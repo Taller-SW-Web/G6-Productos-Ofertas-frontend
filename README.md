@@ -2,7 +2,9 @@
 
 > Aplicación web del módulo **Productos y Ofertas** del proyecto de Taller de Construcción de Software Web.
 >
-> **Estado inicial:** repositorio preparado para comenzar la implementación. Este README describe las convenciones objetivo; no afirma que el código, las dependencias o las integraciones ya existan. Comprobar el árbol real antes de ejecutar comandos.
+> **Estado actual:** Foundation de componentes ejecutable con React, TypeScript, Vite, Mantine y Tabler. Incluye el piloto **MK-013-S01 (precio vigente)** con mocks tipados, una galería de patrones generales y muestras de los componentes de Pricing S02–S05. No implementa APIs reales ni flujos comerciales completos de edición/programación/importación.
+>
+> Uso y correspondencia de componentes: [`docs/COMPONENTES_FOUNDATION.md`](docs/COMPONENTES_FOUNDATION.md). Evidencia y límites: [`docs/VALIDACION_FOUNDATION.md`](docs/VALIDACION_FOUNDATION.md).
 
 ## 1. Propósito
 
@@ -171,24 +173,21 @@ Los mocks son simulaciones; deben estar **aislados** y poder sustituirse por un 
 
 ## 8. Cómo arrancar localmente
 
-Primero confirmar si la aplicación ya fue inicializada:
-
-```powershell
-Test-Path .\package.json
-```
-
-Si `package.json` **no existe**, todavía no hay proyecto ejecutable: la inicialización corresponde al issue **Frontend UI Foundation**; no ejecutar comandos `npm` suponiendo archivos inexistentes.
-
-Si existe y contiene los scripts correspondientes, desde `frontend/`:
+Requisitos: Node >=22.12 y npm. El gestor único es npm; las dependencias están fijadas y se versiona `package-lock.json`. Desde la raíz de este repositorio:
 
 ```bash
-npm install
+npm ci
 npm run dev
+npm run typecheck
 npm run build
 npm run lint
+npx playwright install chromium
+npm test
 ```
 
-Usar `npm ci` en lugar de `npm install` si ya hay `package-lock.json` y se quiere instalación reproducible. `npm run test` / `npm run typecheck` solo si se han definido esos scripts. Mantener un gestor de paquetes por repositorio; no mezclar lockfiles.
+Vite abre el servidor en `http://127.0.0.1:5173`. Piloto: `/precios` (MK-013-S01). Rutas de demostración: `/foundation/listados`, `/foundation/formularios`, `/foundation/estados` y `/foundation/pricing` (composiciones S02–S05). `/` redirige al listado; existe ruta no encontrada. No se necesitan Backend, Docs ni variables de entorno para ejecutar la app. Inter/Oswald se sirven como assets locales mediante Fontsource.
+
+Las pruebas Playwright abren su servidor automáticamente y revisan Chromium a 1440×900. `npm run preview` permite revisar el build de producción. Un hosting futuro deberá resolver las rutas de BrowserRouter hacia `index.html`; no se ha desplegado la aplicación.
 
 Las variables `.env*` locales pueden incluir configuración **no secreta** para URL base y selección de mocks. Nunca subir tokens, contraseñas, claves privadas ni credenciales al bundle frontend.
 
@@ -232,3 +231,9 @@ Las variables `.env*` locales pueden incluir configuración **no secreta** para 
 ---
 
 **Principio rector:** el repositorio Docs define **qué** se debe construir; Frontend define **cómo** construirlo en React sin suplantar al backend ni introducir otra fuente de verdad visual.
+
+### Fuentes usadas por esta entrega
+
+El checkout disponible está en la carpeta hermana `Productos-y-Ofertas-docs`, rama `vera`, commit `b640b7f65d920a12120c1e03540c0c13d2067309`. Su estructura actual usa `mockups/`, `specs/`, `hu/`, `flujos/` y `api/`, distinta de las rutas objetivo de este README. Se consumió `mockups/DESIGN.md` **1.0.0**, no la 1.1.0 mencionada por el issue #1. Se mantiene esa revisión explícita hasta revisar una nueva fuente. No se modifica ni copia el repositorio Docs.
+
+La implementación comenzó en `master`; la rama actual de preparación del commit es `vera`. El issue menciona `main` como destino de PR, que debe verificarse al publicar. No se abrió PR. El piloto MK-013-S01 ya está implementado como **MOCK_INTEGRATED**, con la spec y las capturas proporcionadas como referencia. Su clasificación de trabajo es YELLOW: fuentes suficientes para la consulta, correcciones menores de estilo y aprobación humana todavía pendiente. El contrato de archivo/admisión con errores Q-013-01/02 sigue abierto para la carga de Pricing; no bloquea la consulta S01.

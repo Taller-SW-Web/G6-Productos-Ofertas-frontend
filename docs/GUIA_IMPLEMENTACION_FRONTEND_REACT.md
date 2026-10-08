@@ -6,6 +6,8 @@
 > **Stack objetivo:** React, TypeScript, Vite, Mantine y Tabler Icons; comprobar en `package.json` qué está realmente instalado.  
 > **Alcance UX vigente:** **Web Desktop**, revisión de referencia a **1440 px**. No exigir variantes mobile/tablet sin decisión expresa.
 
+> **Implementación disponible:** consultar [COMPONENTES_FOUNDATION.md](COMPONENTES_FOUNDATION.md) para las APIs y rutas reales de la base y [VALIDACION_FOUNDATION.md](VALIDACION_FOUNDATION.md) para resultados. Los ejemplos/estructuras objetivo de esta guía no implican que todos los MK estén implementados.
+
 ---
 
 ## 0. Cómo se usa este documento
