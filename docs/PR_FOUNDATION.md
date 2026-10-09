@@ -4,7 +4,7 @@ La base permite iniciar features sobre React/TypeScript/Vite, Mantine/Tabler, th
 
 Refs #1. Base de la PR: `master` (rama predeterminada real; el issue menciona `main`). Base auditada: `ceee9d203581b28d6ff8148e951837ec6d000fec`.
 
-**Publicación de correcciones:** preparada localmente; pendiente de push a `vera`. Los resultados siguientes corresponden al árbol con correcciones, no al head remoto original. Actualizar este estado después de publicar. No se atribuye aprobación humana ni PASS de Actions por añadir el workflow.
+**Publicación de correcciones:** código validado en commit local `95722ff3d1cab2d7eb8356a6ee36b2e813b5aafe`, pendiente de push a `vera`. Los resultados siguientes corresponden a esas correcciones, no al head remoto original. La actualización automática de esta descripción fue rechazada por el conector con 403; este archivo está listo para pegar en la PR. Actualizar el estado después de publicar. No se atribuye aprobación humana ni PASS de Actions por añadir el workflow.
 
 ## Fuente normativa
 

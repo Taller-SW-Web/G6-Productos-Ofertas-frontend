@@ -67,7 +67,7 @@ Frontend, Docs y Backend son repositorios independientes. Si Docs es la carpeta 
 
 Base entregada/auditada: **`ceee9d203581b28d6ff8148e951837ec6d000fec`**, rama `vera`, [PR #2](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/2) contra `master`, vinculada al [issue #1](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/issues/1). El issue menciona `main`; la PR real usa la rama predeterminada `master`. No se cambia el destino por suposición.
 
-La corrección FND-01–06 se identifica por su commit en el historial de la PR. GitHub Actions registra el SHA de cada ejecución en `validation-commit.txt` y adjunta capturas/resultados; la fuente visual permanece fijada al SHA de Docs. Las validaciones locales y los límites se registran en [VALIDACION_FOUNDATION.md](docs/VALIDACION_FOUNDATION.md).
+Código corregido FND-01–06 y validado localmente: **`95722ff3d1cab2d7eb8356a6ee36b2e813b5aafe`**, pendiente de publicación en la PR. GitHub Actions registra el SHA de cada ejecución en `validation-commit.txt` y adjunta capturas/resultados; la fuente visual permanece fijada al SHA de Docs. Las validaciones locales y los límites se registran en [VALIDACION_FOUNDATION.md](docs/VALIDACION_FOUNDATION.md). La descripción preparada está en [PR_FOUNDATION.md](docs/PR_FOUNDATION.md); el conector devolvió 403 al intentar actualizarla.
 
 El workflow `.github/workflows/frontend.yml` ejecuta instalación, typecheck, build, lint y la suite Playwright completa en Ubuntu/Node 22. Playwright valida Chromium a 1440×900 y genera evidencia en `docs/evidencias/`. Un workflow definido no acredita que ya haya corrido ni recibido aprobación.
 

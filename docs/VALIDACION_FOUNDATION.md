@@ -6,6 +6,7 @@ Fecha: 2026-10-09. Issue #1; PR #2 (`vera` → `master`). Estado técnico: **MOC
 
 - Base entregada y auditada: `ceee9d203581b28d6ff8148e951837ec6d000fec` (publicada en `vera`).
 - Correcciones: diff de la PR a partir de esa base; el SHA exacto de cada entrega está en su historial y en `validation-commit.txt` del workflow. Las comprobaciones locales corresponden al árbol con las correcciones indicadas, no se atribuyen al commit anterior.
+- Commit local del código corregido y validado: `95722ff3d1cab2d7eb8356a6ee36b2e813b5aafe`. La actualización posterior que registra este SHA y el bloqueo remoto es exclusivamente documental.
 - Fuente visual: Docs `master`, `be5c2db16aca6d6d18b3005a2da4205f724038e3`, `ux/mockups/DESIGN.md` **1.1.0**.
 - UX: `ux/mockups/ux/ux-guidelines.md` y `ux-decisions.md` 2.0. Piloto: `ux/mockups/MK-013/component-spec.md`, `plan.md`, `tasks.md`, HTML `prototipo/mk_013_s01.html`; requisitos en `requisitos/specs/`, `hu/`, `flujos/`, wireframe en `ux/wireframes/flows/`.
 - Contratos de referencia, sin integración: `contratos/http/openapi.yaml`, `catalogo-errores.md`; gobernanza: `EQUIPO_Y_RESPONSABILIDADES.md`.
@@ -86,6 +87,8 @@ Controles finales ejecutados después de los ajustes de módulos y selección; s
 | `git diff --check` | PASS, salida 0 |
 | GitHub Actions | NO EJECUTADO en remoto; workflow preparado para publicación |
 | Revisión humana independiente | PENDIENTE; ningún agente firma la aprobación |
+
+Actualización de la descripción de PR #2: intento por conector rechazado con HTTP 403, `Resource not accessible by integration`. La sesión del navegador de respaldo no está autenticada (ofrece Sign in); no se publicó la descripción ni se solicitaron permisos nuevos. Texto completo preparado en `docs/PR_FOUNDATION.md` para pegar en la PR o aplicar cuando haya acceso de escritura. El head remoto sigue en `ceee9d2`; el código de las correcciones permanece local hasta autorizar/publicar el push.
 
 La prueba inicial de semántica apuntaba al span interior del Badge, cuyo fondo es transparente; se corrigió para medir la superficie real del componente. No se modificó la regla esperada de neutralidad ni se marcó ese fallo como PASS. Las advertencias Fast Refresh iniciales de arrays de rutas se resolvieron separando exports de páginas y configuración.
 
