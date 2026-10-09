@@ -10,6 +10,7 @@ import {
 } from "@mantine/core";
 import { EmptyState } from "./EmptyState";
 import { FeedbackAlert } from "./FeedbackAlert";
+import classes from "./EntityTable.module.css";
 
 export interface TableColumn<T> {
   key: string;
@@ -28,6 +29,7 @@ export interface EntityTableProps<T> {
   rows: readonly T[];
   rowKey: (row: T) => string;
   state: TableState;
+  minWidth?: number;
   empty: { title: string; description: string; action?: ReactNode };
   pagination?: {
     page: number;
@@ -44,7 +46,15 @@ export function EntityTable<T>({
   state,
   empty,
   pagination,
+  minWidth,
 }: EntityTableProps<T>) {
+  const tableMinWidth =
+    minWidth ??
+    columns.reduce(
+      (width, column) =>
+        width + (typeof column.width === "number" ? column.width : 160),
+      0,
+    );
   const content =
     state.status === "loading" ? (
       <Stack
@@ -71,49 +81,58 @@ export function EntityTable<T>({
     ) : rows.length === 0 ? (
       <EmptyState {...empty} />
     ) : (
-      <Table>
-        <Table.Caption
-          style={{
-            textAlign: "left",
-            padding: 16,
-            color: "var(--po-secondary)",
-            captionSide: "top",
-          }}
-        >
-          {caption}
-        </Table.Caption>
-        <Table.Thead>
-          <Table.Tr>
-            {columns.map((column) => (
-              <Table.Th
-                key={column.key}
-                scope="col"
-                style={{ width: column.width, textAlign: column.align }}
-              >
-                {column.header}
-              </Table.Th>
-            ))}
-          </Table.Tr>
-        </Table.Thead>
-        <Table.Tbody>
-          {rows.map((row) => (
-            <Table.Tr key={rowKey(row)}>
+      <div
+        className={classes.scrollRegion}
+        role="region"
+        aria-label={`Tabla: ${caption}`}
+        tabIndex={0}
+      >
+        <Table style={{ minWidth: tableMinWidth }}>
+          <Table.Caption
+            style={{
+              textAlign: "left",
+              padding: 16,
+              color: "var(--po-secondary)",
+              captionSide: "top",
+            }}
+          >
+            {caption}
+          </Table.Caption>
+          <Table.Thead>
+            <Table.Tr>
               {columns.map((column) => (
-                <Table.Td
+                <Table.Th
                   key={column.key}
-                  style={{
-                    textAlign: column.align,
-                    fontVariantNumeric:
-                      column.align === "right" ? "tabular-nums" : undefined,
-                  }}
+                  scope="col"
+                  style={{ width: column.width, textAlign: column.align }}
                 >
-                  {column.render(row)}
-                </Table.Td>
+                  {column.header}
+                </Table.Th>
               ))}
             </Table.Tr>
-          ))}
-        </Table.Tbody>
-      </Table>
+          </Table.Thead>
+          <Table.Tbody>
+            {rows.map((row) => (
+              <Table.Tr key={rowKey(row)}>
+                {columns.map((column) => (
+                  <Table.Td
+                    key={column.key}
+                    style={{
+                      textAlign: column.align,
+                      fontVariantNumeric:
+                        column.align === "right" ? "tabular-nums" : undefined,
+                    }}
+                  >
+                    <div className={classes.cellContent}>
+                      {column.render(row)}
+                    </div>
+                  </Table.Td>
+                ))}
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
+      </div>
     );
   return (
     <Paper

@@ -4,7 +4,7 @@ Entrega del encargo de componentes reutilizables, relacionado con issue #1. Incl
 
 ## Fuente y correspondencia
 
-Fuente visual: `Productos-y-Ofertas-docs/mockups/DESIGN.md` 1.0.0, rama `vera`, SHA `b640b7f65d920a12120c1e03540c0c13d2067309`. Se leyeron además `mockups/ux/ux-guidelines.md` y `ux-decisions.md` 2.0. Las ocho imágenes adjuntas sirven para reconocer composiciones. Los cambios respecto de esas imágenes están en el reporte de validación.
+Fuente visual vigente: `ux/mockups/DESIGN.md` **1.1.0**, Docs `master`, SHA `be5c2db16aca6d6d18b3005a2da4205f724038e3`. Se contrastaron además `ux/mockups/ux/ux-guidelines.md`, `ux-decisions.md` 2.0 y el HTML S01 de esa revisión. Las capturas proporcionadas sirven para reconocer composición; la norma vigente gobierna estilo y semántica. El reporte registra las correcciones FND-01–06 sobre el commit entregado `ceee9d2`.
 
 React 19.3.0, Mantine 9.7.1, Vite 8.3.4, React Router 7.18.4 y Tabler 3.49.0, fijados en package/lockfile. Esta versión de Mantine está publicada; no se instaló la 9.6.2 solo por aparecer en una referencia antigua. Se verificaron las APIs de [theme](https://mantine.dev/theming/theme-object/) y [Modal](https://mantine.dev/core/modal/) en la documentación oficial.
 
@@ -14,11 +14,13 @@ React 19.3.0, Mantine 9.7.1, Vite 8.3.4, React Router 7.18.4 y Tabler 3.49.0, fi
 | §4.2 Inter/Oswald | `theme.ts`, `Title`, fuentes Latin locales; H1–H3 mayúsculas, H4 y modal Inter |
 | §4.3–4 radios, spacing y foco | Theme spacing/radius y `global.css`; foco signal de 2 px con offset 2 px |
 | §4.5 sombras/overlay/capas | Tokens, defaults Modal/Drawer/Select/Tooltip; sin sombras de cards |
-| §5 layout | `src/app/App.tsx`: header 64, sidebar 240, padding 32; tres rutas de demostración |
+| §5 layout | `src/app/layout/ApplicationShell.tsx`: header 64, sidebar 240, padding 32; rutas y navegación separadas |
 | DS-C01–09, C16, C18, C20–21, C24 | Primitivas Mantine configuradas centralmente, sin wrappers que repitan APIs |
 | DS-C12–14, C17, C19, C21–22, C25, C28 | Composiciones shared de la tabla siguiente |
 
 Los arrays de colores Mantine tienen diez entradas repetidas del rol documentado. No son escalas nuevas ni autorizan usar `brand.3` como tono distinto. Para estados usar `semanticTokens`/composiciones, para acciones las variantes configuradas. No usar otras paletas automáticas ni HEX locales en features.
+
+DESIGN 1.1.0 §4.1.1: «Activo», «Inactivo», tipo y origen son neutrales por defecto. `success` requiere un resultado semánticamente confirmado; `info` seguimiento/información; `warning` atención o parcial; `error` fallo/acción destructiva; `promotion` contenido promocional con fuente. El componente no deduce semántica desde el enum. La galería de variantes es una muestra explícita, no un mapeo de entidades por color.
 
 ## Catálogo compartido
 
@@ -33,7 +35,7 @@ Importar desde `src/components/shared/index.ts`. Todas las composiciones se usan
 | `StatusBadge` | `semantic`, `size: sm/md`, `children` | Estado textual neutral/info/success/warning/error/promotion; no mapea enums de negocio |
 | `FeedbackAlert` | `semantic`, `title`, `children`, `actions` | Texto e icono persistentes; error usa role alert, otros status |
 | `EmptyState` | `title`, `description`, `action` | Ausencia/sin coincidencias según texto aportado; no inventa acciones |
-| `EntityTable<T>` | `caption`, `columns`, `rows`, `rowKey`, `state`, `empty`, `pagination?` | Tabla semántica, carga/error/vacío y rango conocido; listado |
+| `EntityTable<T>` | `caption`, `columns`, `rows`, `rowKey`, `state`, `empty`, `pagination?`, `minWidth?` | Tabla semántica, región de desplazamiento etiquetada, estados y rango conocido |
 | `ConfirmDialog` | `opened`, `title`, `confirmLabel`, `onCancel`, `onConfirm`, `children`, `submitting`, `error`, `destructive` | Impacto aportado por caller, foco seguro en cancelar, cierre/retorno de foco; formularios/estados |
 | `MetricCard` | `label`, `value`, `description` | KPI neutral, sin calcular cantidades/precios; S01 y muestra de resultado S05 |
 | `FileSelection` | `label`, `value: File/null`, `onChange`, `description`, `accept?`, `error?`, `disabled?` | Selección nativa con nombre/tamaño real del archivo; no parser, validación ni restricciones inventadas |
@@ -59,14 +61,16 @@ const columns: TableColumn<ItemView>[] = [
 
 `pagination` recibe `page`, `pageSize`, `total`, `onChange`. El caller aporta **las filas de esa página**: la tabla no pagina, ordena ni filtra datos en secreto. Si total no está publicado, omitir esta paginación y diseñar los controles que soporte el provider. Números se alinean con `align: 'right'`; la unidad y ausencia/null se presentan en `render`. Columna identidad recibe ancho restante. No añade selección masiva ni mutaciones por fila.
 
-El hook debe reiniciar página cuando cambian filtros y conservarlos al abrir detalles. La galería demuestra búsqueda/filtros locales sobre todo el fixture, no orden global de una API. Las tablas extensas requieren evaluar columnas según §9; esta composición no agrega scroll arbitrario para ocultar overflow.
+El hook debe reiniciar página cuando cambian filtros y conservarlos al abrir detalles. La galería demuestra búsqueda/filtros locales sobre todo el fixture, no orden global de una API. Se revisa primero la jerarquía de columnas según §9. Si aún se requiere anchura, la tabla conserva el contenido dentro de una región horizontal etiquetada y operable con teclado: no ensancha la página ni recorta celdas.
+
+`minWidth` permite aportar una anchura mínima de composición. Si se omite, se suman anchos numéricos de columnas y se reserva 160 px por columna flexible como punto de partida; no es una regla de datos. El caller ajusta esos anchos según identidad, cantidades y acciones. Los identificadores envuelven sin ellipsis, los badges largos mantienen su texto y los controles de celda respetan el ancho. La muestra «Ver tabla extensa» y `tests/foundation-review.spec.ts` comprueban SKU sin espacios, contenido largo, números, badges y consulta en la última columna.
 
 ## Añadir una feature
 
 1. Leer las fuentes del MK y su alcance antes de decidir datos/acciones.
 2. Crear únicamente archivos usados en `src/features/<dominio>/`: página, hook, puerto/service, adapter y fixture según necesidad.
 3. Definir un modelo de presentación tipado, sin acoplar componentes al DTO externo. Los shared no conocen endpoints ni tokens.
-4. Registrar la página en `src/app/App.tsx` y su navegación una vez exista una ruta funcional aprobada. Las rutas `/foundation/*` son demostraciones.
+4. Registrar el componente diferido en `src/app/routes/productPages.tsx`, la ruta en `productRoutes.tsx` y su navegación en `src/app/navigation/navigation.ts` cuando exista una ruta funcional aprobada. Registrar las muestras en `demoPages.tsx`/`demoRoutes.tsx`. El shell usa Outlet y no registra páginas; `App.tsx` solo monta `AppRoutes`. Las rutas `/foundation/*` son demostraciones.
 5. Consumir shared y primitivas Mantine con el provider/theme de `src/main.tsx`. No importar otro theme por feature.
 6. Modelar loading/empty/error/success y acciones submitting/disabled cuando aplican. No transformar un error de consulta en saldo cero.
 7. Ejecutar typecheck/build/lint y recorridos pertinentes; revisar desktop a 1440 px.
@@ -96,3 +100,5 @@ El `FilterBar` admite `align: 'flex-start'/'flex-end'` para alinear labels/contr
 S01 usa `features/pricing/pages/CurrentPricePage` → `hooks/useCurrentPrice` → `services/pricingService` → `PricingRepository` → `mockPricingRepository` → `mocks/prices`. Las lecturas anteriores se conservan únicamente para el mismo objetivo/canal y se marcan si falla o está pendiente la actualización. Respuestas canceladas no reemplazan la selección nueva.
 
 El selector producto/SKU usa contexto ficticio de Catálogo; un producto base no admite filtro de canal en esta muestra, conforme a la operación de lectura publicada. Retail solicitado puede resolver a global efectivo en SKU. Cambios de filtros requieren Consultar; al ir a muestras y regresar se conserva el contexto aplicado mediante parámetros de navegación, no como parámetros HTTP nuevos.
+
+El borrador editable tiene la vida del contexto aplicado `target/channel`: Atrás/Adelante o una URL diferente restaura los controles desde ese contexto. Cambios pendientes no sustituyen los resultados; al navegar por historial se descartan únicamente esos filtros de consulta sin aplicar, sin escrituras comerciales. Un cambio de escenario no reinicia ediciones dentro del mismo contexto. El recorrido se prueba en FND-06.

@@ -22,7 +22,6 @@ const scenarios: { value: PriceScenario; label: string }[] = [
 ];
 export function CurrentPricePage() {
   const [params, setParams] = useSearchParams();
-  const navigate = useNavigate();
   const targetId =
     priceTargets.find((item) => item.id === params.get("target"))?.id ?? "base";
   const query: PriceQuery = {
@@ -32,6 +31,26 @@ export function CurrentPricePage() {
         ? "retail"
         : "global",
   };
+  // Applied URL context owns the draft lifetime. Back/Forward replaces stale drafts
+  // without an effect that overwrites edits on ordinary re-renders.
+  return (
+    <CurrentPriceContent
+      key={`${query.targetId}:${query.channel}`}
+      query={query}
+      onApply={(next) =>
+        setParams({ target: next.targetId, channel: next.channel })
+      }
+    />
+  );
+}
+function CurrentPriceContent({
+  query,
+  onApply,
+}: {
+  query: PriceQuery;
+  onApply: (query: PriceQuery) => void;
+}) {
+  const navigate = useNavigate();
   const [draft, setDraft] = useState(query);
   const [scenario, setScenario] = useState<PriceScenario>("default");
   const [revision, setRevision] = useState(0);
@@ -41,7 +60,7 @@ export function CurrentPricePage() {
   const demoPath = (panel: string) =>
     `/foundation/pricing?panel=${panel}&target=${query.targetId}&channel=${query.channel}`;
   const consult = () => {
-    setParams({ target: draft.targetId, channel: draft.channel });
+    onApply(draft);
     setRevision((value) => value + 1);
   };
   return (

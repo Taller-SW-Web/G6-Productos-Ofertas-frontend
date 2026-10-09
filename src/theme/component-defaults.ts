@@ -5,6 +5,8 @@ import {
   Button,
   Checkbox,
   Drawer,
+  Loader,
+  Skeleton,
   FileInput,
   Input,
   InputWrapper,
@@ -34,12 +36,15 @@ export const componentDefaults = {
     defaultProps: { size: "md", radius: "sm", variant: "filled" },
     classNames: (_, props) => ({
       root: `${classes.button} ${props.color === "danger" ? classes.destructive : ""}`,
+      label: classes.buttonLabel,
     }),
   }),
   ActionIcon: ActionIcon.extend({
     defaultProps: { size: 32, variant: "subtle" },
     classNames: { root: classes.actionIcon },
   }),
+  Loader: Loader.extend({ defaultProps: { color: tokens.color.secondary } }),
+  Skeleton: Skeleton.extend({ classNames: { root: classes.skeleton } }),
   Input: Input.extend({
     defaultProps: { size: "md" },
     classNames: { input: classes.input, wrapper: classes.inputWrapper },
@@ -171,6 +176,13 @@ export const componentDefaults = {
       closeButtonProps: { "aria-label": "Cerrar panel", size: 40 },
     },
     classNames: { title: classes.dialogTitle },
+    styles: {
+      content: {
+        background: tokens.color.surface,
+        boxShadow: tokens.shadow.dialog,
+      },
+      header: { background: tokens.color.surface },
+    },
   }),
   Tooltip: Tooltip.extend({
     defaultProps: {

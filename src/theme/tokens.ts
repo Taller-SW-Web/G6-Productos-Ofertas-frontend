@@ -1,4 +1,10 @@
-// DESIGN.md 1.0.0 — Docs vera @ b640b7f65d920a12120c1e03540c0c13d2067309, §4–7.
+// ux/mockups/DESIGN.md 1.1.0 — Docs master @ be5c2db16aca6d6d18b3005a2da4205f724038e3, §4–7.
+export const designSource = {
+  version: "1.1.0",
+  branch: "master",
+  commit: "be5c2db16aca6d6d18b3005a2da4205f724038e3",
+  path: "ux/mockups/DESIGN.md",
+} as const;
 export const tokens = {
   color: {
     cloud: "#F7F5F0",

@@ -23,7 +23,8 @@
     background: var(--po-primary);
     color: var(--po-ink);
   }
-  &[data-variant="filled"]:not(:disabled):not([data-disabled]):hover {
+  &[data-variant="filled"]:not(:disabled):not([data-disabled]):hover,
+  &[data-variant="filled"]:not(:disabled):not([data-disabled]):active {
     background: var(--po-primaryHover);
     color: var(--po-cloud);
   }
@@ -37,7 +38,9 @@
     border-color: transparent;
   }
   &[data-variant="outline"]:not(:disabled):hover,
-  &[data-variant="subtle"]:not(:disabled):hover {
+  &[data-variant="subtle"]:not(:disabled):hover,
+  &[data-variant="outline"]:not(:disabled):active,
+  &[data-variant="subtle"]:not(:disabled):active {
     background: var(--po-subtle);
   }
   &.destructive {
@@ -45,7 +48,8 @@
     color: var(--po-surface);
     border-color: var(--po-errorText);
   }
-  &.destructive:not(:disabled):hover {
+  &.destructive:not(:disabled):hover,
+  &.destructive:not(:disabled):active {
     background: var(--po-errorText);
     color: var(--po-surface);
     border-color: var(--po-ink);
@@ -55,6 +59,18 @@
     background: var(--po-subtle);
     color: var(--po-disabled);
     border-color: var(--po-border);
+  }
+}
+.buttonLabel {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.skeleton {
+  &::before {
+    background: var(--po-subtle);
+  }
+  &::after {
+    background: var(--po-border);
   }
 }
 .actionIcon {
@@ -141,7 +157,7 @@
 .choice {
   border-color: var(--po-control);
   &:checked {
-    background: var(--po-primary);
+    background: var(--po-selection);
     border-color: var(--po-primaryHover);
   }
 }

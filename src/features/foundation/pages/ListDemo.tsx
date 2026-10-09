@@ -24,6 +24,7 @@ import type {
   DemoScenario,
 } from "../services/demoRepository";
 import { useDemoList } from "../hooks/useDemoList";
+import { LongTableExample } from "../components/LongTableExample";
 
 const scenarios: { value: DemoScenario; label: string }[] = [
   { value: "default", label: "Con datos" },
@@ -41,6 +42,7 @@ export function ListDemo() {
   const [scenario, setScenario] = useState<DemoScenario>("default");
   const [retry, setRetry] = useState(0);
   const [detail, setDetail] = useState<DemoItem | null>(null);
+  const [showLongTable, setShowLongTable] = useState(false);
   const state = useDemoList(query, scenario, retry);
   const columns: TableColumn<DemoItem>[] = [
     {
@@ -68,7 +70,7 @@ export function ListDemo() {
       header: "Estado visual",
       width: 180,
       render: (row) => (
-        <StatusBadge semantic={row.status === "active" ? "success" : "neutral"}>
+        <StatusBadge>
           {row.status === "active" ? "Activo" : "Inactivo"}
         </StatusBadge>
       ),
@@ -212,6 +214,13 @@ export function ListDemo() {
               : undefined
           }
         />
+        <Button
+          variant="outline"
+          onClick={() => setShowLongTable((value) => !value)}
+        >
+          {showLongTable ? "Ocultar tabla extensa" : "Ver tabla extensa"}
+        </Button>
+        {showLongTable && <LongTableExample />}
       </Stack>
       <Drawer
         opened={detail !== null}
@@ -224,9 +233,7 @@ export function ListDemo() {
             <Text size="sm">Referencia: {detail.reference}</Text>
             <Text size="sm">{detail.kind}</Text>
             <Group>
-              <StatusBadge
-                semantic={detail.status === "active" ? "success" : "neutral"}
-              >
+              <StatusBadge>
                 {detail.status === "active" ? "Activo" : "Inactivo"}
               </StatusBadge>
             </Group>

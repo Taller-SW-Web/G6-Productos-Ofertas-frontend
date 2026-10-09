@@ -1,199 +1,100 @@
-# Reporte de Foundation — componentes reutilizables
+# Validación — Frontend UI Foundation v1
 
-Fecha: 2026-10-08. Encargo: crear componentes reutilizables en Frontend y demostrarlos con el piloto MK-013-S01 del issue #1. Estado: **MOCK_INTEGRATED**. Integración: **MOCK_ONLY**. S02–S05 tienen muestras de componentes, sin implementación comercial completa.
+Fecha: 2026-10-09. Issue #1; PR #2 (`vera` → `master`). Estado técnico: **MOCK_INTEGRATED / MOCK_ONLY**. Aprobación humana pendiente. Este reporte sustituye la narración incremental anterior y registra la corrección de FND-01 a FND-06.
 
-## Alcance y fuentes
+## Revisiones y fuentes
 
-Raíz verificada: `C:/Users/User/workspace/G6-Productos-Ofertas-frontend`. Rama inicial de implementación: `master`; Git inicial limpio. Rama actual de preparación del commit: `vera`. No existían package.json ni src. Se preservaron README, AGENTS y guía; no se cambió el remoto, no hubo commit/push/PR.
+- Base entregada y auditada: `ceee9d203581b28d6ff8148e951837ec6d000fec` (publicada en `vera`).
+- Correcciones: diff de la PR a partir de esa base; el SHA exacto de cada entrega está en su historial y en `validation-commit.txt` del workflow. Las comprobaciones locales corresponden al árbol con las correcciones indicadas, no se atribuyen al commit anterior.
+- Fuente visual: Docs `master`, `be5c2db16aca6d6d18b3005a2da4205f724038e3`, `ux/mockups/DESIGN.md` **1.1.0**.
+- UX: `ux/mockups/ux/ux-guidelines.md` y `ux-decisions.md` 2.0. Piloto: `ux/mockups/MK-013/component-spec.md`, `plan.md`, `tasks.md`, HTML `prototipo/mk_013_s01.html`; requisitos en `requisitos/specs/`, `hu/`, `flujos/`, wireframe en `ux/wireframes/flows/`.
+- Contratos de referencia, sin integración: `contratos/http/openapi.yaml`, `catalogo-errores.md`; gobernanza: `EQUIPO_Y_RESPONSABILIDADES.md`.
+- Fuentes Frontend: `AGENTS.md`, README, guía de implementación; issue #1 y comentario de auditoría de PR #2 por `mrcastilla8`.
 
-Lecturas: `AGENTS.md`, `README.md`, `docs/GUIA_IMPLEMENTACION_FRONTEND_REACT.md`, issue [#1](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/issues/1). Docs solo lectura: `Productos-y-Ofertas-docs/mockups/DESIGN.md`, `mockups/ux/ux-guidelines.md`, `mockups/ux/ux-decisions.md`, rama `vera`, SHA `b640b7f65d920a12120c1e03540c0c13d2067309`. DESIGN 1.0.0; UX 2.0. Fuente local real, distinta de las rutas objetivo del issue.
+La consulta remota de Docs es solo lectura. El checkout local de Docs permanece en `vera/b640b7f`; no se modificó ni se promovió como revisión vigente. Los HTML ahora existen en `master`; no hay validation-report en el inventario consultado. Su existencia no implica aprobación humana del mockup. S01 se utiliza como piloto provisional YELLOW, con datos ficticios y diferencias explícitas de apariencia/alcance.
 
-Referencias adjuntas inspeccionadas: MK-002-S01/S02/S03/S04, MK-003-S05/S06, MK-006-S01/S04. Se usaron para identificar patrones, no como autorización para implementar reglas comerciales ni como evidencia de aprobación del mockup.
+## Resultado FND-01–06
 
-## Archivos creados/modificados
-
-| Archivo dentro de Frontend | Motivo |
-|---|---|
-| `package.json`, `package-lock.json` | Stack fijado, único gestor npm y scripts reales |
-| `.gitignore` | Excluir dependencias/build/secretos locales/resultados temporales |
-| `index.html` | Documento español y entrada Vite |
-| `tsconfig.json` | TypeScript estricto, sin emisión y con índices verificados |
-| `vite.config.ts` | React plugin |
-| `eslint.config.js` | TypeScript, React Hooks y refresh |
-| `playwright.config.ts` | Chromium 1440×900, servidor automático |
-| `src/main.tsx` | Provider, fuentes Latin locales, router y bootstrap |
-| `src/assets/brand/INKA_ATHLETICS.svg` | Logo original proporcionado por el usuario para la barra superior |
-| `src/theme/tokens.ts` | Colores/roles, spacing, radios, sombras y capas documentadas |
-| `src/theme/theme.ts` | Theme Mantine y resolver CSS de tokens |
-| `src/theme/component-defaults.ts` | Defaults de primitivas utilizadas y variantes comunes |
-| `src/theme/primitives.module.css` | Tamaños, selección, input/help, botones/badges/dialog |
-| `src/theme/global.css` | Foco, scroll margin, movimiento reducido y base global |
-| `src/app/App.tsx`, `src/app/app.module.css` | Shell, navegación de galería, carga de rutas diferida, 404 |
-| `src/components/shared/PageHeader.tsx` | Breadcrumbs, título/descripcion/acciones |
-| `src/components/shared/SectionCard.tsx` | Región accesible y tarjeta de sección |
-| `src/components/shared/FilterBar.tsx` | Composición de filtros/resumen |
-| `src/components/shared/SearchField.tsx` | Búsqueda controlada con limpiar accesible |
-| `src/components/shared/StatusBadge.tsx` | Roles semánticos sin mapear estados de backend |
-| `src/components/shared/FeedbackAlert.tsx` | Mensaje persistente, icono, acción y anuncio accesible |
-| `src/components/shared/EmptyState.tsx` | Vacío con causa y acción proporcionadas por caller |
-| `src/components/shared/EntityTable.tsx` | Tabla genérica con estados y paginación conocida |
-| `src/components/shared/ConfirmDialog.tsx` | Confirmación, submitting, error, foco y variante destructiva |
-| `src/components/shared/index.ts` | Exportaciones comunes |
-| `src/features/foundation/pages/ListDemo.tsx` | Demostración de filtros/tabla/detalle |
-| `src/features/foundation/pages/FormDemo.tsx` | Demostración de controles/formulario/confirmación |
-| `src/features/foundation/pages/FeedbackDemo.tsx` | Demostración de feedback, badges, carga/disabled |
-| `src/features/foundation/hooks/useDemoList.ts` | Consulta cancelable; conserva solo respuesta de filtros vigentes |
-| `src/features/foundation/hooks/useDemoForm.ts` | Interacciones y estado del formulario local |
-| `src/features/foundation/services/demoRepository.ts` | Puerto y modelos de presentación explícitos |
-| `src/features/foundation/services/demoService.ts` | Punto único de composición de adapter |
-| `src/features/foundation/adapters/mockDemoRepository.ts` | Escenarios deterministas y confirmación sin persistencia |
-| `src/features/foundation/mocks/items.ts` | Seis fixtures fuera de JSX |
-| `tests/foundation.spec.ts` | Cinco recorridos de navegador |
-| `README.md` | Arranque real, requisitos, rutas, estado y fuentes |
-| `docs/GUIA_IMPLEMENTACION_FRONTEND_REACT.md` | Enlaces a uso y evidencia reales sin reemplazar el procedimiento |
-| `docs/COMPONENTES_FOUNDATION.md` | APIs, mapping DS-C, arquitectura y guía de nueva feature |
-| `docs/VALIDACION_FOUNDATION.md` | Este reporte |
-| `docs/evidencias/listados-1440.png`, `formularios-1440.png`, `estados-1440.png`, `confirmacion-1440.png` | Evidencia visual de tres vistas y dialog |
-
-## Resultado funcional y visual
-
-Rutas: `/foundation/listados`, `/foundation/formularios`, `/foundation/estados`; `/` redirige a listado y ruta desconocida ofrece retorno. Navegación exclusiva de galería, sin rutas definitivas para otros MK.
-
-Listados: búsqueda, filtro de estado, paginación de tres filas, detalle en Drawer que conserva página/filtros. Escenarios reproducibles con datos, loading, vacío y error; vacío global y sin coincidencias se distinguen. Loading es fixture explícito pendiente hasta seleccionar otro escenario, sin fingir tiempos backend. Error recuperable conserva filtros.
-
-Formulario: label, ayuda debajo, error required ilustrativo y foco al campo; controles Inter, checkbox/radio de 20 px; valores read-only legibles y disabled con explicación. Cancelar y fallar confirmación conservan entradas. Confirmar solo demuestra recorrido; no persiste ni muta productos. Dialog centra 480 px, contiene foco y devuelve al activador; alternativa segura recibe foco inicial. La variante destructiva se muestra como ejemplo, sin borrar datos.
-
-Visual: inspección de los cuatro PNG a 1440 px. Header 64, sidebar 240, margen 32 y ancho útil 1136. H1 Oswald 32/40, Inter operativo, tarjetas sin sombra, tabla neutra y semántica, fondos/bordes exactos. El formulario ocupa máximo 880 px y permite scroll vertical. No overflow de página ni recortes observados. Se corrigió solapamiento icono/placeholder encontrado en la primera captura.
-
-## Diferencias respecto de las imágenes
-
-| Referencia / elemento | Regla DESIGN.md | Aplicación en componentes |
+| ID | Corrección / evidencia | Estado |
 |---|---|---|
-| MK-003-S05: confirmación con título Oswald y botón naranja de texto blanco | §4.2 H4/modal Inter 20/28; §7.1 naranja + ink | Modal Inter, primary con ink, hover oscuro + inverse |
-| MK-002-S01 y MK-006-S01: badges/auxiliares pequeños | §7 badge min 24, 14/20; ayuda operativa 14/20 | Badge legible y sin truncamiento; 12 px solo metadatos complementarios |
-| MK-002-S01: barra oscura al pie de la captura | §5.1 header fijo arriba 64 | Shell con header superior |
-| Todas: composición con grandes márgenes de canvas exportado | §5 shell sidebar 240 + padding32 | Geometría de viewport 1440, sin copiar margen externo del canvas |
-| Capturas con decoraciones/tipos en naranja | §4.1 y §7 roles semánticos, categorías neutrales | Tipos de ejemplo neutrales; color solo por intención semántica |
-| Todas: logo de marca | §4.6 activo oficial verificado o texto | Inicialmente texto; reemplazado con `src/assets/brand/INKA_ATHLETICS.svg` proporcionado por el usuario, sin redibujarlo |
+| FND-01 | Theme contrastado con DESIGN 1.1.0; trazabilidad en `designSource`; «Activo» neutral en listado/detalle; controles y estados con tokens | Implementado; revisión humana pendiente |
+| FND-02 | Instalación y controles completos; workflow de PR que adjunta SHA/capturas/diagnósticos; descripción con matriz de issue | Validación local abajo; Actions pendiente de publicar/ejecutar |
+| FND-03 | README y guías usan rutas vigentes y fuente fijada; base entregada, límite S01/mocks y revisión independiente explícitos | Implementado |
+| FND-04 | Shell con Outlet, navegación y rutas de producto/demostración separados | Implementado; sin ampliar funciones |
+| FND-05 | Región tabular etiquetada y operable por teclado, mínimo de composición, wrapping y caso extenso | Implementado y recorrido de regresión |
+| FND-06 | URL posee filtros aplicados; el borrador se reinicia al cambiar contexto por historial; regresión Atrás/Adelante/recarga | Implementado y recorrido de regresión |
 
-No se alteraron reglas de activación, pricing, promociones, stock, combos ni fuentes Docs a partir de estas diferencias. Actualizar la revisión documental/visual corresponde al responsable UX indicado por DESIGN, Leonardo Vera; revisión técnica de la foundation pendiente con Axel o revisor designado según issue.
+### Contraste del theme con 1.1.0
 
-## Validaciones ejecutadas
+La comparación con la fuente anterior 1.0.0 muestra la incorporación de §4.1.1 (gobernanza cromática), aclaraciones DS-C14/19 y variantes de acción. Los HEX, tipografía, geometría, radios y espaciados consumidos por Foundation se conservan; no se agregaron tonos nuevos.
 
-Windows, Node 22.21.0, npm 10.9.4, Chromium de Playwright 1.64.0. Resultado final tras corregir hallazgos:
+- «Activo»/«Inactivo» son estados administrativos ordinarios: se retiró success en `ListDemo`, incluida la consulta Drawer. Neutral usa los tokens de superficie/texto/borde. Success se conserva en feedback de resultados confirmados o fixtures de filas confirmadas, no como categoría.
+- KPI, origen y tipo permanecen neutrales. Info representa información/seguimiento, warning atención/resultado parcial, error fallo/acción destructiva. La galería de variantes está identificada como muestra, no como datos comerciales reales.
+- Botón primario: naranja con ink; hover/pressed oscuro con inverse; foco signal; sin desplazamiento. Secundarios/terciarios conservan variante; destructivo usa error-strong. Los labels largos envuelven. Checkbox/radio checked usan selection-background suave, indicador primary-hover y símbolo ink conforme a la política de selección §4.1.1, sin fondo naranja vivo.
+- Loader/skeleton quedan neutrales; Drawer utiliza superficie blanca y sombra dialog del token. Inputs conservan borde de error y foco independiente. Se mantienen Inter/Oswald locales, Tabler currentColor, header 64/sidebar 240/padding 32, cards planas, radios y fuentes exactos.
+- No se copiará color decorativo, anotación MK/HTTP, usuario de screenshot o capacidad no publicada del HTML. Tres métricas por fila en el piloto siguen DS-C19. No se calculan ahorro, precio final, stock o cascada comercial en el navegador.
 
-| Control | Resultado |
+### Arquitectura, tabla e historial
+
+`ApplicationShell` no registra páginas; `ApplicationNavigation` consume configuración separada. `productPages/productRoutes` y `demoPages/demoRoutes` evitan modificar el shell para añadir features y conservan carga diferida sin advertencias Fast Refresh. No se exige ocultar las demos en producción: el entorno aún es Foundation con mocks.
+
+`EntityTable` conserva tabla/caption/headers semánticos. Evalúa jerarquía y, cuando el ancho es necesario, limita el scroll a una región etiquetada con foco visible. Las columnas reciben ancho mínimo de composición o `minWidth` del caller; identificadores/estados no tienen ellipsis y los controles largos envuelven. El caso de revisión contiene SKU extenso sin espacios, descripción larga, importe grande, badge multilinea y una acción al extremo derecho. El recorrido verifica ancho de página, scroll con teclado, control visible, diálogo y retorno de foco.
+
+En S01, editar filtros no altera la consulta. `target/channel` en URL son el contexto aplicado. El contenido se identifica por ese contexto: Atrás/Adelante restaura inputs y resultado, descartando el borrador de filtros sin aplicar del contexto anterior. Recargar restaura la consulta. Consultar en el mismo contexto mantiene las ediciones y genera una lectura nueva. Las respuestas canceladas no cambian otra selección. No existe escritura comercial en este recorrido.
+
+## Matriz del issue #1
+
+| Criterio | Evidencia | Estado |
+|---|---|---|
+| React/TS/Vite/Mantine/Tabler reproducibles | package/lockfile, main/provider, comandos | Implementado |
+| Theme normativo documentado | tokens/defaults/CSS, fuente 1.1.0 fijada | Implementado |
+| Shell/router/shared mínimos usados | módulos app y once composiciones shared | Implementado |
+| Piloto S01 con mock tipado | `/precios`, Page → hook → port/service → mock → fixtures | Implementado, MOCK_INTEGRATED |
+| Estados default/loading/empty/error y recuperación | escenarios y pruebas Pricing | Verificado en suite |
+| Desktop 1440, tipografía/tokens/teclado | capturas y recorridos de navegador | Evidencia técnica local |
+| Guía para nueva feature y sustitución de adapter | README y COMPONENTES_FOUNDATION | Implementado |
+| README/AGENTS/guía coherentes | archivos presentes, rutas/alcance actualizados | Verificado |
+| Sin HTTP directo/reglas autoritativas/contratos inventados | componentes/puertos/fixtures y búsqueda de código | Verificado |
+| PR contra base acordada | PR #2 usa master; issue menciona main | Base real registrada, sin retarget automático |
+| Revisión técnica independiente y UX de correcciones | auditoría inicial pide cambios; nuevo visto bueno aún no recibido | PENDIENTE |
+
+## Archivos de las correcciones
+
+- `src/theme/tokens.ts`, `component-defaults.ts`, `primitives.module.css`: trazabilidad, semántica/defaults y estados de acción.
+- `src/features/foundation/pages/ListDemo.tsx`: neutral y acceso a caso de tabla extensa.
+- `src/app/App.tsx`, `layout/ApplicationShell.tsx`, `navigation/ApplicationNavigation.tsx`, `navigation.ts`, `routes/AppRoutes.tsx`, `productPages.tsx`, `productRoutes.tsx`, `demoPages.tsx`, `demoRoutes.tsx`, `pages/NotFoundPage.tsx`: separación de responsabilidades.
+- `src/components/shared/EntityTable.tsx`, `EntityTable.module.css`, `features/foundation/components/LongTableExample.tsx`, `mocks/tableCases.ts`: región/controles y fixture de tabla extensa.
+- `src/features/pricing/pages/CurrentPricePage.tsx`: sincronización declarativa del contexto aplicado y borrador.
+- `tests/foundation-review.spec.ts`: semántica y regresiones FND-05/06. `playwright.config.ts`: dos workers para CI.
+- `.github/workflows/frontend.yml`: controles de PR, SHA validado y artefactos. No se cambian dependencias.
+- README, COMPONENTES_FOUNDATION, GUIA_IMPLEMENTACION y este reporte: rutas/versiones, mapping, matrices y límites actualizados.
+- `docs/evidencias/`: capturas regeneradas; nueva `fnd-05-table-1440.png`.
+
+## Validaciones finales
+
+Instalación ejecutada de nuevo: `npm ci` PASS, salida 0, 191 paquetes instalados; auditoría npm reportó 0 vulnerabilidades en ese momento. Node 22.21.0/npm 10.9.4, Windows. No se requiere Backend ni Docs para compilar.
+
+Controles finales ejecutados después de los ajustes de módulos y selección; salidas reales del árbol con correcciones:
+
+| Comando / inspección | Resultado final |
 |---|---|
-| `npm ci` | PASS, 191 paquetes añadidos; auditoría reportó 0 vulnerabilidades en ese momento |
 | `npm run typecheck` | PASS, salida 0 |
-| `npm run build` | PASS, Vite 8.3.4, salida 0; rutas diferidas, sin advertencia de chunk >500 kB en build final |
-| `npm run lint` | PASS, salida 0, sin hallazgos |
-| `npm test` | PASS, 5 pruebas en 10.9 s, salida 0 |
+| `npm run build` | PASS, salida 0; Vite 8.3.4, sin warning de chunk grande |
+| `npm run lint` | PASS, salida 0; sin warnings finales |
+| `npm test` (suite completa) | PASS, 12 pruebas en 23.6 s, salida 0 |
+| Visual 1440 px | PASS técnico: capturas del piloto, muestras y tabla extensa inspeccionadas; foco, semántica y selección medidos |
 | `git diff --check` | PASS, salida 0 |
-| Visual desktop 1440 px | PASS técnico, revisión de las cuatro capturas; no sustituye aprobación humana |
+| GitHub Actions | NO EJECUTADO en remoto; workflow preparado para publicación |
+| Revisión humana independiente | PENDIENTE; ningún agente firma la aprobación |
 
-Pruebas: filtros/paginación/detalle/consulta cancelada; vacío/sin coincidencias/error recuperable; required/cancelar/error/confirmación con datos conservados; geometría/fuentes/carga de páginas/tokens default-hover/foco y capturas; ruta 404/retorno. Se midió también padding del buscador y orden de ayuda después del input. Las pruebas de recorrido no son una certificación WCAG completa ni pruebas de integración real.
+La prueba inicial de semántica apuntaba al span interior del Badge, cuyo fondo es transparente; se corrigió para medir la superficie real del componente. No se modificó la regla esperada de neutralidad ni se marcó ese fallo como PASS. Las advertencias Fast Refresh iniciales de arrays de rutas se resolvieron separando exports de páginas y configuración.
 
-Durante implementación se corrigieron: API `Alert` usa `p` en lugar de `padding`; hook sin actualización síncrona en effect; selectores de prueba ambiguos; variante default del botón para asegurar el par de contraste; espacios de icono/help/tamaños; captura tomada antes de terminar la transición del dialog. Un intento de lint/tests comenzó mientras `npm ci` reemplazaba dependencias y no encontró los ejecutables; ambos se repitieron después de finalizar la instalación, con PASS. Los resultados anteriores no se presentan como evidencia de éxito.
+## Alcance, pendientes y responsables
 
-## Matriz de verificación
+- S01 consulta precio/base/herencia/override/fallback y distingue oferta nula, ausencia y error; selector de Catálogo ficticio, importes y vigencias de fixtures. No declara API integrada, inicialización ni resultado comercial real.
+- S02–S05 son muestras de composición. Fechas usan picker nativo etiquetado con zona; no calendario Mantine personalizado. No PATCH/POST/importación/parser/CSV/reanudación de lote. S06 histórico no implementado.
+- Q-013-01/02 siguen abiertos en la spec: contenido del archivo y admisión con errores. Owner Pricing Leonardo Vera, revisión contractual con Miguel Taco. No bloquean la foundation de lectura.
+- FND-01–06 tienen implementación concreta; no se difiere un riesgo crítico de tabla/historial. Las mejoras incrementales de accesibilidad/datos/errores se incorporarán por owners de cada feature y revisión UX/técnica transversal, sin inventar componentes anticipados.
+- Correcciones locales requieren publicación en `vera`, ejecución de Actions y nuevo visto bueno técnico independiente por Axel o revisor designado por el líder, más revisión UX por Vera. Autor de la auditoría inicial: `mrcastilla8`. La PR no se mergea ni el issue se cierra desde esta tarea.
 
-- [x] Fuentes visuales y guía verificadas con versión/SHA; se registra drift de paths/versiones.
-- [x] Alcance real: componentes y galería; referencias adjuntas identificadas.
-- [x] Git inicial inspeccionado; sin cambios preexistentes en Frontend.
-- [x] React/TypeScript compila, typecheck/build PASS.
-- [x] Lint PASS.
-- [x] Tests PASS.
-- [x] Visual desktop 1440 PASS técnico con evidencia.
-- [x] Loading/empty/error y recuperación local verificados.
-- [x] Sin llamadas HTTP directas en páginas/componentes, verificado con búsqueda de `fetch(`/`axios` en src.
-- [x] Sin HEX locales de componentes; solo tokens documentados en theme.
-- [x] Sin contratos, enums backend, endpoints o scopes inventados.
-- [x] Docs/Backend sin modificaciones de esta tarea; los cuatro `tmp-expo-*.png` preexistentes en Docs se preservaron.
-- [x] Dependencias/limitaciones registradas.
-- [x] Nivel declarado MOCK_INTEGRATED / MOCK_ONLY.
-
-## Pendientes y riesgos
-
-- MK-013-S01 ya se implementó con spec y captura del usuario: clasificación de trabajo YELLOW y entrega MOCK_INTEGRATED. No hay HTML ni validation-report local; no se atribuye aprobación del mockup. DESIGN local sigue en 1.0.0 frente a 1.1.0 mencionada por issue. La discrepancia de revisión y el visto bueno humano siguen registrados.
-- Revisión técnica independiente y visto bueno UX humano pendientes. No se solicita ni firma automáticamente una aprobación.
-- Frontend comenzó en `master` y actualmente está en `vera`; debe comprobarse el destino `main` del issue al preparar la PR. El agente no cambió la rama ni abrió PR.
-- API real, autenticación, permisos, selección de adapter HTTP y validación de contratos: fuera del encargo. No hay contrato bloqueante confirmado para renderizar esta galería; cualquier integración futura necesita la fuente exacta del provider.
-- Solo Chromium desktop revisado. Otros navegadores, zoom ampliado, mobile/tablet y evaluación WCAG exhaustiva: NO EJECUTADOS, sin ampliar alcance por defecto.
-- Solo patrones utilizados están configurados. No se declara acabado todo el catálogo de 29 DS-C ni las 16 funcionalidades.
-
-Estado de entrega de componentes y piloto S01: **MOCK_INTEGRATED**. Estado del issue completo: **PARCIAL**, a la espera de revisiones/publicación; los flujos de escritura Pricing no forman parte de Foundation v1.
-
-## Actualización: logo de marca
-
-Se incorporó el archivo `INKA_ATHLETICS.svg` adjuntado por el usuario en `src/assets/brand/INKA_ATHLETICS.svg`. Los hashes SHA-256 de origen/copia coinciden: el asset se preservó sin modificación. `src/app/App.tsx` reemplaza el texto de marca por una imagen con alt «Inka Athletics» a la izquierda de la barra superior; `app.module.css` conserva su tamaño/proporción 59×44 y el separador.
-
-Validación de este cambio: `npm run build` PASS (incluye TypeScript); `npm test -- --grep 'desktop geometry'` PASS, 1 prueba en 5.3 s; revisión de captura a 1440 px y decodificación del logo en Chromium PASS (dimensiones naturales/renderizadas 59×44); `git diff --check` PASS. Se regeneraron las cuatro capturas de evidencia. Lint y suite completa no se repitieron para este cambio acotado. No hay cambios de integración o fuentes Docs.
-
-## Preparación del commit
-
-Rama actual verificada: `vera`. Se eliminaron únicamente los directorios locales generados `dist/` y `test-results/`. `node_modules/` se conserva localmente para desarrollar, excluido por `.gitignore`; no había `playwright-report/` que limpiar. Galería, fixtures, pruebas automatizadas y cuatro capturas permanecen como entregables de Foundation y evidencia del issue.
-
-`npm run lint` se repitió después de incorporar el logo: PASS, salida 0. Typecheck/build y prueba visual son los ejecutados en la actualización anterior; no se volvieron a ejecutar por los cambios exclusivamente documentales/limpieza de esta preparación. No se crearon pruebas nuevas. El commit se prepara como entrega de componentes vinculada a #1, sin declarar cerrado el issue completo ni usar `Closes #1`.
-
-## Ampliación: piloto MK-013-S01 y componentes de Pricing
-
-Esta sección actualiza el estado de la entrega inicial. Se recibieron las cinco capturas S01–S05 de MK-013. Se consultaron, en el checkout Docs indicado arriba: `specs/SPEC-013-gestion-precios-individuales-masivos.md`, `hu/HU-013-gestion-precios-individuales-masivos.md`, `flujos/FLOW-013-gestion-precios-individuales-masivos.md`, `wireframes/flows/WF-013-gestion-precios-individuales-masivos.md`, `mockups/ux/propuesta-ux.md`, UX Decisions/Guidelines, `mockups/DESIGN.md`, `mockups/MK-013/component-spec.md`, `plan.md`, `tasks.md`, los schemas Pricing de `api/openapi.yaml` 0.5.0, `api/catalogo-errores.md` y `EQUIPO_Y_RESPONSABILIDADES.md`. HTML y validation-report locales: NO ENCONTRADOS. Capturas suministradas no acreditan aprobación humana.
-
-Readiness S01: **YELLOW** de trabajo, con flujo de consulta suficientemente definido por spec/FLOW y referencias visuales suministradas. Su implementación es **MOCK_INTEGRATED**. No se atribuye aprobación oficial al mockup. S02–S05 se cubren como muestras de componentes, no como flujos completos de Pricing; S06 histórico no se implementa dentro de esta Foundation.
-
-### Inventario de esta ampliación
-
-| Archivo | Motivo |
-|---|---|
-| `src/components/shared/MetricCard.tsx` | Composición de KPI neutral usada en precio vigente y resultado parcial |
-| `src/components/shared/FileSelection.tsx` | Selección de archivo y metadatos reales, sin parser ni restricciones inventadas |
-| `src/components/shared/FilterBar.tsx`, `index.ts` | Alineación opcional para filtros con ayudas y exportaciones de los dos patrones nuevos |
-| `src/theme/component-defaults.ts`, `primitives.module.css` | Defaults Tabs/Stepper/Radio.Card/FileInput y corrección de placeholder/opacity a tokens |
-| `src/features/pricing/services/pricingRepository.ts` | Puerto de lectura y modelos de presentación, separados de DTOs HTTP |
-| `src/features/pricing/services/pricingService.ts` | Punto único de composición de adapter Pricing |
-| `src/features/pricing/services/pricePresentation.ts` | Etiquetas de origen/herencia para componentes Pricing |
-| `src/features/pricing/adapters/mockPricingRepository.ts` | Consulta mock determinista de precio, ausencia, error y carga |
-| `src/features/pricing/mocks/prices.ts` | Contexto ficticio de producto/SKU, lecturas y muestras de programación/resultado |
-| `src/features/pricing/hooks/useCurrentPrice.ts` | Cancelación de consultas, resultados asociados al contexto y última lectura identificada |
-| `src/features/pricing/components/PriceFilters.tsx` | Selección pendiente/aplicada y producto sin canal de consulta inventado |
-| `src/features/pricing/components/PriceSummary.tsx` | Contexto, origen, moneda, versión, vigencias y tres métricas neutrales |
-| `src/features/pricing/components/PriceBreakdown.tsx` | Tabla de lecturas fixture y herencia, no cálculo comercial en navegador |
-| `src/features/pricing/components/PriceEditExample.tsx` | Radio.Card, importes, oferta condicional, motivo y confirmación de presentación |
-| `src/features/pricing/components/ScheduleExample.tsx` | Lista y campos de fecha/hora con zona explícita, sin crear programaciones |
-| `src/features/pricing/components/ImportExample.tsx` | Dos etapas, archivo y política; revisión invalidada con archivo nuevo |
-| `src/features/pricing/components/ImportResultExample.tsx` | Resultado parcial fixture 3/2/1 y detalle por fila |
-| `src/features/pricing/pages/CurrentPricePage.tsx` | Piloto S01 de consulta en `/precios` |
-| `src/features/pricing/pages/PricingPatternsPage.tsx` | Muestras con Tabs en `/foundation/pricing?panel=edit/schedule/import/result` |
-| `src/app/App.tsx` | Dos rutas/navegación reales y carga diferida sobre el shell existente |
-| `tests/pricing.spec.ts` | Cuatro recorridos nuevos de Pricing y captura desktop |
-| `README.md`, `docs/COMPONENTES_FOUNDATION.md`, este reporte | Estado y matriz de cobertura actualizados |
-| `docs/evidencias/pricing-s01-1440.png`, `pricing-edit-components-1440.png`, `pricing-schedule-components-1440.png`, `pricing-import-components-1440.png`, `pricing-result-components-1440.png` | Cinco evidencias de la ampliación |
-
-### Cobertura y diferencias aplicadas
-
-S01: selección explícita; Consultar aplica el contexto; lectura base de producto sin filtro de canal conforme al GET publicado; SKU heredado, override y Retail solicitado con fallback global. Oferta nula se lee «Sin oferta». Carga, ausencia y error se distinguen; en error/refresco se conserva última lectura del mismo contexto y se bloquean acciones que requieran lectura actualizada. Las respuestas canceladas no actualizan otra consulta. Retorno desde muestras conserva producto/SKU y canal aplicados.
-
-S02: los controles de alcance y oferta se componen con Radio.Card/Radio, NumberInput y Textarea; ocultar importe de oferta conserva su valor y cancelar revisión conserva el motivo. El diálogo no guarda ni realiza PATCH. S03: tabla y formulario con fechas/horas de America/Lima; no POST ni validación comercial. Fecha/hora usa TextInput `datetime-local`: el picker/idioma visual del calendario son nativos del navegador, sin afirmar un calendario Mantine personalizado. Los formularios de muestra respetan máximo 880 px.
-
-S04: FileSelection permite revisar nombre y bytes del archivo seleccionado, sin afirmar que es válido ni extraer filas/cabeceras. Stepper permite volver; archivo nuevo limpia política y segunda etapa. Confirmar está deshabilitado con causa visible. S05: fixture publicado conceptualmente en spec de 3 filas/2 confirmadas/1 rechazada, alerta parcial y tabla; no resultado derivado de un archivo arbitrario, descarga de CSV ficticio ni reanudación.
-
-Cambios frente a capturas: badges de origen neutros y labels de negocio, sin enums/IDs MK/POST 201/202 como títulos operativos; tres KPI por fila conforme a DS-C19, sin colorear cifras por decoración; no cálculo autoritativo de ahorro/cascada ni afirmación de auditoría en tiempo real. El screenshot ofrece cabeceras CSV y admisión con errores: esas capacidades permanecen bloqueadas por la spec, no se copian como reglas aprobadas. No se copiaron datos de usuario/sesión de Marco Castilla ni un supuesto aviso de otro editor conectado.
-
-### Validación de la ampliación
-
-- `npm run typecheck`: PASS, salida 0.
-- `npm run build`: PASS, salida 0; Vite 8.3.4, sin advertencia de chunk grande.
-- `npm run lint`: PASS, salida 0, sin advertencias finales; se separó helper de etiquetas del componente para respetar Fast Refresh.
-- `npm test`: PASS, **9 pruebas en 19.4 s** (5 de Foundation y 4 de Pricing).
-- Último ajuste de placeholder de archivo y opacidad de input: typecheck/build/lint PASS; `npm test -- --grep 'Pricing desktop'` PASS, **1 prueba en 6.4 s**. No se repitió la suite completa tras ese cambio de estilos; se regeneraron las cinco capturas de Pricing y se midieron los estilos efectivos corregidos.
-- Visual desktop 1440 px: PASS técnico; cinco capturas inspeccionadas, sin overflow de página. Teclado de Tabs, foco/retorno de confirmación y contenido preservado están comprobados en los recorridos.
-- La primera prueba de conservación de oferta comparaba `211.50` con `211.5`; Mantine normaliza el número sin cambiar su valor. Se ajustó la expectativa sin imponer precisión monetaria inexistente en contrato.
-
-No se agregaron dependencias ni llamadas HTTP. No se modificó Docs/Backend. Se preserva el staging previo del usuario y se prepara también esta ampliación para el mismo commit; no se hace commit/push/PR ni cierre de issue.
-
-### Bloqueos y estado final
-
-**Q-013-01**: contrato de contenido/formato/cabeceras/tamaño/versión por fila ausente. **Q-013-02**: admisión de prevalidación con errores no definida. Fuentes: `mockups/MK-013/component-spec.md` §13 y `tasks.md` T06 BLOCKED. Owner funcional: Leonardo Vera; revisión técnica de contrato por Miguel Ángel Taco según gobernanza. Impacto: impiden parser/plantilla/prevalidación/admisión reales, no bloquean S01 ni estas composiciones.
-
-S01 y componentes de Foundation: **MOCK_INTEGRATED / MOCK_ONLY**. API, edición/programación/importación comerciales, histórico S06 y aprobación técnica/UX: pendientes en sus alcances correspondientes. El issue #1 sigue sin cerrarse hasta las revisiones y publicación requeridas; se elimina el antiguo pendiente de implementación del piloto S01.
+Estado de la implementación: **MOCK_INTEGRATED**. Estado de aprobación/merge: **PARCIAL**, pendiente de publicación y revisión humana de las correcciones.

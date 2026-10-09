@@ -8,6 +8,8 @@
 
 > **Implementación disponible:** consultar [COMPONENTES_FOUNDATION.md](COMPONENTES_FOUNDATION.md) para las APIs y rutas reales de la base y [VALIDACION_FOUNDATION.md](VALIDACION_FOUNDATION.md) para resultados. Los ejemplos/estructuras objetivo de esta guía no implican que todos los MK estén implementados.
 
+> **Revisión vigente de Foundation:** DESIGN 1.1.0, Docs `master` en `be5c2db16aca6d6d18b3005a2da4205f724038e3`, ruta `ux/mockups/DESIGN.md`. El shell, la navegación y los registros de rutas de producto/demostración viven en módulos separados de `src/app/`. La base auditada de Frontend es `ceee9d2`; la aprobación de las correcciones sigue requiriendo revisión humana independiente.
+
 ---
 
 ## 0. Cómo se usa este documento
