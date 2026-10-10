@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Button, Group, Select, Skeleton, Stack, Text } from "@mantine/core";
-import { IconPencil, IconCalendar, IconUpload } from "@tabler/icons-react";
+import { useSearchParams } from "react-router-dom";
+import { Button, Select, Skeleton, Stack, Text } from "@mantine/core";
 import {
   EmptyState,
   FeedbackAlert,
@@ -20,6 +19,7 @@ const scenarios: { value: PriceScenario; label: string }[] = [
   { value: "empty", label: "Sin precio" },
   { value: "error", label: "Error de consulta" },
 ];
+
 export function CurrentPricePage() {
   const [params, setParams] = useSearchParams();
   const targetId =
@@ -31,59 +31,60 @@ export function CurrentPricePage() {
         ? "retail"
         : "global",
   };
+  const isRevisionMode =
+    import.meta.env.DEV && params.get("modoRevision") === "1";
+
   // Applied URL context owns the draft lifetime. Back/Forward replaces stale drafts
   // without an effect that overwrites edits on ordinary re-renders.
   return (
     <CurrentPriceContent
       key={`${query.targetId}:${query.channel}`}
       query={query}
+      isRevisionMode={isRevisionMode}
       onApply={(next) =>
-        setParams({ target: next.targetId, channel: next.channel })
+        setParams((prev) => {
+          const nextParams = new URLSearchParams(prev);
+          nextParams.set("target", next.targetId);
+          nextParams.set("channel", next.channel);
+          return nextParams;
+        })
       }
     />
   );
 }
+
 function CurrentPriceContent({
   query,
+  isRevisionMode,
   onApply,
 }: {
   query: PriceQuery;
+  isRevisionMode: boolean;
   onApply: (query: PriceQuery) => void;
 }) {
-  const navigate = useNavigate();
   const [draft, setDraft] = useState(query);
   const [scenario, setScenario] = useState<PriceScenario>("default");
   const [revision, setRevision] = useState(0);
   const { state, previous } = useCurrentPrice(query, scenario, revision);
   const snapshot = state.status === "success" ? state.result : previous;
   const fresh = state.status === "success" && state.result !== null;
-  const demoPath = (panel: string) =>
-    `/foundation/pricing?panel=${panel}&target=${query.targetId}&channel=${query.channel}`;
+
   const consult = () => {
     onApply(draft);
     setRevision((value) => value + 1);
   };
+
   return (
     <>
       <PageHeader
         title="Gestión de precios"
-        description="Consulta el precio vigente y distingue el precio base del producto de los overrides por SKU."
+        description="Consulta los precios vigentes de productos y variantes (SKU)."
         breadcrumbs={[{ label: "Precios" }, { label: "Precio vigente" }]}
-        actions={
-          <Button
-            component={Link}
-            to={demoPath("import")}
-            variant="outline"
-            leftSection={<IconUpload size={20} stroke={2} aria-hidden="true" />}
-          >
-            Componentes de carga masiva
-          </Button>
-        }
       />
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Piloto con datos ficticios">
-          Consulta local de MK-013-S01. Las acciones abren muestras de
-          componentes y no modifican precios reales.
+        <FeedbackAlert semantic="info" title="Datos de demostración">
+          Los precios mostrados son simulados. Esta pantalla no consulta ni
+          modifica información comercial real.
         </FeedbackAlert>
         <PriceFilters
           draft={draft}
@@ -91,16 +92,18 @@ function CurrentPriceContent({
           onChange={setDraft}
           onConsult={consult}
         />
-        <Select
-          label="Escenario de revisión del piloto"
-          value={scenario}
-          data={scenarios}
-          maw={320}
-          onChange={(value) => {
-            const option = scenarios.find((item) => item.value === value);
-            if (option) setScenario(option.value);
-          }}
-        />
+        {isRevisionMode && (
+          <Select
+            label="Escenario de revisión del piloto"
+            value={scenario}
+            data={scenarios}
+            maw={320}
+            onChange={(value) => {
+              const option = scenarios.find((item) => item.value === value);
+              if (option) setScenario(option.value);
+            }}
+          />
+        )}
         {state.status === "loading" && (
           <Stack gap="sm" role="status">
             <Text size="sm">
@@ -142,38 +145,12 @@ function CurrentPriceContent({
             )}
             {query.channel === "retail" && (
               <FeedbackAlert semantic="info" title="Fallback al precio global">
-                Solicitaste Retail. El fixture consultado resuelve al alcance
-                global; no es una tarifa exclusiva de Retail.
+                Para el canal Retail seleccionado, el precio disponible
+                corresponde al alcance global.
               </FeedbackAlert>
             )}
             <PriceSummary price={snapshot.price} />
-            <Group gap="sm">
-              <Button
-                onClick={() => navigate(demoPath("edit"))}
-                disabled={!fresh}
-                leftSection={
-                  <IconPencil size={20} stroke={2} aria-hidden="true" />
-                }
-              >
-                Revisar edición de precio
-              </Button>
-              <Button
-                onClick={() => navigate(demoPath("schedule"))}
-                variant="outline"
-                disabled={!fresh}
-                leftSection={
-                  <IconCalendar size={20} stroke={2} aria-hidden="true" />
-                }
-              >
-                Revisar programación futura
-              </Button>
-            </Group>
             <PriceBreakdown rows={snapshot.breakdown} />
-            <Text size="sm" c="dimmed">
-              Cada fila es una lectura fixture disponible. El navegador no
-              calcula la resolución comercial de precios, ahorro ni cantidad de
-              variantes afectadas.
-            </Text>
           </>
         )}
         {state.status === "success" && !state.result && (

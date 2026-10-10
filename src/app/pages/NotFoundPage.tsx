@@ -5,8 +5,8 @@ export function NotFoundPage() {
     <Stack gap="md">
       <Title order={1}>Página no encontrada</Title>
       <Text>La ruta solicitada no está disponible.</Text>
-      <Anchor component={Link} to="/foundation/listados">
-        Volver a la galería
+      <Anchor component={Link} to="/precios">
+        Volver a precios
       </Anchor>
     </Stack>
   );
