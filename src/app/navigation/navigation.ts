@@ -1,19 +1,33 @@
 import {
   IconCalculator,
   IconComponents,
+  IconFileSpreadsheet,
   IconForms,
   IconLayoutList,
   IconMessageCircle,
+  IconUpload,
   type TablerIcon,
 } from "@tabler/icons-react";
+
 export interface NavigationItem {
   to: string;
   label: string;
   icon: TablerIcon;
 }
+
+export const bulkNavigation: NavigationItem[] = [
+  { to: "/carga-masiva", label: "Carga masiva", icon: IconUpload },
+  {
+    to: "/carga-masiva/descargas",
+    label: "Descargas y exportación",
+    icon: IconFileSpreadsheet,
+  },
+];
+
 export const productNavigation: NavigationItem[] = [
   { to: "/precios", label: "Precio vigente · piloto", icon: IconCalculator },
 ];
+
 export const demoNavigation: NavigationItem[] = [
   {
     to: "/foundation/listados",
