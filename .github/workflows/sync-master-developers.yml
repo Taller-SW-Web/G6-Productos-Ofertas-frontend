@@ -1,0 +1,243 @@
+
+name: Sync Master to Developer Branches
+
+on:
+  push:
+    branches:
+      - master
+
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Simular sin modificar ramas remotas"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-master-developers
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sincronizar ramas de desarrolladores
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Obtener repositorio
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Sincronizar ramas
+        shell: bash
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+
+        run: |
+          set -euo pipefail
+
+          BRANCHES=(castilla poma lopez cueva taco vera)
+          failures=0
+
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin --prune
+
+          {
+            echo "## Sincronización de master"
+            echo ""
+            echo "| Rama | Estado | Detalle |"
+            echo "|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          report() {
+            echo "| \`$1\` | $2 | $3 |" \
+              >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          validate_frontend() {
+            local app_dir=""
+
+            for candidate in \
+              . frontend client web apps/frontend apps/web
+            do
+              if [[ -f "$candidate/package.json" ]]; then
+                app_dir="$candidate"
+                break
+              fi
+            done
+
+            if [[ -z "$app_dir" ]]; then
+              echo "::error::No se encontró package.json"
+              return 1
+            fi
+
+            (
+              cd "$app_dir" || exit 1
+
+              if [[ -f package-lock.json || \
+                    -f npm-shrinkwrap.json ]]; then
+
+                npm ci --no-audit --no-fund || exit 1
+
+              elif [[ -f pnpm-lock.yaml ]]; then
+
+                corepack enable || exit 1
+                corepack pnpm install --frozen-lockfile || exit 1
+
+              elif [[ -f yarn.lock ]]; then
+
+                corepack enable || exit 1
+                version="$(corepack yarn --version)" || exit 1
+
+                if [[ "${version%%.*}" -gt 1 ]]; then
+                  corepack yarn install --immutable || exit 1
+                else
+                  corepack yarn install --frozen-lockfile || exit 1
+                fi
+
+              else
+                echo "::error::No existe lockfile reconocido"
+                exit 1
+              fi
+
+              if ! node -e "
+                const scripts = require('./package.json').scripts || {};
+                process.exit(scripts.build ? 0 : 1);
+              "; then
+                echo "::error::Falta el script build"
+                exit 1
+              fi
+
+              npm run build || exit 1
+              npm run lint --if-present || exit 1
+              npm run typecheck --if-present || exit 1
+              npm run test:ci --if-present || exit 1
+            )
+          }
+
+          for branch in "${BRANCHES[@]}"; do
+            echo "::group::Procesando $branch"
+
+            git reset --hard HEAD
+            git clean -ffdx
+
+            if ! git show-ref --verify --quiet \
+              "refs/remotes/origin/$branch"; then
+
+              report "$branch" "ERROR" "Rama inexistente"
+              failures=$((failures + 1))
+              echo "::endgroup::"
+              continue
+            fi
+
+            if git merge-base --is-ancestor \
+              origin/master "origin/$branch"; then
+
+              report "$branch" "OK" "Ya contiene master"
+              echo "::endgroup::"
+              continue
+            fi
+
+            if ! git checkout -B __sync_temp \
+              "origin/$branch"; then
+
+              report "$branch" "ERROR" "No se pudo preparar"
+              failures=$((failures + 1))
+              echo "::endgroup::"
+              continue
+            fi
+
+            if git merge-base --is-ancestor \
+              "origin/$branch" origin/master; then
+
+              mode="fast-forward"
+
+              if ! git merge --ff-only origin/master; then
+                report "$branch" "ERROR" "Falló fast-forward"
+                failures=$((failures + 1))
+                echo "::endgroup::"
+                continue
+              fi
+
+            else
+              mode="merge"
+
+              if ! git merge --no-ff --no-edit \
+                -m "chore(sync): integrate master into $branch" \
+                origin/master; then
+
+                git merge --abort || true
+
+                report "$branch" "CONFLICTO" \
+                  "Requiere resolución manual"
+
+                failures=$((failures + 1))
+                echo "::endgroup::"
+                continue
+              fi
+            fi
+
+            if ! validate_frontend; then
+
+              report "$branch" "ERROR" \
+                "Falló validación del frontend"
+
+              failures=$((failures + 1))
+              echo "::endgroup::"
+              continue
+            fi
+
+            if ! git diff --quiet || \
+               ! git diff --cached --quiet; then
+
+              report "$branch" "ERROR" \
+                "La validación modificó archivos versionados"
+
+              failures=$((failures + 1))
+              echo "::endgroup::"
+              continue
+            fi
+
+            if [[ "$DRY_RUN" == "true" ]]; then
+
+              report "$branch" "SIMULADO" \
+                "$mode validado; no se hizo push"
+
+              echo "::endgroup::"
+              continue
+            fi
+
+            if git push origin \
+              "HEAD:refs/heads/$branch"; then
+
+              report "$branch" "OK" \
+                "Sincronizado mediante $mode"
+
+            else
+              report "$branch" "ERROR" \
+                "Push rechazado o rama modificada"
+
+              failures=$((failures + 1))
+            fi
+
+            echo "::endgroup::"
+          done
+
+          if [[ "$failures" -gt 0 ]]; then
+            echo "::error::$failures rama(s) requieren atención"
+            exit 1
+          fi
