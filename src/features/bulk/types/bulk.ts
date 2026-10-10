@@ -1,5 +1,5 @@
 // Domain & UI models for MK-001 (Bulk Upload and Export)
-// These models represent presentation entities and repository contracts.
+// Aligned with OpenAPI 0.5.0 schemas (ImportacionGeneralAceptada, EstadoImportacionGeneral, FilaBulk, PasoDominioBulk)
 
 export type BulkImportStatus =
   | "QUEUED"
@@ -15,11 +15,38 @@ export type BulkRowStatus =
 
 export type BulkDomain = "CATALOGO" | "PRICING" | "INVENTARIO";
 
+// Canonical error codes from OpenAPI 0.5.0 ErrorCode enum
+export type BulkErrorCode =
+  | "VALIDACION"
+  | "TOKEN_INVALIDO"
+  | "SCOPE_INSUFICIENTE"
+  | "VERSION_CONFLICT"
+  | "IDEMPOTENCY_CONFLICT"
+  | "ERROR_INTERNO"
+  | "SERVICIO_NO_DISPONIBLE"
+  | "PRODUCTO_NO_ENCONTRADO"
+  | "SKU_DUPLICADO"
+  | "CATEGORIA_INVALIDA"
+  | "TIPO_PRODUCTO_INVALIDO"
+  | "TIPO_PRODUCTO_NO_ENCONTRADO"
+  | "MARCA_INVALIDA"
+  | "DATOS_INCOMPLETOS"
+  | "CAMBIO_ESTRUCTURAL_NO_PERMITIDO"
+  | "VARIANTE_NO_ENCONTRADA"
+  | "SKU_INVALIDO"
+  | "UBICACION_NO_ENCONTRADA"
+  | "CANTIDAD_INVALIDA"
+  | "STOCK_INSUFICIENTE"
+  | "PRECIO_INVALIDO"
+  | "MONEDA_INVALIDA"
+  | "RANGO_PRECIO_INVALIDO"
+  | string;
+
 export interface BulkDomainStep {
   domain: BulkDomain;
   status: BulkRowStatus;
-  code?: string;
-  detail?: string;
+  code?: BulkErrorCode | null;
+  detail?: string | null;
 }
 
 export interface BulkImportRow {
@@ -30,8 +57,8 @@ export interface BulkImportRow {
   applied_domains: BulkDomain[];
   failed_domain?: BulkDomain | null;
   needs_reconciliation: boolean;
-  code?: string;
-  detail?: string;
+  code?: BulkErrorCode | null;
+  detail?: string | null;
   steps: BulkDomainStep[];
 }
 
@@ -76,14 +103,7 @@ export interface LocalFileCheckResult {
   fileSize: number;
   detectedRows?: number;
   detectedColumns?: string[];
-  missingColumns?: string[];
   warnings: string[];
   errors: string[];
   unverifiedAspects: string[];
 }
-
-export type OperationState<T> =
-  | { status: "idle"; data: null; error: null }
-  | { status: "loading"; data: T | null; error: null }
-  | { status: "success"; data: T; error: null }
-  | { status: "error"; data: T | null; error: string };

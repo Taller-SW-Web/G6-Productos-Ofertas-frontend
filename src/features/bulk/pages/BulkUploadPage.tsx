@@ -15,7 +15,7 @@ import { useBulkUploadContext } from "../context/BulkUploadContext";
 
 export function BulkUploadPage() {
   const navigate = useNavigate();
-  const { selectedFile, fileCheck, setSelectedFile, clearSelection } =
+  const { selectedFile, fileCheck, checking, setSelectedFile, clearSelection } =
     useBulkUploadContext();
 
   const handleFileChange = async (file: File | null) => {
@@ -23,7 +23,7 @@ export function BulkUploadPage() {
   };
 
   const hasBlockingErrors = fileCheck ? !fileCheck.valid : false;
-  const canContinue = selectedFile !== null && !hasBlockingErrors;
+  const canContinue = selectedFile !== null && !checking && fileCheck !== null && !hasBlockingErrors;
 
   return (
     <>
@@ -39,7 +39,7 @@ export function BulkUploadPage() {
               variant="outline"
               leftSection={<IconDownload size={18} stroke={2} aria-hidden="true" />}
             >
-              Descargar plantilla
+              Descargar archivo de ejemplo
             </Button>
             <Button
               component={Link}
@@ -67,14 +67,21 @@ export function BulkUploadPage() {
               label="Archivo de catálogo"
               value={selectedFile}
               onChange={handleFileChange}
-              description="Tamaño máximo recomendado: 25 MB. El archivo debe contener al menos las columnas de SKU y datos básicos."
+              description="Seleccione el archivo con las columnas de SKU y datos básicos del producto."
               accept=".csv,.xlsx"
+              disabled={checking}
               error={
                 fileCheck && !fileCheck.valid
                   ? fileCheck.errors.join(". ")
                   : undefined
               }
             />
+
+            {checking && (
+              <FeedbackAlert semantic="info" title="Analizando archivo">
+                Comprobando estructura preliminar del archivo seleccionado…
+              </FeedbackAlert>
+            )}
 
             {fileCheck && fileCheck.warnings.length > 0 && (
               <FeedbackAlert
@@ -87,13 +94,14 @@ export function BulkUploadPage() {
 
             <Group justify="flex-end" gap="sm">
               {selectedFile && (
-                <Button variant="subtle" color="gray" onClick={clearSelection}>
+                <Button variant="subtle" color="gray" onClick={clearSelection} disabled={checking}>
                   Limpiar selección
                 </Button>
               )}
               <Button
                 rightSection={<IconArrowRight size={18} stroke={2} aria-hidden="true" />}
                 onClick={() => navigate("/carga-masiva/revisar")}
+                loading={checking}
                 disabled={!canContinue}
               >
                 Continuar a revisión

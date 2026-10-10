@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Badge, Stack, Text } from "@mantine/core";
+import { Stack, Text } from "@mantine/core";
 import { EntityTable, StatusBadge, type TableColumn, type TableState } from "../../../components/shared";
 import type { BulkDomain, BulkImportRow, BulkRowStatus } from "../types/bulk";
 
@@ -109,9 +109,9 @@ export function BatchRowsTable({
       width: 140,
       render: (row) =>
         row.needs_reconciliation ? (
-          <Badge size="xs" color="orange" variant="light">
+          <StatusBadge semantic="warning" size="sm">
             Reconciliable
-          </Badge>
+          </StatusBadge>
         ) : (
           <Text size="xs" c="dimmed">
             No requerida
@@ -129,7 +129,7 @@ export function BatchRowsTable({
               Código: {row.code}
             </Text>
           )}
-          <Text size="xs" c={row.status === "FAILED" ? "red" : undefined}>
+          <Text size="xs">
             {row.detail ?? "Sin observaciones adicionales"}
           </Text>
         </Stack>

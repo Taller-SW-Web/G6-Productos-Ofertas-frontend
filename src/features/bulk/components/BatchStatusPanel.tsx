@@ -1,4 +1,4 @@
-import { Button, Group, SimpleGrid, Stack } from "@mantine/core";
+import { Button, Group, SimpleGrid, Stack, Text } from "@mantine/core";
 import { IconRefresh, IconArrowRight, IconRotateClockwise, IconUpload } from "@tabler/icons-react";
 import { Link } from "react-router-dom";
 import {
@@ -55,6 +55,8 @@ export function BatchStatusPanel({
           ? "Procesando lote"
           : "En cola de procesamiento";
 
+  const concludedCount = batch.completed_rows + batch.failed_rows;
+
   return (
     <SectionCard
       title={`Lote de importación: ${batch.batch_id}`}
@@ -83,20 +85,25 @@ export function BatchStatusPanel({
       }
     >
       <Stack gap="lg">
+        {/* Subtle demo indicator */}
+        <Text size="xs" c="dimmed">
+          Modo demostración · Datos simulados de importación masiva
+        </Text>
+
         {/* KPI Metrics */}
         <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
           <MetricCard
             label="Total de filas"
             value={batch.total_rows}
-            description="Filas declaradas en el archivo"
+            description="Filas declaradas en el lote"
           />
           <MetricCard
-            label="Filas completadas"
+            label="Filas completadas exitosamente"
             value={batch.completed_rows}
             description={
               isProcessing
-                ? `${batch.completed_rows} de ${batch.total_rows} filas concluidas`
-                : "Aplicadas en dominios"
+                ? `${concludedCount} de ${batch.total_rows} filas concluidas`
+                : "Aplicadas en todos los dominios"
             }
           />
           <MetricCard
@@ -105,7 +112,7 @@ export function BatchStatusPanel({
             description={
               batch.needs_reconciliation
                 ? "Requieren reconciliación"
-                : "Sin rechazos registrados"
+                : "Sin fallos registrados"
             }
           />
         </SimpleGrid>

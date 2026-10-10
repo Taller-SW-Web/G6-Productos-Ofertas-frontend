@@ -30,12 +30,18 @@ export function ExportJobPanel({
   const isQueued = job?.status === "QUEUED";
   const isFailed = job?.status === "FAILED_GENERAL";
 
+  // In demo mode, XLSX download requires real backend export service
+  const canDownload = isCompleted && job?.format === "CSV";
+
   return (
     <SectionCard
       title="Exportación masiva del catálogo"
       description="Genera un archivo consolidado asíncrono con productos, precios base/oferta y existencias de inventario"
     >
       <Stack gap="lg">
+        <Text size="xs" c="dimmed">
+          Modo demostración · Generación asíncrona simulada de exportación
+        </Text>
         <Text size="sm">
           La exportación procesa la totalidad del catálogo activo en segundo plano sin bloquear las consultas transaccionales.
         </Text>
@@ -71,7 +77,7 @@ export function ExportJobPanel({
             description={`Formato solicitado: ${job.format} · Actualizado: ${new Date(job.updated_at).toLocaleTimeString("es-PE")}`}
             actions={
               <Group gap="xs">
-                {isCompleted && <StatusBadge semantic="success">Exportación lista</StatusBadge>}
+                {isCompleted && <StatusBadge semantic="success">Exportación terminada</StatusBadge>}
                 {isProcessing && <StatusBadge semantic="warning">Generando archivo…</StatusBadge>}
                 {isQueued && <StatusBadge semantic="neutral">En cola</StatusBadge>}
                 {isFailed && <StatusBadge semantic="error">Fallo de exportación</StatusBadge>}
@@ -84,7 +90,7 @@ export function ExportJobPanel({
                     onClick={onRefreshJob}
                     loading={refreshing}
                   >
-                    Actualizar
+                    Actualizar estado
                   </Button>
                 )}
               </Group>
@@ -93,19 +99,24 @@ export function ExportJobPanel({
             <Stack gap="md">
               {isQueued && (
                 <FeedbackAlert semantic="info" title="Solicitud en cola (202 Accepted)">
-                  El trabajo de exportación fue recibido y está en espera de consolidación.
+                  El trabajo de exportación fue recibido por el proveedor y está en espera de consolidación.
                 </FeedbackAlert>
               )}
 
               {isProcessing && (
                 <FeedbackAlert semantic="info" title="Consolidando catálogo">
-                  Extrayendo snapshot de Catálogo, Pricing e Inventario. Pulse &quot;Actualizar&quot; para comprobar cuando esté terminado.
+                  Extrayendo snapshot de Catálogo, Pricing e Inventario. Pulse &quot;Actualizar estado&quot; para consultar el estado.
                 </FeedbackAlert>
               )}
 
               {isCompleted && (
-                <FeedbackAlert semantic="success" title="Archivo consolidado disponible">
-                  {job.file_name} · {job.file_size ? `${(job.file_size / 1024).toFixed(1)} KB` : "Listo para descarga"}
+                <FeedbackAlert
+                  semantic={job.format === "CSV" ? "success" : "info"}
+                  title={job.format === "CSV" ? "Archivo CSV listo para descarga" : "Exportación XLSX finalizada"}
+                >
+                  {job.format === "CSV"
+                    ? `${job.file_name ?? "catalogo_exportado.csv"} · Archivo de demostración listo para descargar.`
+                    : "El trabajo XLSX concluyó exitosamente. La descarga directa del libro binario estará disponible al conectar con el servicio bulk-svc."}
                 </FeedbackAlert>
               )}
 
@@ -120,9 +131,11 @@ export function ExportJobPanel({
                   leftSection={<IconDownload size={18} stroke={2} aria-hidden="true" />}
                   onClick={onDownloadExport}
                   loading={downloading}
-                  disabled={!isCompleted}
+                  disabled={!canDownload}
                 >
-                  Descargar archivo consolidado
+                  {job.format === "CSV"
+                    ? "Descargar archivo CSV consolidado"
+                    : "Descarga XLSX no disponible en demo"}
                 </Button>
               </Group>
             </Stack>

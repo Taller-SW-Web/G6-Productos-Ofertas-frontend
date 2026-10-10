@@ -1,7 +1,7 @@
 import {
-  MOCK_CSV_TEMPLATE,
+  MOCK_CSV_SAMPLE_DATA,
   MOCK_EXPORT_CSV_DATA,
-  MOCK_FAILED_ROWS_REPORT_CSV,
+  generateFailedRowsCsv,
   mockBatches,
   mockExports,
   samplePartialRows,
@@ -19,23 +19,35 @@ import type {
 // In-memory state store for dynamic test interactions and active sessions
 const dynamicBatches: Map<string, BulkImportBatch> = new Map();
 const dynamicExports: Map<string, BulkExportJob> = new Map();
-const queryCounters: Map<string, number> = new Map();
 
-export const mockBulkRepository: BulkRepository = {
+function deepCloneBatch(batch: BulkImportBatch): BulkImportBatch {
+  return JSON.parse(JSON.stringify(batch)) as BulkImportBatch;
+}
+
+function deepCloneExport(job: BulkExportJob): BulkExportJob {
+  return JSON.parse(JSON.stringify(job)) as BulkExportJob;
+}
+
+export const mockBulkRepository: BulkRepository & {
+  advanceMockImport?: (batchId: string) => Promise<BulkImportBatch | null>;
+  advanceMockExport?: (exportId: string) => Promise<BulkExportJob | null>;
+  resetMockState?: () => void;
+} = {
   async getTemplate(
     format: BulkExportFormat,
     signal?: AbortSignal,
   ): Promise<DownloadResource | null> {
     signal?.throwIfAborted();
     if (format === "CSV") {
-      const blob = new Blob([MOCK_CSV_TEMPLATE], {
+      const blob = new Blob([MOCK_CSV_SAMPLE_DATA], {
         type: "text/csv;charset=utf-8;",
       });
       return {
         blob,
-        fileName: "plantilla_carga_productos.csv",
+        fileName: "ejemplo_carga_productos.csv",
       };
     }
+    // Official XLSX template is pending integration with bulk-svc provider
     return null;
   },
 
@@ -56,7 +68,7 @@ export const mockBulkRepository: BulkRepository = {
     }
     if (scenario === "ARCHIVO_EXCEDE_LIMITE" || lowerName.includes("excede")) {
       throw new Error(
-        "El archivo excede el tamaño máximo permitido por el servicio (límite: 25 MB).",
+        "El archivo excede el tamaño máximo permitido por el servicio.",
       );
     }
     if (
@@ -93,11 +105,14 @@ export const mockBulkRepository: BulkRepository = {
     };
 
     dynamicBatches.set(batchId, newBatch);
-    queryCounters.set(batchId, 0);
 
-    return { ...newBatch };
+    return deepCloneBatch(newBatch);
   },
 
+  /**
+   * Pure, idempotent read of batch state with ZERO side-effects.
+   * Priority: 1) Dynamic instance, 2) Static fixture, 3) null.
+   */
   async getImport(
     batchId: string,
     signal?: AbortSignal,
@@ -110,36 +125,19 @@ export const mockBulkRepository: BulkRepository = {
       );
     }
 
-    // Check fixed fixture
-    if (mockBatches[batchId]) {
-      return { ...mockBatches[batchId] };
+    // 1. Check dynamic in-memory batch first (e.g. newly created or resumed)
+    const dynamic = dynamicBatches.get(batchId);
+    if (dynamic) {
+      return deepCloneBatch(dynamic);
     }
 
-    // Check dynamic in-memory batch
-    const batch = dynamicBatches.get(batchId);
-    if (!batch) {
-      return null;
+    // 2. Fallback to fixed static fixture
+    const fixture = mockBatches[batchId];
+    if (fixture) {
+      return deepCloneBatch(fixture);
     }
 
-    // Deterministic progression on queries for dynamic batches
-    const count = (queryCounters.get(batchId) ?? 0) + 1;
-    queryCounters.set(batchId, count);
-
-    if (batch.status === "QUEUED" && count >= 1) {
-      batch.status = "PROCESSING";
-      batch.completed_rows = 82;
-      batch.failed_rows = 4;
-      batch.updated_at = new Date().toISOString();
-    } else if (batch.status === "PROCESSING" && count >= 2) {
-      batch.status = "COMPLETED";
-      batch.completed_rows = 114;
-      batch.failed_rows = 6;
-      batch.needs_reconciliation = true;
-      batch.rows = samplePartialRows;
-      batch.updated_at = new Date().toISOString();
-    }
-
-    return { ...batch };
+    return null;
   },
 
   async getImportReport(
@@ -152,15 +150,22 @@ export const mockBulkRepository: BulkRepository = {
       return null;
     }
 
-    const blob = new Blob([MOCK_FAILED_ROWS_REPORT_CSV], {
+    const rows = batch.rows ?? samplePartialRows;
+    const csvContent = generateFailedRowsCsv(rows);
+    const blob = new Blob([csvContent], {
       type: "text/csv;charset=utf-8;",
     });
+
     return {
       blob,
       fileName: `reporte_errores_${batchId}.csv`,
     };
   },
 
+  /**
+   * Idempotent resume of an eligible batch.
+   * Preserves batch_id, total_rows, and confirmed completed rows.
+   */
   async resumeImport(
     batchId: string,
     signal?: AbortSignal,
@@ -172,6 +177,19 @@ export const mockBulkRepository: BulkRepository = {
       throw new Error(`No se encontró el lote ${batchId} para reanudar.`);
     }
 
+    // Validate eligibility for resume
+    if (existing.status === "QUEUED" || existing.status === "PROCESSING") {
+      throw new Error(
+        `El lote ${batchId} ya se encuentra en proceso de reanudación o ejecución.`,
+      );
+    }
+
+    if (!existing.needs_reconciliation || existing.failed_rows === 0) {
+      throw new Error(
+        `El lote ${batchId} no contiene operaciones pendientes ni requiere reconciliación.`,
+      );
+    }
+
     const resumedBatch: BulkImportBatch = {
       ...existing,
       status: "QUEUED",
@@ -179,9 +197,8 @@ export const mockBulkRepository: BulkRepository = {
     };
 
     dynamicBatches.set(batchId, resumedBatch);
-    queryCounters.set(batchId, 0);
 
-    return { ...resumedBatch };
+    return deepCloneBatch(resumedBatch);
   },
 
   async createExport(
@@ -200,11 +217,13 @@ export const mockBulkRepository: BulkRepository = {
     };
 
     dynamicExports.set(exportId, newJob);
-    queryCounters.set(exportId, 0);
 
-    return { ...newJob };
+    return deepCloneExport(newJob);
   },
 
+  /**
+   * Pure, idempotent read of export job state with ZERO side-effects.
+   */
   async getExport(
     exportId: string,
     signal?: AbortSignal,
@@ -217,39 +236,30 @@ export const mockBulkRepository: BulkRepository = {
       );
     }
 
-    if (mockExports[exportId]) {
-      return { ...mockExports[exportId] };
+    const dynamic = dynamicExports.get(exportId);
+    if (dynamic) {
+      return deepCloneExport(dynamic);
     }
 
-    const job = dynamicExports.get(exportId);
-    if (!job) {
-      return null;
+    const fixture = mockExports[exportId];
+    if (fixture) {
+      return deepCloneExport(fixture);
     }
 
-    const count = (queryCounters.get(exportId) ?? 0) + 1;
-    queryCounters.set(exportId, count);
-
-    if (job.status === "QUEUED" && count >= 1) {
-      job.status = "PROCESSING";
-      job.updated_at = new Date().toISOString();
-    } else if (job.status === "PROCESSING" && count >= 2) {
-      job.status = "COMPLETED";
-      job.file_name = `catalogo_${job.format.toLowerCase()}_${exportId}.${job.format.toLowerCase()}`;
-      job.file_size = 128500;
-      job.download_url = `mock://download/${exportId}`;
-      job.updated_at = new Date().toISOString();
-    }
-
-    return { ...job };
+    return null;
   },
 
+  /**
+   * Pure download resource retrieval with ZERO state transition side-effects.
+   */
   async getExportFile(
     exportId: string,
     signal?: AbortSignal,
   ): Promise<DownloadResource | null> {
     signal?.throwIfAborted();
 
-    const job = await this.getExport(exportId, signal);
+    // Read job directly without mutating state
+    const job = dynamicExports.get(exportId) ?? mockExports[exportId];
     if (!job || job.status !== "COMPLETED") {
       return null;
     }
@@ -264,6 +274,73 @@ export const mockBulkRepository: BulkRepository = {
       };
     }
 
+    // XLSX format requires real backend export service
     return null;
+  },
+
+  /**
+   * Internal simulation transition helper for testing and development.
+   */
+  async advanceMockImport(batchId: string): Promise<BulkImportBatch | null> {
+    let batch = dynamicBatches.get(batchId);
+    if (!batch) {
+      const fixture = mockBatches[batchId];
+      if (fixture) {
+        batch = deepCloneBatch(fixture);
+        dynamicBatches.set(batchId, batch);
+      } else {
+        return null;
+      }
+    }
+
+    if (batch.status === "QUEUED") {
+      batch.status = "PROCESSING";
+      batch.completed_rows = Math.min(82, batch.total_rows);
+      batch.failed_rows = 4;
+      batch.updated_at = new Date().toISOString();
+    } else if (batch.status === "PROCESSING") {
+      batch.status = "COMPLETED";
+      batch.completed_rows = Math.min(114, batch.total_rows);
+      batch.failed_rows = 6;
+      batch.needs_reconciliation = true;
+      batch.rows = samplePartialRows;
+      batch.updated_at = new Date().toISOString();
+    }
+
+    return deepCloneBatch(batch);
+  },
+
+  /**
+   * Internal simulation transition helper for testing exports.
+   */
+  async advanceMockExport(exportId: string): Promise<BulkExportJob | null> {
+    let job = dynamicExports.get(exportId);
+    if (!job) {
+      const fixture = mockExports[exportId];
+      if (fixture) {
+        job = deepCloneExport(fixture);
+        dynamicExports.set(exportId, job);
+      } else {
+        return null;
+      }
+    }
+
+    if (job.status === "QUEUED") {
+      job.status = "PROCESSING";
+      job.updated_at = new Date().toISOString();
+    } else if (job.status === "PROCESSING") {
+      job.status = "COMPLETED";
+      job.file_name = `catalogo_${job.format.toLowerCase()}_${exportId}.${job.format.toLowerCase()}`;
+      job.file_size = 128500;
+      job.download_url = `mock://download/${exportId}`;
+      job.updated_at = new Date().toISOString();
+    }
+
+    return deepCloneExport(job);
+  },
+
+  resetMockState() {
+    dynamicBatches.clear();
+    dynamicExports.clear();
   },
 };

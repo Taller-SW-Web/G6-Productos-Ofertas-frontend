@@ -2,6 +2,19 @@ import { Box, NavLink, Stack, Text } from "@mantine/core";
 import { Link, useLocation } from "react-router-dom";
 import { bulkNavigation, demoNavigation, productNavigation } from "./navigation";
 
+function isItemActive(itemPath: string, currentPath: string): boolean {
+  if (itemPath === currentPath) return true;
+  if (itemPath === "/carga-masiva") {
+    // Active for upload, review, and progress tracking, but not for /carga-masiva/descargas
+    return (
+      currentPath === "/carga-masiva" ||
+      currentPath === "/carga-masiva/revisar" ||
+      currentPath.startsWith("/carga-masiva/importaciones")
+    );
+  }
+  return itemPath !== "/" && currentPath.startsWith(`${itemPath}/`);
+}
+
 export function ApplicationNavigation() {
   const { pathname } = useLocation();
   return (
@@ -18,7 +31,7 @@ export function ApplicationNavigation() {
             </Text>
             <Stack gap="xs">
               {group.items.map(({ to, label, icon: Icon }) => {
-                const active = pathname === to || (to !== "/" && pathname.startsWith(`${to}/`));
+                const active = isItemActive(to, pathname);
                 return (
                   <NavLink
                     key={to}

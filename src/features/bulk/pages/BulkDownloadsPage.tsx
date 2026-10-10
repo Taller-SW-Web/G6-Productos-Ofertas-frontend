@@ -30,7 +30,7 @@ export function BulkDownloadsPage() {
     <>
       <PageHeader
         title="Descargas y exportación masiva"
-        description="Descarga de plantillas oficiales de carga y generación asíncrona del catálogo consolidado."
+        description="Descarga de archivos de ejemplo de carga y generación asíncrona del catálogo consolidado."
         breadcrumbs={[
           { label: "Carga masiva", to: "/carga-masiva" },
           { label: "Descargas y exportación" },
@@ -56,22 +56,22 @@ export function BulkDownloadsPage() {
 
         {/* Template Downloads Section */}
         <SectionCard
-          title="Plantillas oficiales de importación"
-          description="Estructura estándar de campos para la carga masiva de productos, variantes, precios y stock"
+          title="Archivos de ejemplo para importación"
+          description="Estructura de referencia para preparar archivos de importación masiva"
         >
           <Stack gap="md">
-            <Text size="sm">
-              Utilice estas plantillas para preparar sus archivos de catálogo. Cada archivo debe incluir las columnas requeridas (SKU, nombre, precio regular y moneda).
-            </Text>
+            <FeedbackAlert semantic="info" title="Disponibilidad de plantillas oficiales">
+              Las plantillas oficiales definitivas serán publicadas por el servicio de catálogo (bulk-svc) durante la integración del backend. Para pruebas y demostración se ofrece el archivo CSV de muestra.
+            </FeedbackAlert>
 
             <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
               <SectionCard
-                title="Plantilla CSV"
+                title="Archivo CSV de ejemplo (Demostración)"
                 description="Formato de texto delimitado por comas con codificación UTF-8"
               >
                 <Stack gap="sm">
                   <Text size="xs" c="dimmed">
-                    Recomendado para volúmenes grandes y procesamiento rápido.
+                    Contiene datos de muestra ficticios para validar la estructura del flujo.
                   </Text>
                   <Group justify="flex-end">
                     <Button
@@ -81,7 +81,7 @@ export function BulkDownloadsPage() {
                       onClick={() => downloadTemplate("CSV")}
                       loading={downloadingTemplate}
                     >
-                      Descargar plantilla CSV
+                      Descargar CSV de ejemplo
                     </Button>
                   </Group>
                 </Stack>
@@ -89,21 +89,20 @@ export function BulkDownloadsPage() {
 
               <SectionCard
                 title="Plantilla XLSX"
-                description="Libro de Microsoft Excel con hojas y validación de celdas"
+                description="Libro de Microsoft Excel con validación de celdas"
               >
                 <Stack gap="sm">
                   <Text size="xs" c="dimmed">
-                    Formato para edición en hojas de cálculo tradicionales.
+                    Plantilla oficial pendiente de publicación por el proveedor de catálogo.
                   </Text>
                   <Group justify="flex-end">
                     <Button
                       variant="outline"
                       size="sm"
                       leftSection={<IconDownload size={16} stroke={2} aria-hidden="true" />}
-                      onClick={() => downloadTemplate("XLSX")}
-                      loading={downloadingTemplate}
+                      disabled
                     >
-                      Descargar plantilla XLSX
+                      No disponible en demo
                     </Button>
                   </Group>
                 </Stack>

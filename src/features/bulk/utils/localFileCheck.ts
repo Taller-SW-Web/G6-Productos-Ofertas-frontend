@@ -1,12 +1,5 @@
 import type { LocalFileCheckResult } from "../types/bulk";
 
-export const EXPECTED_CSV_COLUMNS = [
-  "sku",
-  "nombre",
-  "precio_regular",
-  "moneda",
-];
-
 export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> {
   const fileName = file.name.trim();
   const fileSize = file.size;
@@ -26,7 +19,7 @@ export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> 
         `Formato no admitido. Se requiere un archivo con extensión .csv o .xlsx (recibido: ${fileName})`,
       ],
       unverifiedAspects: [
-        "El contenido no fue procesado debido a extensión inválida.",
+        "El contenido no fue procesado debido a formato no admitido.",
       ],
     };
   }
@@ -63,8 +56,9 @@ export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> 
   // Parse CSV client-side safely
   try {
     const text = await file.text();
-    const trimmed = text.trim();
-    if (!trimmed) {
+    // Strip UTF-8 BOM if present
+    const cleanText = text.replace(/^\uFEFF/, "").trim();
+    if (!cleanText) {
       return {
         valid: false,
         format: "CSV",
@@ -76,8 +70,20 @@ export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> 
       };
     }
 
-    // Split rows respecting basic quotes
-    const rawLines = parseCsvLines(trimmed);
+    const { rows: rawLines, error: parseError } = parseCsvSafely(cleanText);
+
+    if (parseError) {
+      return {
+        valid: false,
+        format: "CSV",
+        fileName,
+        fileSize,
+        warnings: [],
+        errors: [parseError],
+        unverifiedAspects: [],
+      };
+    }
+
     if (rawLines.length === 0) {
       return {
         valid: false,
@@ -92,18 +98,36 @@ export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> 
 
     const headerLine = rawLines[0] ?? [];
     const headers = headerLine.map((h) => h.trim().toLowerCase());
-    const dataRowsCount = rawLines.length - 1;
 
-    const missingColumns = EXPECTED_CSV_COLUMNS.filter(
-      (col) => !headers.includes(col),
-    );
-
-    const warnings: string[] = [];
-    if (missingColumns.length > 0) {
-      warnings.push(
-        `Faltan columnas recomendadas en el encabezado: ${missingColumns.join(", ")}. Si no están presentes, los valores tomarán los valores predeterminados o podrían ser observados.`,
-      );
+    // Check for empty headers
+    if (headers.some((h) => h.length === 0)) {
+      return {
+        valid: false,
+        format: "CSV",
+        fileName,
+        fileSize,
+        warnings: [],
+        errors: ["El encabezado contiene columnas con nombre vacío."],
+        unverifiedAspects: [],
+      };
     }
+
+    // Check for duplicate columns
+    const uniqueHeaders = new Set(headers);
+    if (uniqueHeaders.size !== headers.length) {
+      return {
+        valid: false,
+        format: "CSV",
+        fileName,
+        fileSize,
+        warnings: [],
+        errors: ["El encabezado contiene nombres de columna duplicados."],
+        unverifiedAspects: [],
+      };
+    }
+
+    const dataRows = rawLines.slice(1);
+    const dataRowsCount = dataRows.length;
 
     if (dataRowsCount === 0) {
       return {
@@ -113,13 +137,23 @@ export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> 
         fileSize,
         detectedRows: 0,
         detectedColumns: headers,
-        missingColumns,
-        warnings,
+        warnings: [],
         errors: [
           "El archivo CSV contiene únicamente el encabezado y no tiene filas de datos para importar.",
         ],
         unverifiedAspects: [],
       };
+    }
+
+    // Check row field counts
+    const columnCount = headers.length;
+    const malformedRowIndex = dataRows.findIndex((r) => r.length !== columnCount);
+    const warnings: string[] = [];
+
+    if (malformedRowIndex !== -1) {
+      warnings.push(
+        `La fila ${malformedRowIndex + 2} contiene ${dataRows[malformedRowIndex]?.length} campos, mientras que el encabezado define ${columnCount} columnas.`,
+      );
     }
 
     return {
@@ -129,7 +163,6 @@ export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> 
       fileSize,
       detectedRows: dataRowsCount,
       detectedColumns: headers,
-      missingColumns,
       warnings,
       errors: [],
       unverifiedAspects: [
@@ -153,9 +186,9 @@ export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> 
 }
 
 /**
- * Basic CSV tokenizer that respects quoted fields containing commas or linebreaks.
+ * Robust RFC 4180 CSV parser checking unclosed quotes and structure.
  */
-function parseCsvLines(text: string): string[][] {
+function parseCsvSafely(text: string): { rows: string[][]; error?: string } {
   const rows: string[][] = [];
   let currentRow: string[] = [];
   let currentField = "";
@@ -190,6 +223,13 @@ function parseCsvLines(text: string): string[][] {
     }
   }
 
+  if (insideQuotes) {
+    return {
+      rows: [],
+      error: "El archivo CSV contiene comillas sin cerrar en la estructura de campos.",
+    };
+  }
+
   if (currentField.length > 0 || currentRow.length > 0) {
     currentRow.push(currentField);
     if (currentRow.some((f) => f.trim().length > 0)) {
@@ -197,5 +237,5 @@ function parseCsvLines(text: string): string[][] {
     }
   }
 
-  return rows;
+  return { rows };
 }

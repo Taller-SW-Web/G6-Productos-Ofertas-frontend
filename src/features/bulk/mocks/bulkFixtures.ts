@@ -52,8 +52,8 @@ export const sampleCompletedRows: BulkImportRow[] = [
   },
 ];
 
-export const samplePartialRows: BulkImportRow[] = [
-  ...sampleCompletedRows,
+// 6 failed rows for batch-partial (114 completed + 6 failed = 120 total)
+export const samplePartialFailedRows: BulkImportRow[] = [
   {
     row_id: 4,
     sku: "PUM-FT-004-L",
@@ -62,12 +62,12 @@ export const samplePartialRows: BulkImportRow[] = [
     applied_domains: ["CATALOGO", "PRICING"],
     failed_domain: "INVENTARIO",
     needs_reconciliation: true,
-    code: "INV_LOC_NOT_FOUND",
-    detail: "Ubicación de inventario no encontrada para ajuste de stock inicial (default_location_id no configurado)",
+    code: "UBICACION_NO_ENCONTRADA",
+    detail: "Ubicación de inventario no configurada para ajuste de stock inicial (default_location_id no encontrado)",
     steps: [
       { domain: "CATALOGO", status: "COMPLETED", detail: "Borrador creado" },
       { domain: "PRICING", status: "COMPLETED", detail: "Precio regular S/ 79.00 registrado" },
-      { domain: "INVENTARIO", status: "FAILED", code: "INV_LOC_NOT_FOUND", detail: "Rechazado por ajuste de stock sin ubicación" },
+      { domain: "INVENTARIO", status: "FAILED", code: "UBICACION_NO_ENCONTRADA", detail: "Rechazado por ajuste de stock sin ubicación válida" },
     ],
   },
   {
@@ -78,11 +78,11 @@ export const samplePartialRows: BulkImportRow[] = [
     applied_domains: ["CATALOGO", "INVENTARIO"],
     failed_domain: "PRICING",
     needs_reconciliation: true,
-    code: "PRC_CURRENCY_INVALID",
-    detail: "Moneda USD no habilitada para lista de precios local en canal seleccionado",
+    code: "MONEDA_INVALIDA",
+    detail: "Moneda no habilitada para lista de precios local en canal seleccionado",
     steps: [
       { domain: "CATALOGO", status: "COMPLETED", detail: "Borrador creado" },
-      { domain: "PRICING", status: "FAILED", code: "PRC_CURRENCY_INVALID", detail: "Rechazado por validación de moneda" },
+      { domain: "PRICING", status: "FAILED", code: "MONEDA_INVALIDA", detail: "Rechazado por validación de moneda" },
       { domain: "INVENTARIO", status: "COMPLETED", detail: "SKU inicializado" },
     ],
   },
@@ -94,16 +94,70 @@ export const samplePartialRows: BulkImportRow[] = [
     applied_domains: [],
     failed_domain: "CATALOGO",
     needs_reconciliation: false,
-    code: "CAT_SKU_DUPLICATE",
+    code: "SKU_DUPLICADO",
     detail: "SKU duplicado en catálogo maestro existente",
     steps: [
-      { domain: "CATALOGO", status: "FAILED", code: "CAT_SKU_DUPLICATE", detail: "Rechazo de creación de borrador" },
+      { domain: "CATALOGO", status: "FAILED", code: "SKU_DUPLICADO", detail: "Rechazo de creación de borrador" },
       { domain: "PRICING", status: "PENDING", detail: "No iniciado debido a fallo en Catálogo" },
       { domain: "INVENTARIO", status: "PENDING", detail: "No iniciado debido a fallo en Catálogo" },
     ],
   },
+  {
+    row_id: 7,
+    sku: "NK-SK-007-40",
+    nombre: "Medias Compresión Pro - Talla 40",
+    status: "FAILED",
+    applied_domains: ["CATALOGO", "PRICING"],
+    failed_domain: "INVENTARIO",
+    needs_reconciliation: true,
+    code: "SERVICIO_NO_DISPONIBLE",
+    detail: "Servicio de inventario no disponible temporalmente al inicializar existencias",
+    steps: [
+      { domain: "CATALOGO", status: "COMPLETED", detail: "Borrador creado" },
+      { domain: "PRICING", status: "COMPLETED", detail: "Precio regular S/ 45.00 registrado" },
+      { domain: "INVENTARIO", status: "FAILED", code: "SERVICIO_NO_DISPONIBLE", detail: "Nodo de inventario ocupado" },
+    ],
+  },
+  {
+    row_id: 8,
+    sku: "AD-JK-008-XL",
+    nombre: "Casaca Cortaviento - Talla XL",
+    status: "FAILED",
+    applied_domains: ["CATALOGO", "INVENTARIO"],
+    failed_domain: "PRICING",
+    needs_reconciliation: true,
+    code: "RANGO_PRECIO_INVALIDO",
+    detail: "Precio base fuera del rango comercial permitido para la categoría",
+    steps: [
+      { domain: "CATALOGO", status: "COMPLETED", detail: "Borrador creado" },
+      { domain: "PRICING", status: "FAILED", code: "RANGO_PRECIO_INVALIDO", detail: "Validación de precio rechazada" },
+      { domain: "INVENTARIO", status: "COMPLETED", detail: "SKU inicializado" },
+    ],
+  },
+  {
+    row_id: 9,
+    sku: "PM-BG-009-U",
+    nombre: "Mochila Deportiva 25L - Talla Única",
+    status: "FAILED",
+    applied_domains: [],
+    failed_domain: "CATALOGO",
+    needs_reconciliation: false,
+    code: "CATEGORIA_INVALIDA",
+    detail: "Categoría no encontrada en el árbol taxonómico activo",
+    steps: [
+      { domain: "CATALOGO", status: "FAILED", code: "CATEGORIA_INVALIDA", detail: "Categoría inexistente" },
+      { domain: "PRICING", status: "PENDING", detail: "No ejecutado" },
+      { domain: "INVENTARIO", status: "PENDING", detail: "No ejecutado" },
+    ],
+  },
 ];
 
+export const samplePartialRows: BulkImportRow[] = [
+  ...sampleCompletedRows,
+  ...samplePartialFailedRows,
+];
+
+// 5 failed rows for batch-inventory-failed (45 completed + 5 failed = 50 total)
 export const sampleInventoryFailedRows: BulkImportRow[] = [
   {
     row_id: 1,
@@ -127,16 +181,81 @@ export const sampleInventoryFailedRows: BulkImportRow[] = [
     applied_domains: ["CATALOGO", "PRICING"],
     failed_domain: "INVENTARIO",
     needs_reconciliation: true,
-    code: "INV_UNAVAILABLE",
-    detail: "Inventario rechazó la inicialización de SKU por indisponibilidad temporal",
+    code: "SERVICIO_NO_DISPONIBLE",
+    detail: "Inventario rechazó la inicialización de SKU por indisponibilidad temporal del nodo",
     steps: [
       { domain: "CATALOGO", status: "COMPLETED", detail: "Borrador persistido" },
       { domain: "PRICING", status: "COMPLETED", detail: "Precio base S/ 349.00 registrado" },
-      { domain: "INVENTARIO", status: "FAILED", code: "INV_UNAVAILABLE", detail: "Fallo de conexión en nodo de almacén" },
+      { domain: "INVENTARIO", status: "FAILED", code: "SERVICIO_NO_DISPONIBLE", detail: "Fallo de conexión en nodo de almacén" },
+    ],
+  },
+  {
+    row_id: 3,
+    sku: "NK-RN-002-45",
+    nombre: "Zapatilla Trail Max - Talla 45",
+    status: "FAILED",
+    applied_domains: ["CATALOGO", "PRICING"],
+    failed_domain: "INVENTARIO",
+    needs_reconciliation: true,
+    code: "UBICACION_NO_ENCONTRADA",
+    detail: "Ubicación de inventario predeterminada no encontrada",
+    steps: [
+      { domain: "CATALOGO", status: "COMPLETED", detail: "Borrador persistido" },
+      { domain: "PRICING", status: "COMPLETED", detail: "Precio base S/ 349.00 registrado" },
+      { domain: "INVENTARIO", status: "FAILED", code: "UBICACION_NO_ENCONTRADA", detail: "Ubicación inválida" },
+    ],
+  },
+  {
+    row_id: 4,
+    sku: "AD-TR-003-L",
+    nombre: "Camiseta Climacool - Talla L",
+    status: "FAILED",
+    applied_domains: ["CATALOGO", "PRICING"],
+    failed_domain: "INVENTARIO",
+    needs_reconciliation: true,
+    code: "SERVICIO_NO_DISPONIBLE",
+    detail: "Timeout en servicio de inventario",
+    steps: [
+      { domain: "CATALOGO", status: "COMPLETED", detail: "Borrador creado" },
+      { domain: "PRICING", status: "COMPLETED", detail: "Precio base S/ 99.00 registrado" },
+      { domain: "INVENTARIO", status: "FAILED", code: "SERVICIO_NO_DISPONIBLE", detail: "Timeout en comunicación asíncrona" },
+    ],
+  },
+  {
+    row_id: 5,
+    sku: "AD-TR-003-XL",
+    nombre: "Camiseta Climacool - Talla XL",
+    status: "FAILED",
+    applied_domains: ["CATALOGO", "PRICING"],
+    failed_domain: "INVENTARIO",
+    needs_reconciliation: true,
+    code: "UBICACION_NO_ENCONTRADA",
+    detail: "Ubicación de inventario no encontrada",
+    steps: [
+      { domain: "CATALOGO", status: "COMPLETED", detail: "Borrador creado" },
+      { domain: "PRICING", status: "COMPLETED", detail: "Precio base S/ 99.00 registrado" },
+      { domain: "INVENTARIO", status: "FAILED", code: "UBICACION_NO_ENCONTRADA", detail: "Ubicación no asignada" },
+    ],
+  },
+  {
+    row_id: 6,
+    sku: "PUM-SH-005-41",
+    nombre: "Calzado Smash - Talla 41",
+    status: "FAILED",
+    applied_domains: ["CATALOGO", "PRICING"],
+    failed_domain: "INVENTARIO",
+    needs_reconciliation: true,
+    code: "STOCK_INSUFICIENTE",
+    detail: "Saldo inicial inconsistente en Inventario",
+    steps: [
+      { domain: "CATALOGO", status: "COMPLETED", detail: "Borrador creado" },
+      { domain: "PRICING", status: "COMPLETED", detail: "Precio base S/ 189.00 registrado" },
+      { domain: "INVENTARIO", status: "FAILED", code: "STOCK_INSUFICIENTE", detail: "Rechazo de inventario" },
     ],
   },
 ];
 
+// 5 failed rows for batch-pricing-failed (20 completed + 5 failed = 25 total)
 export const samplePricingFailedRows: BulkImportRow[] = [
   {
     row_id: 1,
@@ -146,34 +265,102 @@ export const samplePricingFailedRows: BulkImportRow[] = [
     applied_domains: ["CATALOGO", "INVENTARIO"],
     failed_domain: "PRICING",
     needs_reconciliation: true,
-    code: "PRC_RANGE_INVALID",
+    code: "RANGO_PRECIO_INVALIDO",
     detail: "Precio base fuera de rango permitido por política comercial",
     steps: [
       { domain: "CATALOGO", status: "COMPLETED", detail: "Borrador creado" },
-      { domain: "PRICING", status: "FAILED", code: "PRC_RANGE_INVALID", detail: "Regla de precio base rechazada" },
+      { domain: "PRICING", status: "FAILED", code: "RANGO_PRECIO_INVALIDO", detail: "Regla de precio base rechazada" },
       { domain: "INVENTARIO", status: "COMPLETED", detail: "SKU registrado sin saldo" },
+    ],
+  },
+  {
+    row_id: 2,
+    sku: "NK-RN-003-41",
+    nombre: "Zapatilla Marathon Elite - Talla 41",
+    status: "FAILED",
+    applied_domains: ["CATALOGO", "INVENTARIO"],
+    failed_domain: "PRICING",
+    needs_reconciliation: true,
+    code: "MONEDA_INVALIDA",
+    detail: "Moneda especificada no admitida en canal de venta",
+    steps: [
+      { domain: "CATALOGO", status: "COMPLETED", detail: "Borrador creado" },
+      { domain: "PRICING", status: "FAILED", code: "MONEDA_INVALIDA", detail: "Moneda no reconocida" },
+      { domain: "INVENTARIO", status: "COMPLETED", detail: "SKU registrado" },
+    ],
+  },
+  {
+    row_id: 3,
+    sku: "NK-RN-003-42",
+    nombre: "Zapatilla Marathon Elite - Talla 42",
+    status: "FAILED",
+    applied_domains: ["CATALOGO", "INVENTARIO"],
+    failed_domain: "PRICING",
+    needs_reconciliation: true,
+    code: "PRECIO_INVALIDO",
+    detail: "Formato de precio numérico inválido",
+    steps: [
+      { domain: "CATALOGO", status: "COMPLETED", detail: "Borrador creado" },
+      { domain: "PRICING", status: "FAILED", code: "PRECIO_INVALIDO", detail: "Valor numérico no admisible" },
+      { domain: "INVENTARIO", status: "COMPLETED", detail: "SKU registrado" },
+    ],
+  },
+  {
+    row_id: 4,
+    sku: "NK-RN-003-43",
+    nombre: "Zapatilla Marathon Elite - Talla 43",
+    status: "FAILED",
+    applied_domains: ["CATALOGO", "INVENTARIO"],
+    failed_domain: "PRICING",
+    needs_reconciliation: true,
+    code: "RANGO_PRECIO_INVALIDO",
+    detail: "Precio base por debajo del umbral mínimo de costo",
+    steps: [
+      { domain: "CATALOGO", status: "COMPLETED", detail: "Borrador creado" },
+      { domain: "PRICING", status: "FAILED", code: "RANGO_PRECIO_INVALIDO", detail: "Precio inferior a costo" },
+      { domain: "INVENTARIO", status: "COMPLETED", detail: "SKU registrado" },
+    ],
+  },
+  {
+    row_id: 5,
+    sku: "NK-RN-003-44",
+    nombre: "Zapatilla Marathon Elite - Talla 44",
+    status: "FAILED",
+    applied_domains: ["CATALOGO", "INVENTARIO"],
+    failed_domain: "PRICING",
+    needs_reconciliation: true,
+    code: "SERVICIO_NO_DISPONIBLE",
+    detail: "Servicio de precios no disponible",
+    steps: [
+      { domain: "CATALOGO", status: "COMPLETED", detail: "Borrador creado" },
+      { domain: "PRICING", status: "FAILED", code: "SERVICIO_NO_DISPONIBLE", detail: "Indisponibilidad en Pricing" },
+      { domain: "INVENTARIO", status: "COMPLETED", detail: "SKU registrado" },
     ],
   },
 ];
 
-export const sampleCatalogFailedRows: BulkImportRow[] = [
-  {
-    row_id: 1,
-    sku: "NK-RN-INVALID",
-    nombre: "Producto con taxonomía corrupta",
-    status: "FAILED",
-    applied_domains: [],
-    failed_domain: "CATALOGO",
-    needs_reconciliation: false,
-    code: "CAT_CATEGORY_NOT_FOUND",
-    detail: "La categoría especificada no existe en la jerarquía de catálogo",
-    steps: [
-      { domain: "CATALOGO", status: "FAILED", code: "CAT_CATEGORY_NOT_FOUND", detail: "Categoría inexistente" },
-      { domain: "PRICING", status: "PENDING", detail: "No ejecutado" },
-      { domain: "INVENTARIO", status: "PENDING", detail: "No ejecutado" },
-    ],
-  },
-];
+// 10 failed rows for batch-catalog-failed (0 completed + 10 failed = 10 total)
+export const sampleCatalogFailedRows: BulkImportRow[] = Array.from({ length: 10 }, (_, i) => ({
+  row_id: i + 1,
+  sku: `CAT-ERR-${i + 1}`,
+  nombre: `Producto observado #${i + 1}`,
+  status: "FAILED",
+  applied_domains: [],
+  failed_domain: "CATALOGO",
+  needs_reconciliation: false,
+  code: i % 2 === 0 ? "CATEGORIA_INVALIDA" : "SKU_DUPLICADO",
+  detail: i % 2 === 0 ? "La categoría especificada no existe en la taxonomía" : "SKU duplicado en catálogo maestro",
+  steps: [
+    {
+      domain: "CATALOGO",
+      status: "FAILED",
+      code: i % 2 === 0 ? "CATEGORIA_INVALIDA" : "SKU_DUPLICADO",
+      detail: i % 2 === 0 ? "Categoría inexistente" : "SKU duplicado",
+    },
+    { domain: "PRICING", status: "PENDING", detail: "No ejecutado" },
+    { domain: "INVENTARIO", status: "PENDING", detail: "No ejecutado" },
+  ],
+}));
 
 export const mockBatches: Record<string, BulkImportBatch> = {
   "batch-queued": {
@@ -327,20 +514,63 @@ export const mockExports: Record<string, BulkExportJob> = {
   },
 };
 
-export const MOCK_CSV_TEMPLATE = `sku,nombre,descripcion,categoria,marca,precio_regular,moneda,stock_inicial,ubicacion
-NK-RN-001-42,Zapatilla Running Air Sprint - Talla 42,Zapatilla deportiva para running,Calzado,Nike,299.00,PEN,50,ALM-CENTRAL
-AD-TR-002-M,Camiseta Entrenamiento DryFit - Talla M,Camiseta transpirable,Ropa,Adidas,89.00,PEN,30,ALM-CENTRAL
-PUM-FT-004-L,Short Futbol Pro - Talla L,Short de competición,Ropa,Puma,79.00,PEN,20,ALM-CENTRAL
+// Sample demonstration CSV (not claimed as normative official template)
+export const MOCK_CSV_SAMPLE_DATA = `sku,nombre,descripcion,categoria,marca,precio_regular,moneda,stock_inicial
+NK-RN-001-42,Zapatilla Running Air Sprint - Talla 42,Zapatilla deportiva para running,Calzado,Nike,299.00,PEN,50
+AD-TR-002-M,Camiseta Entrenamiento DryFit - Talla M,Camiseta transpirable,Ropa,Adidas,89.00,PEN,30
+PUM-FT-004-L,Short Futbol Pro - Talla L,Short de competición,Ropa,Puma,79.00,PEN,20
 `;
 
 export const MOCK_EXPORT_CSV_DATA = `sku,nombre,categoria,marca,precio_regular,precio_oferta,moneda,stock_disponible,estado
 NK-RN-001-42,Zapatilla Running Air Sprint - Talla 42,Calzado,Nike,299.00,249.00,PEN,50,ACTIVO
-NK-RN-001-43,Zapatilla Running Air Sprint - Talla 43,Calzado,Nike,299.00,null,PEN,30,ACTIVO
-AD-TR-002-M,Camiseta Entrenamiento DryFit - Talla M,Ropa,Adidas,89.00,null,PEN,30,ACTIVO
+NK-RN-001-43,Zapatilla Running Air Sprint - Talla 43,Calzado,Nike,299.00,,PEN,30,ACTIVO
+AD-TR-002-M,Camiseta Entrenamiento DryFit - Talla M,Ropa,Adidas,89.00,,PEN,30,ACTIVO
 `;
 
-export const MOCK_FAILED_ROWS_REPORT_CSV = `row_id,sku,nombre,estado,dominio_fallido,codigo_error,detalle_error,necesita_reconciliacion
-4,PUM-FT-004-L,Short Futbol Pro - Talla L,FAILED,INVENTARIO,INV_LOC_NOT_FOUND,Ubicacion de inventario no encontrada para ajuste de stock inicial,true
-5,UND-CP-005-S,Gorra Competicion Vent - Talla S,FAILED,PRICING,PRC_CURRENCY_INVALID,Moneda USD no habilitada para lista de precios local,true
-6,AS-GL-006-U,Guantes Training Grip - Talla Unica,FAILED,CATALOGO,CAT_SKU_DUPLICATE,SKU duplicado en catalogo maestro existente,false
-`;
+/**
+ * Serializes failed rows to RFC 4180 CSV safely preventing formula injection.
+ */
+export function generateFailedRowsCsv(rows: BulkImportRow[]): string {
+  const failed = rows.filter((r) => r.status === "FAILED");
+  const headers = [
+    "row_id",
+    "sku",
+    "nombre",
+    "estado",
+    "dominio_fallido",
+    "codigo_error",
+    "detalle_error",
+    "necesita_reconciliacion",
+  ];
+
+  const lines = [headers.join(",")];
+
+  for (const r of failed) {
+    const values = [
+      r.row_id.toString(),
+      escapeCsvCell(r.sku ?? ""),
+      escapeCsvCell(r.nombre ?? ""),
+      r.status,
+      r.failed_domain ?? "",
+      r.code ?? "",
+      escapeCsvCell(r.detail ?? ""),
+      r.needs_reconciliation ? "true" : "false",
+    ];
+    lines.push(values.join(","));
+  }
+
+  return lines.join("\n") + "\n";
+}
+
+function escapeCsvCell(text: string): string {
+  if (!text) return "";
+  // Escape potential formula injection
+  let sanitized = text;
+  if (/^[=+\-@]/.test(sanitized)) {
+    sanitized = `'${sanitized}`;
+  }
+  if (sanitized.includes(",") || sanitized.includes('"') || sanitized.includes("\n") || sanitized.includes("\r")) {
+    return `"${sanitized.replace(/"/g, '""')}"`;
+  }
+  return sanitized;
+}
