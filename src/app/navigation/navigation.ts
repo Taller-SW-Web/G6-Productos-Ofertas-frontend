@@ -12,7 +12,7 @@ export interface NavigationItem {
   icon: TablerIcon;
 }
 export const productNavigation: NavigationItem[] = [
-  { to: "/precios", label: "Precio vigente · piloto", icon: IconCalculator },
+  { to: "/precios", label: "Consultar precios", icon: IconCalculator },
 ];
 export const demoNavigation: NavigationItem[] = [
   {

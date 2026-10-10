@@ -197,8 +197,39 @@ test("unknown routes give a working return link", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Página no encontrada" }),
   ).toBeVisible();
-  await page.getByRole("link", { name: "Volver a la galería" }).click();
+  await page.getByRole("link", { name: "Volver a precios" }).click();
   await expect(
-    page.getByRole("heading", { name: "Listados y filtros" }),
+    page.getByRole("heading", { name: "Gestión de precios" }),
   ).toBeVisible();
+});
+
+test("commercial shell and navigation do not display foundation copy or demo groups", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/precios$/);
+  await expect(page).toHaveTitle("Productos y Ofertas | Inka Athletics");
+
+  // Header branding
+  const header = page.locator("header");
+  await expect(header.getByText("Productos y Ofertas")).toBeVisible();
+  await expect(header.getByText("Foundation", { exact: false })).not.toBeVisible();
+  await expect(header.getByText("Piloto", { exact: false })).not.toBeVisible();
+
+  // Navigation sidebar
+  const nav = page.getByRole("navigation", { name: "Navegación de la aplicación" });
+  await expect(page.getByText("Navegación", { exact: true })).toBeVisible();
+  await expect(page.getByText("Frontend UI Foundation", { exact: false })).not.toBeVisible();
+  await expect(page.getByText("Foundation v1", { exact: false })).not.toBeVisible();
+  await expect(nav.getByText("DEMOSTRACIONES")).not.toBeVisible();
+  await expect(nav.getByText("Precio vigente · piloto")).not.toBeVisible();
+  await expect(nav.getByText("Consultar precios")).toBeVisible();
+
+  // Commercial page notices and buttons
+  await expect(page.getByText("Datos de demostración", { exact: true })).toBeVisible();
+  await expect(page.getByText("Piloto con datos ficticios")).not.toBeVisible();
+  await expect(page.getByRole("button", { name: "Componentes de carga masiva" })).not.toBeVisible();
+  await expect(page.getByRole("button", { name: "Revisar edición de precio" })).not.toBeVisible();
+  await expect(page.getByRole("button", { name: "Revisar programación futura" })).not.toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Escenario de revisión del piloto" })).not.toBeVisible();
 });
