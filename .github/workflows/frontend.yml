@@ -1,0 +1,35 @@
+name: Frontend Foundation
+on:
+  pull_request:
+  push:
+    branches: [vera, master]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Revision under validation
+        run: git rev-parse HEAD > validation-commit.txt
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm run lint
+      - run: npx playwright install --with-deps chromium
+      - run: npm test
+      - name: Evidence and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: foundation-evidence
+          path: |
+            validation-commit.txt
+            docs/evidencias/
+            test-results/
+          retention-days: 14
