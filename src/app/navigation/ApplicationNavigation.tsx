@@ -1,6 +1,7 @@
 import { Box, NavLink, Stack, Text } from "@mantine/core";
 import { Link, useLocation } from "react-router-dom";
-import { productNavigation, demoNavigation } from "./navigation";
+import { productNavigation } from "./navigation";
+
 export function ApplicationNavigation() {
   const { pathname } = useLocation();
   return (
@@ -8,7 +9,6 @@ export function ApplicationNavigation() {
       <Stack gap="lg">
         {[
           { label: "Precios", items: productNavigation },
-          { label: "Demostraciones", items: demoNavigation },
         ].map((group) => (
           <Box key={group.label}>
             <Text size="xs" fw={600} c="dimmed" mb="sm">

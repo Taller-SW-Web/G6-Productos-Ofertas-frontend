@@ -60,7 +60,7 @@ const columns: TableColumn<PriceView>[] = [
 export function PriceBreakdown({ rows }: { rows: PriceView[] }) {
   return (
     <EntityTable
-      caption="Lecturas de ejemplo por objetivo y herencia de variantes"
+      caption="Precios por producto y variante"
       columns={columns}
       rows={rows}
       rowKey={(row) => row.id}
