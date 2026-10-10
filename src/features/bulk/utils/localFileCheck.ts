@@ -56,9 +56,9 @@ export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> 
   // Parse CSV client-side safely
   try {
     const text = await file.text();
-    // Strip UTF-8 BOM if present
-    const cleanText = text.replace(/^\uFEFF/, "").trim();
-    if (!cleanText) {
+    // Strip UTF-8 BOM if present without trimming whole payload
+    const cleanText = text.replace(/^\uFEFF/, "");
+    if (cleanText.trim().length === 0) {
       return {
         valid: false,
         format: "CSV",
@@ -148,12 +148,21 @@ export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> 
     // Check row field counts
     const columnCount = headers.length;
     const malformedRowIndex = dataRows.findIndex((r) => r.length !== columnCount);
-    const warnings: string[] = [];
 
     if (malformedRowIndex !== -1) {
-      warnings.push(
-        `La fila ${malformedRowIndex + 2} contiene ${dataRows[malformedRowIndex]?.length} campos, mientras que el encabezado define ${columnCount} columnas.`,
-      );
+      return {
+        valid: false,
+        format: "CSV",
+        fileName,
+        fileSize,
+        detectedRows: dataRowsCount,
+        detectedColumns: headers,
+        warnings: [],
+        errors: [
+          `La fila ${malformedRowIndex + 2} contiene ${dataRows[malformedRowIndex]?.length} campos, mientras que el encabezado define ${columnCount} columnas.`,
+        ],
+        unverifiedAspects: [],
+      };
     }
 
     return {
@@ -163,7 +172,7 @@ export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> 
       fileSize,
       detectedRows: dataRowsCount,
       detectedColumns: headers,
-      warnings,
+      warnings: [],
       errors: [],
       unverifiedAspects: [
         "Unicidad de SKU y existencia previa en catálogo no verificable localmente.",
@@ -186,39 +195,63 @@ export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> 
 }
 
 /**
- * Robust RFC 4180 CSV parser checking unclosed quotes and structure.
+ * Robust RFC 4180 CSV parser checking unclosed quotes, escaped quotes and structure.
  */
 function parseCsvSafely(text: string): { rows: string[][]; error?: string } {
   const rows: string[][] = [];
   let currentRow: string[] = [];
   let currentField = "";
   let insideQuotes = false;
+  let fieldHasQuotes = false;
 
   for (let i = 0; i < text.length; i++) {
     const char = text[i];
     const nextChar = text[i + 1];
 
     if (char === '"') {
-      if (insideQuotes && nextChar === '"') {
-        currentField += '"';
-        i++; // skip escaped quote
+      if (insideQuotes) {
+        if (nextChar === '"') {
+          currentField += '"';
+          i++; // skip escaped quote
+        } else {
+          insideQuotes = false;
+        }
       } else {
-        insideQuotes = !insideQuotes;
+        if (currentField.length === 0) {
+          insideQuotes = true;
+          fieldHasQuotes = true;
+        } else {
+          return {
+            rows: [],
+            error: "El archivo CSV contiene comillas en posiciones inválidas dentro de un campo no delimitado.",
+          };
+        }
       }
     } else if (char === "," && !insideQuotes) {
       currentRow.push(currentField);
       currentField = "";
+      fieldHasQuotes = false;
     } else if ((char === "\r" || char === "\n") && !insideQuotes) {
       if (char === "\r" && nextChar === "\n") {
         i++;
       }
       currentRow.push(currentField);
       currentField = "";
+      fieldHasQuotes = false;
       if (currentRow.some((f) => f.trim().length > 0)) {
         rows.push(currentRow);
       }
       currentRow = [];
     } else {
+      if (!insideQuotes && fieldHasQuotes) {
+        // Character found after closing quote before delimiter
+        if (char !== " " && char !== "\t") {
+          return {
+            rows: [],
+            error: "El archivo CSV contiene caracteres después de cerrar comillas sin un delimitador de columna.",
+          };
+        }
+      }
       currentField += char;
     }
   }

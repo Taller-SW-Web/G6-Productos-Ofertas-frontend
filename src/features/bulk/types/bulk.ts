@@ -38,9 +38,9 @@ export type BulkErrorCode =
   | "CANTIDAD_INVALIDA"
   | "STOCK_INSUFICIENTE"
   | "PRECIO_INVALIDO"
-  | "MONEDA_INVALIDA"
-  | "RANGO_PRECIO_INVALIDO"
-  | string;
+  | "CATEGORIA_NO_ENCONTRADA"
+  | "CATEGORIA_DUPLICADA"
+  | "PROFUNDIDAD_CATEGORIA_EXCEDIDA";
 
 export interface BulkDomainStep {
   domain: BulkDomain;
@@ -50,7 +50,7 @@ export interface BulkDomainStep {
 }
 
 export interface BulkImportRow {
-  row_id: number;
+  row_id: string | number;
   sku?: string;
   nombre?: string;
   status: BulkRowStatus;

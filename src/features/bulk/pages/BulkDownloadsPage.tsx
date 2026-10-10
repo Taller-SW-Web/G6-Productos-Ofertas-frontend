@@ -61,7 +61,7 @@ export function BulkDownloadsPage() {
         >
           <Stack gap="md">
             <FeedbackAlert semantic="info" title="Disponibilidad de plantillas oficiales">
-              Las plantillas oficiales definitivas serán publicadas por el servicio de catálogo (bulk-svc) durante la integración del backend. Para pruebas y demostración se ofrece el archivo CSV de muestra.
+              La plantilla oficial estará disponible cuando se habilite el servicio de carga masiva. Para pruebas y demostración se ofrece el archivo CSV de muestra.
             </FeedbackAlert>
 
             <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">

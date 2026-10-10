@@ -4,7 +4,7 @@ import {
   generateFailedRowsCsv,
   mockBatches,
   mockExports,
-  samplePartialRows,
+  sampleCompletedRows,
 } from "../mocks/bulkFixtures";
 import type {
   BulkExportFormat,
@@ -16,9 +16,19 @@ import type {
   DownloadResource,
 } from "../services/bulkRepository";
 
+export const DEMO_CONFIG = {
+  PROCESSING_DELAY_MS: 1200,
+  COMPLETION_DELAY_MS: 2400,
+  AUTO_ADVANCE: true,
+};
+
 // In-memory state store for dynamic test interactions and active sessions
 const dynamicBatches: Map<string, BulkImportBatch> = new Map();
 const dynamicExports: Map<string, BulkExportJob> = new Map();
+const activeTimers: Set<ReturnType<typeof setTimeout>> = new Set();
+
+let batchSequence = 1000;
+let exportSequence = 1000;
 
 function deepCloneBatch(batch: BulkImportBatch): BulkImportBatch {
   return JSON.parse(JSON.stringify(batch)) as BulkImportBatch;
@@ -28,10 +38,138 @@ function deepCloneExport(job: BulkExportJob): BulkExportJob {
   return JSON.parse(JSON.stringify(job)) as BulkExportJob;
 }
 
+function scheduleImportSimulation(batchId: string) {
+  if (!DEMO_CONFIG.AUTO_ADVANCE) return;
+
+  const t1 = setTimeout(() => {
+    activeTimers.delete(t1);
+    const batch = dynamicBatches.get(batchId);
+    if (batch && batch.status === "QUEUED") {
+      batch.status = "PROCESSING";
+      batch.completed_rows = Math.floor(batch.total_rows * 0.7);
+      batch.failed_rows = 0;
+      batch.updated_at = new Date().toISOString();
+    }
+  }, DEMO_CONFIG.PROCESSING_DELAY_MS);
+  activeTimers.add(t1);
+
+  const t2 = setTimeout(() => {
+    activeTimers.delete(t2);
+    const batch = dynamicBatches.get(batchId);
+    if (batch && (batch.status === "PROCESSING" || batch.status === "QUEUED")) {
+      batch.status = "COMPLETED";
+      batch.completed_rows = batch.total_rows;
+      batch.failed_rows = 0;
+      batch.needs_reconciliation = false;
+      batch.updated_at = new Date().toISOString();
+      if (!batch.rows || batch.rows.length === 0) {
+        batch.rows = sampleCompletedRows.slice(
+          0,
+          Math.min(batch.total_rows, sampleCompletedRows.length),
+        );
+      }
+    }
+  }, DEMO_CONFIG.COMPLETION_DELAY_MS);
+  activeTimers.add(t2);
+}
+
+function applyReconciliationCompletion(batch: BulkImportBatch) {
+  batch.status = "COMPLETED";
+  batch.updated_at = new Date().toISOString();
+
+  if (batch.rows && batch.rows.length > 0) {
+    let newlyCompleted = 0;
+    for (const row of batch.rows) {
+      if (row.status === "FAILED" && row.needs_reconciliation) {
+        row.status = "COMPLETED";
+        row.needs_reconciliation = false;
+        row.failed_domain = null;
+        row.code = null;
+        row.detail = "Reconciliación completada exitosamente";
+        row.applied_domains = ["CATALOGO", "PRICING", "INVENTARIO"];
+        row.steps = row.steps.map((s) => ({
+          ...s,
+          status: "COMPLETED",
+          code: null,
+          detail: "Completado tras reanudación",
+        }));
+        newlyCompleted++;
+      }
+    }
+    batch.completed_rows = Math.min(
+      batch.total_rows,
+      batch.completed_rows + newlyCompleted,
+    );
+    batch.failed_rows = Math.max(0, batch.failed_rows - newlyCompleted);
+    batch.needs_reconciliation = batch.rows.some(
+      (r) => r.status === "FAILED" && r.needs_reconciliation,
+    );
+  } else {
+    batch.completed_rows = batch.total_rows;
+    batch.failed_rows = 0;
+    batch.needs_reconciliation = false;
+  }
+}
+
+function scheduleResumeSimulation(batchId: string) {
+  if (!DEMO_CONFIG.AUTO_ADVANCE) return;
+
+  const t1 = setTimeout(() => {
+    activeTimers.delete(t1);
+    const batch = dynamicBatches.get(batchId);
+    if (batch && batch.status === "QUEUED") {
+      batch.status = "PROCESSING";
+      batch.updated_at = new Date().toISOString();
+    }
+  }, DEMO_CONFIG.PROCESSING_DELAY_MS);
+  activeTimers.add(t1);
+
+  const t2 = setTimeout(() => {
+    activeTimers.delete(t2);
+    const batch = dynamicBatches.get(batchId);
+    if (batch && (batch.status === "PROCESSING" || batch.status === "QUEUED")) {
+      applyReconciliationCompletion(batch);
+    }
+  }, DEMO_CONFIG.COMPLETION_DELAY_MS);
+  activeTimers.add(t2);
+}
+
+function scheduleExportSimulation(exportId: string) {
+  if (!DEMO_CONFIG.AUTO_ADVANCE) return;
+
+  const t1 = setTimeout(() => {
+    activeTimers.delete(t1);
+    const job = dynamicExports.get(exportId);
+    if (job && job.status === "QUEUED") {
+      job.status = "PROCESSING";
+      job.updated_at = new Date().toISOString();
+    }
+  }, DEMO_CONFIG.PROCESSING_DELAY_MS);
+  activeTimers.add(t1);
+
+  const t2 = setTimeout(() => {
+    activeTimers.delete(t2);
+    const job = dynamicExports.get(exportId);
+    if (job && (job.status === "PROCESSING" || job.status === "QUEUED")) {
+      job.status = "COMPLETED";
+      job.updated_at = new Date().toISOString();
+      if (job.format === "CSV") {
+        job.file_name = `catalogo_completo_${exportId}.csv`;
+        job.file_size = MOCK_EXPORT_CSV_DATA.length;
+        job.download_url = `mock://download/${exportId}.csv`;
+      } else {
+        job.file_name = `catalogo_completo_${exportId}.xlsx`;
+      }
+    }
+  }, DEMO_CONFIG.COMPLETION_DELAY_MS);
+  activeTimers.add(t2);
+}
+
 export const mockBulkRepository: BulkRepository & {
   advanceMockImport?: (batchId: string) => Promise<BulkImportBatch | null>;
   advanceMockExport?: (exportId: string) => Promise<BulkExportJob | null>;
   resetMockState?: () => void;
+  clearMockTimers?: () => void;
 } = {
   async getTemplate(
     format: BulkExportFormat,
@@ -88,12 +226,28 @@ export const mockBulkRepository: BulkRepository & {
       );
     }
 
-    // Generate unique batch ID
-    const batchId = `lote-${Date.now().toString().slice(-6)}`;
+    // Determine observed row count for CSV without inventing fake numbers
+    let estimatedRows = 120;
+    if (lowerName.endsWith(".csv")) {
+      try {
+        const text = await file.text();
+        const lines = text
+          .split(/\r\n|\r|\n/)
+          .filter((l) => l.trim().length > 0);
+        if (lines.length > 1) {
+          estimatedRows = lines.length - 1;
+        }
+      } catch {
+        // Retain standard default
+      }
+    }
+
+    batchSequence++;
+    const batchId = `lote-imp-${batchSequence}-${Math.random().toString(36).slice(2, 6)}`;
     const newBatch: BulkImportBatch = {
       batch_id: batchId,
       status: "QUEUED",
-      total_rows: 120,
+      total_rows: estimatedRows,
       completed_rows: 0,
       failed_rows: 0,
       needs_reconciliation: false,
@@ -105,6 +259,7 @@ export const mockBulkRepository: BulkRepository & {
     };
 
     dynamicBatches.set(batchId, newBatch);
+    scheduleImportSimulation(batchId);
 
     return deepCloneBatch(newBatch);
   },
@@ -146,12 +301,21 @@ export const mockBulkRepository: BulkRepository & {
   ): Promise<DownloadResource | null> {
     signal?.throwIfAborted();
     const batch = await this.getImport(batchId, signal);
-    if (!batch || batch.failed_rows === 0) {
+    if (
+      !batch ||
+      batch.failed_rows === 0 ||
+      !batch.rows ||
+      batch.rows.length === 0
+    ) {
       return null;
     }
 
-    const rows = batch.rows ?? samplePartialRows;
-    const csvContent = generateFailedRowsCsv(rows);
+    const failedRows = batch.rows.filter((r) => r.status === "FAILED");
+    if (failedRows.length === 0) {
+      return null;
+    }
+
+    const csvContent = generateFailedRowsCsv(failedRows);
     const blob = new Blob([csvContent], {
       type: "text/csv;charset=utf-8;",
     });
@@ -197,6 +361,7 @@ export const mockBulkRepository: BulkRepository & {
     };
 
     dynamicBatches.set(batchId, resumedBatch);
+    scheduleResumeSimulation(batchId);
 
     return deepCloneBatch(resumedBatch);
   },
@@ -207,7 +372,8 @@ export const mockBulkRepository: BulkRepository & {
   ): Promise<BulkExportJob> {
     signal?.throwIfAborted();
 
-    const exportId = `exp-${Date.now().toString().slice(-6)}`;
+    exportSequence++;
+    const exportId = `exp-${exportSequence}-${Math.random().toString(36).slice(2, 6)}`;
     const newJob: BulkExportJob = {
       export_id: exportId,
       status: "QUEUED",
@@ -217,6 +383,7 @@ export const mockBulkRepository: BulkRepository & {
     };
 
     dynamicExports.set(exportId, newJob);
+    scheduleExportSimulation(exportId);
 
     return deepCloneExport(newJob);
   },
@@ -295,16 +462,14 @@ export const mockBulkRepository: BulkRepository & {
 
     if (batch.status === "QUEUED") {
       batch.status = "PROCESSING";
-      batch.completed_rows = Math.min(82, batch.total_rows);
-      batch.failed_rows = 4;
+      batch.completed_rows = Math.min(
+        Math.floor(batch.total_rows * 0.7),
+        batch.total_rows,
+      );
+      batch.failed_rows = 0;
       batch.updated_at = new Date().toISOString();
     } else if (batch.status === "PROCESSING") {
-      batch.status = "COMPLETED";
-      batch.completed_rows = Math.min(114, batch.total_rows);
-      batch.failed_rows = 6;
-      batch.needs_reconciliation = true;
-      batch.rows = samplePartialRows;
-      batch.updated_at = new Date().toISOString();
+      applyReconciliationCompletion(batch);
     }
 
     return deepCloneBatch(batch);
@@ -330,17 +495,34 @@ export const mockBulkRepository: BulkRepository & {
       job.updated_at = new Date().toISOString();
     } else if (job.status === "PROCESSING") {
       job.status = "COMPLETED";
-      job.file_name = `catalogo_${job.format.toLowerCase()}_${exportId}.${job.format.toLowerCase()}`;
-      job.file_size = 128500;
-      job.download_url = `mock://download/${exportId}`;
+      if (job.format === "CSV") {
+        job.file_name = `catalogo_csv_${exportId}.csv`;
+        job.file_size = MOCK_EXPORT_CSV_DATA.length;
+        job.download_url = `mock://download/${exportId}`;
+      } else {
+        job.file_name = `catalogo_xlsx_${exportId}.xlsx`;
+      }
       job.updated_at = new Date().toISOString();
     }
 
     return deepCloneExport(job);
   },
 
+  clearMockTimers() {
+    for (const t of activeTimers) {
+      clearTimeout(t);
+    }
+    activeTimers.clear();
+  },
+
   resetMockState() {
+    for (const t of activeTimers) {
+      clearTimeout(t);
+    }
+    activeTimers.clear();
     dynamicBatches.clear();
     dynamicExports.clear();
+    batchSequence = 1000;
+    exportSequence = 1000;
   },
 };

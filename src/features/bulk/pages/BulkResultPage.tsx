@@ -15,12 +15,14 @@ import {
 } from "../../../components/shared";
 import { BatchRowsTable } from "../components/BatchRowsTable";
 import { BatchStatusPanel } from "../components/BatchStatusPanel";
+import { useBulkUploadContext } from "../context/BulkUploadContext";
 import { useBulkBatch } from "../hooks/useBulkFlow";
 
 export function BulkResultPage() {
   const { batchId } = useParams<{ batchId: string }>();
   const navigate = useNavigate();
   const [confirmResumeOpen, setConfirmResumeOpen] = useState(false);
+  const { clearSelection } = useBulkUploadContext();
 
   const {
     batch,
@@ -64,6 +66,7 @@ export function BulkResultPage() {
               to="/carga-masiva"
               variant="outline"
               leftSection={<IconUpload size={18} stroke={2} aria-hidden="true" />}
+              onClick={clearSelection}
             >
               Nueva carga masiva
             </Button>

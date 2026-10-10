@@ -7,11 +7,13 @@ import {
   PageHeader,
 } from "../../../components/shared";
 import { BatchStatusPanel } from "../components/BatchStatusPanel";
+import { useBulkUploadContext } from "../context/BulkUploadContext";
 import { useBulkBatch } from "../hooks/useBulkFlow";
 
 export function BulkProgressPage() {
   const { batchId } = useParams<{ batchId: string }>();
   const { batch, loading, error, refreshBatch } = useBulkBatch(batchId);
+  const { clearSelection } = useBulkUploadContext();
 
   const isTerminal =
     batch?.status === "COMPLETED" || batch?.status === "FAILED_GENERAL";
@@ -32,6 +34,7 @@ export function BulkProgressPage() {
               to="/carga-masiva"
               variant="outline"
               leftSection={<IconUpload size={18} stroke={2} aria-hidden="true" />}
+              onClick={clearSelection}
             >
               Nueva carga masiva
             </Button>
