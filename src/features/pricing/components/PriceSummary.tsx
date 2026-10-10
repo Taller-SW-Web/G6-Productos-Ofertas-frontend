@@ -39,7 +39,7 @@ export function PriceSummary({ price }: { price: PriceView }) {
         <MetricCard
           label="Moneda"
           value={price.currency}
-          description="Moneda del fixture consultado"
+          description="Moneda del precio mostrado"
         />
       </SimpleGrid>
       <Text size="sm">

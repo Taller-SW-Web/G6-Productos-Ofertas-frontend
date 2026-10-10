@@ -1,6 +1,6 @@
 import { Box, NavLink, Stack, Text } from "@mantine/core";
 import { Link, useLocation } from "react-router-dom";
-import { bulkNavigation, demoNavigation, productNavigation } from "./navigation";
+import { bulkNavigation, productNavigation } from "./navigation";
 
 function isItemActive(itemPath: string, currentPath: string): boolean {
   if (itemPath === currentPath) return true;
@@ -23,7 +23,6 @@ export function ApplicationNavigation() {
         {[
           { label: "Catálogo y Carga", items: bulkNavigation },
           { label: "Precios", items: productNavigation },
-          { label: "Demostraciones", items: demoNavigation },
         ].map((group) => (
           <Box key={group.label}>
             <Text size="xs" fw={600} c="dimmed" mb="sm">

@@ -8,9 +8,9 @@ export function AppRoutes() {
     {
       element: <ApplicationShell />,
       children: [
-        { path: "/", element: <Navigate to="/foundation/listados" replace /> },
+        { path: "/", element: <Navigate to="/precios" replace /> },
         ...productRoutes,
-        ...demoRoutes,
+        ...(import.meta.env.DEV ? demoRoutes : []),
         { path: "*", element: <NotFoundPage /> },
       ],
     },

@@ -35,14 +35,22 @@ test("S01 applies selection explicitly, distinguishes inheritance/override and r
   await page.getByRole("option", { name: "Retail", exact: true }).click();
   await page.getByRole("button", { name: "Consultar", exact: true }).click();
   await expect(
-    page.getByText("Solicitaste Retail.", { exact: false }),
+    page.getByText(
+      "Para el canal Retail seleccionado, el precio disponible corresponde al alcance global.",
+      { exact: false },
+    ),
   ).toBeVisible();
   await expect(inherited).toContainText("Global efectivo");
-  await page.getByRole("button", { name: "Revisar edición de precio" }).click();
   await expect(
-    page.getByRole("heading", { name: "Componentes para Pricing" }),
-  ).toBeVisible();
-  await page.getByRole("link", { name: "Volver a precio vigente" }).click();
+    page.getByRole("button", { name: "Revisar edición de precio" }),
+  ).not.toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Revisar programación futura" }),
+  ).not.toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Componentes de carga masiva" }),
+  ).not.toBeVisible();
+  await page.goto("/precios?target=variant40&channel=retail");
   await expect(
     page.getByRole("combobox", { name: "Producto o SKU" }),
   ).toHaveValue("Talla 40 · Negro — ZAP-TRL-40-BLK");
@@ -71,6 +79,11 @@ test("S01 distinguishes absence from error and marks previous readings without e
 }) => {
   await page.goto("/precios");
   await expect(
+    page.getByRole("combobox", { name: "Escenario de revisión del piloto" }),
+  ).not.toBeVisible();
+
+  await page.goto("/precios?modoRevision=1");
+  await expect(
     page.getByRole("region", {
       name: "Zapatilla Trail Inka Explorer",
       exact: true,
@@ -88,15 +101,9 @@ test("S01 distinguishes absence from error and marks previous readings without e
   await expect(
     page.getByText("Última consulta disponible", { exact: true }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Revisar edición de precio" }),
-  ).toBeDisabled();
   await page
     .getByRole("button", { name: "Volver a consultar", exact: true })
     .click();
-  await expect(
-    page.getByRole("button", { name: "Revisar edición de precio" }),
-  ).toBeEnabled();
   await page
     .getByRole("combobox", { name: "Escenario de revisión del piloto" })
     .click();
