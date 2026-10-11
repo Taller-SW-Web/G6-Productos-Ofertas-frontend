@@ -1,5 +1,6 @@
 import {
   IconCalculator,
+  IconCategory,
   IconComponents,
   IconForms,
   IconLayoutList,
@@ -13,6 +14,9 @@ export interface NavigationItem {
 }
 export const productNavigation: NavigationItem[] = [
   { to: "/precios", label: "Consultar precios", icon: IconCalculator },
+];
+export const taxonomyNavigation: NavigationItem[] = [
+  { to: "/MK008/S01", label: "Categorías", icon: IconCategory },
 ];
 export const demoNavigation: NavigationItem[] = [
   {

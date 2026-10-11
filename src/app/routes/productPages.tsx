@@ -4,3 +4,23 @@ export const CurrentPricePage = lazy(() =>
     default: module.CurrentPricePage,
   })),
 );
+export const CategoryTreePage = lazy(() =>
+  import("../../features/taxonomy/pages/CategoryTreePage").then((module) => ({
+    default: module.CategoryTreePage,
+  })),
+);
+export const CreateCategoryPage = lazy(() =>
+  import("../../features/taxonomy/pages/CreateCategoryPage").then((module) => ({
+    default: module.CreateCategoryPage,
+  })),
+);
+export const EditCategoryPage = lazy(() =>
+  import("../../features/taxonomy/pages/EditCategoryPage").then((module) => ({
+    default: module.EditCategoryPage,
+  })),
+);
+export const CategoryDetailPage = lazy(() =>
+  import("../../features/taxonomy/pages/CategoryDetailPage").then((module) => ({
+    default: module.CategoryDetailPage,
+  })),
+);
