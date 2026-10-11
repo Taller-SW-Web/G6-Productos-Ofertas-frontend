@@ -1,6 +1,6 @@
 # Productos y Ofertas — Frontend
 
-Foundation React/TypeScript/Vite con Mantine y Tabler. Incluye el piloto **MK-013-S01 (precio vigente)** con adapters mock tipados. Estado: **MOCK_INTEGRATED / MOCK_ONLY**. Las muestras de S02–S05 permiten revisar componentes, sin edición comercial, programación, importación real o integración HTTP.
+React/TypeScript/Vite con Mantine y Tabler. **MK-013 / issue #15** extiende el piloto S01 con edición, programación, seguimiento de lotes e histórico navegables mediante adapters mock tipados. Estado: **MOCK_INTEGRATED / MOCK_ONLY**. S04 permite selección, política y revisión de respuestas ficticias; su parser y admisión permanecen **BLOCKED_CONTRACT: Q-013-01/02**. No hay integración HTTP ni escritura comercial real. Las muestras `/foundation/*` se conservan como galería independiente en desarrollo.
 
 ## Ejecutar y validar
 
@@ -28,12 +28,21 @@ La aplicación funciona sin Backend, Docs, credenciales ni variables de entorno.
 | Ruta | Alcance |
 |---|---|
 | `/precios` | Piloto S01: selección producto/SKU, consulta local, herencia/override, fallback global y estados |
+| `/precios/editar` | S02: lectura del objetivo/versionado, oferta, validación, confirmación y conflicto mock |
+| `/precios/programaciones` | S03: listado paginado y creación mock futura con zona horaria explícita |
+| `/precios/importar` | S04: selección/política y respuestas ficticias de prevalidación; confirmación bloqueada |
+| `/precios/importaciones/batch-013-01` | S05: lote ficticio existente, estados, filas y reporte mock independiente del archivo elegido |
+| `/precios/historico` | S06: consulta por SKU/canal e instante, independiente del precio vigente |
 | `/foundation/listados` | Tabla, filtros, detalle, paginación y muestra opcional de tabla extensa |
 | `/foundation/formularios` | Formulario y confirmación de demostración |
 | `/foundation/estados` | Feedback y variantes semánticas |
 | `/foundation/pricing` | Muestras de componentes S02–S05; no flujos comerciales completos |
 
-`/` redirige a la galería; la ruta desconocida ofrece retorno. Los parámetros `target/channel` de `/precios` representan filtros **aplicados** de navegación, no un contrato HTTP. Las entradas editables no se aplican hasta pulsar Consultar. Atrás/Adelante restaura el contexto aplicado y reinicia cualquier borrador pendiente de ese contexto.
+`/` redirige a `/precios`; la ruta desconocida ofrece retorno. Los parámetros `target/channel` representan filtros **aplicados** de navegación, no un contrato HTTP. S06 conserva `at` como fecha/hora local de America/Bogota (UTC−5) y lo convierte a un instante explícito dentro del servicio mock. S02 usa `scope=product` para editar la base desde una variante; por defecto una variante propone su propio override. Las entradas de consulta se aplican al pulsar Consultar. Atrás/Adelante restaura el contexto aplicado. Una propuesta sin guardar en S02/S03, o un archivo seleccionado en S04, exige seguir trabajando o descartar explícitamente al navegar, incluso desde sidebar o historial.
+
+Los importes del formulario se conservan como cadenas decimales, sin calcular descuentos o precios finales. Los cambios confirmados en S02 se reflejan en S01 durante la misma sesión; S03 no altera anticipadamente el precio actual. Recargar reinicia los fixtures. El reloj de validación de programación es fijo: `2026-10-02T12:00:00Z`, según component-spec. La lista usa páginas de 2 filas del mock; no representa un límite contractual.
+
+Para revisar errores localmente, añadir `modoRevision=1` a una ruta de Pricing en desarrollo. Los selectores de escenarios están ocultos en producción. Ejemplo: `/precios/editar?target=variant40&channel=retail&modoRevision=1`. S04 nunca analiza los bytes seleccionados; «Simular respuesta de prevalidación» consulta un fixture independiente. El reporte de S05 también es ficticio y se descarga con ese nombre. Ver [trazabilidad, evidencia y límites de MK-013](docs/VALIDACION_MK013.md).
 
 ## Arquitectura para añadir features
 
@@ -71,4 +80,4 @@ Código corregido FND-01–06 y validado localmente: **`95722ff3d1cab2d7eb8356a6
 
 El workflow `.github/workflows/frontend.yml` ejecuta instalación, typecheck, build, lint y la suite Playwright completa en Ubuntu/Node 22. Playwright valida Chromium a 1440×900 y genera evidencia en `docs/evidencias/`. Un workflow definido no acredita que ya haya corrido ni recibido aprobación.
 
-Pendientes: revisión técnica independiente y visto bueno UX humano de las correcciones. Q-013-01/02 mantienen bloqueados el contrato de archivo y la admisión con errores de Pricing; no bloquean S01. Autenticación, permisos, APIs, escritura comercial S02–S06, mobile/tablet y evaluación WCAG exhaustiva están fuera de esta Foundation.
+Pendientes: revisión técnica/funcional independiente y visto bueno UX humano. Q-013-01/02 mantienen bloqueados el contenido de archivo y su admisión; el issue #15 no debe cerrarse con esos pendientes. Autenticación, permisos reales, APIs, persistencia comercial, mobile/tablet y evaluación WCAG exhaustiva quedan pendientes. La [descripción preparada para revisión de MK-013](docs/PR_MK013.md) usa `Refs #15`; no acredita una PR publicada.

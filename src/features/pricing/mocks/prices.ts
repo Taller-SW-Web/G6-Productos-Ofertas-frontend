@@ -6,6 +6,7 @@ export const priceTargets: PriceTarget[] = [
     label: "Zapatilla Trail Inka Explorer · Producto base",
     productId: "fixture-product-013",
     kind: "product",
+    referenceSku: "ZAP-TRL-EXP",
   },
   {
     id: "variant40",

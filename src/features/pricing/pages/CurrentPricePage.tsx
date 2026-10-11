@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Button, Select, Skeleton, Stack, Text } from "@mantine/core";
 import {
   EmptyState,
@@ -12,6 +12,7 @@ import { PriceFilters } from "../components/PriceFilters";
 import { useCurrentPrice } from "../hooks/useCurrentPrice";
 import { priceTargets } from "../mocks/prices";
 import type { PriceQuery, PriceScenario } from "../services/pricingRepository";
+import { PricingLinks } from "../components/PricingPageFrame";
 
 const scenarios: { value: PriceScenario; label: string }[] = [
   { value: "default", label: "Precio disponible" },
@@ -63,6 +64,7 @@ function CurrentPriceContent({
   onApply: (query: PriceQuery) => void;
 }) {
   const [draft, setDraft] = useState(query);
+  const [params] = useSearchParams();
   const [scenario, setScenario] = useState<PriceScenario>("default");
   const [revision, setRevision] = useState(0);
   const { state, previous } = useCurrentPrice(query, scenario, revision);
@@ -80,6 +82,15 @@ function CurrentPriceContent({
         title="Gestión de precios"
         description="Consulta los precios vigentes de productos y variantes (SKU)."
         breadcrumbs={[{ label: "Precios" }, { label: "Precio vigente" }]}
+        actions={
+          <Button
+            component={Link}
+            to={`/precios/importar?${params.toString()}`}
+            variant="outline"
+          >
+            Importar precios
+          </Button>
+        }
       />
       <Stack gap="lg">
         <FeedbackAlert semantic="info" title="Datos de demostración">
@@ -143,13 +154,18 @@ function CurrentPriceContent({
                 lectura vigente están bloqueadas.
               </FeedbackAlert>
             )}
-            {query.channel === "retail" && (
-              <FeedbackAlert semantic="info" title="Fallback al precio global">
-                Para el canal Retail seleccionado, el precio disponible
-                corresponde al alcance global.
-              </FeedbackAlert>
-            )}
+            {query.channel === "retail" &&
+              snapshot.price.channel === "global" && (
+                <FeedbackAlert
+                  semantic="info"
+                  title="Fallback al precio global"
+                >
+                  Para el canal Retail seleccionado, el precio disponible
+                  corresponde al alcance global.
+                </FeedbackAlert>
+              )}
             <PriceSummary price={snapshot.price} />
+            {fresh && <PricingLinks suffix={`?${params.toString()}`} />}
             <PriceBreakdown rows={snapshot.breakdown} />
           </>
         )}

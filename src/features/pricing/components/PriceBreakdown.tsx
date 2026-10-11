@@ -26,14 +26,14 @@ const columns: TableColumn<PriceView>[] = [
   },
   {
     key: "regular",
-    header: "Regular (PEN)",
+    header: "Regular / moneda",
     width: 120,
     align: "right",
     render: (row) => row.regular,
   },
   {
     key: "offer",
-    header: "Oferta (PEN)",
+    header: "Oferta / moneda",
     width: 120,
     align: "right",
     render: (row) => row.offer ?? "Sin oferta",

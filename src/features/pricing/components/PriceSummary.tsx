@@ -6,7 +6,13 @@ import {
 } from "../../../components/shared";
 import type { PriceView } from "../services/pricingRepository";
 import { priceOriginLabel } from "../services/pricePresentation";
-export function PriceSummary({ price }: { price: PriceView }) {
+export function PriceSummary({
+  price,
+  historical = false,
+}: {
+  price: PriceView;
+  historical?: boolean;
+}) {
   return (
     <SectionCard
       title={price.name}
@@ -23,12 +29,14 @@ export function PriceSummary({ price }: { price: PriceView }) {
       {price.sku && <Text size="sm">SKU: {price.sku}</Text>}
       <SimpleGrid cols={3} spacing="lg">
         <MetricCard
-          label="Precio regular vigente"
+          label={
+            historical ? "Precio regular en fecha" : "Precio regular vigente"
+          }
           value={price.regular}
           description={price.currency}
         />
         <MetricCard
-          label="Precio de oferta actual"
+          label={historical ? "Oferta en fecha" : "Precio de oferta actual"}
           value={price.offer ?? "Sin oferta"}
           description={
             price.offer
