@@ -19,6 +19,11 @@ import {
   ProductEditPage,
   ProductDetailPage,
   ProductPreparationPage,
+  EditPricePage,
+  PriceSchedulesPage,
+  ImportPricesPage,
+  PriceImportResultPage,
+  HistoricalPricePage,
 } from "./productPages";
 export const productRoutes: RouteObject[] = [
   { path: "/productos", element: <ProductsPage /> },
@@ -35,6 +40,14 @@ export const productRoutes: RouteObject[] = [
     element: <ProductDetailPage initialDialog="desactivar" />,
   },
   { path: "/precios", element: <CurrentPricePage /> },
+  { path: "/precios/editar", element: <EditPricePage /> },
+  { path: "/precios/programaciones", element: <PriceSchedulesPage /> },
+  { path: "/precios/importar", element: <ImportPricesPage /> },
+  {
+    path: "/precios/importaciones/:batchId",
+    element: <PriceImportResultPage />,
+  },
+  { path: "/precios/historico", element: <HistoricalPricePage /> },
   { path: "/recomendaciones", element: <RecommendationsPage /> },
   {
     path: "/recomendaciones/nueva/venta-cruzada",
