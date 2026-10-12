@@ -31,6 +31,7 @@ import { useCategoryTree } from "../hooks/useCategoryTree";
 import { estadoSemantic } from "../services/estadoSemantic";
 import type { CategoryNode } from "../types";
 
+// MK-008-S01: listado / árbol de categorías en `/categorias`.
 export function CategoryTreePage() {
   const navigate = useNavigate();
   const { state } = useCategoryTree();
@@ -96,7 +97,7 @@ export function CategoryTreePage() {
             <Box w={28} aria-hidden="true" />
           )}
           <Box style={{ paddingLeft: nodo.nivel * 16 }}>
-            <UnstyledButton onClick={() => navigate(`/MK008/S05/${nodo.id}`)}>
+            <UnstyledButton onClick={() => navigate(`/categorias/${nodo.id}`)}>
               <Text size="sm" fw={nodo.nivel === 0 ? 600 : 400}>
                 {nodo.nombre}
               </Text>
@@ -132,14 +133,14 @@ export function CategoryTreePage() {
           <ActionIcon
             variant="subtle"
             aria-label={`Ver ${nodo.nombre}`}
-            onClick={() => navigate(`/MK008/S05/${nodo.id}`)}
+            onClick={() => navigate(`/categorias/${nodo.id}`)}
           >
             <IconEye size={16} stroke={2} aria-hidden="true" />
           </ActionIcon>
           <ActionIcon
             variant="subtle"
             aria-label={`Editar ${nodo.nombre}`}
-            onClick={() => navigate(`/MK008/S03/${nodo.id}`)}
+            onClick={() => navigate(`/categorias/${nodo.id}/editar`)}
           >
             <IconPencil size={16} stroke={2} aria-hidden="true" />
           </ActionIcon>
@@ -147,7 +148,7 @@ export function CategoryTreePage() {
             variant="subtle"
             aria-label={`Desactivar ${nodo.nombre}`}
             disabled={nodo.estado !== "Activo"}
-            onClick={() => navigate(`/MK008/S04/${nodo.id}`)}
+            onClick={() => navigate(`/categorias/${nodo.id}/desactivar`)}
           >
             <IconPower size={16} stroke={2} aria-hidden="true" />
           </ActionIcon>
@@ -185,7 +186,7 @@ export function CategoryTreePage() {
         actions={
           <Button
             leftSection={<IconPlus size={16} stroke={2} aria-hidden="true" />}
-            onClick={() => navigate("/MK008/S02")}
+            onClick={() => navigate("/categorias/nueva")}
           >
             Crear categoría
           </Button>

@@ -71,3 +71,23 @@ export const CharacteristicStatePage = lazy(() =>
     }),
   ),
 );
+export const ProductTypeListPage = lazy(() =>
+  import("../../features/taxonomy/pages/ProductTypeListPage").then((module) => ({
+    default: module.ProductTypeListPage,
+  })),
+);
+export const ProductTypeCreatePage = lazy(() =>
+  import("../../features/taxonomy/pages/ProductTypeCreatePage").then((module) => ({
+    default: module.ProductTypeCreatePage,
+  })),
+);
+export const ProductTypeDetailPage = lazy(() =>
+  import("../../features/taxonomy/pages/ProductTypeDetailPage").then((module) => ({
+    default: module.ProductTypeDetailPage,
+  })),
+);
+export const ProductTypeAssociatePage = lazy(() =>
+  import("../../features/taxonomy/pages/ProductTypeAssociatePage").then((module) => ({
+    default: module.ProductTypeAssociatePage,
+  })),
+);

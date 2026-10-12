@@ -20,6 +20,8 @@ import { parseBajaScenario, parseCatalogScenario } from "../services/scenarioPar
 import { estadoSemantic } from "../services/estadoSemantic";
 import type { CategoryDetail } from "../types";
 
+// MK-008-S04 / S04-P / S04-B: solicitud de baja y resultado de verificación
+// en `/categorias/:id/desactivar`.
 export function DeactivateCategoryPage() {
   const { id } = useParams<{ id: string }>();
   if (!id) {
@@ -55,7 +57,7 @@ function DeactivateCategoryLoader({ id }: { id: string }) {
         semantic="warning"
         title="Categoría no encontrada"
         actions={
-          <Button variant="outline" onClick={() => navigate("/MK008/S01")}>
+          <Button variant="outline" onClick={() => navigate("/categorias")}>
             Volver al árbol de categorías
           </Button>
         }
@@ -75,7 +77,7 @@ function DeactivateCategoryLoader({ id }: { id: string }) {
         title="Desactivar categoría"
         description="Solicita la baja de una categoría de la taxonomía de productos."
         breadcrumbs={[
-          { label: "Categorías", to: "/MK008/S01" },
+          { label: "Categorías", to: "/categorias" },
           { label: "Desactivar" },
         ]}
       />
@@ -165,7 +167,7 @@ function DeactivateCategoryContent({
           <Group justify="flex-end" gap="sm">
             <Button
               variant="outline"
-              onClick={() => navigate(`/MK008/S05/${detalle.id}`)}
+              onClick={() => navigate(`/categorias/${detalle.id}`)}
             >
               Cancelar
             </Button>
@@ -184,10 +186,10 @@ function DeactivateCategoryContent({
           title="Verificando baja"
           actions={
             <Group gap="sm">
-              <Button onClick={() => navigate(`/MK008/S05/${detalle.id}`)}>
+              <Button onClick={() => navigate(`/categorias/${detalle.id}`)}>
                 Ver categoría
               </Button>
-              <Button variant="outline" onClick={() => navigate("/MK008/S01")}>
+              <Button variant="outline" onClick={() => navigate("/categorias")}>
                 Volver al árbol
               </Button>
             </Group>
@@ -206,10 +208,10 @@ function DeactivateCategoryContent({
           title="Baja rechazada"
           actions={
             <Group gap="sm">
-              <Button onClick={() => navigate(`/MK008/S05/${detalle.id}`)}>
+              <Button onClick={() => navigate(`/categorias/${detalle.id}`)}>
                 Ver categoría
               </Button>
-              <Button variant="outline" onClick={() => navigate("/MK008/S01")}>
+              <Button variant="outline" onClick={() => navigate("/categorias")}>
                 Volver al árbol
               </Button>
             </Group>

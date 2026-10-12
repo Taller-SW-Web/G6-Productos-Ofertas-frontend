@@ -27,6 +27,8 @@ const scenarios: { value: CategoryFormScenario; label: string }[] = [
   { value: "slug-carrera-409", label: "Colisión al guardar (409)" },
 ];
 
+// MK-008-S02: crear categoría en `/categorias/nueva`.
+// MK-008-S02-C: confirmación de slug SEO (mismo flujo; ruta `/categorias/confirmar-slug`).
 export function CreateCategoryPage() {
   const navigate = useNavigate();
   const { state: treeState } = useCategoryTree();
@@ -97,7 +99,7 @@ export function CreateCategoryPage() {
         title="Crear categoría"
         description="Registra una nueva categoría o subcategoría en la taxonomía de productos."
         breadcrumbs={[
-          { label: "Categorías", to: "/MK008/S01" },
+          { label: "Categorías", to: "/categorias" },
           { label: "Crear" },
         ]}
       />
@@ -125,7 +127,7 @@ export function CreateCategoryPage() {
             title="Categoría creada"
             actions={
               <Group gap="sm">
-                <Button onClick={() => navigate("/MK008/S01")}>
+                <Button onClick={() => navigate("/categorias")}>
                   Volver al árbol de categorías
                 </Button>
                 <Button variant="outline" onClick={reiniciar}>
@@ -176,7 +178,7 @@ export function CreateCategoryPage() {
                   <Group justify="flex-end" gap="sm">
                     <Button
                       variant="outline"
-                      onClick={() => navigate("/MK008/S01")}
+                      onClick={() => navigate("/categorias")}
                     >
                       Cancelar
                     </Button>

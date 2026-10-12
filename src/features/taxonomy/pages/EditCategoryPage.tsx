@@ -63,6 +63,7 @@ function SelectorEscenarioCatalogo({
   );
 }
 
+// MK-008-S03: editar categoría en `/categorias/:id/editar`.
 export function EditCategoryPage() {
   const { id } = useParams<{ id: string }>();
   if (!id) {
@@ -98,7 +99,7 @@ function EditCategoryLoader({ id }: { id: string }) {
         semantic="warning"
         title="Categoría no encontrada"
         actions={
-          <Button variant="outline" onClick={() => navigate("/MK008/S01")}>
+          <Button variant="outline" onClick={() => navigate("/categorias")}>
             Volver al árbol de categorías
           </Button>
         }
@@ -115,7 +116,7 @@ function EditCategoryLoader({ id }: { id: string }) {
         title="Editar categoría"
         description="Actualiza los datos de la categoría seleccionada."
         breadcrumbs={[
-          { label: "Categorías", to: "/MK008/S01" },
+          { label: "Categorías", to: "/categorias" },
           { label: "Editar" },
         ]}
       />
@@ -246,10 +247,10 @@ function EditCategoryForm({
           title="Categoría actualizada"
           actions={
             <Group gap="sm">
-              <Button onClick={() => navigate(`/MK008/S05/${resultado.id}`)}>
+              <Button onClick={() => navigate(`/categorias/${resultado.id}`)}>
                 Ver categoría
               </Button>
-              <Button variant="outline" onClick={() => navigate("/MK008/S01")}>
+              <Button variant="outline" onClick={() => navigate("/categorias")}>
                 Volver al árbol
               </Button>
             </Group>
@@ -305,7 +306,7 @@ function EditCategoryForm({
                 <Group justify="flex-end" gap="sm">
                   <Button
                     variant="outline"
-                    onClick={() => navigate(`/MK008/S05/${detalle.id}`)}
+                    onClick={() => navigate(`/categorias/${detalle.id}`)}
                   >
                     Cancelar
                   </Button>

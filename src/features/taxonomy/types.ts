@@ -173,3 +173,53 @@ export interface CharacteristicUpdateInput {
   nombre: string;
   unidad?: string;
 }
+
+// MK-010 (Tipos de producto y esquemas de características) — presentation models.
+export type ProductTypeStatus = EntityStatus;
+
+export interface ProductTypeListItem {
+  tipoProductoId: string;
+  nombre: string;
+  estado: ProductTypeStatus;
+  schemaVersion: number;
+  caracteristicasAsignadas: number;
+  limiteCaracteristicas: number;
+}
+
+export interface ProductTypeCreateInput {
+  nombre: string;
+}
+
+export interface ProductTypeCreateResult {
+  tipoProductoId: string;
+  nombre: string;
+  estado: ProductTypeStatus;
+  schemaVersion: number;
+}
+
+export interface ProductTypeAssociationCharacteristic {
+  id: string;
+  nombre: string;
+  tipo: CharacteristicType;
+  estado: CharacteristicStatus;
+  unidad?: string;
+  valoresActivos: number;
+}
+
+export interface ProductTypeAssociation {
+  caracteristicaId: string;
+  obligatoria: boolean;
+  estado: CharacteristicStatus;
+  schemaVersion: number;
+  caracteristica: ProductTypeAssociationCharacteristic;
+}
+
+export interface ProductTypeDetail {
+  tipoProductoId: string;
+  nombre: string;
+  estado: ProductTypeStatus;
+  schemaVersion: number;
+  limiteCaracteristicas: number;
+  caracteristicasAsignadas: number;
+  asociadas: ProductTypeAssociation[];
+}

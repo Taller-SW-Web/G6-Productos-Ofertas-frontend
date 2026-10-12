@@ -34,7 +34,7 @@ const columnasHijas: TableColumn<CategoryNode>[] = [
     key: "nombre",
     header: "Nombre",
     render: (nodo) => (
-      <Anchor component={Link} to={`/MK008/S05/${nodo.id}`} size="sm">
+      <Anchor component={Link} to={`/categorias/${nodo.id}`} size="sm">
         {nodo.nombre}
       </Anchor>
     ),
@@ -58,6 +58,9 @@ const columnasHijas: TableColumn<CategoryNode>[] = [
   },
 ];
 
+// MK-008-S05: detalle de categoría en `/categorias/:id`.
+// MK-008-S05-R: reactivación de categoría (misma pantalla; ruta `/categorias/:id/reactivar`
+// disponible para deep-link; el botón Reactivar aparece según el estado).
 export function CategoryDetailPage() {
   const { id } = useParams<{ id: string }>();
   if (!id) {
@@ -87,7 +90,7 @@ function CategoryDetailLoader({ id }: { id: string }) {
         title={titulo}
         description="Consulta los datos de la categoría y sus subcategorías."
         breadcrumbs={[
-          { label: "Categorías", to: "/MK008/S01" },
+          { label: "Categorías", to: "/categorias" },
           {
             label: state.status === "success" ? state.detalle.nombre : "Detalle",
           },
@@ -126,7 +129,7 @@ function CategoryDetailLoader({ id }: { id: string }) {
             semantic="warning"
             title="Categoría no encontrada"
             actions={
-              <Button variant="outline" onClick={() => navigate("/MK008/S01")}>
+              <Button variant="outline" onClick={() => navigate("/categorias")}>
                 Volver al árbol de categorías
               </Button>
             }
@@ -195,7 +198,7 @@ function CategoryDetailContent({
               >
                 Actualizar estado
               </Button>
-              <Button variant="outline" onClick={() => navigate("/MK008/S01")}>
+              <Button variant="outline" onClick={() => navigate("/categorias")}>
                 Volver al árbol
               </Button>
             </Group>
@@ -214,7 +217,7 @@ function CategoryDetailContent({
               <Button variant="outline" onClick={reiniciar}>
                 Entendido
               </Button>
-              <Button variant="outline" onClick={() => navigate("/MK008/S01")}>
+              <Button variant="outline" onClick={() => navigate("/categorias")}>
                 Volver al árbol
               </Button>
             </Group>
@@ -248,7 +251,7 @@ function CategoryDetailContent({
           <Group gap="sm">
             <Button
               leftSection={<IconPencil size={16} stroke={2} aria-hidden="true" />}
-              onClick={() => navigate(`/MK008/S03/${detalle.id}`)}
+              onClick={() => navigate(`/categorias/${detalle.id}/editar`)}
             >
               Editar
             </Button>
@@ -257,7 +260,7 @@ function CategoryDetailContent({
                 variant="outline"
                 color="danger"
                 leftSection={<IconPower size={16} stroke={2} aria-hidden="true" />}
-                onClick={() => navigate(`/MK008/S04/${detalle.id}`)}
+                onClick={() => navigate(`/categorias/${detalle.id}/desactivar`)}
               >
                 Desactivar
               </Button>
@@ -288,7 +291,7 @@ function CategoryDetailContent({
             {detalle.padreId && detalle.padreNombre ? (
               <Anchor
                 component={Link}
-                to={`/MK008/S05/${detalle.padreId}`}
+                to={`/categorias/${detalle.padreId}`}
                 size="sm"
               >
                 {detalle.padreNombre}
