@@ -127,9 +127,6 @@ function CharacteristicDetailLoader({ id }: { id: string }) {
         }
       />
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Datos de demostración">
-          El detalle mostrado es simulado. No refleja una fuente de datos real.
-        </FeedbackAlert>
         <SectionCard title="Datos generales">
           <Stack gap="sm">
             <CampoDato etiqueta="Nombre">{detalle.nombre}</CampoDato>

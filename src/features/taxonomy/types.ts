@@ -128,9 +128,14 @@ export interface CharacteristicValueInput {
 
 // MK-009 — baja de un valor permitido (SPEC-009/010). Simula el protocolo transversal
 // S04 sin afirmar un contrato HTTP: "pendiente" admite la solicitud (202) sin
-// confirmar la desactivación, y "rechazada" conserva el valor Activo. Solo "exito"
+// confirmar la desactivación, "rechazada" conserva el valor Activo y
+// "no-concluyente" no obtiene una respuesta determinante. Solo "exito"/"confirmada"
 // autoriza la mutación del estado en el modelo de presentación.
-export type ValorBajaResultado = "pendiente" | "rechazada" | "exito";
+export type ValorBajaResultado =
+  | "pendiente"
+  | "rechazada"
+  | "no-concluyente"
+  | "exito";
 
 export interface ValorBajaResult {
   resultado: ValorBajaResultado;
@@ -253,9 +258,12 @@ export interface ProductTypeDesasociarResult {
   operacionId?: string;
 }
 
+// MK-010 — desactivación de tipo de producto. "pendiente" (202) conserva el estado
+// actual y expone un operacionId para el seguimiento; solo "exito" confirma la baja.
 export interface ProductTypeDesactivarResult {
   resultado: OperationResultState;
   mensaje: string;
+  operacionId?: string;
 }
 
 // MK-011 (Marcas) — presentation models aligned to MarcaAdmin.
@@ -333,9 +341,10 @@ export interface HistorialSlugItem {
 
 // MK-008/009/010 — Seguimiento de operaciones asíncronas (202 Accepted).
 // BLOCKED_CONTRACT: no existe un contrato OpenAPI confirmado para el sondeo del
-// resultado de una operación asíncrona de baja/desasociación (la documentación de
-// contratos no está accesible en este entorno). Estos modelos solo representan el
-// estado devuelto por el servicio; no definen ni inventan un endpoint HTTP propio.
+// resultado de una operación asíncrona de baja/desasociación/desactivación (la
+// documentación de contratos no está accesible en este entorno). Estos modelos solo
+// representan el estado devuelto por el servicio; no definen ni inventan un endpoint
+// HTTP propio.
 export type OperationFollowUpStatus =
   | "pendiente"
   | "confirmada"
@@ -356,6 +365,9 @@ export interface ValorBajaSeguimiento extends OperationFollowUpResult {
   valor?: CharacteristicValue;
 }
 
-export interface DesasociacionSeguimiento extends OperationFollowUpResult {
+export interface ProductTypeSeguimiento extends OperationFollowUpResult {
   tipoProducto?: ProductTypeDetail;
 }
+
+// Alias retrocompatible: la desasociación es una operación sobre un tipo de producto.
+export type DesasociacionSeguimiento = ProductTypeSeguimiento;

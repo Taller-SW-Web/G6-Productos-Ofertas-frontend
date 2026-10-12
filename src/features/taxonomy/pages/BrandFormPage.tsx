@@ -154,10 +154,6 @@ export function BrandFormPage() {
         ]}
       />
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Datos de demostración">
-          El formulario es simulado. No guarda marcas reales.
-        </FeedbackAlert>
-
         {cargando && (
           <Group gap="sm" role="status">
             <Loader size="sm" />

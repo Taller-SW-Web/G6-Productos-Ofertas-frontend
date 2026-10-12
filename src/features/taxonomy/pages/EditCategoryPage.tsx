@@ -184,10 +184,6 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
         </FeedbackAlert>
       ) : (
         <>
-          <FeedbackAlert semantic="info" title="Datos de demostración">
-            El formulario es simulado. No actualiza categorías reales ni envía
-            datos a un backend.
-          </FeedbackAlert>
           <SectionCard
             title="Datos de la categoría"
             description="Si cambias el nombre, el slug se vuelve a proponer y se confirma antes de guardar."

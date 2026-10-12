@@ -3,7 +3,6 @@ import type { ProductTypeRepository } from "../services/productTypeRepository";
 import { PRODUCT_TYPE_ATTRIBUTE_LIMIT } from "../services/productTypeRepository";
 import type {
   CharacteristicListItem,
-  DesasociacionSeguimiento,
   ProductTypeAssociarInput,
   ProductTypeAssociationCharacteristic,
   ProductTypeCreateInput,
@@ -12,6 +11,7 @@ import type {
   ProductTypeDesactivarResult,
   ProductTypeDetail,
   ProductTypeListItem,
+  ProductTypeSeguimiento,
 } from "../types";
 
 interface RegistroAsociacion {
@@ -136,15 +136,19 @@ const generarId = (nombre: string): string => {
 };
 
 // BLOCKED_CONTRACT: no hay contrato OpenAPI confirmado para el sondeo del resultado
-// de una desasociación asíncrona (202). Este registro mantiene las operaciones
-// pendientes en memoria para que la UI consulte su estado sin inventar un endpoint.
-interface OperacionDesasocio {
+// de una operación asíncrona sobre tipo de producto (desasociación o desactivación,
+// 202). Este registro mantiene las operaciones pendientes en memoria para que la UI
+// consulte su estado sin inventar un endpoint.
+type TipoOperacionTipoProducto = "desasocio" | "desactivacion";
+
+interface OperacionTipoProducto {
   tipoProductoId: string;
-  caracteristicaId: string;
+  tipo: TipoOperacionTipoProducto;
+  caracteristicaId?: string;
   estado: "pendiente" | "confirmada";
 }
 
-const operacionesDesasocio = new Map<string, OperacionDesasocio>();
+const operacionesTipoProducto = new Map<string, OperacionTipoProducto>();
 
 // Deterministic local states used only for review. The repository contract does not
 // accept scenarios; reviewers change these values to reproduce error or edge cases
@@ -273,8 +277,9 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
     if (!asociacion) throw new Error("CARACTERISTICA_NO_ASOCIADA");
     if (asociacion.obligatoria) {
       const operacionId = `op-desasocio-${id}-${caracteristicaId}`;
-      operacionesDesasocio.set(operacionId, {
+      operacionesTipoProducto.set(operacionId, {
         tipoProductoId: id,
+        tipo: "desasocio",
         caracteristicaId,
         estado: "pendiente",
       });
@@ -299,14 +304,14 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
   async consultarEstadoOperacion(
     operacionId: string,
     signal,
-  ): Promise<DesasociacionSeguimiento> {
+  ): Promise<ProductTypeSeguimiento> {
     signal?.throwIfAborted();
     await esperar(400);
     signal?.throwIfAborted();
 
-    const operacion = operacionesDesasocio.get(operacionId);
+    const operacion = operacionesTipoProducto.get(operacionId);
     if (!operacion) {
-      throw new Error("No se encontró la operación de desasociación.");
+      throw new Error("No se encontró la operación de tipo de producto.");
     }
     const registro = encontrar(operacion.tipoProductoId);
     if (!registro) {
@@ -315,18 +320,27 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
 
     if (operacion.estado === "pendiente") {
       operacion.estado = "confirmada";
-      registro.asociadas = registro.asociadas.filter(
-        (item) => item.caracteristicaId !== operacion.caracteristicaId,
-      );
-      registro.schemaVersion += 1;
+      if (operacion.tipo === "desasocio" && operacion.caracteristicaId) {
+        registro.asociadas = registro.asociadas.filter(
+          (item) => item.caracteristicaId !== operacion.caracteristicaId,
+        );
+        registro.schemaVersion += 1;
+      } else if (operacion.tipo === "desactivacion") {
+        registro.estado = "Inactivo";
+      }
     }
 
+    const mensaje =
+      operacion.estado === "confirmada"
+        ? operacion.tipo === "desasocio"
+          ? "Verificación concluida: la característica se desasoció del esquema y se incrementó la versión del esquema."
+          : "Verificación concluida: el tipo de producto quedó Inactivo."
+        : "La operación continúa en verificación con Catálogo.";
     const catalogo = await cargarCatalogo(signal);
     return {
       operacionId,
-      estado: "confirmada",
-      mensaje:
-        "Verificación concluida: la característica se desasoció del esquema y se incrementó la versión del esquema.",
+      estado: operacion.estado,
+      mensaje,
       tipoProducto: aDetalle(registro, catalogo),
     };
   },
@@ -349,10 +363,17 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
       };
     }
     if (registro.tipoProductoId === "ropa") {
+      const operacionId = `op-desactivacion-${id}`;
+      operacionesTipoProducto.set(operacionId, {
+        tipoProductoId: id,
+        tipo: "desactivacion",
+        estado: "pendiente",
+      });
       return {
         resultado: "pendiente",
         mensaje:
-          "La solicitud de desactivación se admitió (202). Se espera la verificación de Catálogo antes de confirmarla.",
+          "La solicitud de desactivación se admitió (202). El tipo conserva su estado Activo hasta que Catálogo confirme la verificación.",
+        operacionId,
       };
     }
     registro.estado = "Inactivo";

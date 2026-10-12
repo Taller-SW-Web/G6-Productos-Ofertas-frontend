@@ -126,6 +126,11 @@ function ProductTypeDetailContent({ id }: { id: string }) {
     desasociar.state.result.resultado === "pendiente"
       ? desasociar.state.result.operacionId
       : undefined;
+  const desactivarPendiente =
+    desactivar.state.status === "success" &&
+    desactivar.state.result.resultado === "pendiente"
+      ? desactivar.state.result.operacionId
+      : undefined;
 
   return (
     <>
@@ -139,11 +144,6 @@ function ProductTypeDetailContent({ id }: { id: string }) {
         ]}
       />
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Datos de demostración">
-          El esquema es simulado. Esta pantalla no consulta ni modifica datos
-          reales.
-        </FeedbackAlert>
-
         {desasociar.state.status === "enviando" && (
           <FeedbackAlert
             semantic="warning"
@@ -161,9 +161,11 @@ function ProductTypeDetailContent({ id }: { id: string }) {
         {desasociar.state.status === "success" && (
           <FeedbackAlert
             semantic={
-              desasociar.state.result.resultado === "rechazada"
-                ? "error"
-                : "info"
+              desasociar.state.result.resultado === "exito"
+                ? "success"
+                : desasociar.state.result.resultado === "rechazada"
+                  ? "error"
+                  : "warning"
             }
             title={
               desasociar.state.result.resultado === "pendiente"
@@ -178,9 +180,9 @@ function ProductTypeDetailContent({ id }: { id: string }) {
                   <Button
                     loading={desasociar.seguimiento.status === "consultando"}
                     onClick={() =>
-                      desasociar.consultarEstado(desasociarPendiente, () =>
-                        reload(),
-                      )
+                      desasociar.consultarEstado(desasociarPendiente, (result) => {
+                        if (result.estado === "confirmada") reload();
+                      })
                     }
                   >
                     Consultar estado
@@ -193,14 +195,36 @@ function ProductTypeDetailContent({ id }: { id: string }) {
             {desasociar.state.result.mensaje}
           </FeedbackAlert>
         )}
-        {desasociar.seguimiento.status === "success" && (
-          <FeedbackAlert
-            semantic="success"
-            title="Desasociación confirmada"
-          >
-            {desasociar.seguimiento.result.mensaje}
-          </FeedbackAlert>
-        )}
+        {desasociar.seguimiento.status === "success" &&
+          desasociar.seguimiento.result.estado === "confirmada" && (
+            <FeedbackAlert semantic="success" title="Desasociación confirmada">
+              {desasociar.seguimiento.result.mensaje}
+            </FeedbackAlert>
+          )}
+        {desasociar.seguimiento.status === "success" &&
+          desasociar.seguimiento.result.estado === "pendiente" && (
+            <FeedbackAlert
+              semantic="warning"
+              title="Desasociación aún en verificación"
+            >
+              {desasociar.seguimiento.result.mensaje}
+            </FeedbackAlert>
+          )}
+        {desasociar.seguimiento.status === "success" &&
+          desasociar.seguimiento.result.estado === "rechazada" && (
+            <FeedbackAlert semantic="error" title="Desasociación rechazada">
+              {desasociar.seguimiento.result.mensaje}
+            </FeedbackAlert>
+          )}
+        {desasociar.seguimiento.status === "success" &&
+          desasociar.seguimiento.result.estado === "no-concluyente" && (
+            <FeedbackAlert
+              semantic="warning"
+              title="Verificación no concluyente"
+            >
+              {desasociar.seguimiento.result.mensaje}
+            </FeedbackAlert>
+          )}
         {desasociar.seguimiento.status === "error" && (
           <FeedbackAlert
             semantic="error"
@@ -240,22 +264,76 @@ function ProductTypeDetailContent({ id }: { id: string }) {
         {desactivar.state.status === "success" && (
           <FeedbackAlert
             semantic={
-              desactivar.state.result.resultado === "rechazada"
-                ? "error"
-                : "info"
+              desactivar.state.result.resultado === "exito"
+                ? "success"
+                : desactivar.state.result.resultado === "rechazada"
+                  ? "error"
+                  : "warning"
             }
             title={
               desactivar.state.result.resultado === "pendiente"
-                ? "Solicitud admitida"
+                ? "Solicitud de desactivación admitida"
                 : desactivar.state.result.resultado === "rechazada"
                   ? "No se realizó la desactivación"
                   : "Tipo de producto desactivado"
             }
             actions={
-              <Button onClick={desactivar.reiniciar}>Entendido</Button>
+              <Group gap="sm">
+                {desactivarPendiente && (
+                  <Button
+                    loading={desactivar.seguimiento.status === "consultando"}
+                    onClick={() =>
+                      desactivar.consultarEstado(desactivarPendiente, (result) => {
+                        if (result.estado === "confirmada") reload();
+                      })
+                    }
+                  >
+                    Consultar estado
+                  </Button>
+                )}
+                <Button onClick={desactivar.reiniciar}>Entendido</Button>
+              </Group>
             }
           >
             {desactivar.state.result.mensaje}
+          </FeedbackAlert>
+        )}
+        {desactivar.seguimiento.status === "success" &&
+          desactivar.seguimiento.result.estado === "confirmada" && (
+            <FeedbackAlert semantic="success" title="Tipo de producto desactivado">
+              {desactivar.seguimiento.result.mensaje}
+            </FeedbackAlert>
+          )}
+        {desactivar.seguimiento.status === "success" &&
+          desactivar.seguimiento.result.estado === "pendiente" && (
+            <FeedbackAlert
+              semantic="warning"
+              title="Desactivación aún en verificación"
+            >
+              {desactivar.seguimiento.result.mensaje}
+            </FeedbackAlert>
+          )}
+        {desactivar.seguimiento.status === "success" &&
+          desactivar.seguimiento.result.estado === "rechazada" && (
+            <FeedbackAlert semantic="error" title="Desactivación rechazada">
+              {desactivar.seguimiento.result.mensaje}
+            </FeedbackAlert>
+          )}
+        {desactivar.seguimiento.status === "success" &&
+          desactivar.seguimiento.result.estado === "no-concluyente" && (
+            <FeedbackAlert
+              semantic="warning"
+              title="Verificación no concluyente"
+            >
+              {desactivar.seguimiento.result.mensaje}
+            </FeedbackAlert>
+          )}
+        {desactivar.seguimiento.status === "error" && (
+          <FeedbackAlert
+            semantic="error"
+            title="No se pudo consultar la desactivación"
+          >
+            {desactivar.seguimiento.message}
           </FeedbackAlert>
         )}
         {desactivar.state.status === "error" && (

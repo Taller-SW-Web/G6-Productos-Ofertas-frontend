@@ -4,7 +4,6 @@ import { Box, Button, Stack, Text } from "@mantine/core";
 import { IconPlus } from "@tabler/icons-react";
 import {
   EntityTable,
-  FeedbackAlert,
   FilterBar,
   PageHeader,
   SearchField,
@@ -68,7 +67,6 @@ export function SeoListPage() {
     <>
       <PageHeader title="SEO y metadatos" description="Gestiona slug y metadatos SEO de categorías." breadcrumbs={[{ label: "Taxonomía" }, { label: "SEO" }]} actions={<Button leftSection={<IconPlus size={16} stroke={2} aria-hidden="true" />} disabled>Nueva configuración</Button>} />
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Datos de demostración">La información mostrada es simulada. Esta pantalla no consulta ni modifica datos reales.</FeedbackAlert>
         <FilterBar summary={`${filas.length} elementos visibles`}>
           <Box w={320}>
             <SearchField label="Buscar" value={busqueda} onChange={setBusqueda} placeholder="Categoría o slug" />

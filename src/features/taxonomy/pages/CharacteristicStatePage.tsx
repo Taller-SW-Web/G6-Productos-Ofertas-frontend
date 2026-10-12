@@ -131,10 +131,6 @@ function CharacteristicStateContent({
         }
       />
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Datos de demostración">
-          Esta operación es simulada. No cambia el estado en un backend real.
-        </FeedbackAlert>
-
         {resultado && (
           <FeedbackAlert
             semantic={semanticaDestino}

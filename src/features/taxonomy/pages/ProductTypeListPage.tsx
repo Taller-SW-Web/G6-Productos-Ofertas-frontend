@@ -4,7 +4,6 @@ import { Box, Button, Stack, Text } from "@mantine/core";
 import { IconPlus } from "@tabler/icons-react";
 import {
   EntityTable,
-  FeedbackAlert,
   FilterBar,
   PageHeader,
   SearchField,
@@ -127,10 +126,6 @@ export function ProductTypeListPage() {
         }
       />
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Datos de demostración">
-          Los tipos de producto mostrados son simulados. Esta pantalla no
-          consulta ni modifica tipos reales del catálogo.
-        </FeedbackAlert>
         <FilterBar summary={`${filas.length} tipos de producto visibles`}>
           <Box w={320}>
             <SearchField

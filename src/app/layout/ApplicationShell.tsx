@@ -6,6 +6,7 @@ import brandLogo from "../../assets/brand/INKA_ATHLETICS.svg";
 import { ApplicationNavigation } from "../navigation/ApplicationNavigation";
 import classes from "../app.module.css";
 import { CommercialModeGate } from "../config/CommercialModeGate";
+import { TaxonomyModeGate } from "../config/TaxonomyModeGate";
 
 export function ApplicationShell() {
   return (
@@ -45,7 +46,9 @@ export function ApplicationShell() {
           }
         >
           <CommercialModeGate>
-            <Outlet />
+            <TaxonomyModeGate>
+              <Outlet />
+            </TaxonomyModeGate>
           </CommercialModeGate>
         </Suspense>
       </AppShell.Main>

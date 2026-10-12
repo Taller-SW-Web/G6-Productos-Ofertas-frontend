@@ -73,11 +73,6 @@ function ProductTypeAssociateContent({ id }: { id: string }) {
         ]}
       />
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Datos de demostración">
-          La asociación modifica el esquema simulado y queda disponible al
-          volver al detalle. No crea acuerdos reales con Catálogo.
-        </FeedbackAlert>
-
         {asociar.state.status === "error" && (
           <FeedbackAlert
             semantic="error"

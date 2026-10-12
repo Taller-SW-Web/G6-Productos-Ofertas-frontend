@@ -115,10 +115,6 @@ export function CreateCategoryPage() {
           </FeedbackAlert>
         ) : (
           <>
-            <FeedbackAlert semantic="info" title="Datos de demostración">
-              El formulario es simulado. No crea categorías reales ni envía
-              datos a un backend.
-            </FeedbackAlert>
             <SectionCard
               title="Datos de la categoría"
               description="El slug de la URL se propone a partir del nombre y se confirma en el siguiente paso."

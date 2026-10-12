@@ -30,13 +30,15 @@ import { estadoCaracteristicaSemantic } from "../services/estadoSemantic";
 import type { CharacteristicValue, ValorBajaResult } from "../types";
 
 // MK-009-S03: baja de un valor permitido. La pantalla solo transmite la solicitud vía
-// servicio y representa el resultado (verificación en curso, rechazo por uso o baja
-// confirmada); nunca asume una desactivación inmediata por su cuenta.
+// servicio y representa el resultado (verificación en curso, rechazo por uso, baja
+// confirmada o verificación no concluyente); nunca asume una desactivación inmediata
+// por su cuenta y solo muta la tabla ante una confirmación real ("exito"/"confirmada").
 type BajaValorUi =
   | { status: "idle" }
   | { status: "verificando"; valor: CharacteristicValue }
   | { status: "pendiente"; result: ValorBajaResult }
   | { status: "rechazada"; result: ValorBajaResult }
+  | { status: "no-concluyente"; result: ValorBajaResult }
   | { status: "exito"; result: ValorBajaResult }
   | { status: "error"; message: string };
 
@@ -301,6 +303,28 @@ function CharacteristicValuesContent({
               operacionId,
             },
           });
+        } else if (res.estado === "rechazada") {
+          setBaja({
+            status: "rechazada",
+            result: {
+              resultado: "rechazada",
+              valor,
+              mensaje: res.mensaje,
+              bloqueos: [],
+              operacionId,
+            },
+          });
+        } else if (res.estado === "no-concluyente") {
+          setBaja({
+            status: "no-concluyente",
+            result: {
+              resultado: "no-concluyente",
+              valor,
+              mensaje: res.mensaje,
+              bloqueos: [],
+              operacionId,
+            },
+          });
         } else {
           setBaja({
             status: "pendiente",
@@ -412,11 +436,6 @@ function CharacteristicValuesContent({
         }
       />
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Datos de demostración">
-          Los valores mostrados son simulados. Esta pantalla no consulta ni
-          modifica valores reales.
-        </FeedbackAlert>
-
         {baja.status === "verificando" && (
           <FeedbackAlert
             semantic="info"
@@ -473,6 +492,24 @@ function CharacteristicValuesContent({
               <Text size="sm" c="dimmed">
                 El valor conserva su estado Activo; no se eliminó ni se
                 desactivó nada.
+              </Text>
+            </Stack>
+          </FeedbackAlert>
+        )}
+
+        {baja.status === "no-concluyente" && (
+          <FeedbackAlert
+            semantic="warning"
+            title="Verificación no concluyente"
+            actions={
+              <Button onClick={cancelarBaja}>Entendido</Button>
+            }
+          >
+            <Stack gap="sm">
+              <Text size="sm">{baja.result.mensaje}</Text>
+              <Text size="sm" c="dimmed">
+                No se obtuvo una respuesta determinante. El valor conserva su
+                estado actual; no se eliminó ni se desactivó nada.
               </Text>
             </Stack>
           </FeedbackAlert>

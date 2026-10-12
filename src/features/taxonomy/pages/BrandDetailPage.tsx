@@ -53,9 +53,6 @@ function BrandDetailLoader({ id }: { id: string }) {
         ]}
       />
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Datos de demostración">
-          El detalle y la baja son simulados. No consultan datos reales.
-        </FeedbackAlert>
         {state.status === "loading" && (
           <Group gap="sm" role="status">
             <Loader size="sm" />

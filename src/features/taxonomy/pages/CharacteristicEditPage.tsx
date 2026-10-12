@@ -142,10 +142,6 @@ function CharacteristicEditForm({ detalle }: { detalle: CharacteristicDetail }) 
 
   return (
     <>
-      <FeedbackAlert semantic="info" title="Datos de demostración">
-        El formulario es simulado. No actualiza características reales ni envía
-        datos a un backend.
-      </FeedbackAlert>
       <SectionCard
         title="Datos de la característica"
         description="El tipo se define al crear la característica y no puede cambiarse después."

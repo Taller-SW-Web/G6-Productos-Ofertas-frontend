@@ -19,7 +19,6 @@ import {
 } from "@tabler/icons-react";
 import {
   EntityTable,
-  FeedbackAlert,
   FilterBar,
   PageHeader,
   SearchField,
@@ -193,10 +192,6 @@ export function CategoryTreePage() {
         }
       />
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Datos de demostración">
-          El árbol de categorías es simulado. Esta pantalla no consulta ni
-          modifica categorías reales del catálogo.
-        </FeedbackAlert>
         <FilterBar summary={`${filas.length} categorías visibles`}>
           <Box w={320}>
             <SearchField

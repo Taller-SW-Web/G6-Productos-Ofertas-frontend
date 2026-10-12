@@ -16,7 +16,6 @@ import {
 } from "@tabler/icons-react";
 import {
   EntityTable,
-  FeedbackAlert,
   FilterBar,
   PageHeader,
   SearchField,
@@ -177,10 +176,6 @@ export function CharacteristicListPage() {
         }
       />
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Datos de demostración">
-          Las características mostradas son simuladas. Esta pantalla no consulta
-          ni modifica características reales del catálogo.
-        </FeedbackAlert>
         <FilterBar summary={`${filas.length} características visibles`}>
           <Box w={320}>
             <SearchField

@@ -49,9 +49,6 @@ function SeoConfigLoader({ id }: { id: string }) {
         ]}
       />
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Datos de demostración">
-          La edición es simulada. No persiste datos reales.
-        </FeedbackAlert>
         {state.status === "loading" && (
           <Group gap="sm" role="status">
             <Loader size="sm" />

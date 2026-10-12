@@ -1,5 +1,4 @@
 import type {
-  DesasociacionSeguimiento,
   ProductTypeAssociarInput,
   ProductTypeCreateInput,
   ProductTypeCreateResult,
@@ -8,6 +7,7 @@ import type {
   ProductTypeDetail,
   ProductTypeListItem,
   ProductTypeAssociationCharacteristic,
+  ProductTypeSeguimiento,
 } from "../types";
 
 export const PRODUCT_TYPE_ATTRIBUTE_LIMIT = 20;
@@ -43,10 +43,11 @@ export interface ProductTypeRepository {
     id: string,
     signal?: AbortSignal,
   ): Promise<ProductTypeDesactivarResult>;
-  // BLOCKED_CONTRACT: sondeo del resultado de la desasociación asíncrona (202).
-  // No hay endpoint OpenAPI confirmado; la simulación vive en el adapter mock.
+  // BLOCKED_CONTRACT: sondeo del resultado de una operación asíncrona sobre tipo de
+  // producto (desasociación o desactivación, 202). No hay endpoint OpenAPI confirmado
+  // para ninguna de las dos; la simulación determinista vive en el adapter mock.
   consultarEstadoOperacion(
     operacionId: string,
     signal?: AbortSignal,
-  ): Promise<DesasociacionSeguimiento>;
+  ): Promise<ProductTypeSeguimiento>;
 }

@@ -160,20 +160,69 @@ function DeactivateCategoryContent({ detalle }: { detalle: CategoryDetail }) {
               </StatusBadge>
             </Stack>
           </FeedbackAlert>
-          {seguimiento.status === "success" && (
-            <FeedbackAlert semantic="success" title="Baja confirmada">
-              <Stack gap="sm">
-                <Text size="sm">{seguimiento.result.mensaje}</Text>
-                {seguimiento.result.categoria && (
-                  <StatusBadge
-                    semantic={estadoSemantic[seguimiento.result.categoria.estado]}
-                  >
-                    {seguimiento.result.categoria.estado}
-                  </StatusBadge>
-                )}
-              </Stack>
-            </FeedbackAlert>
-          )}
+          {seguimiento.status === "success" &&
+            seguimiento.result.estado === "confirmada" && (
+              <FeedbackAlert semantic="success" title="Baja confirmada">
+                <Stack gap="sm">
+                  <Text size="sm">{seguimiento.result.mensaje}</Text>
+                  {seguimiento.result.categoria && (
+                    <StatusBadge
+                      semantic={estadoSemantic[seguimiento.result.categoria.estado]}
+                    >
+                      {seguimiento.result.categoria.estado}
+                    </StatusBadge>
+                  )}
+                </Stack>
+              </FeedbackAlert>
+            )}
+          {seguimiento.status === "success" &&
+            seguimiento.result.estado === "pendiente" && (
+              <FeedbackAlert semantic="warning" title="Baja aún en verificación">
+                <Stack gap="sm">
+                  <Text size="sm">{seguimiento.result.mensaje}</Text>
+                  {seguimiento.result.categoria && (
+                    <StatusBadge
+                      semantic={estadoSemantic[seguimiento.result.categoria.estado]}
+                    >
+                      {seguimiento.result.categoria.estado}
+                    </StatusBadge>
+                  )}
+                </Stack>
+              </FeedbackAlert>
+            )}
+          {seguimiento.status === "success" &&
+            seguimiento.result.estado === "rechazada" && (
+              <FeedbackAlert semantic="error" title="Baja rechazada">
+                <Stack gap="sm">
+                  <Text size="sm">{seguimiento.result.mensaje}</Text>
+                  {seguimiento.result.categoria && (
+                    <StatusBadge
+                      semantic={estadoSemantic[seguimiento.result.categoria.estado]}
+                    >
+                      {seguimiento.result.categoria.estado}
+                    </StatusBadge>
+                  )}
+                </Stack>
+              </FeedbackAlert>
+            )}
+          {seguimiento.status === "success" &&
+            seguimiento.result.estado === "no-concluyente" && (
+              <FeedbackAlert
+                semantic="warning"
+                title="Verificación no concluyente"
+              >
+                <Stack gap="sm">
+                  <Text size="sm">{seguimiento.result.mensaje}</Text>
+                  {seguimiento.result.categoria && (
+                    <StatusBadge
+                      semantic={estadoSemantic[seguimiento.result.categoria.estado]}
+                    >
+                      {seguimiento.result.categoria.estado}
+                    </StatusBadge>
+                  )}
+                </Stack>
+              </FeedbackAlert>
+            )}
           {seguimiento.status === "error" && (
             <FeedbackAlert
               semantic="error"

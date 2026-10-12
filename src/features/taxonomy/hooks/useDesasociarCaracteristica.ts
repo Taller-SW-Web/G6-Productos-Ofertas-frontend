@@ -58,7 +58,10 @@ export function useDesasociarCaracteristica(
       );
   };
 
-  const consultarEstado = (operacionId: string, onConfirmada?: () => void) => {
+  const consultarEstado = (
+    operacionId: string,
+    onResultado?: (result: DesasociacionSeguimiento) => void,
+  ) => {
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -69,7 +72,7 @@ export function useDesasociarCaracteristica(
         (result) => {
           if (controller.signal.aborted) return;
           setSeguimiento({ status: "success", result });
-          onConfirmada?.();
+          onResultado?.(result);
         },
         (error: unknown) => {
           if (controller.signal.aborted) return;

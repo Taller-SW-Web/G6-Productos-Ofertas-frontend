@@ -4,7 +4,6 @@ import { Avatar, Box, Button, Stack, Text } from "@mantine/core";
 import { IconPlus } from "@tabler/icons-react";
 import {
   EntityTable,
-  FeedbackAlert,
   FilterBar,
   PageHeader,
   SearchField,
@@ -100,9 +99,6 @@ export function BrandListPage() {
         }
       />
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Datos de demostración">
-          Las marcas mostradas son simuladas. Esta pantalla no consulta ni modifica marcas reales.
-        </FeedbackAlert>
         <FilterBar summary={`${filas.length} marcas visibles`}>
           <Box w={320}>
             <SearchField label="Buscar marca" value={busqueda} onChange={setBusqueda} placeholder="Nombre de la marca" />

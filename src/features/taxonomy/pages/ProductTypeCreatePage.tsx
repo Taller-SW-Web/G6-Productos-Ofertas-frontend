@@ -56,9 +56,6 @@ export function ProductTypeCreatePage() {
         ]}
       />
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Datos de demostración">
-          El formulario es simulado. No crea tipos de producto reales.
-        </FeedbackAlert>
         {isRevisionMode && creado && (
           <FeedbackAlert semantic="success" title="Tipo de producto creado">
             Redirigiendo al detalle del tipo de producto…
