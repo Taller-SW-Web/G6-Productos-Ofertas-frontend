@@ -15,6 +15,7 @@ import {
   IconEye,
   IconPencil,
   IconPlus,
+  IconPower,
 } from "@tabler/icons-react";
 import {
   EntityTable,
@@ -95,9 +96,7 @@ export function CategoryTreePage() {
             <Box w={28} aria-hidden="true" />
           )}
           <Box style={{ paddingLeft: nodo.nivel * 16 }}>
-            <UnstyledButton
-              onClick={() => navigate(`/MK008/S05/${nodo.id}`)}
-            >
+            <UnstyledButton onClick={() => navigate(`/MK008/S05/${nodo.id}`)}>
               <Text size="sm" fw={nodo.nivel === 0 ? 600 : 400}>
                 {nodo.nombre}
               </Text>
@@ -126,7 +125,7 @@ export function CategoryTreePage() {
     {
       key: "acciones",
       header: "Acciones",
-      width: 120,
+      width: 160,
       align: "right",
       render: (nodo) => (
         <Group gap="xs" justify="flex-end" wrap="nowrap">
@@ -143,6 +142,14 @@ export function CategoryTreePage() {
             onClick={() => navigate(`/MK008/S03/${nodo.id}`)}
           >
             <IconPencil size={16} stroke={2} aria-hidden="true" />
+          </ActionIcon>
+          <ActionIcon
+            variant="subtle"
+            aria-label={`Desactivar ${nodo.nombre}`}
+            disabled={nodo.estado !== "Activo"}
+            onClick={() => navigate(`/MK008/S04/${nodo.id}`)}
+          >
+            <IconPower size={16} stroke={2} aria-hidden="true" />
           </ActionIcon>
         </Group>
       ),
@@ -205,7 +212,7 @@ export function CategoryTreePage() {
           rows={filas}
           rowKey={(nodo) => nodo.id}
           state={tablaState}
-          minWidth={760}
+          minWidth={900}
           empty={vacio}
         />
       </Stack>

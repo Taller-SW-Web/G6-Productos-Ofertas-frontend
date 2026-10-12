@@ -83,3 +83,93 @@ export interface CategoryUpdateInput {
   descripcion?: string;
   orden: number;
 }
+
+// S04/S04-B/S05-R (Baja y reactivación) — presentation models. Simulated dependencies,
+// not an agency over product or inventory state.
+export interface BloqueoDependencia {
+  tipo: "subcategorias" | "productos" | "padre";
+  cantidad: number;
+  detalle: string;
+}
+
+export interface BajaSolicitudResult {
+  resultado: "verificando" | "rechazada";
+  categoria: CategoryDetail;
+  bloqueos: BloqueoDependencia[];
+  mensaje: string;
+}
+
+export interface ReactivacionResult {
+  resultado: "reactivada" | "bloqueada";
+  categoria: CategoryDetail;
+  bloqueos: BloqueoDependencia[];
+  mensaje: string;
+}
+
+// MK-009 (Características y sus valores) — presentation models. Not provider DTOs
+// or a new HTTP contract. SPEC/HU/FLOW/WF-009.
+export type CharacteristicType = "TEXTO" | "NUMERO" | "LISTA";
+
+export type EntityStatus = "Activo" | "Inactivo";
+export type CharacteristicStatus = EntityStatus;
+export type CharacteristicValueStatus = EntityStatus;
+
+export interface CharacteristicValue {
+  valorId: string;
+  nombre: string;
+  estado: CharacteristicValueStatus;
+  version: number;
+}
+
+export interface CharacteristicValueInput {
+  nombre: string;
+}
+
+export interface CharacteristicListItem {
+  id: string;
+  nombre: string;
+  tipo: CharacteristicType;
+  estado: CharacteristicStatus;
+  unidad?: string;
+  valoresActivos: number;
+}
+
+export interface CharacteristicCatalogConfig {
+  maxTexto: number;
+  maxValoresLista: number;
+}
+
+// S02 (Crear característica) — presentation models. The type is chosen at creation
+// and cannot change afterwards; NUMERO requires a unit.
+export interface CharacteristicCreateInput {
+  nombre: string;
+  tipo: CharacteristicType;
+  estado: CharacteristicStatus;
+  unidad?: string;
+}
+
+export interface CharacteristicCreateResult {
+  id: string;
+  nombre: string;
+  tipo: CharacteristicType;
+  estado: CharacteristicStatus;
+  unidad?: string;
+}
+
+// S03/S06 (Editar y Detalle) — single characteristic. SPEC-009 defines the type as
+// immutable, so the update input intentionally excludes it and the state.
+export interface CharacteristicDetail {
+  id: string;
+  nombre: string;
+  tipo: CharacteristicType;
+  estado: CharacteristicStatus;
+  unidad?: string;
+  valoresActivos: number;
+  valores?: CharacteristicValue[];
+}
+
+export interface CharacteristicUpdateInput {
+  id: string;
+  nombre: string;
+  unidad?: string;
+}

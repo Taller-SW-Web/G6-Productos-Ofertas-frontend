@@ -5,6 +5,7 @@ import {
   IconForms,
   IconLayoutList,
   IconMessageCircle,
+  IconTag,
   type TablerIcon,
 } from "@tabler/icons-react";
 export interface NavigationItem {
@@ -17,6 +18,7 @@ export const productNavigation: NavigationItem[] = [
 ];
 export const taxonomyNavigation: NavigationItem[] = [
   { to: "/MK008/S01", label: "Categorías", icon: IconCategory },
+  { to: "/caracteristicas", label: "Características", icon: IconTag },
 ];
 export const demoNavigation: NavigationItem[] = [
   {

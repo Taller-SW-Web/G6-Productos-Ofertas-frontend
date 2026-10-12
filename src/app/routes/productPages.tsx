@@ -24,3 +24,50 @@ export const CategoryDetailPage = lazy(() =>
     default: module.CategoryDetailPage,
   })),
 );
+export const DeactivateCategoryPage = lazy(() =>
+  import("../../features/taxonomy/pages/DeactivateCategoryPage").then((module) => ({
+    default: module.DeactivateCategoryPage,
+  })),
+);
+export const CharacteristicListPage = lazy(() =>
+  import("../../features/taxonomy/pages/CharacteristicListPage").then(
+    (module) => ({
+      default: module.CharacteristicListPage,
+    }),
+  ),
+);
+export const CharacteristicCreatePage = lazy(() =>
+  import("../../features/taxonomy/pages/CharacteristicCreatePage").then(
+    (module) => ({
+      default: module.CharacteristicCreatePage,
+    }),
+  ),
+);
+export const CharacteristicEditPage = lazy(() =>
+  import("../../features/taxonomy/pages/CharacteristicEditPage").then(
+    (module) => ({
+      default: module.CharacteristicEditPage,
+    }),
+  ),
+);
+export const CharacteristicDetailPage = lazy(() =>
+  import("../../features/taxonomy/pages/CharacteristicDetailPage").then(
+    (module) => ({
+      default: module.CharacteristicDetailPage,
+    }),
+  ),
+);
+export const CharacteristicValuesPage = lazy(() =>
+  import("../../features/taxonomy/pages/CharacteristicValuesPage").then(
+    (module) => ({
+      default: module.CharacteristicValuesPage,
+    }),
+  ),
+);
+export const CharacteristicStatePage = lazy(() =>
+  import("../../features/taxonomy/pages/CharacteristicStatePage").then(
+    (module) => ({
+      default: module.CharacteristicStatePage,
+    }),
+  ),
+);

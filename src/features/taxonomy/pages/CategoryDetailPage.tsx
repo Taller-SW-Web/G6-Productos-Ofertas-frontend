@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Anchor,
@@ -9,7 +8,7 @@ import {
   Stack,
   Text,
 } from "@mantine/core";
-import { IconPencil, IconPower } from "@tabler/icons-react";
+import { IconPencil, IconPower, IconRefresh } from "@tabler/icons-react";
 import {
   EntityTable,
   FeedbackAlert,
@@ -18,38 +17,17 @@ import {
   StatusBadge,
   type TableColumn,
 } from "../../../components/shared";
+import { CampoDato } from "../components/CampoDato";
+import { ListaBloqueos } from "../components/ListaBloqueos";
 import { useCategoryDetail } from "../hooks/useCategoryDetail";
+import { useReactivarCategoria } from "../hooks/useReactivarCategoria";
+import { scenariosCatalogo, scenariosReactivacion } from "../services/categoryRepository";
 import {
-  scenariosCatalogo,
-  type CategoryCatalogScenario,
-} from "../services/categoryRepository";
+  parseCatalogScenario,
+  parseReactivacionScenario,
+} from "../services/scenarioParams";
 import { estadoSemantic } from "../services/estadoSemantic";
-import type { CategoryNode } from "../types";
-
-function parseCatalogScenario(raw: string | null): CategoryCatalogScenario {
-  return scenariosCatalogo.some((item) => item.value === raw)
-    ? (raw as CategoryCatalogScenario)
-    : "default";
-}
-
-function CampoDato({
-  etiqueta,
-  children,
-}: {
-  etiqueta: string;
-  children: ReactNode;
-}) {
-  return (
-    <Group gap="xs" align="flex-start" wrap="wrap">
-      <Text size="sm" fw={600} w={140}>
-        {etiqueta}
-      </Text>
-      <Group gap="xs" align="center" wrap="wrap">
-        {children}
-      </Group>
-    </Group>
-  );
-}
+import type { CategoryDetail, CategoryNode } from "../types";
 
 const columnasHijas: TableColumn<CategoryNode>[] = [
   {
@@ -98,7 +76,7 @@ function CategoryDetailLoader({ id }: { id: string }) {
   const isRevisionMode =
     import.meta.env.DEV && params.get("modoRevision") === "1";
   const catalogScenario = parseCatalogScenario(params.get("escenario"));
-  const { state } = useCategoryDetail(id, catalogScenario);
+  const { state, reload } = useCategoryDetail(id, catalogScenario);
 
   const titulo =
     state.status === "success" ? state.detalle.nombre : "Detalle de categoría";
@@ -157,93 +135,199 @@ function CategoryDetailLoader({ id }: { id: string }) {
           </FeedbackAlert>
         )}
         {state.status === "success" && (
-          <>
-            <FeedbackAlert semantic="info" title="Datos de demostración">
-              El detalle es simulado. Esta pantalla no consulta categorías reales
-              del catálogo.
-            </FeedbackAlert>
-            <SectionCard
-              title="Información general"
-              description="Datos de la categoría en la taxonomía."
-              actions={
-                <Group gap="sm">
-                  <Button
-                    leftSection={
-                      <IconPencil size={16} stroke={2} aria-hidden="true" />
-                    }
-                    onClick={() => navigate(`/MK008/S03/${state.detalle.id}`)}
-                  >
-                    Editar
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled
-                    leftSection={
-                      <IconPower size={16} stroke={2} aria-hidden="true" />
-                    }
-                  >
-                    Desactivar
-                  </Button>
-                </Group>
-              }
-            >
-              <Stack gap="sm">
-                <CampoDato etiqueta="Nombre">{state.detalle.nombre}</CampoDato>
-                <CampoDato etiqueta="Slug">{state.detalle.slug}</CampoDato>
-                <CampoDato etiqueta="Nivel">{state.detalle.nivel}</CampoDato>
-                <CampoDato etiqueta="Orden">{state.detalle.orden}</CampoDato>
-                <CampoDato etiqueta="Estado">
-                  <StatusBadge semantic={estadoSemantic[state.detalle.estado]}>
-                    {state.detalle.estado}
-                  </StatusBadge>
-                </CampoDato>
-                <CampoDato etiqueta="Categoría padre">
-                  {state.detalle.padreId && state.detalle.padreNombre ? (
-                    <Anchor
-                      component={Link}
-                      to={`/MK008/S05/${state.detalle.padreId}`}
-                      size="sm"
-                    >
-                      {state.detalle.padreNombre}
-                    </Anchor>
-                  ) : (
-                    <Text size="sm" c="dimmed">
-                      Categoría raíz
-                    </Text>
-                  )}
-                </CampoDato>
-                <CampoDato etiqueta="Descripción">
-                  {state.detalle.descripcion ? (
-                    state.detalle.descripcion
-                  ) : (
-                    <Text size="sm" c="dimmed">
-                      Sin descripción
-                    </Text>
-                  )}
-                </CampoDato>
-              </Stack>
-            </SectionCard>
-            <SectionCard
-              title="Subcategorías"
-              description="Categorías hijas directas de esta categoría."
-            >
-              <EntityTable
-                caption="Subcategorías"
-                columns={columnasHijas}
-                rows={state.detalle.hijas}
-                rowKey={(nodo) => nodo.id}
-                state={{ status: "success" }}
-                minWidth={520}
-                empty={{
-                  title: "Sin subcategorías",
-                  description:
-                    "Esta categoría no tiene subcategorías registradas.",
-                }}
-              />
-            </SectionCard>
-          </>
+          <CategoryDetailContent
+            detalle={state.detalle}
+            onReload={reload}
+            isRevisionMode={isRevisionMode}
+          />
         )}
       </Stack>
+    </>
+  );
+}
+
+function CategoryDetailContent({
+  detalle,
+  onReload,
+  isRevisionMode,
+}: {
+  detalle: CategoryDetail;
+  onReload: () => void;
+  isRevisionMode: boolean;
+}) {
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const reactivacionScenario = parseReactivacionScenario(params.get("reactivacion"));
+  const { state, reactivar, reiniciar } = useReactivarCategoria();
+
+  const esActivo = detalle.estado === "Activo";
+
+  return (
+    <>
+      {isRevisionMode && (
+        <Select
+          label="Escenario de revisión de reactivación"
+          value={reactivacionScenario}
+          data={scenariosReactivacion}
+          maw={360}
+          onChange={(next) => {
+            if (!next) return;
+            setParams((prev) => {
+              const copy = new URLSearchParams(prev);
+              copy.set("reactivacion", next);
+              return copy;
+            });
+          }}
+        />
+      )}
+
+      {state.status === "reactivada" && (
+        <FeedbackAlert
+          semantic="success"
+          title="Categoría reactivada"
+          actions={
+            <Group gap="sm">
+              <Button
+                onClick={() => {
+                  onReload();
+                  reiniciar();
+                }}
+              >
+                Actualizar estado
+              </Button>
+              <Button variant="outline" onClick={() => navigate("/MK008/S01")}>
+                Volver al árbol
+              </Button>
+            </Group>
+          }
+        >
+          {state.result.mensaje}
+        </FeedbackAlert>
+      )}
+
+      {state.status === "bloqueada" && (
+        <FeedbackAlert
+          semantic="error"
+          title="Reactivación bloqueada"
+          actions={
+            <Group gap="sm">
+              <Button variant="outline" onClick={reiniciar}>
+                Entendido
+              </Button>
+              <Button variant="outline" onClick={() => navigate("/MK008/S01")}>
+                Volver al árbol
+              </Button>
+            </Group>
+          }
+        >
+          <Stack gap="sm">
+            <Text size="sm">{state.result.mensaje}</Text>
+            <ListaBloqueos bloqueos={state.result.bloqueos} />
+          </Stack>
+        </FeedbackAlert>
+      )}
+
+      {state.status === "error" && (
+        <FeedbackAlert
+          semantic="error"
+          title="No se pudo reactivar la categoría"
+          actions={
+            <Button variant="outline" onClick={reiniciar}>
+              Entendido
+            </Button>
+          }
+        >
+          {state.message}
+        </FeedbackAlert>
+      )}
+
+      <SectionCard
+        title="Información general"
+        description="Datos de la categoría en la taxonomía."
+        actions={
+          <Group gap="sm">
+            <Button
+              leftSection={<IconPencil size={16} stroke={2} aria-hidden="true" />}
+              onClick={() => navigate(`/MK008/S03/${detalle.id}`)}
+            >
+              Editar
+            </Button>
+            {esActivo ? (
+              <Button
+                variant="outline"
+                color="danger"
+                leftSection={<IconPower size={16} stroke={2} aria-hidden="true" />}
+                onClick={() => navigate(`/MK008/S04/${detalle.id}`)}
+              >
+                Desactivar
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                leftSection={<IconRefresh size={16} stroke={2} aria-hidden="true" />}
+                loading={state.status === "enviando"}
+                onClick={() => reactivar(detalle.id, reactivacionScenario)}
+              >
+                Reactivar
+              </Button>
+            )}
+          </Group>
+        }
+      >
+        <Stack gap="sm">
+          <CampoDato etiqueta="Nombre">{detalle.nombre}</CampoDato>
+          <CampoDato etiqueta="Slug">{detalle.slug}</CampoDato>
+          <CampoDato etiqueta="Nivel">{detalle.nivel}</CampoDato>
+          <CampoDato etiqueta="Orden">{detalle.orden}</CampoDato>
+          <CampoDato etiqueta="Estado">
+            <StatusBadge semantic={estadoSemantic[detalle.estado]}>
+              {detalle.estado}
+            </StatusBadge>
+          </CampoDato>
+          <CampoDato etiqueta="Categoría padre">
+            {detalle.padreId && detalle.padreNombre ? (
+              <Anchor
+                component={Link}
+                to={`/MK008/S05/${detalle.padreId}`}
+                size="sm"
+              >
+                {detalle.padreNombre}
+              </Anchor>
+            ) : (
+              <Text size="sm" c="dimmed">
+                Categoría raíz
+              </Text>
+            )}
+          </CampoDato>
+          <CampoDato etiqueta="Descripción">
+            {detalle.descripcion ? (
+              detalle.descripcion
+            ) : (
+              <Text size="sm" c="dimmed">
+                Sin descripción
+              </Text>
+            )}
+          </CampoDato>
+        </Stack>
+      </SectionCard>
+
+      <SectionCard
+        title="Subcategorías"
+        description="Categorías hijas directas de esta categoría."
+      >
+        <EntityTable
+          caption="Subcategorías"
+          columns={columnasHijas}
+          rows={detalle.hijas}
+          rowKey={(nodo) => nodo.id}
+          state={{ status: "success" }}
+          minWidth={520}
+          empty={{
+            title: "Sin subcategorías",
+            description: "Esta categoría no tiene subcategorías registradas.",
+          }}
+        />
+      </SectionCard>
     </>
   );
 }

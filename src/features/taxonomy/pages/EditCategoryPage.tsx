@@ -26,6 +26,7 @@ import {
   type CategoryCatalogScenario,
   type CategoryFormScenario,
 } from "../services/categoryRepository";
+import { parseCatalogScenario } from "../services/scenarioParams";
 import type { CategoryDetail, CategoryNode } from "../types";
 
 const slugScenarios: { value: CategoryFormScenario; label: string }[] = [
@@ -34,12 +35,6 @@ const slugScenarios: { value: CategoryFormScenario; label: string }[] = [
   { value: "slug-con-colision", label: "Slug con colisión" },
   { value: "slug-carrera-409", label: "Colisión al guardar (409)" },
 ];
-
-function parseCatalogScenario(raw: string | null): CategoryCatalogScenario {
-  return scenariosCatalogo.some((item) => item.value === raw)
-    ? (raw as CategoryCatalogScenario)
-    : "default";
-}
 
 function parseFormScenario(raw: string | null): CategoryFormScenario {
   return slugScenarios.some((item) => item.value === raw)

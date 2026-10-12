@@ -12,8 +12,9 @@ export type CategoryDetailState =
 export function useCategoryDetail(
   id: string,
   scenario: CategoryCatalogScenario,
-): { state: CategoryDetailState } {
+): { state: CategoryDetailState; reload: () => void } {
   const [state, setState] = useState<CategoryDetailState>({ status: "loading" });
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -38,7 +39,9 @@ export function useCategoryDetail(
       },
     );
     return () => controller.abort();
-  }, [id, scenario]);
+  }, [id, scenario, reloadToken]);
 
-  return { state };
+  const reload = () => setReloadToken((token) => token + 1);
+
+  return { state, reload };
 }

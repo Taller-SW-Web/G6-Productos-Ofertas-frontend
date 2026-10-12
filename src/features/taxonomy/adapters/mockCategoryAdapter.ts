@@ -1,5 +1,9 @@
 import type { CategoryRepository } from "../services/categoryRepository";
-import type { CategoryDetail, CategoryNode } from "../types";
+import type {
+  BloqueoDependencia,
+  CategoryDetail,
+  CategoryNode,
+} from "../types";
 
 // In-memory flat store for MK-008. No HTTP contract exists yet; writes are simulated
 // and lost on reload. Keeping it flat makes parent/child relationships explicit.
@@ -11,6 +15,9 @@ interface RegistroCategoria {
   orden: number;
   estado: CategoryNode["estado"];
   descripcion?: string;
+  // Simulated dependency count. Taxonomy does not own product state; used only to
+  // exercise the deactivation/reactivation review flows.
+  productosActivos?: number;
 }
 
 const store: RegistroCategoria[] = [
@@ -22,6 +29,7 @@ const store: RegistroCategoria[] = [
     orden: 1,
     estado: "Activo",
     descripcion: "Calzado para dama y caballero.",
+    productosActivos: 0,
   },
   {
     id: "ropa",
@@ -31,6 +39,7 @@ const store: RegistroCategoria[] = [
     orden: 2,
     estado: "Activo",
     descripcion: "Prendas de vestir.",
+    productosActivos: 0,
   },
   {
     id: "running",
@@ -39,6 +48,7 @@ const store: RegistroCategoria[] = [
     padreId: "calzado",
     orden: 1,
     estado: "Activo",
+    productosActivos: 12,
   },
   {
     id: "casual",
@@ -47,6 +57,7 @@ const store: RegistroCategoria[] = [
     padreId: "calzado",
     orden: 2,
     estado: "Activo",
+    productosActivos: 0,
   },
   {
     id: "play",
@@ -55,6 +66,7 @@ const store: RegistroCategoria[] = [
     padreId: "ropa",
     orden: 1,
     estado: "Inactivo",
+    productosActivos: 5,
   },
   {
     id: "office",
@@ -63,6 +75,7 @@ const store: RegistroCategoria[] = [
     padreId: "ropa",
     orden: 2,
     estado: "Verificando baja",
+    productosActivos: 0,
   },
 ];
 
@@ -191,6 +204,7 @@ export const mockCategoryAdapter: CategoryRepository = {
       orden: hijasDe(padreId).length + 1,
       estado: "Activo",
       descripcion: input.descripcion,
+      productosActivos: 0,
     });
     return { id, nombre: input.nombre, slug: input.slug };
   },
@@ -224,5 +238,159 @@ export const mockCategoryAdapter: CategoryRepository = {
     registro.descripcion = input.descripcion;
 
     return aDetalle(registro);
+  },
+
+  async solicitarBaja(id, scenario, signal) {
+    signal.throwIfAborted();
+    await esperar(500);
+    signal.throwIfAborted();
+
+    const registro = hallar(id);
+    if (!registro) {
+      throw new Error("La categoría ya no está disponible para desactivar.");
+    }
+
+    if (scenario === "error") {
+      throw new Error("No se pudo verificar la baja. Inténtalo de nuevo.");
+    }
+
+    if (scenario === "rechazada-subcategorias") {
+      const cantidad = hijasDe(id).filter((item) => item.estado === "Activo").length || 1;
+      return {
+        resultado: "rechazada",
+        categoria: aDetalle(registro),
+        bloqueos: [
+          {
+            tipo: "subcategorias",
+            cantidad,
+            detalle: "Subcategorías activas que dependen de esta categoría.",
+          },
+        ],
+        mensaje:
+          "No se puede desactivar: la categoría tiene subcategorías activas.",
+      };
+    }
+
+    if (scenario === "rechazada-productos") {
+      const cantidad = registro.productosActivos || 1;
+      return {
+        resultado: "rechazada",
+        categoria: aDetalle(registro),
+        bloqueos: [
+          {
+            tipo: "productos",
+            cantidad,
+            detalle: "Productos activos asociados a esta categoría.",
+          },
+        ],
+        mensaje: "No se puede desactivar: la categoría tiene productos activos.",
+      };
+    }
+
+    if (scenario === "default") {
+      const hijasActivas = hijasDe(id).filter((item) => item.estado === "Activo");
+      if (hijasActivas.length > 0) {
+        return {
+          resultado: "rechazada",
+          categoria: aDetalle(registro),
+          bloqueos: [
+            {
+              tipo: "subcategorias",
+              cantidad: hijasActivas.length,
+              detalle: "Subcategorías activas que dependen de esta categoría.",
+            },
+          ],
+          mensaje:
+            "No se puede desactivar: la categoría tiene subcategorías activas.",
+        };
+      }
+      const productos = registro.productosActivos ?? 0;
+      if (productos > 0) {
+        return {
+          resultado: "rechazada",
+          categoria: aDetalle(registro),
+          bloqueos: [
+            {
+              tipo: "productos",
+              cantidad: productos,
+              detalle: "Productos activos asociados a esta categoría.",
+            },
+          ],
+          mensaje:
+            "No se puede desactivar: la categoría tiene productos activos.",
+        };
+      }
+    }
+
+    registro.estado = "Verificando baja";
+    return {
+      resultado: "verificando",
+      categoria: aDetalle(registro),
+      bloqueos: [],
+      mensaje:
+        "La solicitud de baja quedó en verificación. La categoría se marcará como inactiva al finalizar.",
+    };
+  },
+
+  async reactivar(id, scenario, signal) {
+    signal.throwIfAborted();
+    await esperar(500);
+    signal.throwIfAborted();
+
+    const registro = hallar(id);
+    if (!registro) {
+      throw new Error("La categoría ya no está disponible para reactivar.");
+    }
+
+    if (scenario === "error") {
+      throw new Error("No se pudo reactivar la categoría. Inténtalo de nuevo.");
+    }
+
+    const productos = registro.productosActivos ?? 0;
+    const padre = registro.padreId ? hallar(registro.padreId) : undefined;
+    const padreBloqueante = padre && padre.estado !== "Activo";
+
+    const bloqueada =
+      scenario === "bloqueada" ||
+      (scenario === "default" && (productos > 0 || Boolean(padreBloqueante)));
+
+    if (bloqueada) {
+      const bloqueos: BloqueoDependencia[] = [];
+      if (productos > 0) {
+        bloqueos.push({
+          tipo: "productos",
+          cantidad: productos,
+          detalle: "Productos activos asociados a esta categoría.",
+        });
+      }
+      if (padreBloqueante && padre) {
+        bloqueos.push({
+          tipo: "padre",
+          cantidad: 1,
+          detalle: `La categoría padre «${padre.nombre}» no está activa.`,
+        });
+      }
+      if (bloqueos.length === 0) {
+        bloqueos.push({
+          tipo: "productos",
+          cantidad: 1,
+          detalle: "La categoría tiene dependencias que impiden reactivarla.",
+        });
+      }
+      return {
+        resultado: "bloqueada",
+        categoria: aDetalle(registro),
+        bloqueos,
+        mensaje: "No se puede reactivar la categoría en este momento.",
+      };
+    }
+
+    registro.estado = "Activo";
+    return {
+      resultado: "reactivada",
+      categoria: aDetalle(registro),
+      bloqueos: [],
+      mensaje: "La categoría se reactivó correctamente.",
+    };
   },
 };

@@ -1,9 +1,11 @@
 import type {
+  BajaSolicitudResult,
   CategoryCreateInput,
   CategoryCreateResult,
   CategoryDetail,
   CategoryNode,
   CategoryUpdateInput,
+  ReactivacionResult,
   SlugCheckResult,
 } from "../types";
 
@@ -32,6 +34,37 @@ export const scenariosCatalogo: {
   { value: "no-encontrado", label: "Categoría no encontrada" },
 ];
 
+// Deterministic scenarios for local review of the deactivation request (S04/S04-P/S04-B).
+export type CategoryBajaScenario =
+  | "default"
+  | "verificando"
+  | "rechazada-subcategorias"
+  | "rechazada-productos"
+  | "error";
+
+export const scenariosBaja: {
+  value: CategoryBajaScenario;
+  label: string;
+}[] = [
+  { value: "default", label: "Por defecto (según dependencias)" },
+  { value: "verificando", label: "Baja en verificación (S04-P)" },
+  { value: "rechazada-subcategorias", label: "Baja rechazada por subcategorías" },
+  { value: "rechazada-productos", label: "Baja rechazada por productos" },
+  { value: "error", label: "Error al verificar" },
+];
+
+// Deterministic scenarios for local review of reactivation (S05-R).
+export type CategoryReactivacionScenario = "default" | "bloqueada" | "error";
+
+export const scenariosReactivacion: {
+  value: CategoryReactivacionScenario;
+  label: string;
+}[] = [
+  { value: "default", label: "Por defecto (según dependencias)" },
+  { value: "bloqueada", label: "Reactivación bloqueada (S05-R)" },
+  { value: "error", label: "Error al reactivar" },
+];
+
 export interface CategoryRepository {
   list(signal: AbortSignal): Promise<CategoryListResult>;
   obtener(
@@ -54,4 +87,14 @@ export interface CategoryRepository {
     scenario: CategoryFormScenario,
     signal: AbortSignal,
   ): Promise<CategoryDetail>;
+  solicitarBaja(
+    id: string,
+    scenario: CategoryBajaScenario,
+    signal: AbortSignal,
+  ): Promise<BajaSolicitudResult>;
+  reactivar(
+    id: string,
+    scenario: CategoryReactivacionScenario,
+    signal: AbortSignal,
+  ): Promise<ReactivacionResult>;
 }
