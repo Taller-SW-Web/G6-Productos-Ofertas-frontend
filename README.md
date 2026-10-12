@@ -53,7 +53,7 @@ La aplicación funciona sin Backend, Docs, credenciales ni variables de entorno.
 
 Los tres listados conservan filtros/paginación en URL al abrir detalle, editar y regresar. Los parámetros representan contexto de UI. No hay buscador remoto no publicado ni acciones de consumo/restitución. El router de datos de React Router permite bloquear la salida con borrador pendiente, incluido Atrás; los layouts anidados conservan formularios al abrir/cancelar selectores.
 
-Las escrituras se guardan **en memoria de la pestaña y se reinician al recargar**. Una promoción de modalidad cupón creada en la sesión aparece al crear un cupón. Asociar un cupón o haber activado una promoción bloquea el cambio de modalidad; la UI depende de una capacidad informada por el mock. No se expanden productos completos a SKU ni se infiere superioridad por precio. Precio/disponibilidad de recomendaciones siguen **No disponible** por D-REC-01/02.
+Las escrituras se guardan **en memoria de la pestaña y se reinician al recargar**. Una promoción de modalidad cupón creada en la sesión aparece al crear un cupón. La capacidad de cambiar modalidad procede del servicio: requiere inactividad, ninguna activación histórica, ningún cupón asociado actualmente y ningún uso histórico. Reasignar el último cupón sin uso libera la asociación anterior; no borra activaciones ni usos. La capacidad desconocida se conserva desconocida. No se expanden productos completos a SKU ni se infiere superioridad por precio. Precio/disponibilidad de recomendaciones siguen **No disponible** por D-REC-01/02.
 
 Solo en desarrollo, `modoRevision=1&escenario=...` habilita escenarios deterministas: `loading`, `empty`, `error`, `missing`, `session`, `forbidden`, `saving`, `save-error`, `rejected`, `conflict`, `unknown-result`; además `usage-unavailable` en Cupones y `selection-empty`, `selection-error`, `unknown-capability` donde corresponden. Producción ignora estos parámetros. Ejemplo: `/promociones/carrera/editar?modoRevision=1&escenario=conflict`. Un resultado incierto bloquea repetir la escritura y permite consultar el resultado. Las creaciones de promociones/reglas sin identificador confirmado requieren localizar el registro en el listado, sin reenvío automático. Escenarios, capturas y límites en [AVANCE_FRONTEND_CUEVA.md](docs/AVANCE_FRONTEND_CUEVA.md).
 
@@ -71,6 +71,10 @@ src/features/foundation/ Galería y casos de revisión de componentes
 ```
 
 Registrar una feature en `productRoutes.tsx` y su navegación en `navigation.ts` (con `group` para el grupo funcional), reutilizando shell y theme. Mantener las demos en `demoRoutes.tsx`. Los shared no conocen endpoints, credenciales, DTOs externos ni reglas autoritativas de negocio. La [guía de componentes](docs/COMPONENTES_FOUNDATION.md) contiene APIs y ejemplos; la [guía de implementación](docs/GUIA_IMPLEMENTACION_FRONTEND_REACT.md) contiene el procedimiento y gates.
+
+En Promotions, `services/promotionServices.ts` es el punto central de composición. `createMockPromotionServices({ catalog: adaptadorCatalogo })` permite sustituir un puerto y conservar los mocks restantes; estos consultan el puerto inyectado, no los fixtures de otra funcionalidad. También acepta `coupons`, `campaigns` y `recommendations`. `createPromotionServices` recibe los cuatro puertos para una composición sin simulación de historial. Los archivos `*Service.ts` son aliases de esa composición. Cada factory crea una memoria aislada; los adapters externos deberán mapear sus DTO al modelo de presentación y respetar el contrato oficial antes de seleccionarse aquí. La sustitución está probada con dobles de servicios; no acredita integración HTTP real.
+
+Los contratos de repositorio reciben datos y `AbortSignal`; no reciben `scenario`. `dev/reviewServices.ts` selecciona decoradores de fallos únicamente en DEV, separados de los adapters. Las reglas reutilizables de cupones, promociones y recomendaciones están en `services/*Validation.ts` y son utilizadas por los formularios y los mocks. Una API real debe seguir revalidando las reglas en el servidor.
 
 ## Documentación normativa de Docs
 
@@ -92,6 +96,16 @@ La Foundation de `vera` se integró mediante [PR #2](https://github.com/Taller-S
 
 [VALIDACION_FOUNDATION.md](docs/VALIDACION_FOUNDATION.md) y [PR_FOUNDATION.md](docs/PR_FOUNDATION.md) conservan el reporte histórico del 9 de octubre: sus referencias a publicación pendiente/403 no describen el estado actual de la PR ya fusionada. El diagnóstico y la entrega de los issues #7/#8/#9 en `cueva`, fuentes y verificaciones están en [AVANCE_FRONTEND_CUEVA.md](docs/AVANCE_FRONTEND_CUEVA.md). Una PR fusionada no acredita aprobación UX de todos los MK.
 
-El workflow `.github/workflows/frontend.yml` ejecuta instalación, typecheck, build, lint y la suite Playwright completa en Ubuntu/Node 22. Playwright valida Chromium a 1440×900 y genera evidencia en `docs/evidencias/`. Un workflow definido no acredita que ya haya corrido ni recibido aprobación.
+El workflow `.github/workflows/frontend.yml` ejecuta instalación, typecheck, build, lint y la suite Playwright completa en Ubuntu/Node 22. Playwright valida Chromium a 1440×900 y guarda las capturas de cada ejecución en `test-results/`, sin sobrescribir la evidencia versionada del equipo. `tests/promotions-visual.spec.ts` produce las 19 capturas y sus mediciones para revisión UX. Un workflow definido no acredita que ya haya corrido ni recibido aprobación.
 
-Pendientes: revisión técnica/UX independiente, aprobación documental y publicación de la entrega. Los contratos administrativos siguen provisionales y requieren provider/auth/grants comprobados antes de conectar HTTP. Q-013-01/02 mantienen abiertos el contrato de archivo y la admisión con errores de Pricing; no bloquean su S01. Autenticación, permisos reales, APIs, escritura comercial, mobile/tablet y evaluación WCAG exhaustiva no se acreditan mediante estos mocks.
+Para actualizar deliberadamente las evidencias de los tres MK de Cueva después de revisarlas, en PowerShell:
+
+```powershell
+$env:UPDATE_PROMOTIONS_EVIDENCE = "1"
+npm test -- --workers=2 --grep "desktop evidence|seven desktop views"
+Remove-Item Env:UPDATE_PROMOTIONS_EVIDENCE
+```
+
+El opt-in solo admite nombres de capturas de Cupones/Promociones/Recomendaciones. Foundation y Pricing conservan siempre sus evidencias versionadas durante estas pruebas.
+
+La entrega anterior se integró mediante PR #22; Axel autorizó publicar las correcciones posteriores en `cueva` y abrir una nueva PR hacia `master`. Véase la actualización al final de [AVANCE_FRONTEND_CUEVA.md](docs/AVANCE_FRONTEND_CUEVA.md); la PR registra el estado remoto y de revisión. Pendientes: revisión técnica/UX independiente y aprobación documental. Los contratos administrativos siguen provisionales y requieren provider/auth/grants comprobados antes de conectar HTTP. Q-013-01/02 mantienen abiertos el contrato de archivo y la admisión con errores de Pricing; no bloquean su S01. Autenticación, permisos reales, APIs, escritura comercial, mobile/tablet y evaluación WCAG exhaustiva no se acreditan mediante estos mocks.

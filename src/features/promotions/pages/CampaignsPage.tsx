@@ -1,3 +1,5 @@
+import { administrationScenario } from "../dev/demoScenarios";
+import { reviewServices } from "../dev/reviewServices";
 import { useCallback } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Button, Group, Select, Stack } from "@mantine/core";
@@ -10,8 +12,7 @@ import {
   type TableColumn,
 } from "../../../components/shared";
 import { useAdministrationRead } from "../hooks/useAdministrationRead";
-import { administrationScenario } from "../services/administration";
-import { campaignService } from "../services/campaignService";
+
 import type { CampaignView } from "../services/campaignRepository";
 import {
   couponStatusLabel,
@@ -40,7 +41,10 @@ export function CampaignsPage() {
     scenario = administrationScenario(params);
   const read = useCallback(
     (signal: AbortSignal) =>
-      campaignService.list({ status, kind, page, pageSize }, scenario, signal),
+      reviewServices(scenario).campaigns.list(
+        { status, kind, page, pageSize },
+        signal,
+      ),
     [status, kind, page, pageSize, scenario],
   );
   const state = useAdministrationRead(

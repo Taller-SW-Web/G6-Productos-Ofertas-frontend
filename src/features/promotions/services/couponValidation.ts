@@ -3,6 +3,55 @@ import type {
   CouponInput,
   CouponView,
 } from "./couponRepository";
+import { positiveDecimal } from "./administration";
+
+export type CouponConfiguration = Omit<CouponInput, "status">;
+export function normalizeCouponConfiguration<T extends CouponConfiguration>(
+  input: T,
+): T {
+  return {
+    ...input,
+    code: normalizeCouponCode(input.code),
+    promotionId: input.promotionId.trim(),
+    minimumAmount:
+      input.minimumAmount === null
+        ? null
+        : input.minimumAmount.trim().replace(",", "."),
+  };
+}
+export function couponInputErrors(
+  input: CouponConfiguration & { status?: string },
+  creating = false,
+): CouponFieldErrors {
+  const errors: CouponFieldErrors = {};
+  if (!/^[A-Z0-9_-]+$/.test(normalizeCouponCode(input.code)))
+    errors.code =
+      "Ingresa un código con letras A–Z, números, guion o guion bajo.";
+  if (!input.promotionId.trim())
+    errors.promotionId = "Selecciona una promoción de modalidad cupón.";
+  for (const field of ["globalLimit", "customerLimit"] as const) {
+    if (
+      input[field] !== null &&
+      (!Number.isSafeInteger(input[field]) || input[field]! < 1)
+    )
+      errors[field] =
+        "Ingresa un entero positivo o deja el campo vacío para indicar Sin límite.";
+  }
+  if (
+    input.minimumAmount !== null &&
+    !positiveDecimal(input.minimumAmount.trim().replace(",", "."))
+  )
+    errors.minimumAmount =
+      "Ingresa un monto mayor que cero o deja el campo vacío.";
+  if (
+    input.cancellationPolicy !== "restore" &&
+    input.cancellationPolicy !== "keep"
+  )
+    errors.cancellationPolicy = "Selecciona una política de restitución.";
+  if (creating && input.status !== "active" && input.status !== "inactive")
+    errors.status = "Selecciona el estado inicial.";
+  return errors;
+}
 
 export interface CouponDraft {
   code: string;
@@ -42,14 +91,6 @@ export function validateCouponDraft(draft: CouponDraft): {
 } {
   const errors: CouponFieldErrors = {};
   const code = normalizeCouponCode(draft.code);
-  if (!/^[A-Z0-9_-]+$/.test(code))
-    errors.code =
-      "Ingresa un código con letras A–Z, números, guion o guion bajo.";
-  if (!draft.promotionId)
-    errors.promotionId = "Selecciona una promoción de modalidad cupón.";
-  if (!draft.status) errors.status = "Selecciona el estado inicial.";
-  if (!draft.cancellationPolicy)
-    errors.cancellationPolicy = "Selecciona una política de restitución.";
   const limit = (field: "globalLimit" | "customerLimit") => {
     const text = draft[field].trim();
     if (!text) return null;
@@ -64,12 +105,22 @@ export function validateCouponDraft(draft: CouponDraft): {
   const globalLimit = limit("globalLimit"),
     customerLimit = limit("customerLimit");
   const minimumAmount = draft.minimumAmount.trim().replace(",", ".") || null;
-  if (
-    minimumAmount &&
-    (!/^\d+(\.\d+)?$/.test(minimumAmount) || !/[1-9]/.test(minimumAmount))
-  )
-    errors.minimumAmount =
-      "Ingresa un monto mayor que cero o deja el campo vacío.";
+  Object.assign(
+    errors,
+    couponInputErrors(
+      {
+        code,
+        promotionId: draft.promotionId,
+        status: draft.status,
+        globalLimit,
+        customerLimit,
+        minimumAmount,
+        cancellationPolicy:
+          draft.cancellationPolicy as CouponInput["cancellationPolicy"],
+      },
+      true,
+    ),
+  );
   if (Object.keys(errors).length || !draft.status || !draft.cancellationPolicy)
     return { errors, values: null };
   return {

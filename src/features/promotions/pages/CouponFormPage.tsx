@@ -1,3 +1,5 @@
+import { readCouponMutationScenario } from "../dev/demoScenarios";
+import { readCouponScenario } from "../dev/demoScenarios";
 import { useEffect, useState } from "react";
 import {
   Link,
@@ -18,10 +20,7 @@ import { useCoupon } from "../hooks/useCoupons";
 import { useCouponForm } from "../hooks/useCouponForm";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 import { couponService } from "../services/couponService";
-import {
-  readCouponMutationScenario,
-  readCouponScenario,
-} from "../services/couponPresentation";
+
 import type { CouponPromotion, CouponView } from "../services/couponRepository";
 
 export function CouponFormPage() {

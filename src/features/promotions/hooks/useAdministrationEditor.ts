@@ -3,7 +3,6 @@ import {
   AdministrationError,
   type AdministrationRecord,
   type AdministrationRepository,
-  type AdministrationScenario,
 } from "../services/administration";
 import { usePromotionCommand } from "./usePromotionCommand";
 export function useAdministrationEditor<T extends AdministrationRecord, D>(
@@ -12,8 +11,8 @@ export function useAdministrationEditor<T extends AdministrationRecord, D>(
   draftOf: (record: T) => D,
   validate: (draft: D) => Record<string, string>,
   repository: AdministrationRepository<T, D>,
-  scenario: AdministrationScenario,
   normalize: (draft: D) => D,
+  reviewedRepository: AdministrationRepository<T, D> = repository,
 ) {
   const [original] = useState(() =>
     initial ? draftOf(initial) : structuredClone(empty),
@@ -50,12 +49,9 @@ export function useAdministrationEditor<T extends AdministrationRecord, D>(
     setDraft(proposal);
     const result = await command.run(async (signal) => {
       try {
-        return await repository.save(
-          initial?.id ?? null,
-          proposal,
-          conflict && current ? "default" : scenario,
-          signal,
-        );
+        return await (
+          conflict && current ? reviewedRepository : repository
+        ).save(initial?.id ?? null, proposal, signal);
       } catch (cause: unknown) {
         if (cause instanceof AdministrationError) {
           setErrors(cause.fields);
@@ -79,7 +75,6 @@ export function useAdministrationEditor<T extends AdministrationRecord, D>(
     try {
       const result = await repository.read(
         initial.id,
-        "default",
         new AbortController().signal,
       );
       if (result) {

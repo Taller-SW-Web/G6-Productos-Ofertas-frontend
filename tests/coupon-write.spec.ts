@@ -1,3 +1,4 @@
+import { evidencePath } from "./support/evidence";
 import { expect, test, type Page } from "@playwright/test";
 
 async function select(page: Page, label: string, option: string) {
@@ -205,7 +206,7 @@ test("MK-005 S02/S03/S06: desktop evidence and pending submission protection", a
   await fillNew(page, "CUPON-EJEMPLO");
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({
-    path: "docs/evidencias/cupones-s02-1440.png",
+    path: evidencePath("cupones-s02-1440.png"),
     fullPage: true,
   });
   await page.getByRole("button", { name: "Cancelar", exact: true }).click();
@@ -219,7 +220,7 @@ test("MK-005 S02/S03/S06: desktop evidence and pending submission protection", a
   ).toHaveValue("RUN10");
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({
-    path: "docs/evidencias/cupones-s03-1440.png",
+    path: evidencePath("cupones-s03-1440.png"),
     fullPage: true,
   });
   await page.getByRole("button", { name: "Cancelar", exact: true }).click();
@@ -230,7 +231,7 @@ test("MK-005 S02/S03/S06: desktop evidence and pending submission protection", a
   await expect(page.getByRole("dialog")).toHaveCSS("opacity", "1");
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({
-    path: "docs/evidencias/cupones-s06-1440.png",
+    path: evidencePath("cupones-s06-1440.png"),
     animations: "disabled",
     fullPage: false,
   });

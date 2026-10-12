@@ -1,3 +1,5 @@
+import { administrationScenario } from "../dev/demoScenarios";
+import { reviewServices } from "../dev/reviewServices";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Link,
@@ -17,7 +19,7 @@ import {
 import { AdministrationStateDialog } from "../components/AdministrationStateDialog";
 import { RecommendationCandidates } from "../components/RecommendationCandidates";
 import { useAdministrationRead } from "../hooks/useAdministrationRead";
-import { administrationScenario } from "../services/administration";
+
 import { recommendationService } from "../services/recommendationService";
 import { promotionCatalogService } from "../services/catalogService";
 import { recommendationKindLabel } from "../services/recommendationRepository";
@@ -38,7 +40,7 @@ export function RecommendationDetailPage({
     navigate = useNavigate();
   const read = useCallback(
     (signal: AbortSignal) =>
-      recommendationService.read(ruleId, scenario, signal),
+      reviewServices(scenario).recommendations.read(ruleId, signal),
     [ruleId, scenario],
   );
   const state = useAdministrationRead(
@@ -47,8 +49,8 @@ export function RecommendationDetailPage({
   );
   const readCatalog = useCallback(
     async (signal: AbortSignal) => ({
-      products: await promotionCatalogService.products("default", signal),
-      categories: await promotionCatalogService.categories("default", signal),
+      products: await promotionCatalogService.products(signal),
+      categories: await promotionCatalogService.categories(signal),
     }),
     [],
   );
@@ -196,16 +198,13 @@ export function RecommendationDetailPage({
               entityLabel="regla"
               opened={opened || changeState}
               change={(status, signal) =>
-                recommendationService.changeStatus(
+                reviewServices(scenario).recommendations.changeStatus(
                   ruleId,
                   status,
-                  scenario,
                   signal,
                 )
               }
-              read={(signal) =>
-                recommendationService.read(ruleId, "default", signal)
-              }
+              read={(signal) => recommendationService.read(ruleId, signal)}
               onCancel={close}
               onConfirmed={() => {
                 close();

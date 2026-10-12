@@ -1,10 +1,10 @@
+import { reviewServices } from "../dev/reviewServices";
+import { type CouponScenario } from "../dev/demoScenarios";
 import { useCallback, useEffect, useState } from "react";
-import { couponService } from "../services/couponService";
 import {
   CouponReadError,
   type CouponQuery,
   type CouponReadFailure,
-  type CouponScenario,
 } from "../services/couponRepository";
 
 type ReadState<T> =
@@ -59,7 +59,7 @@ export function useCouponList(
   const key = JSON.stringify([status, page, pageSize, scenario, revision]);
   const read = useCallback(
     (signal: AbortSignal) =>
-      couponService.list({ status, page, pageSize }, scenario, signal),
+      reviewServices(scenario).coupons.list({ status, page, pageSize }, signal),
     [status, page, pageSize, scenario],
   );
   return useCouponRead(key, read);
@@ -71,7 +71,7 @@ export function useCoupon(
 ) {
   const key = JSON.stringify([id, scenario, revision]);
   const read = useCallback(
-    (signal: AbortSignal) => couponService.read(id, scenario, signal),
+    (signal: AbortSignal) => reviewServices(scenario).coupons.read(id, signal),
     [id, scenario],
   );
   return useCouponRead(key, read);

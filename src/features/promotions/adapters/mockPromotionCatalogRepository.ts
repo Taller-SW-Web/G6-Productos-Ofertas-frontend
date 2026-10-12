@@ -1,19 +1,14 @@
 import { catalogCategories, catalogProducts } from "../mocks/catalogChoices";
-import { checkAdministrationRead } from "../services/administration";
 import type { PromotionCatalogRepository } from "../services/catalogRepository";
-export const mockPromotionCatalogRepository: PromotionCatalogRepository = {
-  async products(scenario, signal) {
-    await checkAdministrationRead(scenario, signal);
-    signal.throwIfAborted();
-    return scenario === "selection-empty"
-      ? []
-      : structuredClone(catalogProducts.filter((item) => item.active));
-  },
-  async categories(scenario, signal) {
-    await checkAdministrationRead(scenario, signal);
-    signal.throwIfAborted();
-    return scenario === "selection-empty"
-      ? []
-      : structuredClone(catalogCategories.filter((item) => item.active));
-  },
-};
+export function createMockPromotionCatalogRepository(): PromotionCatalogRepository {
+  return {
+    async products(signal) {
+      signal.throwIfAborted();
+      return structuredClone(catalogProducts.filter((item) => item.active));
+    },
+    async categories(signal) {
+      signal.throwIfAborted();
+      return structuredClone(catalogCategories.filter((item) => item.active));
+    },
+  };
+}

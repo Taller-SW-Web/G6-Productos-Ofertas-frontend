@@ -1,3 +1,5 @@
+import { readCouponMutationScenario } from "../dev/demoScenarios";
+import { readCouponScenario } from "../dev/demoScenarios";
 import { useEffect, useRef, useState } from "react";
 import {
   Link,
@@ -15,10 +17,6 @@ import {
 import { CouponSummary } from "../components/CouponSummary";
 import { CouponStateDialog } from "../components/CouponStateDialog";
 import { useCoupon } from "../hooks/useCoupons";
-import {
-  readCouponMutationScenario,
-  readCouponScenario,
-} from "../services/couponPresentation";
 
 export function CouponDetailPage({
   limitsOnly = false,

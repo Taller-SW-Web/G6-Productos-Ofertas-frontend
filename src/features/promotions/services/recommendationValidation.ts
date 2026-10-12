@@ -19,11 +19,17 @@ export function normalizeRecommendationDraft(
 export function recommendationErrors(draft: RecommendationDraft) {
   const errors: Record<string, string> = {};
   if (!draft.name.trim()) errors.name = "Ingresa un nombre para la regla.";
-  if (!draft.originType || !draft.originId)
+  if (
+    (draft.originType !== "product" && draft.originType !== "category") ||
+    !draft.originId
+  )
     errors.origin = "Selecciona un origen válido por producto o categoría.";
   if (!positiveInteger(draft.priority))
     errors.priority = "Ingresa una prioridad entera positiva.";
-  if (!draft.status) errors.status = "Selecciona el estado inicial.";
+  if (draft.status !== "active" && draft.status !== "inactive")
+    errors.status = "Selecciona el estado inicial.";
+  if (draft.kind !== "cross-sell" && draft.kind !== "upsell")
+    errors.kind = "Selecciona un tipo de regla válido.";
   if (!validPeriod(draft.validFrom, draft.validUntil))
     errors.validFrom =
       "Ingresa inicio y fin válidos; el fin debe ser posterior al inicio (hora de Lima).";

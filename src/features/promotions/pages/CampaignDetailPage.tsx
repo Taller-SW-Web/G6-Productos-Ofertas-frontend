@@ -1,3 +1,5 @@
+import { administrationScenario } from "../dev/demoScenarios";
+import { reviewServices } from "../dev/reviewServices";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Link,
@@ -17,7 +19,7 @@ import {
 import { AdministrationStateDialog } from "../components/AdministrationStateDialog";
 import { CampaignScope } from "../components/CampaignScope";
 import { useAdministrationRead } from "../hooks/useAdministrationRead";
-import { administrationScenario } from "../services/administration";
+
 import { campaignService } from "../services/campaignService";
 import { promotionCatalogService } from "../services/catalogService";
 import { channelChoices } from "../services/campaignRepository";
@@ -39,7 +41,7 @@ export function CampaignDetailPage({
     navigate = useNavigate();
   const read = useCallback(
     (signal: AbortSignal) =>
-      campaignService.read(promotionId, scenario, signal),
+      reviewServices(scenario).campaigns.read(promotionId, signal),
     [promotionId, scenario],
   );
   const state = useAdministrationRead(
@@ -47,8 +49,7 @@ export function CampaignDetailPage({
     read,
   );
   const catalogRead = useCallback(
-    (signal: AbortSignal) =>
-      promotionCatalogService.products("default", signal),
+    (signal: AbortSignal) => promotionCatalogService.products(signal),
     [],
   );
   const catalog = useAdministrationRead("catalog", catalogRead),
@@ -215,16 +216,13 @@ export function CampaignDetailPage({
               entityLabel="promoción"
               opened={opened || changeState}
               change={(status, signal) =>
-                campaignService.changeStatus(
+                reviewServices(scenario).campaigns.changeStatus(
                   promotionId,
                   status,
-                  scenario,
                   signal,
                 )
               }
-              read={(signal) =>
-                campaignService.read(promotionId, "default", signal)
-              }
+              read={(signal) => campaignService.read(promotionId, signal)}
               onCancel={close}
               onConfirmed={() => {
                 close();

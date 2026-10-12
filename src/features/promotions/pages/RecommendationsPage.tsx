@@ -1,3 +1,5 @@
+import { reviewServices } from "../dev/reviewServices";
+import { administrationScenario } from "../dev/demoScenarios";
 import { useCallback } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Button, Group, Select, Stack } from "@mantine/core";
@@ -10,8 +12,7 @@ import {
   type TableColumn,
 } from "../../../components/shared";
 import { useAdministrationRead } from "../hooks/useAdministrationRead";
-import { administrationScenario } from "../services/administration";
-import { recommendationService } from "../services/recommendationService";
+
 import { promotionCatalogService } from "../services/catalogService";
 import {
   recommendationKindLabel,
@@ -41,9 +42,8 @@ export function RecommendationsPage() {
     scenario = administrationScenario(params);
   const read = useCallback(
     (signal: AbortSignal) =>
-      recommendationService.list(
+      reviewServices(scenario).recommendations.list(
         { status, kind, page, pageSize },
-        scenario,
         signal,
       ),
     [status, kind, page, pageSize, scenario],
@@ -54,8 +54,8 @@ export function RecommendationsPage() {
   );
   const readCatalog = useCallback(
     async (signal: AbortSignal) => ({
-      products: await promotionCatalogService.products("default", signal),
-      categories: await promotionCatalogService.categories("default", signal),
+      products: await promotionCatalogService.products(signal),
+      categories: await promotionCatalogService.categories(signal),
     }),
     [],
   );

@@ -1,3 +1,5 @@
+import { administrationScenario } from "../dev/demoScenarios";
+import { reviewServices, reviewCreationAccess } from "../dev/reviewServices";
 import { useCallback } from "react";
 import {
   Link,
@@ -12,12 +14,8 @@ import { useAdministrationRead } from "../hooks/useAdministrationRead";
 import { useAdministrationEditor } from "../hooks/useAdministrationEditor";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 import { UnsavedChangesDialog } from "../components/UnsavedChangesDialog";
-import {
-  administrationScenario,
-  checkAdministrationRead,
-} from "../services/administration";
+
 import { campaignService } from "../services/campaignService";
-import { promotionCatalogService } from "../services/catalogService";
 import {
   campaignErrors,
   normalizeCampaignDraft,
@@ -45,13 +43,8 @@ export function CampaignEditorLayout() {
   const read = useCallback(
     (signal: AbortSignal) =>
       promotionId
-        ? campaignService.read(promotionId, scenario, signal)
-        : checkAdministrationRead(
-            scenario === "session" || scenario === "forbidden"
-              ? scenario
-              : "default",
-            signal,
-          ).then(() => null),
+        ? reviewServices(scenario).campaigns.read(promotionId, signal)
+        : reviewCreationAccess(scenario, signal).then(() => null),
     [promotionId, scenario],
   );
   const state = useAdministrationRead(
@@ -104,9 +97,9 @@ function CampaignEditorProvider({ initial }: { initial: CampaignView | null }) {
     emptyCampaign,
     draftOf,
     campaignErrors,
-    campaignService,
-    scenario,
+    reviewServices(scenario).campaigns,
     normalizeCampaignDraft,
+    campaignService,
   );
   const guard = useUnsavedChanges(
     form.dirty && !form.confirmed,
@@ -114,13 +107,7 @@ function CampaignEditorProvider({ initial }: { initial: CampaignView | null }) {
     root,
   );
   const readProducts = useCallback(
-    (signal: AbortSignal) =>
-      promotionCatalogService.products(
-        scenario === "selection-error" || scenario === "selection-empty"
-          ? scenario
-          : "default",
-        signal,
-      ),
+    (signal: AbortSignal) => reviewServices(scenario).catalog.products(signal),
     [scenario],
   );
   const catalog = useAdministrationRead(`catalog:${scenario}`, readProducts);

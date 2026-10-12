@@ -1,3 +1,5 @@
+import { administrationScenario } from "../dev/demoScenarios";
+import { reviewServices, reviewCreationAccess } from "../dev/reviewServices";
 import { useCallback } from "react";
 import {
   Link,
@@ -12,10 +14,7 @@ import { useAdministrationRead } from "../hooks/useAdministrationRead";
 import { useAdministrationEditor } from "../hooks/useAdministrationEditor";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 import { UnsavedChangesDialog } from "../components/UnsavedChangesDialog";
-import {
-  administrationScenario,
-  checkAdministrationRead,
-} from "../services/administration";
+
 import { recommendationService } from "../services/recommendationService";
 import { promotionCatalogService } from "../services/catalogService";
 import {
@@ -58,13 +57,8 @@ export function RecommendationEditorLayout({
   const read = useCallback(
     (signal: AbortSignal) =>
       ruleId
-        ? recommendationService.read(ruleId, scenario, signal)
-        : checkAdministrationRead(
-            scenario === "session" || scenario === "forbidden"
-              ? scenario
-              : "default",
-            signal,
-          ).then(() => null),
+        ? reviewServices(scenario).recommendations.read(ruleId, signal)
+        : reviewCreationAccess(scenario, signal).then(() => null),
     [ruleId, scenario],
   );
   const state = useAdministrationRead(JSON.stringify([ruleId, scenario]), read);
@@ -124,9 +118,9 @@ function RecommendationEditorProvider({
     { ...emptyRecommendation, kind },
     draftOf,
     recommendationErrors,
-    recommendationService,
-    scenario,
+    reviewServices(scenario).recommendations,
     normalizeRecommendationDraft,
+    recommendationService,
   );
   const guard = useUnsavedChanges(
     form.dirty && !form.confirmed,
@@ -135,13 +129,8 @@ function RecommendationEditorProvider({
   );
   const readCatalog = useCallback(
     async (signal: AbortSignal) => ({
-      products: await promotionCatalogService.products(
-        scenario === "selection-error" || scenario === "selection-empty"
-          ? scenario
-          : "default",
-        signal,
-      ),
-      categories: await promotionCatalogService.categories("default", signal),
+      products: await reviewServices(scenario).catalog.products(signal),
+      categories: await promotionCatalogService.categories(signal),
     }),
     [scenario],
   );

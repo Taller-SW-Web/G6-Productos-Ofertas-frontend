@@ -128,7 +128,7 @@ export function RecommendationFormPage() {
             }
           >
             {field("name", "Nombre de la regla")}
-            <div data-field="origin">
+            <Stack data-field="origin" gap="md">
               <Select
                 label="Tipo de origen"
                 aria-label="Tipo de origen"
@@ -163,7 +163,7 @@ export function RecommendationFormPage() {
                 onChange={(value) => update("originId", value ?? "")}
                 error={draft.originType ? form.errors.origin : undefined}
               />
-            </div>
+            </Stack>
             {catalogError && (
               <FeedbackAlert
                 semantic="warning"

@@ -1,4 +1,4 @@
-import { mockPromotionCatalogRepository } from "../adapters/mockPromotionCatalogRepository";
+import { promotionServices } from "./promotionServices";
 import type { PromotionCatalogRepository } from "./catalogRepository";
 export const promotionCatalogService: PromotionCatalogRepository =
-  mockPromotionCatalogRepository;
+  promotionServices.catalog;

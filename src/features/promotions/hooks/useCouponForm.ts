@@ -1,3 +1,5 @@
+import { reviewServices } from "../dev/reviewServices";
+import { type CouponMutationScenario } from "../dev/demoScenarios";
 import { useState } from "react";
 import { couponService } from "../services/couponService";
 import {
@@ -5,7 +7,6 @@ import {
   type CouponField,
   type CouponFieldErrors,
   type CouponInput,
-  type CouponMutationScenario,
   type CouponView,
 } from "../services/couponRepository";
 import {
@@ -61,14 +62,17 @@ export function useCouponForm(
     const result = await command.run(async (signal) => {
       try {
         if (!initial)
-          return await couponService.create(
+          return await reviewServices(scenario).coupons.create(
             validation.values!,
-            scenario,
             signal,
           );
         const { status, ...values } = validation.values!;
         void status;
-        return await couponService.update(initial.id, values, scenario, signal);
+        return await reviewServices(scenario).coupons.update(
+          initial.id,
+          values,
+          signal,
+        );
       } catch (cause: unknown) {
         if (cause instanceof CouponWriteError && cause.kind === "validation") {
           setErrors(cause.fields);
@@ -86,11 +90,10 @@ export function useCouponForm(
     try {
       const controller = new AbortController();
       const result = initial
-        ? await couponService.read(initial.id, "default", controller.signal)
+        ? await couponService.read(initial.id, controller.signal)
         : (
             await couponService.list(
               { status: "all", page: 1, pageSize: 100 },
-              "default",
               controller.signal,
             )
           ).items.find((item) => item.code === proposal.code);

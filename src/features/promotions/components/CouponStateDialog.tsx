@@ -1,3 +1,5 @@
+import { reviewServices } from "../dev/reviewServices";
+import { type CouponMutationScenario } from "../dev/demoScenarios";
 import { useState } from "react";
 import { Button, Stack, Text } from "@mantine/core";
 import { ConfirmDialog, FeedbackAlert } from "../../../components/shared";
@@ -5,7 +7,6 @@ import { usePromotionCommand } from "../hooks/usePromotionCommand";
 import { couponService } from "../services/couponService";
 import {
   CouponWriteError,
-  type CouponMutationScenario,
   type CouponView,
 } from "../services/couponRepository";
 import {
@@ -40,7 +41,6 @@ export function CouponStateDialog({
       try {
         const result = await couponService.read(
           coupon.id,
-          "default",
           new AbortController().signal,
         );
         if (result?.status === target) onConfirmed();
@@ -58,7 +58,7 @@ export function CouponStateDialog({
       return;
     }
     const result = await command.run((signal) =>
-      couponService.changeStatus(coupon.id, target, scenario, signal),
+      reviewServices(scenario).coupons.changeStatus(coupon.id, target, signal),
     );
     if (result) onConfirmed();
   };

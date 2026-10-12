@@ -1,5 +1,7 @@
 # Entrega de Cueva — MK-005, MK-006 y MK-007
 
+> **Estado vigente:** la entrega anterior fue integrada en PR #22. Las correcciones posteriores, pruebas y revisión visual están en la actualización al final de este documento. Tras completar la validación local, Axel autorizó publicar en `cueva` y abrir una nueva PR hacia `master`. La PR registra el estado remoto, CI y revisiones. Las secciones originales conservan la evidencia histórica de aquella entrega.
+
 Fecha: 2026-10-11, America/Lima. Refs [#7 Cupones](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/issues/7), [#8 Promociones](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/issues/8), [#9 Recomendaciones](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/issues/9).
 
 **MOCK_INTEGRATED / MOCK_ONLY, provisional.** Las 19 pantallas del alcance frontend están implementadas. No se declara aprobación UX, API real ni cierre de issues. Entrega en `cueva`, autorizada por Axel para commit, publicación y preparación de revisión el 11 de octubre. El estado de publicación/CI/revisión se registra en la PR; este reporte acredita implementación y comprobaciones locales.
@@ -154,3 +156,105 @@ SAFE_NOW: UI/mocks de19vistas completos. NEEDS_DECISION: homologación documenta
 Publicación autorizada en `cueva` mediante commits de base compartida, flujos y validación; PR hacia master con Refs #7/#8/#9 mientras falte revisión. Solicitar revisión UX a LeonardoVera y técnica/funcional a mrcastilla8, conforme a los issues y responsabilidades. No se afirma DoD global cerrado hasta revisión y aceptación de limitaciones. Mobile/tablet, backend, auth y auditoría WCAG exhaustiva fuera de alcance.
 
 **Estado: MOCK_INTEGRATED provisional de los tres MK; publicación/revisión de issues pendiente.**
+
+## Actualización: correcciones locales posteriores a PR #22
+
+**Estado actual: MOCK_INTEGRATED, revisión humana pendiente.** Trabajo local en `cueva`, desde `master`/`origin/master` verificado en `421951b30d506589e43dcc4c07b4194eea2026b8`, merge de PR #22. Se sincronizó mediante avance directo, sin merge adicional de contenido. Git inicial limpio; cambios de esta iteración conservados sin commit, push, PR nueva, comentarios, cierre de issues ni merge remoto. PR #22 ya estaba fusionada por el owner, lo que no acredita aprobación UX. Los issues #7/#8/#9 y su aceptación independiente siguen pendientes en la última consulta remota.
+
+### Qué se confirmó y corrigió
+
+| Solicitud | Evidencia del problema | Corrección y comprobación |
+|---|---|---|
+| Desacoplar mocks | Cupones importaba funciones de otro adapter; promociones/recomendaciones consultaban fixtures de Catálogo | Composición única `promotionServices.ts`; factories con dependencias por puertos. Dobles de los cuatro servicios sustituidos independientemente, con IDs externos a fixtures. |
+| Reasignar cupones | Con cupón A→B, A tenía cero asociaciones vigentes y seguía bloqueada | Consulta de asociaciones actuales paginada, separada del historial simulado de activación/uso. Pruebas de última asociación, varias asociaciones, cupón inactivo, rechazo e historial. |
+| Capacidad desconocida | Guardar otros campos convertía `undefined` en `true` | La edición conserva hechos desconocidos; no admite cambio de modalidad sin capacidad explícita `true`. Prueba directa de edición y cambio rechazado. |
+| Validaciones de adapter | Alta/edición admitían monto cero/negativo/no numérico y política inválida | `couponInputErrors` y normalización comunes al formulario y al mock. Rechazos directos sin mutación. También se comprueban enums de estado/modalidad/tipo/criterio y booleanos de combinación. |
+| Escenarios en interfaces | Puertos recibían `scenario`; no se encontró bypass de parámetros DEV en producción | Puertos reciben exclusivamente datos y `AbortSignal`. Fallos en decoradores `dev/`; la selección de escenarios exige DEV y `modoRevision=1`. Prueba de la versión compilada. |
+| Diez capturas previas | Las suites sobrescribían PNG de Foundation/Pricing al ejecutar pruebas | Se conservan los PNG de HEAD: los antiguos previos a PR #22 incluían navegación/demo ya retirados. Nuevas ejecuciones escriben artefactos en `test-results/`; opt-in restringido a los tres MK propios. Ningún PNG versionado cambia en esta corrección. |
+| Revisión visual | Campos de origen de recomendaciones contiguos, sin gap | MK-007-S02/S03/S04: `Stack gap=md` existente de Mantine, 16 px según DESIGN §4.3. Se conserva el resto de las vistas; comprobación automática y captura inspeccionada. |
+
+La elegibilidad se simula en el servicio, nunca en React. Requiere promoción inactiva, sin activación previa, sin cupones asociados actualmente y sin uso histórico confirmado. Un cupón inactivo continúa siendo una asociación. Una reasignación fallida no elimina la anterior. El contador de usos del cupón se conserva: trasladarlo no constituye un nuevo consumo de la promoción destino. La simulación registra observaciones para no atribuir otra vez los usos anteriores; si contador/asociación cambian externamente sin información suficiente o el uso es desconocido, mantiene historial desconocido. Los hechos iniciales pertenecen a fixtures del simulador. En la integración real, la capacidad y su revalidación siguen siendo responsabilidad del provider, no una inferencia autoritativa de esta simulación.
+
+No se implementaron HTTP, endpoints, DTO comerciales, auth, grants, consumo, restitución, stock ni cálculo de precio. El periodo de la promoción se mapea a las referencias del mock con hora de Lima; el futuro adapter debe mapear el periodo oficial recibido, no reutilizar fixtures. La sustitución con dobles acredita el aislamiento de los puertos; no acredita transacciones ni comunicación con APIs reales.
+
+### Inventario de cambios y dependencias
+
+Se reutilizaron los contratos de presentación, validadores, hooks, Mantine, Tabler y componentes existentes. Se comprobó que los archivos nuevos cubren responsabilidades antes ausentes; no duplican endpoints, componentes visuales ni un Design System.
+
+| Archivos dentro de Frontend | Motivo |
+|---|---|
+| `src/features/promotions/services/promotionServices.ts` (nuevo) | Composición central, sustitución por puerto y enlace de referencias/asociaciones; instancia aislada por factory. |
+| `services/{coupon,campaign,recommendation,catalog}Service.ts` | Aliases de la composición, sin selección separada de mocks por feature. |
+| `services/couponRepository.ts`, `administration.ts`, `catalogRepository.ts` | Retirar escenarios de los contratos productivos; conservar modelos/errores/reglas comunes. |
+| `services/couponValidation.ts`, `campaignValidation.ts`, `recommendationValidation.ts`, `couponPresentation.ts` | Validación compartida, enums/normalización y traslado de controles DEV fuera de presentación productiva. |
+| `adapters/mock{Coupon,Campaign,Recommendation,PromotionCatalog}Repository.ts` | Factories con memoria aislada, inyección de referencias, asociaciones vigentes y validación; sin importaciones entre adapters. Catálogo solo lee sus propios fixtures. |
+| `mocks/promotionHistory.ts` (nuevo) | Historial propio del simulador, sin inventar un campo o DTO HTTP. Conservar `true`/`false`/desconocido. |
+| `dev/demoScenarios.ts`, `demoServices.ts`, `reviewServices.ts` (nuevos) | Tipos/parsers DEV, decoradores de fallos y selección del servicio de revisión; sin parámetros DEV en los puertos. |
+| `hooks/useAdministrationEditor.ts`, `useCouponForm.ts`, `useCoupons.ts`, `components/CouponStateDialog.tsx` | Adaptar llamadas a puertos sin escenarios y conservar reconciliación/revisión explícita. |
+| `pages/{CampaignDetailPage,CampaignEditorLayout,CampaignsPage,CouponDetailPage,CouponFormPage,CouponsPage,RecommendationDetailPage,RecommendationEditorLayout,RecommendationsPage}.tsx` | Consumir composición/decoradores y nuevas firmas; conservar estructura visual, estados y navegación. |
+| `pages/RecommendationFormPage.tsx` | Único ajuste de composición visual: 16 px entre los dos campos de origen. |
+| `tests/promotions-adapters.spec.ts` (nuevo) | 22 pruebas directas de sustitución, validación, reasignación/historial, aislamiento, fallos y cancelación. |
+| `tests/promotions-visual.spec.ts` (nuevo) | Un recorrido de las 19 vistas: tokens/geometría/diálogos y capturas para revisión humana. |
+| `tests/support/evidence.ts` (nuevo) | Destino de artefactos y actualización deliberada exclusivamente de evidencias de Cueva. |
+| `tests/{campaigns,coupon-write,coupons,recommendations,foundation,foundation-review,pricing}.spec.ts` | Cambiar solo el destino de capturas; mismas aserciones y recorridos. Justificación de cambios en pruebas ajenas: impedir sobrescritura de evidencia del equipo. |
+| `README.md`, este reporte y `PR_PROMOTIONS_CUEVA.md` | Arquitectura/sustitución, evidencia vigente, límites y borrador local para futura revisión. |
+
+Sin cambios en `src/theme/`, `src/components/shared/`, `src/app/`, Foundation, Pricing, dependencias ni lockfile. Docs y Backend permanecen de solo lectura. Los diez PNG históricos y los 19 PNG versionados permanecen idénticos a HEAD. Las nuevas capturas quedan en los artefactos locales de la suite.
+
+### Contraste visual de las 19 vistas
+
+Fuentes: los 19 `ux/mockups/MK-00{5,6,7}/prototipo/mk_00*_s*.html`, sus `component-spec.md`/`plan.md`/`tasks.md`, DESIGN 1.1.0 §§4–12, UX Guidelines/Decisions 2.0 y los requisitos enumerados al inicio. Se volvió a verificar Docs: `lab/lopez` en `80eb28c324e77bbafe27ee01803335b03c3e5417`, `origin/master` en `be5c2db16aca6d6d18b3005a2da4205f724038e3`; sin diferencias en estas carpetas normativas/contratos entre ambas referencias. No se editó ninguna fuente oficial.
+
+Se contrastaron estructura, títulos, campos/acciones y reglas de los HTML con código, DOM y capturas actuales. No se afirma igualdad pixel a pixel con el HTML renderizado ni aprobación humana. Capturas Chromium tomadas con viewport 1440×900: páginas altas con fullPage y scroll vertical permitido por DESIGN; los tres diálogos se capturan solo dentro del viewport. Todas las imágenes se inspeccionaron; se verificó la captura final tras corregir el gap.
+
+| Vista | Comprobación y diferencia que debe conocer UX |
+|---|---|
+| MK-005-S01 | Estado/paginación/tabla/acciones legibles; badges neutros frente a colores ordinarios del HTML, según DESIGN §4.1.1. |
+| MK-005-S02 | Tres grupos de configuración y política explícita; ancho breve 640 px y scroll vertical. HTML ofrece otra densidad/rotulación; no se modificaron campos de negocio. |
+| MK-005-S03 | Mismo formulario, código/promoción precargados, usos intactos y estado desde confirmación. Fixture RUN10 distinto de datos de muestra HTML: homologación pendiente con PO. |
+| MK-005-S04 | Configuración y uso legibles, acciones completas; RUN10 como entidad real seleccionada en vez del ejemplo BIENVENIDA15 del HTML. |
+| MK-005-S05 | Cero, Sin límite y No disponible distintos, política visible y retorno contextual; mismas reglas con distinta entidad de muestra. |
+| MK-005-S06 | Diálogo de 480 px con entidad/impacto/estado, foco en Cancelar, sin recorte; conserva usos y no ejecuta pedidos. |
+| MK-006-S01 | Estado/modalidad/tabla/paginación; ocho fixtures para casos históricos, frente a cuatro del HTML. Sin buscador remoto inventado. |
+| MK-006-S02 | Campos completos en 880 px, estado/modalidad explícitos y canales/alcance/combinación; React agrupa beneficio-vigencia y canales-alcance de otra forma. Confirmar agrupación/densidad con Vera. |
+| MK-006-S03 | Precarga, motivo de modalidad deshabilitada y guardado/cancelación; capacidad falsa/desconocida no se transforma en permiso. Misma diferencia de agrupación de S02. |
+| MK-006-S04 | Producto completo y SKU distinguibles, selección/retorno conservados; selector vertical con checkboxes frente a composición de catálogo/resumen del HTML. Confirmar composición con Vera sin rediseñar por cuenta propia. |
+| MK-006-S05 | Beneficio/prioridad/vigencia/canales, alcance y combinación; título conserva nombre, sin añadir porcentaje al nombre de entidad del HTML. |
+| MK-006-S06 | Diálogo 480 px, foco seguro, explicación de impacto y conservación de historial; sin superposición de controles. |
+| MK-007-S01 | Dos altas diferenciadas, estado/tipo/tabla; estado y tipo neutros. Sin parámetros/filtros comerciales no publicados. |
+| MK-007-S02 | Origen por producto/categoría y candidatos; gap corregido a 16 px. React reúne identificación/origen: agrupación para revisión UX. |
+| MK-007-S03 | Regla/criterio/orden/justificación visibles íntegramente; gap corregido, conserva tipo. Tabla de criterios utilizable con scroll vertical. |
+| MK-007-S04 | Sin criterio ni origen preseleccionados; gap corregido y criterio obligatorio tras seleccionar candidato. HTML precargado es demo, no default de alta. |
+| MK-007-S05 | Selección temporal de productos y confirmación/cancelación; exclusión comprobada de origen, repetidos e inactivos. Lista con checkboxes frente a filas/panel del HTML: pendiente de UX. |
+| MK-007-S06 | Candidatos ordenados, criterio y justificación; precio/disponibilidad No disponible por D-REC-01/02. Se muestra la entidad seleccionada, no el fixture fijo de HTML. |
+| MK-007-S07 | Diálogo de 480 px con entidad/impacto y foco; fixture de revisión ejercita Activar, otros recorridos de suite ejercitan Desactivar. |
+
+Mediciones comunes: ancho de documento ≤1440, título a x=272 (sidebar 240 + padding 32), padding derecho/inferior 32 px, Oswald H1 32/40 en mayúsculas, Inter operativo y cloud `#F7F5F0`. Se reutilizan cards/campos/acciones del tema; no se introdujeron HEX, tipografías ni componentes shared nuevos. Márgenes, espaciados, componentes, estados, navegación, diálogos y overflow comprobados mediante suite/capturas; no es una auditoría WCAG exhaustiva.
+
+### Evidencias y revisión de Vera
+
+El recorrido `tests/promotions-visual.spec.ts` guarda 19 PNG y `mediciones-19-vistas.json` en `test-results/promotions-visual-19-vista-47547-1-capturas-para-revisión-UX/`. Son artefactos locales, regenerables y no versionados. Las evidencias previas de `docs/evidencias/` permanecen preservadas; el README documenta la actualización deliberada de los tres MK propios.
+
+**Visto bueno de Vera: PENDIENTE.** La PR anterior no tenía revisión UX registrada en la última consulta. No se contactó a Vera ni se publicó una nueva PR, respetando la instrucción de Axel de no enviar nada hasta autorización. Queda preparada localmente la revisión: las 19 rutas/capturas, mediciones, agrupación de campos, composición de selectores, homologación de fixtures, estados/foco y las discrepancias anteriores. Owner de apariencia/agrupación: Vera; datos/reglas: Cueva/PO; contratos: provider correspondiente. Solicitar aprobación explícita cuando Axel autorice la coordinación externa.
+
+### Validaciones de esta iteración
+
+| Verificación | Resultado |
+|---|---|
+| `npm run typecheck` | PASS, salida 0. |
+| `npm run build` | PASS, salida 0, compilación TypeScript y Vite 8.3.4. |
+| `npm run lint` | PASS, salida 0. |
+| `npm test -- --workers=2` | PASS, 65 pruebas, 2.8 min: 42 previas + 22 directas de adapters + 1 recorrido visual de 19 vistas. Foundation/Pricing incluidos sin regresiones detectadas. |
+| Visual 1440×900 | 19 vistas inspeccionadas y mediciones PASS; aprobación UX humana PENDIENTE. |
+| Producción local 4173 | PASS: tres listados ignoran `empty`, cuatro altas ignoran `session`, controles de alta habilitados, Foundation inaccesible y cero errores de página. |
+| Escenarios DEV en bundle de Promotions | No se encontraron ramas de selección/error/capacidad demo tras compilación; la factory mock de datos permanece por ser MOCK_ONLY. |
+| `git diff --check` y alcance | PASS, salida 0; sin cambios en PNG versionados, theme/shared, shell, código Foundation/Pricing, dependencias o lockfile. |
+| API/auth/CI remoto/despliegue/revisión humana | NO EJECUTADO en esta iteración. |
+
+Los fallos de comprobación intermedios se corrigieron: imports/firmas al trasladar escenarios; en el nuevo chequeo visual, `status` también identifica mensajes informativos estables y por eso se espera solo la ausencia de mensajes de carga. En la comprobación de producción se corrigió una aserción que exigía un alert inexistente. No se debilitó ninguna aserción previa ni se ocultó un fallo de aplicación. El servidor local existente sirvió la versión recompilada; intentar levantar otro en el mismo puerto rechazó correctamente la duplicación.
+
+**Pendientes externos:** autorización para publicar nueva PR a `master` (sin merge directo), revisión técnica y UX de Vera, aceptación de issues y homologación documental. **BLOCKED_CONTRACT:** provider/auth/grants/mapping administrativos reales sin verificar; D-REC-01/02 para precio/disponibilidad por producto. No se marca VALIDATED, API_INTEGRATED ni DoD global cerrado.
+
+### Autorización posterior para publicar
+
+Después de la validación local descrita arriba, Axel solicitó publicar los cambios en su rama `cueva` y abrir la PR hacia `master`. Se verificaron de nuevo el remoto, la rama y sus referencias: `HEAD`, `origin/cueva` y `origin/master` en `421951b30d506589e43dcc4c07b4194eea2026b8`, sin PR abierta previamente para esta rama. La restricción de no enviar cambios queda revocada para este commit, push y apertura de PR. Las referencias a trabajo sin publicar en la sección anterior describen el momento de las comprobaciones locales. La revisión humana y la aceptación de los issues siguen pendientes; no hay autorización para merge directo.

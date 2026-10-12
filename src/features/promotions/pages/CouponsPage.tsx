@@ -1,3 +1,4 @@
+import { readCouponScenario } from "../dev/demoScenarios";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Button, Group, Select, Stack, Text } from "@mantine/core";
@@ -15,7 +16,6 @@ import {
   couponLimitLabel,
   couponStatusLabel,
   couponUsageLabel,
-  readCouponScenario,
   readPositiveInteger,
 } from "../services/couponPresentation";
 import type { CouponQuery, CouponView } from "../services/couponRepository";
