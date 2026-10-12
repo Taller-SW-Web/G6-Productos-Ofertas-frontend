@@ -223,3 +223,64 @@ export interface ProductTypeDetail {
   caracteristicasAsignadas: number;
   asociadas: ProductTypeAssociation[];
 }
+
+// MK-011 (Marcas) — presentation models aligned to MarcaAdmin.
+export type BrandStatus = EntityStatus;
+
+export interface BrandListItem {
+  marcaId: string;
+  nombre: string;
+  estado: BrandStatus;
+  logoUrl?: string | null;
+  paisOrigenIso?: string | null;
+}
+
+export interface BrandDetail {
+  marcaId: string;
+  nombre: string;
+  estado: BrandStatus;
+  logoUrl?: string | null;
+  paisOrigenIso?: string | null;
+  descripcion?: string | null;
+  version: number;
+}
+
+export interface BrandCreateInput {
+  nombre: string;
+  descripcion?: string | null;
+  paisOrigenIso?: string | null;
+}
+
+export interface BrandUpdateInput {
+  marcaId: string;
+  nombre: string;
+  descripcion?: string | null;
+  paisOrigenIso?: string | null;
+}
+
+// MK-012 (SEO y metadatos) — presentation models. Aligned to SPEC-012/HU-012/WF-012.
+export interface SeoMetadatos {
+  metaTitulo: string;
+  metaDescripcion: string;
+}
+
+export interface SlugPropuesta {
+  slug: string;
+  colisionResuelta: boolean;
+}
+
+export interface SeoCategory {
+  id: string;
+  nombre: string;
+  slug: string;
+  slugAnterior?: string;
+  metaTitulo?: string;
+  metaDescripcion?: string;
+  colisionResuelta?: boolean;
+}
+
+export interface HistorialSlugItem {
+  slugAnterior: string;
+  slugActual: string;
+  fecha: string;
+}

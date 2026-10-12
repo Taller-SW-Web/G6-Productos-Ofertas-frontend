@@ -7,6 +7,8 @@ import {
   IconMessageCircle,
   IconTag,
   IconPackages,
+  IconBrandApple,
+  IconSeo,
   type TablerIcon,
 } from "@tabler/icons-react";
 export interface NavigationItem {
@@ -21,6 +23,8 @@ export const taxonomyNavigation: NavigationItem[] = [
   { to: "/categorias", label: "Categorías", icon: IconCategory },
   { to: "/caracteristicas", label: "Características", icon: IconTag },
   { to: "/tipos-producto", label: "Tipos de producto", icon: IconPackages },
+  { to: "/marcas", label: "Marcas", icon: IconBrandApple },
+  { to: "/seo", label: "SEO", icon: IconSeo },
 ];
 export const demoNavigation: NavigationItem[] = [
   {

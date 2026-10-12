@@ -91,3 +91,28 @@ export const ProductTypeAssociatePage = lazy(() =>
     default: module.ProductTypeAssociatePage,
   })),
 );
+export const BrandListPage = lazy(() =>
+  import("../../features/taxonomy/pages/BrandListPage").then((module) => ({
+    default: module.BrandListPage,
+  })),
+);
+export const BrandFormPage = lazy(() =>
+  import("../../features/taxonomy/pages/BrandFormPage").then((module) => ({
+    default: module.BrandFormPage,
+  })),
+);
+export const BrandDetailPage = lazy(() =>
+  import("../../features/taxonomy/pages/BrandDetailPage").then((module) => ({
+    default: module.BrandDetailPage,
+  })),
+);
+export const SeoListPage = lazy(() =>
+  import("../../features/taxonomy/pages/SeoListPage").then((module) => ({
+    default: module.SeoListPage,
+  })),
+);
+export const SeoConfigPage = lazy(() =>
+  import("../../features/taxonomy/pages/SeoConfigPage").then((module) => ({
+    default: module.SeoConfigPage,
+  })),
+);

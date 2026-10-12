@@ -1,5 +1,8 @@
 import type { RouteObject } from "react-router-dom";
 import {
+  BrandDetailPage,
+  BrandFormPage,
+  BrandListPage,
   CategoryDetailPage,
   CategoryTreePage,
   CharacteristicCreatePage,
@@ -16,6 +19,8 @@ import {
   ProductTypeCreatePage,
   ProductTypeDetailPage,
   ProductTypeListPage,
+  SeoConfigPage,
+  SeoListPage,
 } from "./productPages";
 export const productRoutes: RouteObject[] = [
   { path: "/precios", element: <CurrentPricePage /> },
@@ -45,4 +50,12 @@ export const productRoutes: RouteObject[] = [
   { path: "/tipos-producto/nuevo", element: <ProductTypeCreatePage /> },
   { path: "/tipos-producto/:id/asociar", element: <ProductTypeAssociatePage /> },
   { path: "/tipos-producto/:id", element: <ProductTypeDetailPage /> },
+  // MK-011: marcas
+  { path: "/marcas", element: <BrandListPage /> },
+  { path: "/marcas/nueva", element: <BrandFormPage /> },
+  { path: "/marcas/:id/editar", element: <BrandFormPage /> },
+  { path: "/marcas/:id", element: <BrandDetailPage /> },
+  // MK-012: SEO y metadatos
+  { path: "/seo", element: <SeoListPage /> },
+  { path: "/seo/:id", element: <SeoConfigPage /> },
 ];
