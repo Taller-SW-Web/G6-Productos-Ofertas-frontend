@@ -1,5 +1,6 @@
 import { FeedbackAlert } from "../../../components/shared";
-import { promotionRuntime } from "../services/promotionServices";
+import { useContext } from "react";
+import { DataModeContext } from "../../../app/config/DataModeContext";
 
 const messages = {
   coupons:
@@ -25,7 +26,7 @@ export function PromotionDataNotice({
 }: {
   kind: keyof typeof messages;
 }) {
-  if (promotionRuntime.source !== "mock") return null;
+  if (useContext(DataModeContext) !== "mock") return null;
   return (
     <FeedbackAlert semantic="info" title="Datos de demostración">
       {messages[kind]}

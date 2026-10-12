@@ -15,6 +15,7 @@ import {
   promotionHistoryFixtures,
 } from "../mocks/promotionHistory";
 import { createReviewServiceResolver } from "../dev/reviewServices";
+import type { DataMode } from "../../../app/config/dataMode";
 
 export interface PromotionServices {
   coupons: CouponRepository;
@@ -23,7 +24,6 @@ export interface PromotionServices {
   catalog: PromotionCatalogRepository;
 }
 
-export type PromotionSource = "mock" | "backend";
 export interface PromotionServiceContext {
   services: PromotionServices;
   confirmedServices: PromotionServices;
@@ -31,15 +31,26 @@ export interface PromotionServiceContext {
   clearTransientParams(params: URLSearchParams): URLSearchParams;
 }
 export interface PromotionRuntime {
-  source: PromotionSource;
+  mode: DataMode;
   resolve(params: URLSearchParams): PromotionServiceContext;
+}
+export interface PromotionRuntimeDependencies {
+  api?: () => PromotionServices;
 }
 
 // Source and DEV selection live at the composition boundary, not in consumers.
 export function createPromotionRuntime(
-  services: PromotionServices,
-  source: PromotionSource,
+  mode: DataMode,
+  dependencies: PromotionRuntimeDependencies = {},
 ): PromotionRuntime {
+  if (mode !== "mock" && mode !== "api")
+    throw new Error("VITE_DATA_MODE debe ser mock o api.");
+  if (mode === "api" && !dependencies.api)
+    throw new Error("El provider API de Promotions no está configurado.");
+  const services =
+    mode === "mock"
+      ? createMockPromotionServices()
+      : createPromotionServices(dependencies.api!());
   const context: PromotionServiceContext = {
     services,
     confirmedServices: services,
@@ -49,9 +60,9 @@ export function createPromotionRuntime(
     clearTransientParams: (params) => new URLSearchParams(params),
   };
   return {
-    source,
+    mode,
     resolve:
-      source === "mock" && import.meta.env?.DEV
+      mode === "mock" && import.meta.env?.DEV
         ? createReviewServiceResolver(context)
         : () => context,
   };
@@ -157,5 +168,15 @@ export function createMockPromotionServices(
   });
 }
 
-export const promotionServices = createMockPromotionServices();
-export const promotionRuntime = createPromotionRuntime(promotionServices, "mock");
+// Read the application's validated mode through DataModeContext. No environment
+// variable or mock instance is selected at module import time.
+const runtimes = new Map<DataMode, PromotionRuntime>();
+const dependencies: PromotionRuntimeDependencies = {};
+export function getPromotionRuntime(mode: DataMode): PromotionRuntime {
+  let runtime = runtimes.get(mode);
+  if (!runtime) {
+    runtime = createPromotionRuntime(mode, dependencies);
+    runtimes.set(mode, runtime);
+  }
+  return runtime;
+}

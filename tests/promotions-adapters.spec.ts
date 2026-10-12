@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { createMockPromotionServices } from "../src/features/promotions/services/promotionServices";
+import {
+  createMockPromotionServices,
+  createPromotionRuntime,
+} from "../src/features/promotions/services/promotionServices";
 import { createMockCouponRepository } from "../src/features/promotions/adapters/mockCouponRepository";
 import { createDemoServices } from "../src/features/promotions/dev/demoServices";
 import { campaignFixtures } from "../src/features/promotions/mocks/campaigns";
@@ -21,6 +24,31 @@ import {
 
 const signal = () => new AbortController().signal;
 const query = { status: "all", kind: "all", page: 1, pageSize: 100 } as const;
+
+test("composición global: api sin provider falla y no sustituye fallos por mocks", () => {
+  expect(() => createPromotionRuntime("api")).toThrow(
+    "El provider API de Promotions no está configurado",
+  );
+  expect(() =>
+    createPromotionRuntime("api", {
+      api: () => {
+        throw new Error("Provider no disponible");
+      },
+    }),
+  ).toThrow("Provider no disponible");
+});
+
+test("composición global: los cuatro puertos API se inyectan juntos sin escenarios DEV", async () => {
+  const ports = createMockPromotionServices(); // Service double, not an HTTP implementation.
+  const runtime = createPromotionRuntime("api", { api: () => ports });
+  const params = new URLSearchParams("modoRevision=1&escenario=forbidden");
+  const context = runtime.resolve(params);
+  expect(runtime.mode).toBe("api");
+  expect(context.services).toBe(ports);
+  expect(context.confirmedServices).toBe(ports);
+  await expect(context.prepareCreation(signal())).resolves.toBeUndefined();
+  expect(context.clearTransientParams(params).toString()).toBe(params.toString());
+});
 const campaign = (name: string): CampaignDraft => ({
   ...structuredClone(campaignFixtures[0]!.configuration),
   name,

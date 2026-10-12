@@ -1,6 +1,6 @@
 # Productos y Ofertas — Frontend
 
-Frontend React/TypeScript/Vite con Mantine y Tabler. Incluye el piloto **MK-013-S01 (precio vigente)** y **MK-005 Cupones, MK-006 Promociones y MK-007 Recomendaciones: 19 pantallas**, con altas, edición, selectores y confirmaciones sobre adapters mock tipados. Estado: **MOCK_INTEGRATED / MOCK_ONLY**, provisional mientras está pendiente la revisión funcional/UX. Las muestras de Pricing S02–S05 permiten revisar componentes; no hay integración HTTP.
+React/TypeScript/Vite con Mantine y Tabler. Integra **MK-005 Cupones, MK-006 Promociones y MK-007 Recomendaciones (19 pantallas)**. **MK-013 / issue #15** cubre S01–S06 con puertos de datos sustituibles. Estado: **MOCK_INTEGRATED / MOCK_REPLACEABLE**, comprobado con un segundo adapter independiente y las mismas páginas. **Q-013-01/02** mantienen bloqueados el parser y la admisión de archivos; la política de cambio de moneda también requiere definición de Pricing. No hay integración HTTP ni escritura comercial real. Las muestras `/foundation/*` se conservan como galería independiente en desarrollo.
 
 ## Ejecutar y validar
 
@@ -11,23 +11,39 @@ npm ci
 npm run dev
 ```
 
-Abrir `http://127.0.0.1:5173/cupones`, `/promociones`, `/recomendaciones` o `/precios`. Para validar:
+Abrir `http://127.0.0.1:5173/precios`, `/cupones`, `/promociones` o `/recomendaciones`. Para validar la demostración:
 
 ```powershell
 npm run typecheck
+$env:VITE_DATA_MODE = 'mock'
 npm run build
 npm run lint
 npx playwright install chromium
 npm test
 ```
 
-La aplicación funciona sin Backend, Docs, credenciales ni variables de entorno. Inter/Oswald y el logo se sirven como assets locales. `npm run preview` permite revisar `dist/` después del build. Un hosting futuro deberá resolver las rutas hacia `index.html`; no se declara desplegada la app.
+El modo `mock` funciona sin Backend, Docs ni credenciales. Solo el servidor de desarrollo admite `mock` como valor predeterminado. **Todo build de producción exige `VITE_DATA_MODE=mock` o `api` explícito**; sin valor o con uno inválido, falla. `.env.example` documenta la demostración: copiarlo a `.env.local` selecciona mocks intencionalmente. Para un despliegue destinado al backend real, configurar `api` en el entorno de build. Inter/Oswald y el logo se sirven como assets locales. `npm run preview` permite revisar `dist/` después del build. Un hosting futuro deberá resolver las rutas hacia `index.html`; no se declara desplegada la app.
+
+## Selección de adapters y prueba de sustitución
+
+`VITE_DATA_MODE=mock|api` es la única configuración global, leída una vez en `src/main.tsx` y distribuida mediante `DataModeContext`. `src/features/pricing/services/pricingService.ts` compone el adapter de Pricing con ese modo: `mock` crea una instancia propia del repositorio de memoria, reloj de exposición y herramientas aisladas de desarrollo. `api` usa un factory inyectado compatible; mientras no se implemente y configure, muestra **«adapter API de Pricing no está configurado»**. Un fallo de API se propaga como error; no hay fallback al mock. Cambiar la variable requiere reiniciar Vite/reconstruir producción.
+
+`src/app/config/dataMode.ts` valida la configuración tanto en Vite como al iniciar la app; no selecciona un segundo adapter. En modo `api`, Cupones/Promociones/Recomendaciones permanecen deshabilitados porque sus providers HTTP todavía no existen: la barrera común del shell evita cargar sus adapters mock. Sus 19 pantallas funcionan en la demostración explícita. Un error de catálogo en Pricing ofrece **Volver a cargar productos y SKU**, reutilizando la misma instancia del adapter y conservando la aplicación y URL.
+
+Las páginas/hooks usan `PricingProvider` y el puerto `PricingRepository`: catálogo de productos/SKU, lecturas, escrituras, prevalidación `File + allowPartial` y reportes `Blob + filename`. No importan targets/fixtures ni reciben `scenario`. El contexto mantiene IDs opacos y la asociación `productTargetId`; no deriva producto desde SKU ni usa `base` como identidad productiva. Las monedas se conservan desde la lectura; no se habilita conversión ni elección de otra moneda sin política publicada. La validación preliminar de oferta programada consulta la vigencia correspondiente al inicio; la validación definitiva pertenece a Pricing.
+
+`tests/harness/pricing-adapter.html` monta el mismo `App` con `AlternatePricingRepository`: cafetera, otro UUID de producto, otro SKU, moneda CHF y otro lote. El harness es de pruebas, servido por Vite en desarrollo y ausente del build de producto; no es una ruta comercial. Ejecutar `npm test -- tests/pricing-audit.spec.ts` verifica sustitución, entradas de archivo/política, errores sin fallback y descarga del archivo de ese adapter.
 
 ## Rutas y límites
 
 | Ruta | Alcance |
 |---|---|
-| `/precios` | Piloto S01: selección producto/SKU, consulta local, herencia/override, fallback global y estados |
+| `/precios` | S01: selección producto/SKU, consulta local, herencia/override, fallback global y estados |
+| `/precios/editar` | S02: lectura del objetivo/versionado, oferta, validación, confirmación y conflicto mock |
+| `/precios/programaciones` | S03: listado paginado y creación mock futura con zona horaria explícita |
+| `/precios/importar` | S04: selección/política y respuestas ficticias de prevalidación; confirmación bloqueada |
+| `/precios/importaciones/batch-013-01` | S05: lote ficticio existente, estados, filas y reporte mock independiente del archivo elegido |
+| `/precios/historico` | S06: consulta por SKU/canal e instante, independiente del precio vigente |
 | `/cupones` | MK-005-S01: listado, filtro por estado y paginación local |
 | `/cupones/nuevo` | MK-005-S02: alta con promoción de modalidad cupón, límites y política explícita |
 | `/cupones/:couponId/editar` | MK-005-S03: edición sin alterar usos registrados |
@@ -49,13 +65,20 @@ La aplicación funciona sin Backend, Docs, credenciales ni variables de entorno.
 | `/foundation/estados` | Feedback y variantes semánticas |
 | `/foundation/pricing` | Muestras de componentes S02–S05; no flujos comerciales completos |
 
-`/` redirige a `/precios`; la ruta desconocida ofrece retorno. Las rutas `/foundation/*` están disponibles únicamente con el servidor de desarrollo y no aparecen en la navegación comercial. Los parámetros `target/channel` de `/precios` representan filtros **aplicados** de navegación, no un contrato HTTP. Las entradas editables no se aplican hasta pulsar Consultar. Atrás/Adelante restaura el contexto aplicado y reinicia cualquier borrador pendiente de ese contexto.
+`/` redirige a `/precios`; la ruta desconocida ofrece retorno. Los parámetros `target/channel` representan filtros **aplicados** de navegación, no un contrato HTTP. S06 conserva `at` como fecha/hora local de America/Bogota (UTC−5) y lo convierte a un instante explícito dentro del servicio mock. S02 usa `scope=product` para editar la base desde una variante; por defecto una variante propone su propio override. Las entradas de consulta se aplican al pulsar Consultar. Atrás/Adelante restaura el contexto aplicado. Una propuesta sin guardar en S02/S03, o un archivo seleccionado en S04, exige seguir trabajando o descartar explícitamente al navegar, incluso desde sidebar o historial.
+
+Los modelos internos conservan importes como cadenas decimales, moneda como código y fechas como ISO; las etiquetas `S/`, zona y formato legible se aplican solo en presentación. Los cambios confirmados en S02 se reflejan en S01 durante la sesión; S03 no altera anticipadamente el precio actual. Recargar reinicia el mock. Las programaciones están asignadas a su objetivo y se rechaza superposición por objetivo/canal incluso entre regular/oferta. La lista usa páginas de 2 filas del mock; no representa un límite contractual.
+
+El reloj de producción es `systemClock`; las reglas reciben un `Clock`, sin fecha ficticia incrustada. El adapter de exposición fija **17/10/2026 07:00 America/Bogota = `2026-10-17T12:00:00Z`**, señalado en su aviso. Sus precios de octubre tienen intervalo `[2026-10-01T00:00:00Z, 2026-11-01T00:00:00Z)` y son aplicables el 17; después existe una lectura global sin oferta. El archivo normativo sigue registrando otro reloj de fixture, del 2 de octubre; el reloj de exposición es una variante local explícita, no una modificación de Docs.
+
+Para revisar errores en modo mock y desarrollo, añadir `modoRevision=1`. `mocks/PricingDemoPanel` controla un decorador de pruebas; los puertos y páginas no conocen esos escenarios. Ejemplo: `/precios/editar?target=variant40&channel=retail&modoRevision=1`. Las respuestas artificiales se restablecen desde ese panel. S04 entrega archivo/política al puerto, pero el mock normal rechaza prevalidar por Q-013-01/02; únicamente el decorador de revisión ofrece respuestas ficticias seleccionadas explícitamente, sin analizar bytes. La confirmación permanece bloqueada. El ejemplo de lote se abre desde el panel de revisión; en la página se puede introducir una referencia recibida. El reporte se descarga usando bytes/nombre del adapter, mediante un downloader separado. Ver [auditoría H01–H16 y prueba MOCK_REPLACEABLE](docs/AUDITORIA_MK013.md) y el [registro inicial](docs/VALIDACION_MK013.md).
 
 Los tres listados conservan filtros/paginación en URL al abrir detalle, editar y regresar. Los parámetros representan contexto de UI. No hay buscador remoto no publicado ni acciones de consumo/restitución. El router de datos de React Router permite bloquear la salida con borrador pendiente, incluido Atrás; los layouts anidados conservan formularios al abrir/cancelar selectores.
 
 Las escrituras se guardan **en memoria de la pestaña y se reinician al recargar**. Una promoción de modalidad cupón creada en la sesión aparece al crear un cupón. La capacidad de cambiar modalidad procede del servicio: requiere inactividad, ninguna activación histórica, ningún cupón asociado actualmente y ningún uso histórico. Reasignar el último cupón sin uso libera la asociación anterior; no borra activaciones ni usos. La capacidad desconocida se conserva desconocida. No se expanden productos completos a SKU ni se infiere superioridad por precio. Precio/disponibilidad de recomendaciones siguen **No disponible** por D-REC-01/02.
 
 Solo en desarrollo, `modoRevision=1&escenario=...` habilita escenarios deterministas: `loading`, `empty`, `error`, `missing`, `session`, `forbidden`, `saving`, `save-error`, `rejected`, `conflict`, `unknown-result`; además `usage-unavailable` en Cupones y `selection-empty`, `selection-error`, `unknown-capability` donde corresponden. Producción ignora estos parámetros. Ejemplo: `/promociones/carrera/editar?modoRevision=1&escenario=conflict`. Un resultado incierto bloquea repetir la escritura y permite consultar el resultado. Las creaciones de promociones/reglas sin identificador confirmado requieren localizar el registro en el listado, sin reenvío automático. Escenarios, capturas y límites en [AVANCE_FRONTEND_CUEVA.md](docs/AVANCE_FRONTEND_CUEVA.md).
+
 
 ## Arquitectura para añadir features
 
@@ -66,25 +89,25 @@ src/app/routes/          productRoutes/productPages y demoRoutes/demoPages separ
 src/components/shared/   Patrones de presentación usados en pilotos/muestras
 src/theme/               Tokens, defaults y variables CSS centrales
 src/features/pricing/    Página → componentes/hook → puerto/service → adapter mock → fixtures
-src/features/promotions/ Cupones/promociones/reglas: páginas/componentes → hooks → servicios/puertos → adapters mock → fixtures
+src/features/promotions/ Cupones/promociones/reglas → hooks → servicios/puertos → adapters mock → fixtures
 src/features/foundation/ Galería y casos de revisión de componentes
 ```
 
-Registrar una feature en `productRoutes.tsx` y su navegación en `navigation.ts` (con `group` para el grupo funcional), reutilizando shell y theme. Mantener las demos en `demoRoutes.tsx`. Los shared no conocen endpoints, credenciales, DTOs externos ni reglas autoritativas de negocio. La [guía de componentes](docs/COMPONENTES_FOUNDATION.md) contiene APIs y ejemplos; la [guía de implementación](docs/GUIA_IMPLEMENTACION_FRONTEND_REACT.md) contiene el procedimiento y gates.
+Registrar una feature en `productRoutes.tsx` y su navegación en `navigation.ts` (con `group` y `matchPaths` para destinos relacionados), reutilizando shell y theme. Mantener las demos en `demoRoutes.tsx`. Los shared no conocen endpoints, credenciales, DTOs externos ni reglas autoritativas de negocio. La [guía de componentes](docs/COMPONENTES_FOUNDATION.md) contiene APIs y ejemplos; la [guía de implementación](docs/GUIA_IMPLEMENTACION_FRONTEND_REACT.md) contiene el procedimiento y gates.
 
-En Promotions, `services/promotionServices.ts` es el punto central de composición. `createMockPromotionServices({ catalog: adaptadorCatalogo })` permite sustituir un puerto y conservar los mocks restantes; estos consultan el puerto inyectado, no los fixtures de otra funcionalidad. También acepta `coupons`, `campaigns` y `recommendations`. `createPromotionServices` recibe los cuatro puertos para una composición sin simulación de historial. Los archivos `*Service.ts` son aliases de esa composición. Cada factory crea una memoria aislada; los adapters externos deberán mapear sus DTO al modelo de presentación y respetar el contrato oficial antes de seleccionarse aquí. La sustitución está probada con dobles de servicios; no acredita integración HTTP real.
+En Promotions, `services/promotionServices.ts` es el punto central de composición. `createMockPromotionServices({ catalog: adaptadorCatalogo })` permite sustituir un puerto y conservar los mocks restantes; estos consultan el puerto inyectado, no los fixtures de otra funcionalidad. También acepta `coupons`, `campaigns` y `recommendations`. `createPromotionServices` recibe los cuatro puertos para una composición sin simulación de historial. Cada factory crea una memoria aislada; los adapters externos deberán mapear sus DTO al modelo de presentación y respetar el contrato oficial antes de seleccionarse aquí. La sustitución está probada con dobles de servicios; no acredita integración HTTP real.
 
-Los contratos de repositorio reciben datos y `AbortSignal`; no reciben `scenario`. Las páginas consumen `hooks/usePromotionServices.ts` y pasan esos puertos a los hooks/formularios/diálogos. `services/promotionServices.ts` configura tanto los adapters como su origen mediante `createPromotionRuntime(promotionServices, "mock")`. Solo la composición mock en DEV selecciona `dev/reviewServices.ts`; allí quedan los parsers, decoradores y la limpieza del contexto de revisión. Los reintentos vuelven a consultar sin perder filtros; las consultas descartan respuestas de un puerto anterior.
+Los contratos de repositorio reciben datos y `AbortSignal`; no reciben `scenario`. Las páginas consumen `hooks/usePromotionServices.ts` y pasan esos puertos a los hooks/formularios/diálogos. Este hook utiliza `DataModeContext` y `getPromotionRuntime(mode)`; no lee otra variable ni conserva una selección paralela `mock/backend`. La composición se crea al solicitarla, sin inicializar mocks al importar el módulo. Solo la composición mock en DEV selecciona `dev/reviewServices.ts`; allí quedan los parsers, decoradores y la limpieza del contexto de revisión. Los reintentos vuelven a consultar sin perder filtros; las consultas descartan respuestas de un puerto anterior. `useCoupon` no consulta el repositorio si falta el identificador al abrir un alta.
 
-`components/PromotionDataNotice.tsx` reúne los avisos actuales y conserva su `FeedbackAlert`. Usa el origen de la composición: se muestra con mock, incluso en un build de demostración, y desaparece con backend. Las confirmaciones de guardado/estado utilizan mensajes neutrales. No hay flags de simulación por pantalla.
+`components/PromotionDataNotice.tsx` reúne los avisos actuales y conserva su `FeedbackAlert`. Usa el mismo `DataModeContext`: se muestra con mock, incluso en un build de demostración, y desaparece con api. Las confirmaciones de guardado/estado utilizan mensajes neutrales. No hay flags de simulación por pantalla.
 
-Cuando existan contratos/adapters HTTP verificados, el cambio central será componer los cuatro puertos con `createPromotionServices(adapters)` y seleccionar `createPromotionRuntime(promotionServices, "backend")` en el mismo archivo. Las pantallas y hooks mantendrán sus interfaces. Con backend los parámetros de revisión se ignoran también en DEV; `confirmedServices` usa los mismos adapters para reconciliar resultados inciertos. `prepareCreation` conserva las guardas de demostración actuales: en backend solo comprueba cancelación, no concede permisos ni acredita autenticación. El acceso real y los errores deben provenir de los servicios oficiales; no se ha implementado ningún adapter HTTP.
+Mientras falten providers, `CommercialModeGate` mantiene bloqueadas las 19 vistas en modo `api`, sin cargar sus páginas ni mocks. Si se solicita directamente `createPromotionRuntime("api")` sin factory, también falla explícitamente; no existe fallback. Cuando existan los cuatro adapters HTTP verificados, se inyectarán juntos mediante `dependencies.api` en la composición central y se actualizará la capacidad del gate para habilitar el módulo. Las pantallas y hooks mantendrán sus interfaces. Con api los parámetros de revisión se ignoran también en DEV; `confirmedServices` usa los mismos adapters para reconciliar resultados inciertos. `prepareCreation` conserva las guardas de demostración actuales: en api solo comprueba cancelación, no concede permisos ni acredita autenticación. El acceso real y los errores deben provenir de los servicios oficiales; no se ha implementado ningún adapter HTTP.
 
 Las reglas reutilizables de cupones, promociones y recomendaciones están en `services/*Validation.ts` y son utilizadas por los formularios y los mocks. Una API real debe seguir revalidando las reglas en el servidor. Los adapters, fixtures e historial simulado permanecen sin cambios de comportamiento en esta separación.
 
 ## Documentación normativa de Docs
 
-Fuente visual: **[DESIGN.md 1.1.0](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/be5c2db16aca6d6d18b3005a2da4205f724038e3/ux/mockups/DESIGN.md)** de Docs `master`, commit **`be5c2db16aca6d6d18b3005a2da4205f724038e3`**. La revisión FND-01 actualiza la referencia inicial 1.0.0 y registra las diferencias en el [reporte](docs/VALIDACION_FOUNDATION.md).
+Fuente visual: **[DESIGN.md 1.1.0](https://github.com/Taller-SW-Web/Productos-y-Ofertas-docs/blob/be5c2db16aca6d6d18b3005a2da4205f724038e3/ux/mockups/DESIGN.md)** de Docs `master`, commit **`be5c2db16aca6d6d18b3005a2da4205f724038e3`**. La revisión FND-01 actualiza la referencia inicial 1.0.0 y registra las diferencias en el [reporte](docs/VALIDACION_FOUNDATION.md).
 
 | Fuente | Ruta vigente dentro de Docs |
 |---|---|
@@ -114,4 +137,8 @@ Remove-Item Env:UPDATE_PROMOTIONS_EVIDENCE
 
 El opt-in solo admite nombres de capturas de Cupones/Promociones/Recomendaciones. Foundation y Pricing conservan siempre sus evidencias versionadas durante estas pruebas.
 
-La entrega anterior se integró mediante PR #22; Axel autorizó publicar las correcciones posteriores en `cueva` y abrir una nueva PR hacia `master`. Véase la actualización al final de [AVANCE_FRONTEND_CUEVA.md](docs/AVANCE_FRONTEND_CUEVA.md); la PR registra el estado remoto y de revisión. Pendientes: revisión técnica/UX independiente y aprobación documental. Los contratos administrativos siguen provisionales y requieren provider/auth/grants comprobados antes de conectar HTTP. Q-013-01/02 mantienen abiertos el contrato de archivo y la admisión con errores de Pricing; no bloquean su S01. Autenticación, permisos reales, APIs, escritura comercial, mobile/tablet y evaluación WCAG exhaustiva no se acreditan mediante estos mocks.
+La entrega anterior de Cueva se integró mediante PR #22. Las correcciones posteriores están en [PR #23](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/23), de `cueva` hacia `master`. El [reporte de Cueva](docs/AVANCE_FRONTEND_CUEVA.md) conserva las validaciones y registra la sincronización con `origin/master@9b0365c`, sin merge directo a master.
+
+La entrega de Pricing de [PR #21](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/21) fue incorporada a `master` mediante `9b0365c`. El [informe de integración](docs/INTEGRACION_VERA_MASTER.md) registra resolución por archivo, N03–N05, comandos y evidencia; [PR_MK013.md](docs/PR_MK013.md) describe el alcance. Sus referencias a PR abierta describen el momento de aquella validación. Los informes H01–H16 conservan su ejecución histórica de 48 pruebas; la ejecución completa tras integrar está en el informe nuevo. Se conservan los seis flujos de Pricing y los 19 de Cupones/Promociones/Recomendaciones.
+
+Pendientes: última revisión técnica/funcional y visto bueno UX humano. Q-013-01/02 mantienen bloqueados el contenido de archivo y su admisión; el issue #15 no debe cerrarse con esos pendientes. D-REC-01/02, contratos administrativos, autenticación, permisos reales, APIs, persistencia comercial, mobile/tablet y evaluación WCAG exhaustiva siguen pendientes. `MOCK_REPLACEABLE` se acredita para Pricing, sin atribuir ese criterio a los otros módulos.

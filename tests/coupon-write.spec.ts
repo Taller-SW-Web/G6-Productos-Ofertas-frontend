@@ -26,8 +26,9 @@ test("MK-005 S02: crear cupón no consulta repository.read sin identificador", a
         response,
         body: `${await response.text()}
 window.couponReadIds = [];
-const originalCouponRead = promotionServices.coupons.read.bind(promotionServices.coupons);
-promotionServices.coupons.read = (id, signal) => {
+const couponRepository = getPromotionRuntime("mock").resolve(new URLSearchParams()).services.coupons;
+const originalCouponRead = couponRepository.read.bind(couponRepository);
+couponRepository.read = (id, signal) => {
   window.couponReadIds.push(id);
   return originalCouponRead(id, signal);
 };`,

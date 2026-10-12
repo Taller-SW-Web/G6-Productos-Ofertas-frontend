@@ -103,7 +103,7 @@ test("19 vistas desktop: geometría, tipografía y diálogo según DESIGN 1.1; c
   });
 });
 
-test("la composición backend oculta los avisos e ignora escenarios DEV en las 19 vistas", async ({
+test("el modo API global bloquea las 19 vistas sin cargar datos ni adapters mock", async ({
   page,
 }) => {
   test.setTimeout(90000);
@@ -112,45 +112,30 @@ test("la composición backend oculta los avisos e ignora escenarios DEV en las 1
     page.getByText("Datos de demostración", { exact: true }),
   ).toBeVisible();
 
-  // Change only the composition source; existing ports act as a service double.
-  // This verifies integration preparation, not an HTTP adapter or backend access.
-  await page.route(
-    "**/src/features/promotions/services/promotionServices.ts*",
-    async (route) => {
-      const response = await route.fetch();
-      const body = await response.text();
-      const selection = /createPromotionRuntime\(promotionServices,\s*["']mock["']\)/;
-      expect(body).toMatch(selection);
-      await route.fulfill({
-        response,
-        body: body.replace(
-          selection,
-          'createPromotionRuntime(promotionServices, "backend")',
-        ),
-      });
-    },
-  );
-  for (const [id, path] of views) {
+  const requests: string[] = [];
+  page.on("request", (request) => requests.push(request.url()));
+  // Exercise the real application entry point with the same globally resolved
+  // mode as VITE_DATA_MODE=api; do not bypass CommercialModeGate.
+  await page.route("**/src/main.tsx*", async (route) => {
+    const response = await route.fetch();
+    const body = await response.text();
+    const selection = /import\.meta\.env\.VITE_DATA_MODE/;
+    expect(body).toMatch(selection);
+    await route.fulfill({ response, body: body.replace(selection, '"api"') });
+  });
+  for (const [, path] of views) {
     await page.goto(`${path}?modoRevision=1&escenario=forbidden`);
-    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-    await expect(
-      page.getByRole("status").filter({ hasText: /Cargando|Consultando/ }),
-    ).toHaveCount(0);
+    await expect(page.getByRole("alert")).toContainText(
+      "Integración API no disponible",
+    );
     await expect(
       page.getByText("Datos de demostración", { exact: true }),
     ).toHaveCount(0);
-    await expect(page.getByRole("alert")).toHaveCount(0);
-    if (id.endsWith("S02") || id === "MK-007-S04") {
-      await expect(page.locator("main form")).toBeVisible();
-      const label = id.startsWith("MK-005")
-        ? "Código del cupón"
-        : id.startsWith("MK-006")
-          ? "Nombre de la promoción"
-          : "Nombre de la regla";
-      await expect(page.getByRole("textbox", { name: label, exact: true })).toBeEnabled();
-      await expect(page.getByRole("button", { name: /^Crear / })).toBeEnabled();
-    }
-    if (id === "MK-005-S06" || id === "MK-006-S06" || id === "MK-007-S07")
-      await expect(page.getByRole("dialog")).toBeVisible();
+    await expect(page.locator("main form")).toHaveCount(0);
+    await expect(page.getByRole("table")).toHaveCount(0);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
   }
+  expect(
+    requests.some((url) => /features\/promotions\/|\/mocks\//.test(url)),
+  ).toBe(false);
 });

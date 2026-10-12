@@ -349,3 +349,52 @@ La prueba nueva se ejecutó antes de cambiar el hook y falló con dos lecturas d
 | Suite global / API HTTP / CI remoto | NO EJECUTADO como parte de esta corrección puntual. |
 
 Publicación autorizada por Axel en `cueva` y actualización de PR #23; sin merge directo. Estado **MOCK_INTEGRATED / MOCK_ONLY**. Los contratos/adapters HTTP y la revisión independiente siguen pendientes; no bloquean la prevención de lecturas innecesarias.
+
+## Sincronización con master y modo global mock/api — 12 de octubre
+
+Axel solicitó incorporar los cinco commits nuevos de `origin/master` a `cueva`, conservar Pricing y los 19 flujos propios, compatibilizar la composición con `VITE_DATA_MODE` y validar antes de publicar. Git inicial limpio, `cueva`/`origin/cueva` en `64e077bbd74e2f309e47a5ca9a9ad11027f5437e`. Tras fetch, `origin/master` está en `9b0365c` (merge de PR #21). Se usa merge normal sin reescribir historial ni modificar master. GitHub confirmaba PR #23 abierta, sin merge automático por conflicto.
+
+### Resolución y alcance
+
+Solo `README.md` presentó conflicto de contenido. Se conservaron las rutas S01–S06, configuración, sustitución de adapters, reloj, límites de archivo/moneda y reportes de Pricing de master, junto con arquitectura, avisos y evidencia de Promotions de cueva. Se actualiza la referencia a PR #21 ya integrada según el historial Git. Los informes históricos de Vera no se reescriben.
+
+Las rutas lazy, navegación de cinco destinos, shell, `CommercialModeGate`, `DataModeContext`, `dataMode.ts`, `main.tsx`, Vite y el código de Pricing se incorporan idénticos a `origin/master`. Las evidencias PNG versionadas también coinciden con master: antes de ejecutar los tests que escriben capturas de Pricing se conservó una copia y después se repusieron exactamente los bytes. Las nuevas 19 capturas propias y sus mediciones quedan en `test-results/`; no se sobrescribe la evidencia del equipo como parte de esta corrección.
+
+La composición de Promotions usa el tipo `DataMode` y recibe el valor validado de `DataModeContext`. No lee otra variable, no conserva selección `mock/backend` y no inicializa memoria mock al importar el módulo. `getPromotionRuntime(mode)` conserva la instancia seleccionada; `createPromotionRuntime("api")` sin provider falla explícitamente. La factory `api` puede proporcionar los cuatro puertos juntos y sus errores se propagan sin fallback. El gate actual sigue bloqueando el módulo completo en api y evita cargar sus páginas/adapters. Los parámetros DEV solo se decoran en mock.
+
+Cuando se disponga de los cuatro adapters HTTP oficiales, se inyectarán en `dependencies.api` dentro del punto central de composición y se habilitará la capacidad correspondiente del gate común. No se necesitan cambios de páginas/hooks/formularios. Esa habilitación futura no se realizó en esta entrega. Auth/grants reales deben provenir del provider; no se infieren de la configuración.
+
+| Archivo propio de esta sincronización | Motivo |
+|---|---|
+| `README.md` | Resolver conflicto conservando ambas entregas y documentar la única configuración global. |
+| `src/features/promotions/services/promotionServices.ts` | Composición por DataMode, inicialización bajo demanda y factory api sin fallback. |
+| `src/features/promotions/hooks/usePromotionServices.ts` | Consumir el contexto global, manteniendo servicios/reintentos neutrales. |
+| `src/features/promotions/components/PromotionDataNotice.tsx` | Visibilidad desde el mismo contexto global, sin importar una instancia mock. |
+| `services/{coupon,campaign,recommendation,catalog}Service.ts` de Promotions | Eliminar cuatro aliases sin consumidores que seleccionaban mocks al importar. La búsqueda confirmó que no hay referencias restantes. |
+| `tests/coupon-write.spec.ts` | Mantener el espía de regresión sobre el puerto seleccionado bajo demanda. Cero lecturas al crear, lectura al editar. |
+| `tests/promotions-adapters.spec.ts` | Rechazo sin provider, propagación de fallo y composición conjunta de los cuatro puertos API. Los dobles no acreditan HTTP. |
+| `tests/promotions-visual.spec.ts` | Conservar recorrido mock de las 19 vistas; adaptar el caso API a la barrera global real, sin bypass ni selección paralela. |
+| `scripts/verify-production.mjs` | Ampliar el smoke de master a las 19 vistas propias en ambos builds, conservando Pricing S01 y su reintento. |
+| `.github/workflows/frontend.yml` | Conservar validaciones/smoke mock/suite; añadir build api y smoke sin fallback al mismo job. |
+| `docs/PR_PROMOTIONS_CUEVA.md`, este informe | Alcance final y evidencias actuales de PR #23. |
+
+Fuentes leídas: AGENTS, README de ambas ramas, configuración, rutas/código y pruebas reales, informe `docs/INTEGRACION_VERA_MASTER.md`, estado de PR #23 y los cinco commits de master. Docs local `../Productos-y-Ofertas-docs/mockups/{DESIGN.md,ux/ux-guidelines.md,ux/ux-decisions.md}`: DESIGN 1.1.0 y UX 2.0; misma copia cuya referencia previa comprobada es `master@d0d9e37330d3426accf91158fe4febf7d41d4494`. No se modifica Docs ni Backend ni se interpreta esta sincronización como aprobación UX.
+
+### Validación local de la sincronización
+
+| Comprobación | Resultado |
+|---|---|
+| `npm run typecheck` | PASS, salida 0. |
+| `npm run build`, `VITE_DATA_MODE=mock` | PASS, salida 0. |
+| `npm run build`, `VITE_DATA_MODE=api` | PASS, salida 0. No acredita backend real. |
+| `npm run lint` | PASS, salida 0. |
+| `npm test`, `VITE_DATA_MODE=mock`, `CI=true` | PASS, **112 pruebas**, 3.7 min, dos workers como el workflow. Pricing, Foundation, 19 vistas propias, guardas, formularios/selectores, navegación y regresión del ID vacío incluidos. |
+| `node scripts/verify-production.mjs mock` | PASS, 19 vistas de Promotions y Pricing S01, 1440 px, controles DEV ignorados, sin pageerror. |
+| `node scripts/verify-production.mjs api` | PASS, las 19 vistas bloqueadas sin forms/tablas/diálogos ni avisos de datos simulados; Pricing sin provider y reintento explícito; cero requests a mocks/páginas bloqueadas. |
+| Visual mock 1440×900 | Recorrido/mediciones/capturas de 19 vistas PASS; inspección manual de MK-005-S02, MK-006-S04 y MK-007-S07. Cinco destinos en navegación, sin overflow. |
+| Alcance | Sin diferencias frente a origin/master en Pricing, app/shared, main/Vite/.env.example y PNG versionados. |
+| Conflictos / `git diff --check` | Ningún archivo unmerged ni marcador pendiente; PASS. |
+
+El resultado de GitHub Actions y la fusionabilidad del SHA publicado se registran en la descripción/checks de [PR #23](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/23), tras esperar su finalización. La existencia del workflow o la validación local no sustituyen ese resultado remoto. Se publica solo en `cueva`; no se hace merge de PR #23 ni se cierran issues.
+
+Estado **MOCK_INTEGRATED / MOCK_ONLY**. En `api`, **BLOCKED_CONTRACT/provider ausente** se conserva explícito. Pendientes: contratos/adapters/auth/grants administrativos, D-REC-01/02, Q-013-01/02 y moneda de Pricing, revisión técnica/UX independiente.

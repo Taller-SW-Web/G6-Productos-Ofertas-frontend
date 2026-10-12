@@ -1,27 +1,29 @@
-# Centralizar avisos y desacoplar servicios de cupones, promociones y recomendaciones
+# Sincronizar Cueva con master y unificar el modo mock/api de Promotions
 
-Los avisos de demostración estaban escritos en las pantallas y varios consumidores seleccionaban servicios DEV directamente. Ahora los nueve avisos se reúnen en `PromotionDataNotice` y desaparecen automáticamente al seleccionar composición backend. Las páginas, hooks y diálogos consumen puertos neutrales mediante `usePromotionServices`; la selección, decoración y limpieza de escenarios queda aislada en la composición mock de desarrollo.
+La rama `cueva` incorpora `origin/master@9b0365c` mediante merge normal y conserva los cinco commits nuevos de Pricing. El conflicto de README se resolvió uniendo la documentación de ambas entregas. Pricing, rutas, navegación, shell, configuración global y evidencias versionadas coinciden con master; no se revierten implementaciones del equipo.
 
-Conectar el backend requerirá principalmente proporcionar los cuatro adaptadores oficiales y cambiar la composición a `backend`, conservando las 19 pantallas, formularios, navegación y validaciones. Los parámetros de demostración se ignoran también en DEV cuando se selecciona backend. Las confirmaciones utilizan textos neutrales y las consultas descartan respuestas de un puerto anterior.
+Promotions consume el único `VITE_DATA_MODE=mock|api` a través de `DataModeContext`. Se retiró la selección paralela `mock/backend`: la composición se crea bajo demanda, los avisos usan el mismo contexto y los escenarios DEV solo aplican en mock. `CommercialModeGate` permanece intacto y bloquea las 19 vistas en api mientras falten providers HTTP, sin cargar sus páginas ni mocks. Solicitar la composición API sin provider falla explícitamente; un fallo de provider nunca cae a mocks.
 
-La PR también corrige las asociaciones de cupones y las validaciones compartidas: reasignar el último cupón sin uso libera la asociación anterior, mientras que activaciones, uso histórico y capacidades desconocidas se conservan. Los mocks reciben referencias por puertos y las capturas de pruebas no sobrescriben la evidencia versionada del equipo.
+Los cuatro puertos podrán conectarse juntos en `services/promotionServices.ts` mediante la factory API cuando existan adapters oficiales. La futura habilitación del gate se hará entonces, sin reescribir pantallas/hooks/formularios. No se implementan HTTP, endpoints ni permisos ficticios.
 
-Al abrir `/cupones/nuevo`, `useCoupon` recibe el identificador ausente y devuelve `null` sin invocar `repository.read`. La llamada al hook sigue siendo incondicional y la edición mantiene la lectura del cupón seleccionado. Una prueba de regresión cuenta las llamadas al puerto antes de montar React: verifica cero lecturas en el alta y utiliza la edición de `run10` como control positivo.
+Se conservan las correcciones de asociaciones/validaciones, los nueve avisos centralizados, guardas de borrador, selectores y las 19 pantallas MK-005/006/007. El alta de cupones no invoca `repository.read` sin identificador; la regresión verifica cero lecturas al crear y lectura de `run10` al editar.
 
-### Validación
+### Validación local
 
-- `npm run typecheck`, `npm run build` y `npm run lint`: PASS, salida 0.
-- `npm test -- tests/coupon-write.spec.ts tests/coupons.spec.ts --workers=2 --output=test-results/coupon-read-fix`: **13 PASS**, incluida la regresión de lectura al crear y los flujos de alta, edición, detalle, límites, cambio de estado, errores y retorno contextual.
-- Sensibilidad de la regresión comprobada antes del fix: detectó dos llamadas con ID vacío; después verifica cero en el alta y lecturas de `run10` en edición. No añade fixtures ni cambia el resultado del repositorio.
-- Cupones: capturas desktop **1440 × 900** regeneradas; captura de S02 inspeccionada. En la validación anterior de esta PR pasaron las 65 pruebas existentes y la prueba de composición backend sobre las 19 vistas. No se declara una nueva ejecución de la suite global en esta corrección puntual.
-- `git diff --check`: PASS. Sin cambios en tokens, navegación, dependencias, nuevos fixtures ni lógica interna de los mocks en esta última separación.
+- `npm run typecheck` y `npm run lint`: PASS.
+- `npm run build` con `VITE_DATA_MODE=mock` y con `api`: ambos PASS.
+- `npm test`, `VITE_DATA_MODE=mock`, `CI=true`: **112 PASS**, 3.7 min. Incluye Pricing, Foundation, rutas/sidebar conjuntos, 19 vistas de Promotions, formularios, selectores y estados.
+- `node scripts/verify-production.mjs mock`: PASS, 19 vistas propias + Pricing S01 a 1440 px, controles DEV ignorados y cero errores de página.
+- `node scripts/verify-production.mjs api`: PASS, las 19 vistas explícitamente bloqueadas; cero formularios/tablas/diálogos de negocio o avisos de simulación; Pricing sin provider conserva su error/reintento; cero carga de mocks.
+- Recorrido visual automatizado de las 19 vistas a 1440×900: PASS. Inspección manual de MK-005-S02, MK-006-S04 y MK-007-S07.
+- `git diff --check`: PASS. Sin conflictos pendientes ni diferencias frente a master en el código de Pricing, app/shared, configuración global y PNG versionados.
+
+El workflow conserva build mock, smoke y suite completa, y añade build/smoke api. El resultado remoto del SHA publicado se confirma en los checks de esta PR.
 
 ### Límites
 
-Entrega **MOCK_INTEGRATED / MOCK_ONLY**. La comprobación de composición backend no acredita acceso HTTP ni una API real. Los contratos administrativos, autenticación y permisos del provider siguen pendientes; `prepareCreation` no concede permisos reales. D-REC-01/02 mantienen precio/disponibilidad por producto como No disponible.
+**MOCK_INTEGRATED / MOCK_ONLY**. Modo api bloqueado por providers ausentes. Contratos/adapters administrativos, auth/grants y D-REC-01/02 pendientes. Pricing conserva Q-013-01/02 y la política de moneda pendientes. Revisión técnica/UX independiente pendiente. Sin merge directo ni cierre de issues.
 
-Revisión técnica y UX independiente pendiente. No se declara cierre de los issues ni aprobación funcional global.
-
-[Informe e inventario de cambios](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/blob/cueva/docs/AVANCE_FRONTEND_CUEVA.md).
+[Informe de sincronización, resolución e inventario](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/blob/cueva/docs/AVANCE_FRONTEND_CUEVA.md#sincronización-con-master-y-modo-global-mockapi--12-de-octubre).
 
 Refs #7, #8, #9.
