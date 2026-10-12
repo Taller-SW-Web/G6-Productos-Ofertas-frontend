@@ -125,6 +125,20 @@ export interface CharacteristicValueInput {
   nombre: string;
 }
 
+// MK-009 — baja de un valor permitido (SPEC-009/010). Simula el protocolo transversal
+// S04 sin afirmar un contrato HTTP: "pendiente" admite la solicitud (202) sin
+// confirmar la desactivación, y "rechazada" conserva el valor Activo. Solo "exito"
+// autoriza la mutación del estado en el modelo de presentación.
+export type ValorBajaResultado = "pendiente" | "rechazada" | "exito";
+
+export interface ValorBajaResult {
+  resultado: ValorBajaResultado;
+  valor: CharacteristicValue;
+  mensaje: string;
+  bloqueos: BloqueoDependencia[];
+  operacionId?: string;
+}
+
 export interface CharacteristicListItem {
   id: string;
   nombre: string;
@@ -224,6 +238,24 @@ export interface ProductTypeDetail {
   asociadas: ProductTypeAssociation[];
 }
 
+export interface ProductTypeAssociarInput {
+  tipoProductoId: string;
+  caracteristicaId: string;
+  obligatoria: boolean;
+}
+
+export type OperationResultState = "exito" | "pendiente" | "rechazada";
+
+export interface ProductTypeDesasociarResult {
+  resultado: OperationResultState;
+  mensaje: string;
+}
+
+export interface ProductTypeDesactivarResult {
+  resultado: OperationResultState;
+  mensaje: string;
+}
+
 // MK-011 (Marcas) — presentation models aligned to MarcaAdmin.
 export type BrandStatus = EntityStatus;
 
@@ -256,6 +288,18 @@ export interface BrandUpdateInput {
   nombre: string;
   descripcion?: string | null;
   paisOrigenIso?: string | null;
+}
+
+// MK-011 — baja segura de marca (protocolo transversal BRAND, SPEC-011).
+// La baja es lógica; solo un CLEAR vigente confirma. Error/timeout no autorizan.
+// "no-concluyente" = verificación sin respuesta determinante; la marca conserva su estado.
+export type BrandBajaResultado = "exito" | "pendiente" | "rechazada" | "no-concluyente";
+
+export interface BrandBajaResult {
+  resultado: BrandBajaResultado;
+  mensaje: string;
+  operacionId?: string;
+  bloqueos?: BloqueoDependencia[];
 }
 
 // MK-012 (SEO y metadatos) — presentation models. Aligned to SPEC-012/HU-012/WF-012.

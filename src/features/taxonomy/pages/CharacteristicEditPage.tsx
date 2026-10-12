@@ -82,8 +82,8 @@ function CharacteristicEditLoader({ id }: { id: string }) {
         title="Característica no encontrada"
         actions={
           <Button variant="outline" onClick={() => navigate("/caracteristicas")}>
-              Volver al listado
-            </Button>
+            Volver al listado
+          </Button>
         }
       >
         La característica solicitada no existe o ya no está disponible.
@@ -101,7 +101,7 @@ function CharacteristicEditLoader({ id }: { id: string }) {
         title="Editar característica"
         description="Actualiza el nombre y la unidad de la característica seleccionada."
         breadcrumbs={[
-          { label: "Características", to: "/MK009/S01" },
+          { label: "Características", to: "/caracteristicas" },
           { label: "Editar" },
         ]}
       />
@@ -170,6 +170,8 @@ function CharacteristicEditForm({
     });
   };
 
+  const guardando = phase === "guardando";
+
   if (resultado) {
     return (
       <FeedbackAlert
@@ -224,6 +226,7 @@ function CharacteristicEditForm({
               withAsterisk
               value={nombre}
               error={nombreError}
+              disabled={guardando}
               onChange={(event) => setNombre(event.currentTarget.value)}
             />
             <TextInput
@@ -239,6 +242,7 @@ function CharacteristicEditForm({
                 value={unidad}
                 error={unidadError}
                 placeholder="Ej. kg, cm"
+                disabled={guardando}
                 onChange={(event) => setUnidad(event.currentTarget.value)}
               />
             )}
@@ -256,11 +260,12 @@ function CharacteristicEditForm({
             <Group justify="flex-end" gap="sm">
               <Button
                 variant="outline"
+                disabled={guardando}
                 onClick={() => navigate(`/caracteristicas/${detalle.id}`)}
               >
                 Cancelar
               </Button>
-              <Button type="submit" loading={phase === "guardando"}>
+              <Button type="submit" loading={guardando}>
                 Guardar cambios
               </Button>
             </Group>

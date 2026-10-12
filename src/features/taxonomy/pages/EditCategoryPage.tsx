@@ -212,7 +212,13 @@ function EditCategoryForm({
   };
 
   const handleConfirmar = () => {
-    if (!slugCheck || phase === "comprobando") return;
+    if (
+      !slugCheck ||
+      phase === "comprobando" ||
+      phase === "guardando"
+    ) {
+      return;
+    }
     actualizar({
       id: detalle.id,
       nombre: nombre.trim(),
@@ -379,6 +385,7 @@ function EditCategoryForm({
               <TextInput
                 label="Slug (URL)"
                 value={slug}
+                disabled={phase === "guardando"}
                 onChange={(event) => setSlug(event.currentTarget.value)}
               />
             </>

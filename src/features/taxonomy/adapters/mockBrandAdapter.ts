@@ -1,5 +1,11 @@
 import type { BrandRepository } from "../services/brandRepository";
-import type { BrandCreateInput, BrandDetail, BrandListItem, BrandUpdateInput } from "../types";
+import type {
+  BrandBajaResult,
+  BrandCreateInput,
+  BrandDetail,
+  BrandListItem,
+  BrandUpdateInput,
+} from "../types";
 
 interface RegistroMarca {
   marcaId: string;
@@ -9,6 +15,12 @@ interface RegistroMarca {
   paisOrigenIso: string | null;
   descripcion: string | null;
   version: number;
+}
+
+interface OperacionBaja {
+  operacionId: string;
+  marcaId: string;
+  estado: "verificando" | "completada" | "no-concluyente";
 }
 
 const store: RegistroMarca[] = [
@@ -39,6 +51,10 @@ const store: RegistroMarca[] = [
     descripcion: null,
     version: 1,
   },
+];
+
+const operacionesBaja: OperacionBaja[] = [
+  { operacionId: "op-marca-adidas", marcaId: "adidas", estado: "verificando" },
 ];
 
 const esperar = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -128,5 +144,83 @@ export const mockBrandAdapter: BrandRepository = {
     r.paisOrigenIso = input.paisOrigenIso ?? null;
     r.version += 1;
     return aDetalle(r);
+  },
+
+  async solicitarBaja(id, signal) {
+    signal.throwIfAborted();
+    await esperar(400);
+    signal.throwIfAborted();
+    const r = store.find((item) => item.marcaId === id);
+    if (!r) {
+      throw new Error("La marca no existe o ya no está disponible.");
+    }
+    if (r.estado !== "Activo") {
+      throw new Error("La marca no está activa; no corresponde solicitar su baja.");
+    }
+    if (r.marcaId === "nike") {
+      const result: BrandBajaResult = {
+        resultado: "rechazada",
+        mensaje: "Catálogo reportó productos activos asociados a la marca.",
+        bloqueos: [
+          {
+            tipo: "productos",
+            cantidad: 8,
+            detalle: "Hay 8 productos activos asociados a la marca Nike.",
+          },
+        ],
+      };
+      return result;
+    }
+    const op = operacionesBaja.find((o) => o.marcaId === id);
+    const operacionId =
+      op?.operacionId ?? `op-marca-${id}-${Date.now().toString(36)}`;
+    if (!op) {
+      operacionesBaja.push({
+        operacionId,
+        marcaId: id,
+        estado: "verificando",
+      });
+    }
+    return {
+      resultado: "pendiente",
+      mensaje: "Solicitud admitida (202 Accepted). La marca queda activa mientras se verifican dependencias con Catálogo.",
+      operacionId,
+    };
+  },
+
+  async consultarResultadoBaja(operacionId, signal) {
+    signal.throwIfAborted();
+    await esperar(600);
+    signal.throwIfAborted();
+    const op = operacionesBaja.find((o) => o.operacionId === operacionId);
+    if (!op) {
+      throw new Error("No se encontró la operación de baja solicitada.");
+    }
+    if (op.marcaId === "adidas" && op.estado === "verificando") {
+      op.estado = "completada";
+      const r = store.find((item) => item.marcaId === op.marcaId);
+      if (r) {
+        r.estado = "Inactivo";
+        r.version += 1;
+      }
+      return {
+        resultado: "exito",
+        mensaje: "Baja confirmada por Catálogo. La marca pasó a estado Inactivo.",
+        operacionId,
+      };
+    }
+    if (op.estado === "completada") {
+      return {
+        resultado: "exito",
+        mensaje: "La marca ya cuenta con la baja confirmada.",
+        operacionId,
+      };
+    }
+    op.estado = "no-concluyente";
+    return {
+      resultado: "no-concluyente",
+      mensaje: "La verificación no fue concluyente. La marca conserva su estado actual.",
+      operacionId,
+    };
   },
 };

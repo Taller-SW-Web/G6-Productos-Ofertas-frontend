@@ -1,4 +1,4 @@
-import type { SeoRepository } from "../services/seoRepository";
+import { SeoConflictError, type SeoRepository } from "../services/seoRepository";
 import type { SlugPropuesta } from "../types";
 
 interface RegistroSeo {
@@ -34,6 +34,8 @@ const normalizar = (s: string) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "") || "slug";
 
+const aRegistro = (r: RegistroSeo) => ({ ...r });
+
 export const mockSeoAdapter: SeoRepository = {
   async list(scenario, signal) {
     signal.throwIfAborted();
@@ -41,7 +43,7 @@ export const mockSeoAdapter: SeoRepository = {
     signal.throwIfAborted();
     if (scenario === "error") throw new Error("No se pudieron cargar los metadatos SEO.");
     if (scenario === "empty") return { items: [] };
-    return { items: store.map((r) => ({ ...r })) };
+    return { items: store.map(aRegistro) };
   },
 
   async obtener(id, signal) {
@@ -49,7 +51,7 @@ export const mockSeoAdapter: SeoRepository = {
     await esperar(200);
     signal.throwIfAborted();
     const r = store.find((x) => x.id === id);
-    return r ? ({ ...r }) : null;
+    return r ? aRegistro(r) : null;
   },
 
   async proponerSlug(nombre, signal) {
@@ -67,15 +69,36 @@ export const mockSeoAdapter: SeoRepository = {
     return { slug, colisionResuelta: colision } as SlugPropuesta;
   },
 
-  async guardarMetadatos(id, metaTitulo, metaDescripcion, signal) {
+  async guardar({ id, slug, metaTitulo, metaDescripcion }, signal) {
     signal.throwIfAborted();
-    await esperar(200);
+    await esperar(250);
     signal.throwIfAborted();
     const r = store.find((x) => x.id === id);
-    if (!r) return null;
+    if (!r) {
+      throw new Error("La categoría no existe o ya no está disponible.");
+    }
+    const slugNormalizado = normalizar(slug);
+    const duplicado = store.find(
+      (x) => x.id !== id && x.slug === slugNormalizado,
+    );
+    if (duplicado) {
+      throw new SeoConflictError(slugNormalizado);
+    }
+    if (slugNormalizado !== r.slug) {
+      const historialDe = historial[id] ?? [];
+      historialDe.push({
+        slugAnterior: r.slug,
+        slugActual: slugNormalizado,
+        fecha: new Date().toISOString(),
+      });
+      historial[id] = historialDe;
+      r.slugAnterior = r.slug;
+      r.slug = slugNormalizado;
+      r.colisionResuelta = false;
+    }
     r.metaTitulo = metaTitulo;
     r.metaDescripcion = metaDescripcion;
-    return { ...r };
+    return aRegistro(r);
   },
 
   async historial(id, signal) {

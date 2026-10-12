@@ -105,8 +105,8 @@ function CharacteristicStateContent({
             `La característica «${res.nombre}» quedó como ${res.estado}.`,
           );
         } else {
-          setResultado(
-            `La característica «${detalle.nombre}» quedó como ${destino}.`,
+          setError(
+            "No se pudo cambiar el estado: el registro ya no está disponible. No se aplicó ninguna mutación.",
           );
         }
       })
@@ -206,6 +206,7 @@ function CharacteristicStateContent({
                 </Button>
                 <Button
                   variant="outline"
+                  disabled={procesando}
                   onClick={() => navigate(`/caracteristicas/${detalle.id}`)}
                 >
                   Cancelar

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ActionIcon,
@@ -22,6 +22,7 @@ import {
   type TableColumn,
   type TableState,
 } from "../../../components/shared";
+import { ListaBloqueos } from "../components/ListaBloqueos";
 import { useCharacteristicDetail } from "../hooks/useCharacteristicDetail";
 import {
   characteristicConfigDefaults,
@@ -30,9 +31,18 @@ import {
 } from "../services/characteristicRepository";
 import { characteristicService } from "../services/characteristicService";
 import { estadoCaracteristicaSemantic } from "../services/estadoSemantic";
-import type { CharacteristicValue } from "../types";
+import type { CharacteristicValue, ValorBajaResult } from "../types";
 
-type BajaEstado = "idle" | "verificando" | "rechazada" | "exito";
+// MK-009-S03: baja de un valor permitido. La pantalla solo transmite la solicitud vía
+// servicio y representa el resultado (verificación en curso, rechazo por uso o baja
+// confirmada); nunca asume una desactivación inmediata por su cuenta.
+type BajaValorUi =
+  | { status: "idle" }
+  | { status: "verificando"; valor: CharacteristicValue }
+  | { status: "pendiente"; result: ValorBajaResult }
+  | { status: "rechazada"; result: ValorBajaResult }
+  | { status: "exito"; result: ValorBajaResult }
+  | { status: "error"; message: string };
 
 function parseScenario(raw: string | null): CharacteristicCatalogScenario {
   return scenariosCatalogoCaracteristica.some((item) => item.value === raw)
@@ -134,9 +144,8 @@ function CharacteristicValuesContent({
   const [nuevoValor, setNuevoValor] = useState("");
   const [agregando, setAgregando] = useState(false);
   const [agregarError, setAgregarError] = useState<string | null>(null);
-  const [bajaEstado, setBajaEstado] = useState<BajaEstado>("idle");
-  const [valorEnBaja, setValorEnBaja] = useState<CharacteristicValue | null>(null);
-  const [mensajeRechazo, setMensajeRechazo] = useState<string | null>(null);
+  const [baja, setBaja] = useState<BajaValorUi>({ status: "idle" });
+  const bajaControllerRef = useRef<AbortController | null>(null);
 
   const termino = busqueda.trim().toLocaleLowerCase("es");
   const filas = useMemo(
@@ -151,17 +160,11 @@ function CharacteristicValuesContent({
 
   useEffect(() => {
     const controller = new AbortController();
-    let mounted = true;
     const idDetalle = detalle.id;
-    setTimeout(() => {
-      if (!mounted) return;
-      setLoadingValores(true);
-      setErrorValores(null);
-    }, 0);
     characteristicService
       .listarValores(idDetalle, "default", controller.signal)
       .then((res) => {
-        if (!mounted || controller.signal.aborted) return;
+        if (controller.signal.aborted) return;
         if (res) {
           setValores(res);
         } else {
@@ -169,7 +172,7 @@ function CharacteristicValuesContent({
         }
       })
       .catch((err) => {
-        if (!mounted || controller.signal.aborted) return;
+        if (controller.signal.aborted) return;
         setErrorValores(
           err instanceof Error
             ? err.message
@@ -178,24 +181,27 @@ function CharacteristicValuesContent({
         setValores([]);
       })
       .finally(() => {
-        if (!mounted || controller.signal.aborted) return;
+        if (controller.signal.aborted) return;
         setLoadingValores(false);
       });
-    return () => {
-      mounted = false;
-      controller.abort();
-    };
+    return () => controller.abort();
   }, [detalle.id]);
+
+  useEffect(
+    () => () => {
+      bajaControllerRef.current?.abort();
+    },
+    [],
+  );
 
   const cargarValores = () => {
     const controller = new AbortController();
-    let mounted = true;
     setLoadingValores(true);
     setErrorValores(null);
     characteristicService
       .listarValores(detalle.id, "default", controller.signal)
       .then((res) => {
-        if (!mounted || controller.signal.aborted) return;
+        if (controller.signal.aborted) return;
         if (res) {
           setValores(res);
         } else {
@@ -203,7 +209,7 @@ function CharacteristicValuesContent({
         }
       })
       .catch((err) => {
-        if (!mounted || controller.signal.aborted) return;
+        if (controller.signal.aborted) return;
         setErrorValores(
           err instanceof Error
             ? err.message
@@ -212,13 +218,9 @@ function CharacteristicValuesContent({
         setValores([]);
       })
       .finally(() => {
-        if (!mounted || controller.signal.aborted) return;
+        if (controller.signal.aborted) return;
         setLoadingValores(false);
       });
-    return () => {
-      mounted = false;
-      controller.abort();
-    };
   };
 
   const handleAgregar = () => {
@@ -247,38 +249,40 @@ function CharacteristicValuesContent({
   };
 
   const handleSolicitarBaja = (valor: CharacteristicValue) => {
-    setBajaEstado("verificando");
-    setValorEnBaja(valor);
-    setMensajeRechazo(null);
+    if (baja.status !== "idle") return;
+    bajaControllerRef.current?.abort();
     const controller = new AbortController();
+    bajaControllerRef.current = controller;
+    setBaja({ status: "verificando", valor });
     characteristicService
       .solicitarBajaValor(detalle.id, valor.valorId, controller.signal)
-      .then((res) => {
-        if (res === "REJECTED") {
-          setBajaEstado("rechazada");
-          setMensajeRechazo(
-            "No se puede dar de baja este valor porque está siendo usado por productos asociados al esquema de tipo de producto (según SPEC-010).",
-          );
-          return;
-        }
-        if (res && res.estado === "Inactivo") {
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        if (result.resultado === "exito") {
           setValores((prev) =>
-            prev.map((v) => (v.valorId === res.valorId ? res : v)),
+            prev.map((item) =>
+              item.valorId === result.valor.valorId ? result.valor : item,
+            ),
           );
-          setBajaEstado("exito");
-          return;
         }
-        setBajaEstado("rechazada");
-        setMensajeRechazo("La verificación de uso no confirmó la baja.");
+        setBaja({ status: result.resultado, result });
       })
       .catch((err) => {
-        setBajaEstado("rechazada");
-        setMensajeRechazo(
-          err instanceof Error
-            ? err.message
-            : "No se pudo verificar el uso del valor.",
-        );
+        if (controller.signal.aborted) return;
+        setBaja({
+          status: "error",
+          message:
+            err instanceof Error
+              ? err.message
+              : "No se pudo verificar el uso del valor.",
+        });
       });
+  };
+
+  const cancelarBaja = () => {
+    bajaControllerRef.current?.abort();
+    bajaControllerRef.current = null;
+    setBaja({ status: "idle" });
   };
 
   const columnas: TableColumn<CharacteristicValue>[] = [
@@ -310,7 +314,7 @@ function CharacteristicValuesContent({
         <Group gap="xs" justify="flex-end" wrap="nowrap">
           <ActionIcon
             variant="subtle"
-            disabled={item.estado !== "Activo" || bajaEstado === "verificando"}
+            disabled={item.estado !== "Activo" || baja.status !== "idle"}
             aria-label={`Solicitar baja de ${item.nombre}`}
             onClick={() => handleSolicitarBaja(item)}
           >
@@ -372,53 +376,83 @@ function CharacteristicValuesContent({
           modifica valores reales.
         </FeedbackAlert>
 
-        {bajaEstado === "verificando" && valorEnBaja && (
+        {baja.status === "verificando" && (
           <FeedbackAlert
             semantic="info"
-            title="Comprobando uso"
+            title="Comprobando uso del valor"
             actions={
-              <Group gap="sm">
-                <Button variant="outline" onClick={() => setBajaEstado("idle")}>
-                  Cancelar comprobación
-                </Button>
-              </Group>
+              <Button variant="outline" onClick={cancelarBaja}>
+                Cancelar comprobación
+              </Button>
             }
           >
-            Se está verificando si el valor «{valorEnBaja.nombre}» está en uso
-            por productos asociados al esquema de tipo de producto...
+            Se está verificando si el valor «{baja.valor.nombre}» está en uso
+            por el esquema de un tipo de producto antes de confirmar su baja.
           </FeedbackAlert>
         )}
 
-        {bajaEstado === "rechazada" && (
+        {baja.status === "pendiente" && (
           <FeedbackAlert
             semantic="warning"
-            title="Baja de valor rechazada"
+            title="Solicitud de baja admitida (202 Accepted)"
             actions={
-              <Group gap="sm">
-                <Button onClick={() => setBajaEstado("idle")}>Aceptar</Button>
-                <Button
-                  variant="outline"
-                  onClick={() => navigate(`/caracteristicas/${detalle.id}/estado`)}
-                >
-                  Cambiar estado de característica
-                </Button>
-              </Group>
+              <Button onClick={cancelarBaja}>Entendido</Button>
             }
           >
-            {mensajeRechazo}
+            <Stack gap="sm">
+              <Text size="sm">{baja.result.mensaje}</Text>
+              <Text size="sm" c="dimmed">
+                El valor conserva su estado actual. La verificación de uso quedó
+                en curso y no confirma la desactivación con una sola respuesta.
+              </Text>
+            </Stack>
           </FeedbackAlert>
         )}
 
-        {bajaEstado === "exito" && valorEnBaja && (
+        {baja.status === "rechazada" && (
           <FeedbackAlert
-            semantic="success"
-            title="Solicitud de baja procesada"
+            semantic="error"
+            title="No se pudo dar de baja el valor"
             actions={
-              <Button onClick={() => setBajaEstado("idle")}>Continuar</Button>
+              <Button onClick={cancelarBaja}>Entendido</Button>
             }
           >
-            El valor «{valorEnBaja.nombre}» quedó marcado como Inactivo. La
-            simulación no elimina el registro.
+            <Stack gap="sm">
+              <Text size="sm">{baja.result.mensaje}</Text>
+              {baja.result.bloqueos.length > 0 && (
+                <ListaBloqueos bloqueos={baja.result.bloqueos} />
+              )}
+              <Text size="sm" c="dimmed">
+                El valor conserva su estado Activo; no se eliminó ni se
+                desactivó nada.
+              </Text>
+            </Stack>
+          </FeedbackAlert>
+        )}
+
+        {baja.status === "exito" && (
+          <FeedbackAlert
+            semantic="success"
+            title="Baja de valor confirmada"
+            actions={
+              <Button onClick={cancelarBaja}>Continuar</Button>
+            }
+          >
+            <Text size="sm">{baja.result.mensaje}</Text>
+          </FeedbackAlert>
+        )}
+
+        {baja.status === "error" && (
+          <FeedbackAlert
+            semantic="error"
+            title="No se pudo verificar la baja del valor"
+            actions={
+              <Button variant="outline" onClick={cancelarBaja}>
+                Cerrar
+              </Button>
+            }
+          >
+            {baja.message}
           </FeedbackAlert>
         )}
 
@@ -432,6 +466,7 @@ function CharacteristicValuesContent({
               placeholder="Ej. XL"
               value={nuevoValor}
               error={agregarError}
+              disabled={agregando}
               onChange={(e) => {
                 setNuevoValor(e.currentTarget.value);
                 setAgregarError(null);

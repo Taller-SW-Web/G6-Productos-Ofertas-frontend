@@ -91,6 +91,16 @@ function CategoryDetailLoader({ id }: { id: string }) {
         description="Consulta los datos de la categoría y sus subcategorías."
         breadcrumbs={[
           { label: "Categorías", to: "/categorias" },
+          ...(state.status === "success" &&
+          state.detalle.padreId &&
+          state.detalle.padreNombre
+            ? [
+                {
+                  label: state.detalle.padreNombre,
+                  to: `/categorias/${state.detalle.padreId}`,
+                },
+              ]
+            : []),
           {
             label: state.status === "success" ? state.detalle.nombre : "Detalle",
           },

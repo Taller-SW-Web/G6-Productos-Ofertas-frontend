@@ -1,6 +1,7 @@
 import type { CharacteristicRepository } from "../services/characteristicRepository";
 import { characteristicConfigDefaults } from "../services/characteristicRepository";
 import type {
+  BloqueoDependencia,
   CharacteristicDetail,
   CharacteristicListItem,
   CharacteristicType,
@@ -43,7 +44,7 @@ const store: RegistroCaracteristica[] = [
     nombre: "Color",
     tipo: "LISTA",
     estado: "Activo",
-    valoresActivos: 6,
+    valoresActivos: 2,
     valores: [
       { valorId: "negro", nombre: "Negro", estado: "Activo", version: 1 },
       { valorId: "blanco", nombre: "Blanco", estado: "Activo", version: 1 },
@@ -250,12 +251,68 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
     signal.throwIfAborted();
     const r = hallar(id);
     const v = r?.valores?.find((x) => x.valorId === valorId);
-    if (!v) return null;
+    if (!r || !v) {
+      throw new Error(
+        "El valor no existe o ya no está disponible para una baja.",
+      );
+    }
+    if (v.estado !== "Activo") {
+      throw new Error("El valor ya no está activo; no se aplicó ninguna baja.");
+    }
+    const actual: CharacteristicValue = {
+      valorId: v.valorId,
+      nombre: v.nombre,
+      estado: v.estado,
+      version: v.version,
+    };
+    // SPEC-010: un valor referenciado por el esquema de un tipo de producto activo
+    // no puede desactivarse. Demostración determinista para la revisión del piloto.
+    if (valorId === "m") {
+      const bloqueos: BloqueoDependencia[] = [
+        {
+          tipo: "productos",
+          cantidad: 2,
+          detalle:
+            "Valor usado por el esquema de un tipo de producto activo (SPEC-010).",
+        },
+      ];
+      return {
+        resultado: "rechazada",
+        valor: actual,
+        mensaje:
+          "No se puede dar de baja: el valor está referenciado por el esquema de un tipo de producto activo.",
+        bloqueos,
+      };
+    }
+    // Demostración de verificación en curso (equivalente a 202): la solicitud se
+    // admite pero el valor conserva su estado hasta que se confirme.
+    if (valorId === "negro") {
+      return {
+        resultado: "pendiente",
+        valor: actual,
+        mensaje:
+          "Solicitud de baja admitida en revisión. El valor continúa Activo; la desactivación no quedó confirmada.",
+        bloqueos: [],
+        operacionId: `baja-valor-${valorId}`,
+      };
+    }
     v.estado = "Inactivo";
-    if (r && r.valores) {
+    v.version += 1;
+    if (r.valores) {
       r.valoresActivos = (r.valores.filter((x) => x.estado === "Activo")).length;
     }
-    return { valorId: v.valorId, nombre: v.nombre, estado: v.estado, version: v.version };
+    return {
+      resultado: "exito",
+      valor: {
+        valorId: v.valorId,
+        nombre: v.nombre,
+        estado: v.estado,
+        version: v.version,
+      },
+      mensaje:
+        "Baja confirmada. El valor quedó Inactivo sin eliminar el registro.",
+      bloqueos: [],
+    };
   },
 
   async cambiarEstado(id, estado, signal) {

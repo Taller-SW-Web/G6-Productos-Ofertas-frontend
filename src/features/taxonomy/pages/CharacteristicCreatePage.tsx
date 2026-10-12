@@ -88,13 +88,15 @@ export function CharacteristicCreatePage() {
     });
   };
 
+  const guardando = phase === "guardando";
+
   return (
     <>
       <PageHeader
         title="Crear característica"
         description="Registra un atributo tipado para los esquemas definidos por tipo de producto."
         breadcrumbs={[
-          { label: "Características", to: "/MK009/S01" },
+          { label: "Características", to: "/caracteristicas" },
           { label: "Crear" },
         ]}
       />
@@ -153,6 +155,7 @@ export function CharacteristicCreatePage() {
                     value={nombre}
                     error={nombreError}
                     placeholder="Ej. Talla"
+                    disabled={guardando}
                     onChange={(event) =>
                       setNombre(event.currentTarget.value)
                     }
@@ -163,6 +166,7 @@ export function CharacteristicCreatePage() {
                     data={tipos}
                     value={tipo}
                     allowDeselect={false}
+                    disabled={guardando}
                     onChange={(value) => {
                       const opcion = tipos.find((item) => item.value === value);
                       if (!opcion) return;
@@ -178,6 +182,7 @@ export function CharacteristicCreatePage() {
                       value={unidad}
                       error={unidadError}
                       placeholder="Ej. kg, cm"
+                      disabled={guardando}
                       onChange={(event) =>
                         setUnidad(event.currentTarget.value)
                       }
@@ -188,6 +193,7 @@ export function CharacteristicCreatePage() {
                     data={estados}
                     value={estado}
                     allowDeselect={false}
+                    disabled={guardando}
                     onChange={(value) => {
                       const opcion = estados.find(
                         (item) => item.value === value,
@@ -213,11 +219,12 @@ export function CharacteristicCreatePage() {
                   <Group justify="flex-end" gap="sm">
                     <Button
                       variant="outline"
-            onClick={() => navigate("/caracteristicas")}
-          >
-            Cancelar
-          </Button>
-                    <Button type="submit" loading={phase === "guardando"}>
+                      disabled={guardando}
+                      onClick={() => navigate("/caracteristicas")}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button type="submit" loading={guardando}>
                       Crear característica
                     </Button>
                   </Group>

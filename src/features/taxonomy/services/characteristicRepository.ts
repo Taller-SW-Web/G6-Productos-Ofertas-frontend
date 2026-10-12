@@ -4,7 +4,10 @@ import type {
   CharacteristicCreateResult,
   CharacteristicDetail,
   CharacteristicListItem,
+  CharacteristicStatus,
   CharacteristicUpdateInput,
+  CharacteristicValue,
+  ValorBajaResult,
 } from "../types";
 
 // SPEC-009 documented defaults for the configurable limits. The provider owns the
@@ -55,8 +58,6 @@ export interface CharacteristicListResult {
   config: CharacteristicCatalogConfig;
 }
 
-import type { CharacteristicValue } from "../types";
-
 export interface CharacteristicRepository {
   list(
     scenario: CharacteristicListScenario,
@@ -91,10 +92,10 @@ export interface CharacteristicRepository {
     id: string,
     valorId: string,
     signal: AbortSignal,
-  ): Promise<CharacteristicValue | "REJECTED" | null>;
+  ): Promise<ValorBajaResult>;
   cambiarEstado(
     id: string,
-    estado: "Activo" | "Inactivo",
+    estado: CharacteristicStatus,
     signal: AbortSignal,
   ): Promise<CharacteristicDetail | null>;
 }

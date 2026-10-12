@@ -76,7 +76,13 @@ export function CreateCategoryPage() {
   };
 
   const handleConfirmar = () => {
-    if (!slugCheck || phase === "comprobando") return;
+    if (
+      !slugCheck ||
+      phase === "comprobando" ||
+      phase === "guardando"
+    ) {
+      return;
+    }
     confirmar({
       nombre: nombre.trim(),
       slug: slug.trim(),
@@ -127,10 +133,13 @@ export function CreateCategoryPage() {
             title="Categoría creada"
             actions={
               <Group gap="sm">
-                <Button onClick={() => navigate("/categorias")}>
+                <Button onClick={() => navigate(`/categorias/${creado.id}`)}>
+                  Ver categoría
+                </Button>
+                <Button variant="outline" onClick={() => navigate("/categorias")}>
                   Volver al árbol de categorías
                 </Button>
-                <Button variant="outline" onClick={reiniciar}>
+                <Button variant="subtle" onClick={reiniciar}>
                   Crear otra categoría
                 </Button>
               </Group>
@@ -156,6 +165,7 @@ export function CreateCategoryPage() {
                     value={nombre}
                     error={nombreError}
                     placeholder="Ej. Calzado urbano"
+                    disabled={phase === "comprobando"}
                     onChange={(event) => setNombre(event.currentTarget.value)}
                   />
                   <Select
@@ -166,6 +176,7 @@ export function CreateCategoryPage() {
                     clearable
                     searchable
                     nothingFoundMessage="Sin categorías disponibles"
+                    disabled={phase === "comprobando"}
                     onChange={(value) => setPadreId(value)}
                   />
                   <Textarea
@@ -173,11 +184,13 @@ export function CreateCategoryPage() {
                     value={descripcion}
                     autosize
                     minRows={3}
+                    disabled={phase === "comprobando"}
                     onChange={(event) => setDescripcion(event.currentTarget.value)}
                   />
                   <Group justify="flex-end" gap="sm">
                     <Button
                       variant="outline"
+                      disabled={phase === "comprobando"}
                       onClick={() => navigate("/categorias")}
                     >
                       Cancelar
@@ -250,6 +263,7 @@ export function CreateCategoryPage() {
               <TextInput
                 label="Slug (URL)"
                 value={slug}
+                disabled={phase === "guardando"}
                 onChange={(event) => setSlug(event.currentTarget.value)}
               />
             </>

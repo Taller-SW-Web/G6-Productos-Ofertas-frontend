@@ -1,4 +1,10 @@
-import type { BrandCreateInput, BrandDetail, BrandListItem, BrandUpdateInput } from "../types";
+import type {
+  BrandBajaResult,
+  BrandCreateInput,
+  BrandDetail,
+  BrandListItem,
+  BrandUpdateInput,
+} from "../types";
 
 export type BrandListScenario = "default" | "empty" | "error";
 
@@ -20,4 +26,6 @@ export interface BrandRepository {
   obtener(id: string, signal: AbortSignal): Promise<BrandDetail | null>;
   crear(input: BrandCreateInput, signal: AbortSignal): Promise<BrandDetail>;
   actualizar(input: BrandUpdateInput, signal: AbortSignal): Promise<BrandDetail | null>;
+  solicitarBaja(id: string, signal: AbortSignal): Promise<BrandBajaResult>;
+  consultarResultadoBaja(operacionId: string, signal: AbortSignal): Promise<BrandBajaResult>;
 }
