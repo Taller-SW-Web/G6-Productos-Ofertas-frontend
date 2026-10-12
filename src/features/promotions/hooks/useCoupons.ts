@@ -66,13 +66,14 @@ export function useCouponList(
   return useCouponRead(key, read);
 }
 export function useCoupon(
-  id: string,
+  id: string | undefined,
   repository: CouponRepository,
   revision: number,
 ) {
   const key = JSON.stringify([id, revision]);
   const read = useCallback(
-    (signal: AbortSignal) => repository.read(id, signal),
+    (signal: AbortSignal) =>
+      id ? repository.read(id, signal) : Promise.resolve(null),
     [id, repository],
   );
   return useCouponRead(key, read);

@@ -14,6 +14,47 @@ async function fillNew(page: Page, code: string) {
     .check();
 }
 
+test("MK-005 S02: crear cupón no consulta repository.read sin identificador", async ({
+  page,
+}) => {
+  await page.route(
+    "**/src/features/promotions/services/promotionServices.ts*",
+    async (route) => {
+      const response = await route.fetch();
+      // Spy on the composed port before React mounts, without changing its result.
+      await route.fulfill({
+        response,
+        body: `${await response.text()}
+window.couponReadIds = [];
+const originalCouponRead = promotionServices.coupons.read.bind(promotionServices.coupons);
+promotionServices.coupons.read = (id, signal) => {
+  window.couponReadIds.push(id);
+  return originalCouponRead(id, signal);
+};`,
+      });
+    },
+  );
+  const readIds = () =>
+    page.evaluate(
+      () => (window as Window & { couponReadIds?: string[] }).couponReadIds,
+    );
+
+  await page.goto("/cupones/nuevo");
+  const code = page.getByRole("textbox", {
+    name: "Código del cupón",
+    exact: true,
+  });
+  await code.fill("BORRADOR");
+  await expect(code).toHaveValue("BORRADOR");
+  expect(await readIds()).toEqual([]);
+
+  // Positive control: the same spy observes reading an existing coupon.
+  await page.goto("/cupones/run10/editar");
+  await expect(code).toHaveValue("RUN10");
+  expect(await readIds()).toContain("run10");
+  expect(await readIds()).not.toContain("");
+});
+
 test("MK-005 S02: create normalized coupon only after valid data and preserve list context", async ({
   page,
 }) => {

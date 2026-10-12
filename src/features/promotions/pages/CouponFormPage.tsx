@@ -25,7 +25,7 @@ import type { CouponView } from "../services/couponRepository";
 export function CouponFormPage() {
   const { couponId } = useParams();
   const { services } = usePromotionServices();
-  const state = useCoupon(couponId ?? "", services.coupons, 0);
+  const state = useCoupon(couponId, services.coupons, 0);
   if (couponId && state.status === "loading")
     return (
       <Stack role="status">

@@ -323,3 +323,29 @@ Los dos archivos nuevos cubren responsabilidades ausentes: distribución neutral
 La prueba nueva sustituye solo el origen de la composición en el módulo servido por Vite y reutiliza los puertos existentes como doble de servicio. Comprueba avisos ocultos, guardas DEV ignoradas y disponibilidad de las 19 vistas; no demuestra HTTP ni conexión a backend. Las 19 capturas/mediciones permanecen en `test-results/promotions-visual-19-vista-47547-1-capturas-para-revisión-UX/`; el resultado del reintento de la prueba nueva queda en `test-results/backend-composition/`.
 
 Pendientes: adapters/contratos/auth/grants administrativos reales; D-REC-01/02 para enriquecimientos; revisión técnica/UX independiente. Ninguno se presenta como resuelto por esta corrección. Estado final: **MOCK_INTEGRATED**, publicación autorizada en `cueva` y revisión mediante [PR #23](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/23). La PR registra el SHA remoto y el estado de CI; no se autoriza ni declara merge a `master`.
+
+## Corrección de lectura al crear cupones — MK-005-S02/S03
+
+Trabajo en `cueva` desde `233706f4f90a39250aede516a01c01ccebcc3b08`, Git inicial limpio y sincronizado. Fuentes: petición de Axel en PR #23, AGENTS.md, README, hook/página/composición reales y pruebas existentes. El alcance es evitar una consulta sin ID; no modifica diseño, contratos ni reglas de negocio.
+
+| Archivo | Cambio |
+|---|---|
+| `src/features/promotions/hooks/useCoupons.ts` | `useCoupon` acepta ID ausente; devuelve `null` sin llamar al puerto cuando no hay ID. Hooks/efectos siguen ejecutándose incondicionalmente. |
+| `src/features/promotions/pages/CouponFormPage.tsx` | Pasar `couponId` directamente, sin sustituirlo por cadena vacía. |
+| `tests/coupon-write.spec.ts` | Espiar las llamadas al puerto compuesto antes del montaje; alta sin lecturas, edición de `run10` con lectura. Sin fixtures nuevos ni alteración de resultados. |
+| `docs/PR_PROMOTIONS_CUEVA.md` | Corrección y validación puntual en la descripción de la PR. |
+| `docs/AVANCE_FRONTEND_CUEVA.md` | Este registro. |
+
+La prueba nueva se ejecutó antes de cambiar el hook y falló con dos lecturas de `""`, confirmando que detecta la regresión. Después del fix pasó junto con todas las pruebas de Cupones. El tipo de la propiedad del espía se ajustó antes de la validación final de TypeScript; las aserciones de comportamiento permanecen iguales.
+
+| Validación | Resultado |
+|---|---|
+| `npm run typecheck` | PASS, salida 0. |
+| `npm run build` | PASS, salida 0, TypeScript + Vite 8.3.4. |
+| `npm run lint` | PASS, salida 0. |
+| `npm test -- tests/coupon-write.spec.ts tests/coupons.spec.ts --workers=2 --output=test-results/coupon-read-fix` | PASS, 13 pruebas en 38.2 s, incluida la nueva regresión y las 12 existentes de Cupones. |
+| Visual 1440×900 | Capturas de S01–S06 regeneradas por las suites; S02 inspeccionada manualmente. Sin cambios visuales. |
+| `git diff --check` | PASS. |
+| Suite global / API HTTP / CI remoto | NO EJECUTADO como parte de esta corrección puntual. |
+
+Publicación autorizada por Axel en `cueva` y actualización de PR #23; sin merge directo. Estado **MOCK_INTEGRATED / MOCK_ONLY**. Los contratos/adapters HTTP y la revisión independiente siguen pendientes; no bloquean la prevención de lecturas innecesarias.
