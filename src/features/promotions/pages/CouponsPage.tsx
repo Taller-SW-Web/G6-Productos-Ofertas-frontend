@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { usePromotionServices } from "../hooks/usePromotionServices";
+import { PromotionDataNotice } from "../components/PromotionDataNotice";
 import { Link, useSearchParams } from "react-router-dom";
 import { Button, Group, Select, Stack, Text } from "@mantine/core";
 import { IconEye } from "@tabler/icons-react";
@@ -15,22 +16,20 @@ import {
   couponLimitLabel,
   couponStatusLabel,
   couponUsageLabel,
-  readCouponScenario,
   readPositiveInteger,
 } from "../services/couponPresentation";
 import type { CouponQuery, CouponView } from "../services/couponRepository";
 
 export function CouponsPage() {
   const [params, setParams] = useSearchParams();
-  const [revision, setRevision] = useState(0);
+  const { services, revision, retry } = usePromotionServices();
   const status = params.get("estado");
   const query: CouponQuery = {
     status: status === "active" || status === "inactive" ? status : "all",
     page: readPositiveInteger(params.get("pagina"), 1, Number.MAX_SAFE_INTEGER),
     pageSize: readPositiveInteger(params.get("tamanio"), 10, 100),
   };
-  const scenario = readCouponScenario(params);
-  const state = useCouponList(query, scenario, revision);
+  const state = useCouponList(query, services.coupons, revision);
   const update = (status: CouponQuery["status"], page = 1) =>
     setParams((current) => {
       const next = new URLSearchParams(current);
@@ -40,17 +39,6 @@ export function CouponsPage() {
       else next.set("pagina", String(page));
       return next;
     });
-  const retry = () => {
-    setParams(
-      (current) => {
-        const next = new URLSearchParams(current);
-        next.delete("escenario");
-        return next;
-      },
-      { replace: true },
-    );
-    setRevision((value) => value + 1);
-  };
   const columns: TableColumn<CouponView>[] = [
     {
       key: "code",
@@ -141,10 +129,7 @@ export function CouponsPage() {
         ]}
       />
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Datos de demostración">
-          Los cupones y sus usos son simulados. Esta consulta no accede a
-          información comercial real.
-        </FeedbackAlert>
+        <PromotionDataNotice kind="coupons" />
         <FilterBar
           summary={
             state.status === "success"

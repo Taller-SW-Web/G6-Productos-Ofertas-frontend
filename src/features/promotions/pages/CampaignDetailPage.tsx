@@ -1,3 +1,5 @@
+import { usePromotionServices } from "../hooks/usePromotionServices";
+import { PromotionDataNotice } from "../components/PromotionDataNotice";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Link,
@@ -17,9 +19,7 @@ import {
 import { AdministrationStateDialog } from "../components/AdministrationStateDialog";
 import { CampaignScope } from "../components/CampaignScope";
 import { useAdministrationRead } from "../hooks/useAdministrationRead";
-import { administrationScenario } from "../services/administration";
-import { campaignService } from "../services/campaignService";
-import { promotionCatalogService } from "../services/catalogService";
+
 import { channelChoices } from "../services/campaignRepository";
 import { couponStatusLabel } from "../services/couponPresentation";
 export function CampaignDetailPage({
@@ -28,9 +28,14 @@ export function CampaignDetailPage({
   changeState?: boolean;
 }) {
   const { promotionId = "" } = useParams();
-  const [params, setParams] = useSearchParams(),
-    scenario = administrationScenario(params),
+  const [params] = useSearchParams(),
     suffix = params.size ? `?${params}` : "";
+  const {
+    services,
+    confirmedServices,
+    revision: queryRevision,
+    retry,
+  } = usePromotionServices();
   const [revision, setRevision] = useState(0),
     [opened, setOpened] = useState(false),
     [updated, setUpdated] = useState(false);
@@ -39,17 +44,16 @@ export function CampaignDetailPage({
     navigate = useNavigate();
   const read = useCallback(
     (signal: AbortSignal) =>
-      campaignService.read(promotionId, scenario, signal),
-    [promotionId, scenario],
+      services.campaigns.read(promotionId, signal),
+    [promotionId, services],
   );
   const state = useAdministrationRead(
-    `${promotionId}:${scenario}:${revision}`,
+    `${promotionId}:${revision + queryRevision}`,
     read,
   );
   const catalogRead = useCallback(
-    (signal: AbortSignal) =>
-      promotionCatalogService.products("default", signal),
-    [],
+    (signal: AbortSignal) => confirmedServices.catalog.products(signal),
+    [confirmedServices],
   );
   const catalog = useAdministrationRead("catalog", catalogRead),
     record = state.status === "success" ? state.result : null;
@@ -80,12 +84,10 @@ export function CampaignDetailPage({
         }
       />
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Datos de demostración">
-          Consulta y cambios locales de muestra; no se modifican compras reales.
-        </FeedbackAlert>
+        <PromotionDataNotice kind="campaign-detail" />
         {location.state?.saved && (
           <FeedbackAlert semantic="success" title="Promoción guardada">
-            La configuración fue confirmada en la sesión de demostración.
+            La configuración fue confirmada.
           </FeedbackAlert>
         )}
         {updated && (
@@ -104,13 +106,7 @@ export function CampaignDetailPage({
               state.access ? undefined : (
                 <Button
                   variant="outline"
-                  onClick={() =>
-                    setParams((current) => {
-                      const next = new URLSearchParams(current);
-                      next.delete("escenario");
-                      return next;
-                    })
-                  }
+                  onClick={retry}
                 >
                   Volver a consultar
                 </Button>
@@ -215,15 +211,14 @@ export function CampaignDetailPage({
               entityLabel="promoción"
               opened={opened || changeState}
               change={(status, signal) =>
-                campaignService.changeStatus(
+                services.campaigns.changeStatus(
                   promotionId,
                   status,
-                  scenario,
                   signal,
                 )
               }
               read={(signal) =>
-                campaignService.read(promotionId, "default", signal)
+                confirmedServices.campaigns.read(promotionId, signal)
               }
               onCancel={close}
               onConfirmed={() => {

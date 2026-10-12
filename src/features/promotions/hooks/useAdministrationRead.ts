@@ -6,6 +6,7 @@ export function useAdministrationRead<T>(
 ) {
   const [response, setResponse] = useState<{
     key: string;
+    read: typeof read;
     state:
       | { status: "success"; result: T }
       | { status: "error"; message: string; access: boolean };
@@ -15,12 +16,13 @@ export function useAdministrationRead<T>(
     void read(controller.signal).then(
       (result) => {
         if (!controller.signal.aborted)
-          setResponse({ key, state: { status: "success", result } });
+          setResponse({ key, read, state: { status: "success", result } });
       },
       (cause: unknown) => {
         if (!controller.signal.aborted)
           setResponse({
             key,
+            read,
             state: {
               status: "error",
               message:
@@ -36,7 +38,7 @@ export function useAdministrationRead<T>(
     );
     return () => controller.abort();
   }, [key, read]);
-  return response?.key === key
+  return response?.key === key && response.read === read
     ? response.state
     : ({ status: "loading" } as const);
 }

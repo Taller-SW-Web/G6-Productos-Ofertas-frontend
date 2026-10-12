@@ -2,11 +2,10 @@ import { useState } from "react";
 import { Button, Stack, Text } from "@mantine/core";
 import { ConfirmDialog, FeedbackAlert } from "../../../components/shared";
 import { usePromotionCommand } from "../hooks/usePromotionCommand";
-import { couponService } from "../services/couponService";
 import {
   CouponWriteError,
-  type CouponMutationScenario,
   type CouponView,
+  type CouponRepository,
 } from "../services/couponRepository";
 import {
   couponStatusLabel,
@@ -15,13 +14,15 @@ import {
 
 export function CouponStateDialog({
   coupon,
-  scenario,
+  repository,
+  confirmedRepository = repository,
   opened,
   onCancel,
   onConfirmed,
 }: {
   coupon: CouponView;
-  scenario: CouponMutationScenario;
+  repository: CouponRepository;
+  confirmedRepository?: CouponRepository;
   opened: boolean;
   onCancel: () => void;
   onConfirmed: () => void;
@@ -38,9 +39,8 @@ export function CouponStateDialog({
       if (checking) return;
       setChecking(true);
       try {
-        const result = await couponService.read(
+        const result = await confirmedRepository.read(
           coupon.id,
-          "default",
           new AbortController().signal,
         );
         if (result?.status === target) onConfirmed();
@@ -58,7 +58,7 @@ export function CouponStateDialog({
       return;
     }
     const result = await command.run((signal) =>
-      couponService.changeStatus(coupon.id, target, scenario, signal),
+      repository.changeStatus(coupon.id, target, signal),
     );
     if (result) onConfirmed();
   };

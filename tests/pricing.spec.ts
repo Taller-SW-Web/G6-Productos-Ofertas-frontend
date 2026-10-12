@@ -1,3 +1,4 @@
+import { evidencePath } from "./support/evidence";
 import { test, expect } from "@playwright/test";
 
 test("S01 applies selection explicitly, distinguishes inheritance/override and retains context on return", async ({
@@ -253,7 +254,7 @@ test("Pricing desktop captures and tab keyboard navigation", async ({
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= 1440),
     ).toBe(true);
-    await page.screenshot({ path: `docs/evidencias/${file}`, fullPage: true });
+    await page.screenshot({ path: evidencePath(`${file}`), fullPage: true });
   }
   await page.getByRole("tab", { name: "Editar precio", exact: true }).focus();
   await page.keyboard.press("ArrowRight");

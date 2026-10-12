@@ -1,17 +1,17 @@
+import { usePromotionServices } from "../hooks/usePromotionServices";
+import { PromotionDataNotice } from "../components/PromotionDataNotice";
 import { useCallback } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Button, Group, Select, Stack } from "@mantine/core";
 import {
   EntityTable,
-  FeedbackAlert,
   FilterBar,
   PageHeader,
   StatusBadge,
   type TableColumn,
 } from "../../../components/shared";
 import { useAdministrationRead } from "../hooks/useAdministrationRead";
-import { administrationScenario } from "../services/administration";
-import { campaignService } from "../services/campaignService";
+
 import type { CampaignView } from "../services/campaignRepository";
 import {
   couponStatusLabel,
@@ -19,6 +19,7 @@ import {
 } from "../services/couponPresentation";
 export function CampaignsPage() {
   const [params, setParams] = useSearchParams();
+  const { services, revision, retry } = usePromotionServices();
   const status =
     params.get("estado") === "active"
       ? "active"
@@ -36,15 +37,17 @@ export function CampaignsPage() {
       1,
       Number.MAX_SAFE_INTEGER,
     ),
-    pageSize = readPositiveInteger(params.get("tamanio"), 10, 100),
-    scenario = administrationScenario(params);
+    pageSize = readPositiveInteger(params.get("tamanio"), 10, 100);
   const read = useCallback(
     (signal: AbortSignal) =>
-      campaignService.list({ status, kind, page, pageSize }, scenario, signal),
-    [status, kind, page, pageSize, scenario],
+      services.campaigns.list(
+        { status, kind, page, pageSize },
+        signal,
+      ),
+    [status, kind, page, pageSize, services],
   );
   const state = useAdministrationRead(
-    JSON.stringify([status, kind, page, pageSize, scenario]),
+    JSON.stringify([status, kind, page, pageSize, revision]),
     read,
   );
   const update = (key: string, value: string, reset = true) =>
@@ -145,9 +148,7 @@ export function CampaignsPage() {
         }
       />
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Datos de demostración">
-          Los registros y cambios son simulados y se reinician al recargar.
-        </FeedbackAlert>
+        <PromotionDataNotice kind="campaigns" />
         <FilterBar
           summary={
             state.status === "success"
@@ -196,7 +197,7 @@ export function CampaignsPage() {
                   action: state.access ? undefined : (
                     <Button
                       variant="outline"
-                      onClick={() => update("escenario", "default", false)}
+                      onClick={retry}
                     >
                       Volver a consultar
                     </Button>
