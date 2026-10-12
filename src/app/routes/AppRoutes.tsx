@@ -1,6 +1,6 @@
 import {
-  Navigate,
   createBrowserRouter,
+  Navigate,
   RouterProvider,
 } from "react-router-dom";
 import { ApplicationShell } from "../layout/ApplicationShell";

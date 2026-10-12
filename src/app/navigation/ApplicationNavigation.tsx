@@ -4,6 +4,18 @@ import { productNavigation } from "./navigation";
 
 export function ApplicationNavigation() {
   const { pathname } = useLocation();
+  const activeDestination = productNavigation
+    .flatMap((item) =>
+      [item.to, ...(item.matchPaths ?? [])].map((prefix) => ({
+        to: item.to,
+        prefix,
+      })),
+    )
+    .filter(
+      (item) =>
+        pathname === item.prefix || pathname.startsWith(`${item.prefix}/`),
+    )
+    .sort((a, b) => b.prefix.length - a.prefix.length)[0]?.to;
   return (
     <Box component="nav" aria-label="Navegación de la aplicación">
       <Stack gap="lg">
@@ -23,8 +35,7 @@ export function ApplicationNavigation() {
               </Text>
               <Stack gap="xs">
                 {group.items.map(({ to, label, icon: Icon }) => {
-                  const active =
-                    pathname === to || pathname.startsWith(`${to}/`);
+                  const active = activeDestination === to;
                   return (
                     <NavLink
                       key={to}
