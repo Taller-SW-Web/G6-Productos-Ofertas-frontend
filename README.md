@@ -89,10 +89,11 @@ src/app/routes/          productRoutes/productPages y demoRoutes/demoPages separ
 src/components/shared/   Patrones de presentación usados en pilotos/muestras
 src/theme/               Tokens, defaults y variables CSS centrales
 src/features/pricing/    Página → componentes/hook → puerto/service → adapter mock → fixtures
+src/features/promotions/ Cupones/promociones/reglas → hooks → servicios/puertos → adapters mock → fixtures
 src/features/foundation/ Galería y casos de revisión de componentes
 ```
 
-Registrar una feature en `productRoutes.tsx` y su navegación en `navigation.ts`, reutilizando shell y theme. Mantener las demos en `demoRoutes.tsx`. Los shared no conocen endpoints, credenciales, DTOs externos ni reglas autoritativas de negocio. La [guía de componentes](docs/COMPONENTES_FOUNDATION.md) contiene APIs y ejemplos; la [guía de implementación](docs/GUIA_IMPLEMENTACION_FRONTEND_REACT.md) contiene el procedimiento y gates.
+Registrar una feature en `productRoutes.tsx` y su navegación en `navigation.ts` (con `group` y `matchPaths` para destinos relacionados), reutilizando shell y theme. Mantener las demos en `demoRoutes.tsx`. Los shared no conocen endpoints, credenciales, DTOs externos ni reglas autoritativas de negocio. La [guía de componentes](docs/COMPONENTES_FOUNDATION.md) contiene APIs y ejemplos; la [guía de implementación](docs/GUIA_IMPLEMENTACION_FRONTEND_REACT.md) contiene el procedimiento y gates.
 
 ## Documentación normativa de Docs
 
@@ -110,9 +111,9 @@ Frontend, Docs y Backend son repositorios independientes. Si Docs es la carpeta 
 
 ## Entrega, validación y revisión
 
-Base entregada/auditada: **`ceee9d203581b28d6ff8148e951837ec6d000fec`**, rama `vera`, [PR #2](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/2) contra `master`, vinculada al [issue #1](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/issues/1). El issue menciona `main`; la PR real usa la rama predeterminada `master`. No se cambia el destino por suposición.
+La Foundation de `vera` se integró mediante [PR #2](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/2) a `master`, commit **`731ae1d3cdad100d943d35111a4da6229a31fb96`**, el 10 de octubre de 2026. La consulta actual de GitHub confirma `merged=true`. El issue #1 menciona `main`; la PR real usó `master`.
 
-Código corregido FND-01–06 y validado localmente: **`95722ff3d1cab2d7eb8356a6ee36b2e813b5aafe`**, pendiente de publicación en la PR. GitHub Actions registra el SHA de cada ejecución en `validation-commit.txt` y adjunta capturas/resultados; la fuente visual permanece fijada al SHA de Docs. Las validaciones locales y los límites se registran en [VALIDACION_FOUNDATION.md](docs/VALIDACION_FOUNDATION.md). La descripción preparada está en [PR_FOUNDATION.md](docs/PR_FOUNDATION.md); el conector devolvió 403 al intentar actualizarla.
+[VALIDACION_FOUNDATION.md](docs/VALIDACION_FOUNDATION.md) y [PR_FOUNDATION.md](docs/PR_FOUNDATION.md) conservan el reporte histórico del 9 de octubre: sus referencias a publicación pendiente/403 no describen el estado actual de la PR ya fusionada. El diagnóstico y la entrega de los issues #7/#8/#9 en `cueva`, fuentes y verificaciones están en [AVANCE_FRONTEND_CUEVA.md](docs/AVANCE_FRONTEND_CUEVA.md). Una PR fusionada no acredita aprobación UX de todos los MK.
 
 El workflow `.github/workflows/frontend.yml` ejecuta instalación, typecheck, build, lint y la suite Playwright completa en Ubuntu/Node 22. Playwright valida Chromium a 1440×900 y genera evidencia en `docs/evidencias/`. Un workflow definido no acredita que ya haya corrido ni recibido aprobación.
 
