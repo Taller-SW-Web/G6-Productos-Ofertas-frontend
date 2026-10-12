@@ -1,25 +1,25 @@
-# Corregir servicios y asociaciones de cupones, promociones y recomendaciones
+# Centralizar avisos y desacoplar servicios de cupones, promociones y recomendaciones
 
-Descripción preparada para la PR de `cueva` hacia `master`, desde `421951b30d506589e43dcc4c07b4194eea2026b8` (PR #22 ya integrada). Axel autorizó publicar las correcciones y abrir la PR después de completar las validaciones locales. Refs #7, #8, #9; sin cierre automático de issues pendientes de aceptación. La PR es la fuente del estado remoto, SHA final, CI y revisiones.
+Los avisos de demostración estaban escritos en las pantallas y varios consumidores seleccionaban servicios DEV directamente. Ahora los nueve avisos se reúnen en `PromotionDataNotice` y desaparecen automáticamente al seleccionar composición backend. Las páginas, hooks y diálogos consumen puertos neutrales mediante `usePromotionServices`; la selección, decoración y limpieza de escenarios queda aislada en la composición mock de desarrollo.
 
-Reasignar un cupón dejaba la promoción anterior bloqueada aunque ya no tuviera asociaciones vigentes. La corrección consulta las asociaciones actuales y conserva por separado activaciones y usos históricos; editar una promoción con historial desconocido conserva su capacidad desconocida. Un cupón inactivo sigue asociado y una reasignación rechazada no altera el vínculo anterior.
+Conectar el backend requerirá principalmente proporcionar los cuatro adaptadores oficiales y cambiar la composición a `backend`, conservando las 19 pantallas, formularios, navegación y validaciones. Los parámetros de demostración se ignoran también en DEV cuando se selecciona backend. Las confirmaciones utilizan textos neutrales y las consultas descartan respuestas de un puerto anterior.
 
-Los cuatro servicios ahora se componen en un único punto y los mocks reciben puertos inyectados. Sustituir Catálogo, Promociones, Cupones o Recomendaciones deja a los consumidores consultando el servicio seleccionado, sin imports entre adapters ni fixtures cruzados. Los contratos productivos reciben datos y AbortSignal; los escenarios DEV quedan en decoradores independientes. Monto mínimo, límites y política de restitución utilizan las mismas reglas en formulario y mock, con validación directa antes de mutar.
+La PR también corrige las asociaciones de cupones y las validaciones compartidas: reasignar el último cupón sin uso libera la asociación anterior, mientras que activaciones, uso histórico y capacidades desconocidas se conservan. Los mocks reciben referencias por puertos y las capturas de pruebas no sobrescriben la evidencia versionada del equipo.
 
-Se conservan las 19 vistas, con una corrección de 16 px entre campos de origen de recomendaciones según DESIGN. Las pruebas guardan capturas en sus artefactos y ya no sobrescriben evidencias del equipo. Los diez PNG de Foundation/Pricing y los 19 PNG versionados quedan idénticos a master; no cambian theme, componentes compartidos ni implementación de otras features.
+### Validación
 
-## Validación
+- `npm run typecheck`, `npm run build` y `npm run lint`: PASS, salida 0.
+- `npm test -- --workers=2`: las **65 pruebas existentes pasaron**. La prueba nueva falló inicialmente por exigir que un selector dependiente estuviera habilitado antes de elegir el tipo de origen.
+- `npm test -- tests/promotions-visual.spec.ts --workers=2 --grep 'composición backend' --output=test-results/backend-composition`: **1 PASS** tras corregir exclusivamente esa aserción nueva. Comprueba las 19 vistas cambiando solo el origen de composición y usando los puertos existentes como doble de servicio.
+- Recorrido visual automatizado de las 19 vistas a **1440 × 900**: PASS; seis capturas inspeccionadas manualmente en esta corrección.
+- `git diff --check`: PASS. Sin cambios en tokens, navegación, dependencias, nuevos fixtures ni lógica interna de los mocks en esta última separación.
 
-- `npm run typecheck`, `npm run build`, `npm run lint`: PASS, salida 0.
-- `npm test -- --workers=2`: PASS, 65 pruebas en 2.8 min, incluidas 22 pruebas directas de adapters y un recorrido visual de las 19 vistas a 1440×900.
-- Capturas inspeccionadas, geometría/tipografías/diálogos comprobados y gap corregido; diferencias frente a los mockups documentadas.
-- Producción local: escenarios DEV ignorados en tres listados y cuatro altas; galería inaccesible; cero errores de página.
-- Docs/Backend no modificados; integración a master exclusivamente mediante PR y revisión.
+### Límites
 
-## Límites y revisión pendiente
+Entrega **MOCK_INTEGRATED / MOCK_ONLY**. La comprobación de composición backend no acredita acceso HTTP ni una API real. Los contratos administrativos, autenticación y permisos del provider siguen pendientes; `prepareCreation` no concede permisos reales. D-REC-01/02 mantienen precio/disponibilidad por producto como No disponible.
 
-Entrega MOCK_INTEGRATED / MOCK_ONLY. No implementa endpoints ni acredita API/auth/grants reales. Los contratos administrativos siguen provisionales; D-REC-01/02 mantienen precio/disponibilidad No disponible. El historial local no reemplaza la capacidad autoritativa del provider ni demuestra concurrencia/transacciones reales.
+Revisión técnica y UX independiente pendiente. No se declara cierre de los issues ni aprobación funcional global.
 
-Vera debe revisar las 19 capturas, agrupación/densidad de formularios, composición de selectores, fixtures, estados y foco; su visto bueno no se ha obtenido. Un revisor técnico debe revisar composición/sustitución, reglas reutilizables y reasignación/historial. No solicitar merge ni cierre global de issues antes de esa aceptación.
+[Informe e inventario de cambios](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/blob/cueva/docs/AVANCE_FRONTEND_CUEVA.md).
 
-Fuentes, inventario de archivos, matriz por pantalla y discrepancias: [actualización del reporte de Cueva](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/blob/cueva/docs/AVANCE_FRONTEND_CUEVA.md#actualización-correcciones-locales-posteriores-a-pr-22). Docs master: `be5c2db16aca6d6d18b3005a2da4205f724038e3`, DESIGN 1.1.0 y UX 2.0.
+Refs #7, #8, #9.

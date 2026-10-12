@@ -102,3 +102,55 @@ test("19 vistas desktop: geometría, tipografía y diálogo según DESIGN 1.1; c
     contentType: "application/json",
   });
 });
+
+test("la composición backend oculta los avisos e ignora escenarios DEV en las 19 vistas", async ({
+  page,
+}) => {
+  test.setTimeout(90000);
+  await page.goto("/cupones");
+  await expect(
+    page.getByText("Datos de demostración", { exact: true }),
+  ).toBeVisible();
+
+  // Change only the composition source; existing ports act as a service double.
+  // This verifies integration preparation, not an HTTP adapter or backend access.
+  await page.route(
+    "**/src/features/promotions/services/promotionServices.ts*",
+    async (route) => {
+      const response = await route.fetch();
+      const body = await response.text();
+      const selection = /createPromotionRuntime\(promotionServices,\s*["']mock["']\)/;
+      expect(body).toMatch(selection);
+      await route.fulfill({
+        response,
+        body: body.replace(
+          selection,
+          'createPromotionRuntime(promotionServices, "backend")',
+        ),
+      });
+    },
+  );
+  for (const [id, path] of views) {
+    await page.goto(`${path}?modoRevision=1&escenario=forbidden`);
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await expect(
+      page.getByRole("status").filter({ hasText: /Cargando|Consultando/ }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByText("Datos de demostración", { exact: true }),
+    ).toHaveCount(0);
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    if (id.endsWith("S02") || id === "MK-007-S04") {
+      await expect(page.locator("main form")).toBeVisible();
+      const label = id.startsWith("MK-005")
+        ? "Código del cupón"
+        : id.startsWith("MK-006")
+          ? "Nombre de la promoción"
+          : "Nombre de la regla";
+      await expect(page.getByRole("textbox", { name: label, exact: true })).toBeEnabled();
+      await expect(page.getByRole("button", { name: /^Crear / })).toBeEnabled();
+    }
+    if (id === "MK-005-S06" || id === "MK-006-S06" || id === "MK-007-S07")
+      await expect(page.getByRole("dialog")).toBeVisible();
+  }
+});

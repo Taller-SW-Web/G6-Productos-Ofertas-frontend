@@ -258,3 +258,68 @@ Los fallos de comprobación intermedios se corrigieron: imports/firmas al trasla
 ### Autorización posterior para publicar
 
 Después de la validación local descrita arriba, Axel solicitó publicar los cambios en su rama `cueva` y abrir la PR hacia `master`. Se verificaron de nuevo el remoto, la rama y sus referencias: `HEAD`, `origin/cueva` y `origin/master` en `421951b30d506589e43dcc4c07b4194eea2026b8`, sin PR abierta previamente para esta rama. La restricción de no enviar cambios queda revocada para este commit, push y apertura de PR. Las referencias a trabajo sin publicar en la sección anterior describen el momento de las comprobaciones locales. La revisión humana y la aceptación de los issues siguen pendientes; no hay autorización para merge directo.
+
+## Corrección del 12 de octubre: avisos y consumo neutral de servicios
+
+**MOCK_INTEGRATED / MOCK_ONLY.** Correcciones solicitadas por Axel para MK-005/006/007 en su rama local `cueva`, con seguimiento de `origin/cueva`, desde `f914478b028d01cc00bd011844ebfe3ccc426df7`. Git inicial limpio. La validación se completó como cambios locales sin commit ni push; después Axel autorizó publicarlos con mensajes de commit en español. La PR #23 ya existe para `cueva` hacia `master`: se amplía esa entrega y se actualiza su descripción. Las autorizaciones/publicaciones de las secciones anteriores corresponden a aquella iteración.
+
+Los nueve avisos de demostración se reúnen en `PromotionDataNotice`, reutilizando el mismo FeedbackAlert y sus textos/ubicaciones. Su visibilidad depende del origen de la composición, sin flags por pantalla. Las confirmaciones de guardado/estado usan texto neutral. Con origen `backend`, los avisos desaparecen y los escenarios de revisión se ignoran incluso en DEV.
+
+`usePromotionServices` expone los puertos configurados, consulta de confirmación y reintento. Páginas, hooks de formularios y diálogos no importan `dev/`, interpretan escenarios ni conocen adapters. El resolver de revisión está ligado a la composición y conserva los decoradores existentes; no importa su instancia global, por lo que no crea un ciclo de ejecución. Las consultas comparan también su callback para descartar una respuesta de otro puerto. La carga de referencias del formulario de cupón reutiliza `useAdministrationRead`.
+
+La conexión futura consiste principalmente en proporcionar los cuatro adapters verificados en `createPromotionServices` y seleccionar `createPromotionRuntime(promotionServices, "backend")` en el mismo punto de composición. En backend los puertos de confirmación son los mismos adapters; `prepareCreation` solo comprueba cancelación y no acredita permisos. Autenticación/autorización reales deben proceder del provider. No se implementaron HTTP, endpoints ni nuevos contratos.
+
+### Fuentes e inventario
+
+Lecturas: AGENTS/README/package/configuración y código real de Frontend. Docs se encontró en `../Productos-y-Ofertas-docs`, rama `master`, SHA `d0d9e37330d3426accf91158fe4febf7d41d4494`: DESIGN 1.1.0, UX Guidelines/Decisions 2.0 y component-spec de MK-005/006/007. Esta copia local no contiene los HTML ni validation-report de esos MK; no acredita aprobación documental actual. El alcance de las 19 vistas se comprobó en rutas y en la suite existente. No se cambian estructura visual, tokens, reglas ni validadores por esta refactorización.
+
+Rutas de la tabla relativas a `src/features/promotions/`, salvo las que comienzan por `README`, `docs/` o `tests/`.
+
+| Archivo | Cambio |
+|---|---|
+| `services/promotionServices.ts` | Origen y resolver central de servicios; selección DEV exclusivamente en composición mock. |
+| `hooks/usePromotionServices.ts` (nuevo) | Acceso neutral a servicios, contexto transitorio y reintentos. |
+| `components/PromotionDataNotice.tsx` (nuevo) | Único catálogo/renderizado de los avisos; ocultación automática con backend. |
+| `dev/reviewServices.ts` | Resolver ligado a los puertos seleccionados; parsers/decoración/limpieza aislados de las páginas. |
+| `dev/demoScenarios.ts` | Retirar el parser de mutaciones que quedó sin consumidores. |
+| `dev/demoServices.ts` | Actualizar comentario del punto de selección; ninguna lógica del decorador modificada. |
+| `hooks/useCoupons.ts` | Recibir CouponRepository y descartar respuestas de otro callback. |
+| `hooks/useCouponForm.ts` | Guardar/reconciliar con repositorios inyectados; retirar imports DEV. |
+| `hooks/useAdministrationRead.ts` | Verificar identidad de consulta además de clave para no mostrar datos del puerto anterior. |
+| `hooks/useAdministrationEditor.ts` | Nombre neutral del puerto de confirmación; usarlo al consultar el resultado actual. |
+| `components/CouponStateDialog.tsx` | Recibir puertos para cambio/confirmación; retirar escenario e imports DEV. |
+| `pages/CouponsPage.tsx` | Listado/reintento neutral y aviso central. |
+| `pages/CouponDetailPage.tsx` | Lectura/cambio/confirmación neutrales, aviso central y éxitos sin texto de simulación. |
+| `pages/CouponFormPage.tsx` | Puertos y referencias neutrales; acceso por resultado de consulta y aviso central. |
+| `pages/CampaignsPage.tsx` | Servicios/reintento neutrales y aviso central. |
+| `pages/CampaignDetailPage.tsx` | Lectura/cambio/confirmación neutrales y aviso central. |
+| `pages/CampaignEditorLayout.tsx` | Resolver/guardas/referencias y retorno sin interpretar escenarios. |
+| `pages/CampaignFormPage.tsx` | Sustituir únicamente el aviso por su componente central. |
+| `pages/RecommendationsPage.tsx` | Listado/referencias/reintento neutrales y aviso central. |
+| `pages/RecommendationDetailPage.tsx` | Lectura/cambio/confirmación neutrales y aviso central. |
+| `pages/RecommendationEditorLayout.tsx` | Resolver/guardas/referencias y retorno sin interpretar escenarios. |
+| `pages/RecommendationFormPage.tsx` | Sustituir únicamente el aviso por su componente central. |
+| `tests/promotions-visual.spec.ts` | Una prueba de regresión de la selección backend sobre las 19 vistas. |
+| `README.md` | Uso de composición, avisos, puertos y límite de acceso real. |
+| `docs/AVANCE_FRONTEND_CUEVA.md` | Este inventario y resultados actuales. |
+| `docs/PR_PROMOTIONS_CUEVA.md` | Descripción en español de la PR #23 con el alcance final y la validación real. |
+
+Los dos archivos nuevos cubren responsabilidades ausentes: distribución neutral de los servicios y aviso transversal a las páginas de estos MK. No duplican repositorios, decoradores ni shared. Adapters, fixtures, historial, validadores, theme, navegación, dependencias y evidencias versionadas permanecen sin cambios. Docs y Backend no se modificaron.
+
+### Validación actual
+
+| Comprobación | Resultado |
+|---|---|
+| `npm run typecheck` | PASS, salida 0, repetido tras corregir la nueva aserción. |
+| `npm run build` | PASS, salida 0, TypeScript y Vite 8.3.4. |
+| `npm run lint` | PASS, salida 0. |
+| `npm test -- --workers=2` | 65 pruebas anteriores PASS; la nueva prueba falló inicialmente por exigir que todos los campos estuvieran habilitados. |
+| `npm test -- tests/promotions-visual.spec.ts --workers=2 --grep 'composición backend' --output=test-results/backend-composition` | PASS, 1 prueba, 19 vistas. Se corrigió solo la aserción nueva: nombre/código y botón Crear habilitados; el origen conserva su bloqueo funcional hasta seleccionar tipo. |
+| Cobertura final | Las 65 pruebas existentes y la nueva comprobación están verificadas; no se modificó ninguna aserción anterior ni se añadieron fixtures. |
+| Visual 1440×900 | Recorrido de 19 vistas y mediciones PASS. Inspección manual de seis capturas: MK-005-S02/S06, MK-006-S02, MK-007-S02/S04/S07. Revisión UX independiente pendiente. |
+| Aislamiento | Búsqueda sin coincidencias de imports `dev/`, parámetros de revisión o selección DEV en páginas/hooks/componentes. Selectores de escenarios ausentes en el chunk de Promotions de producción. |
+| `git diff --check` | PASS; alcance revisado. |
+
+La prueba nueva sustituye solo el origen de la composición en el módulo servido por Vite y reutiliza los puertos existentes como doble de servicio. Comprueba avisos ocultos, guardas DEV ignoradas y disponibilidad de las 19 vistas; no demuestra HTTP ni conexión a backend. Las 19 capturas/mediciones permanecen en `test-results/promotions-visual-19-vista-47547-1-capturas-para-revisión-UX/`; el resultado del reintento de la prueba nueva queda en `test-results/backend-composition/`.
+
+Pendientes: adapters/contratos/auth/grants administrativos reales; D-REC-01/02 para enriquecimientos; revisión técnica/UX independiente. Ninguno se presenta como resuelto por esta corrección. Estado final: **MOCK_INTEGRATED**, publicación autorizada en `cueva` y revisión mediante [PR #23](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/23). La PR registra el SHA remoto y el estado de CI; no se autoriza ni declara merge a `master`.
