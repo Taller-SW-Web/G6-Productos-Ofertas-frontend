@@ -1,3 +1,4 @@
+import { evidencePath } from "./support/evidence";
 import { expect, test, type Page } from "@playwright/test";
 
 async function select(page: Page, label: string, option: string) {
@@ -12,6 +13,48 @@ async function fillNew(page: Page, code: string) {
     .getByRole("radio", { name: "Restaurar uso al cancelar", exact: true })
     .check();
 }
+
+test("MK-005 S02: crear cupón no consulta repository.read sin identificador", async ({
+  page,
+}) => {
+  await page.route(
+    "**/src/features/promotions/services/promotionServices.ts*",
+    async (route) => {
+      const response = await route.fetch();
+      // Spy on the composed port before React mounts, without changing its result.
+      await route.fulfill({
+        response,
+        body: `${await response.text()}
+window.couponReadIds = [];
+const couponRepository = getPromotionRuntime("mock").resolve(new URLSearchParams()).services.coupons;
+const originalCouponRead = couponRepository.read.bind(couponRepository);
+couponRepository.read = (id, signal) => {
+  window.couponReadIds.push(id);
+  return originalCouponRead(id, signal);
+};`,
+      });
+    },
+  );
+  const readIds = () =>
+    page.evaluate(
+      () => (window as Window & { couponReadIds?: string[] }).couponReadIds,
+    );
+
+  await page.goto("/cupones/nuevo");
+  const code = page.getByRole("textbox", {
+    name: "Código del cupón",
+    exact: true,
+  });
+  await code.fill("BORRADOR");
+  await expect(code).toHaveValue("BORRADOR");
+  expect(await readIds()).toEqual([]);
+
+  // Positive control: the same spy observes reading an existing coupon.
+  await page.goto("/cupones/run10/editar");
+  await expect(code).toHaveValue("RUN10");
+  expect(await readIds()).toContain("run10");
+  expect(await readIds()).not.toContain("");
+});
 
 test("MK-005 S02: create normalized coupon only after valid data and preserve list context", async ({
   page,
@@ -205,7 +248,7 @@ test("MK-005 S02/S03/S06: desktop evidence and pending submission protection", a
   await fillNew(page, "CUPON-EJEMPLO");
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({
-    path: "docs/evidencias/cupones-s02-1440.png",
+    path: evidencePath("cupones-s02-1440.png"),
     fullPage: true,
   });
   await page.getByRole("button", { name: "Cancelar", exact: true }).click();
@@ -219,7 +262,7 @@ test("MK-005 S02/S03/S06: desktop evidence and pending submission protection", a
   ).toHaveValue("RUN10");
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({
-    path: "docs/evidencias/cupones-s03-1440.png",
+    path: evidencePath("cupones-s03-1440.png"),
     fullPage: true,
   });
   await page.getByRole("button", { name: "Cancelar", exact: true }).click();
@@ -230,7 +273,7 @@ test("MK-005 S02/S03/S06: desktop evidence and pending submission protection", a
   await expect(page.getByRole("dialog")).toHaveCSS("opacity", "1");
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({
-    path: "docs/evidencias/cupones-s06-1440.png",
+    path: evidencePath("cupones-s06-1440.png"),
     animations: "disabled",
     fullPage: false,
   });

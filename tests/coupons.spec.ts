@@ -1,3 +1,4 @@
+import { evidencePath } from "./support/evidence";
 import { expect, test, type Page } from "@playwright/test";
 
 async function noPageOverflow(page: Page) {
@@ -211,7 +212,7 @@ test("MK-005: desktop evidence for all three read views", async ({ page }) => {
   ).toHaveAttribute("aria-current", "page");
   await noPageOverflow(page);
   await page.screenshot({
-    path: "docs/evidencias/cupones-s01-1440.png",
+    path: evidencePath("cupones-s01-1440.png"),
     fullPage: true,
   });
   await page.getByRole("link", { name: "Ver detalle de BIENVENIDA15" }).click();
@@ -220,7 +221,7 @@ test("MK-005: desktop evidence for all three read views", async ({ page }) => {
   ).toBeVisible();
   await noPageOverflow(page);
   await page.screenshot({
-    path: "docs/evidencias/cupones-s04-1440.png",
+    path: evidencePath("cupones-s04-1440.png"),
     fullPage: true,
   });
   await page
@@ -234,7 +235,7 @@ test("MK-005: desktop evidence for all three read views", async ({ page }) => {
   ).toBeVisible();
   await noPageOverflow(page);
   await page.screenshot({
-    path: "docs/evidencias/cupones-s05-1440.png",
+    path: evidencePath("cupones-s05-1440.png"),
     fullPage: true,
   });
 });

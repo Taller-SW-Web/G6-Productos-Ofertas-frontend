@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { usePromotionServices } from "../hooks/usePromotionServices";
+import { PromotionDataNotice } from "../components/PromotionDataNotice";
+import { useCallback, useState } from "react";
 import {
   Link,
   Navigate,
@@ -16,18 +18,14 @@ import { CouponForm } from "../components/CouponForm";
 import { UnsavedChangesDialog } from "../components/UnsavedChangesDialog";
 import { useCoupon } from "../hooks/useCoupons";
 import { useCouponForm } from "../hooks/useCouponForm";
+import { useAdministrationRead } from "../hooks/useAdministrationRead";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
-import { couponService } from "../services/couponService";
-import {
-  readCouponMutationScenario,
-  readCouponScenario,
-} from "../services/couponPresentation";
-import type { CouponPromotion, CouponView } from "../services/couponRepository";
+import type { CouponView } from "../services/couponRepository";
 
 export function CouponFormPage() {
   const { couponId } = useParams();
-  const [params] = useSearchParams();
-  const state = useCoupon(couponId ?? "", readCouponScenario(params), 0);
+  const { services } = usePromotionServices();
+  const state = useCoupon(couponId, services.coupons, 0);
   if (couponId && state.status === "loading")
     return (
       <Stack role="status">
@@ -77,37 +75,30 @@ export function CouponFormPage() {
 
 function CouponFormContent({ initial }: { initial: CouponView | null }) {
   const [params] = useSearchParams();
+  const { services, confirmedServices, prepareCreation, clearTransientParams } =
+    usePromotionServices();
   const navigate = useNavigate();
-  const [choices, setChoices] = useState<CouponPromotion[] | null>(null);
-  const [choiceError, setChoiceError] = useState(false);
   const [revision, setRevision] = useState(0);
   const suffix = params.size ? `?${params.toString()}` : "";
-  const form = useCouponForm(initial, readCouponMutationScenario(params));
+  const form = useCouponForm(initial, services.coupons, confirmedServices.coupons);
   const guard = useUnsavedChanges(
     form.dirty && !form.confirmed,
     form.submitting,
   );
-  useEffect(() => {
-    const controller = new AbortController();
-    void couponService.promotions(controller.signal).then(
-      (items) => {
-        if (!controller.signal.aborted)
-          setChoices(items.filter((item) => item.mode === "coupon"));
-      },
-      () => {
-        if (!controller.signal.aborted) setChoiceError(true);
-      },
-    );
-    return () => controller.abort();
-  }, [revision]);
-  const blocked =
-    readCouponScenario(params) === "session" ||
-    readCouponScenario(params) === "forbidden";
+  const readChoices = useCallback(
+    async (signal: AbortSignal) => {
+      await prepareCreation(signal);
+      return (await services.coupons.promotions(signal)).filter(
+        (item) => item.mode === "coupon",
+      );
+    },
+    [services, prepareCreation],
+  );
+  const choices = useAdministrationRead(`promotions:${revision}`, readChoices);
   const cancel = () =>
     navigate(initial ? `/cupones/${initial.id}${suffix}` : `/cupones${suffix}`);
   if (form.confirmed) {
-    const next = new URLSearchParams(params);
-    next.delete("escenario");
+    const next = clearTransientParams(params);
     return (
       <Navigate
         to={`/cupones/${form.confirmed.id}?${next.toString()}`}
@@ -126,26 +117,20 @@ function CouponFormContent({ initial }: { initial: CouponView | null }) {
         ]}
       />
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Datos de demostración">
-          Los cambios se guardan solo en esta sesión de demostración. Al
-          recargar se recuperan los datos de muestra.
-        </FeedbackAlert>
-        {blocked ? (
+        <PromotionDataNotice kind="coupon-form" />
+        {choices.status === "error" && choices.access ? (
           <FeedbackAlert semantic="warning" title="Acceso no disponible">
             No tienes acceso para guardar cupones. La información anterior se
             conserva.
           </FeedbackAlert>
-        ) : choiceError ? (
+        ) : choices.status === "error" ? (
           <FeedbackAlert
             semantic="error"
             title="Promociones no disponibles"
             actions={
               <Button
                 variant="outline"
-                onClick={() => {
-                  setChoiceError(false);
-                  setRevision((value) => value + 1);
-                }}
+                onClick={() => setRevision((value) => value + 1)}
               >
                 Consultar promociones
               </Button>
@@ -154,10 +139,10 @@ function CouponFormContent({ initial }: { initial: CouponView | null }) {
             No se pudo consultar las promociones. No se puede guardar una
             asociación sin comprobar.
           </FeedbackAlert>
-        ) : choices ? (
+        ) : choices.status === "success" ? (
           <CouponForm
             form={form}
-            promotions={choices}
+            promotions={choices.result}
             initial={initial}
             onCancel={cancel}
             onReload={() => navigate(`/cupones/${initial?.id ?? ""}${suffix}`)}

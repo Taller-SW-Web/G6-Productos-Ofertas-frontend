@@ -59,10 +59,50 @@ try {
       true,
     );
   }
+  // Cover nested editors, selectors and state dialogs as well as the four lists.
+  for (const path of [
+    "/cupones/nuevo",
+    "/cupones/run10/editar",
+    "/cupones/run10",
+    "/cupones/run10/limites",
+    "/cupones/run10/estado",
+    "/promociones/nueva",
+    "/promociones/carrera/editar",
+    "/promociones/nueva/alcance",
+    "/promociones/carrera",
+    "/promociones/carrera/estado",
+    "/recomendaciones/nueva/venta-cruzada",
+    "/recomendaciones/mejora-rendimiento/editar",
+    "/recomendaciones/nueva/upselling",
+    "/recomendaciones/nueva/venta-cruzada/productos",
+    "/recomendaciones/mejora-rendimiento",
+    "/recomendaciones/mejora-rendimiento/estado",
+  ]) {
+    await page.goto(baseURL + path + "?modoRevision=1&escenario=forbidden");
+    if (mode === "api") {
+      await page.getByRole("alert").waitFor();
+      assert.match(
+        await page.getByRole("alert").innerText(),
+        /Integración API no disponible/,
+      );
+      assert.equal(await page.locator("main form").count(), 0);
+      assert.equal(await page.getByRole("table").count(), 0);
+      assert.equal(await page.getByRole("dialog").count(), 0);
+      assert.equal(await page.getByText("Datos de demostración", { exact: true }).count(), 0);
+    } else {
+      await page.getByRole("heading", { level: 1 }).waitFor();
+      assert.equal(await page.getByRole("alert").count(), 0);
+      if (path.endsWith("/estado")) await page.getByRole("dialog").waitFor();
+    }
+    assert.equal(
+      await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+      true,
+    );
+  }
   if (mode === "api")
     assert.equal(
       requests.some((url) =>
-        /createDemoPricingRuntime|mock[A-Z]|\/prices-|\/catalogChoices-|\/CouponsPage-|\/CampaignsPage-|\/RecommendationsPage-/.test(
+        /createDemoPricingRuntime|mock[A-Z]|\/prices-|\/catalogChoices-|\/promotionServices-|\/PromotionDataNotice-|\/(?:Coupon|Campaign|Recommendation)[^/]*Page-/.test(
           url,
         ),
       ),
@@ -70,7 +110,7 @@ try {
     );
   assert.deepEqual(errors, []);
   console.log(
-    `PASS producción ${mode}: 4 rutas directas, 1440 px, sin errores; ${mode === "api" ? "providers ausentes explícitos, reintento y cero carga de mocks" : "módulos presentes y controles de revisión ausentes"}.`,
+    `PASS producción ${mode}: 19 vistas de Promotions y Pricing S01, 1440 px, sin errores; ${mode === "api" ? "providers ausentes explícitos, reintento y cero carga de mocks" : "módulos presentes y controles de revisión ausentes"}.`,
   );
 } finally {
   await browser.close();
