@@ -1,5 +1,4 @@
-
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   Button,
   Group,
@@ -22,20 +21,12 @@ import { CampoDato } from "../components/CampoDato";
 import { useCharacteristicDetail } from "../hooks/useCharacteristicDetail";
 import {
   characteristicConfigDefaults,
-  scenariosCatalogoCaracteristica,
-  type CharacteristicCatalogScenario,
 } from "../services/characteristicRepository";
 import {
   describirReglaCaracteristica,
   etiquetaTipoCaracteristica,
 } from "../services/characteristicPresentation";
 import { estadoCaracteristicaSemantic } from "../services/estadoSemantic";
-
-function parseScenario(raw: string | null): CharacteristicCatalogScenario {
-  return scenariosCatalogoCaracteristica.some((item) => item.value === raw)
-    ? (raw as CharacteristicCatalogScenario)
-    : "default";
-}
 
 export function CharacteristicDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -51,9 +42,7 @@ export function CharacteristicDetailPage() {
 
 function CharacteristicDetailLoader({ id }: { id: string }) {
   const navigate = useNavigate();
-  const [params] = useSearchParams();
-  const scenario = parseScenario(params.get("escenario"));
-  const { state } = useCharacteristicDetail(id, scenario);
+  const { state } = useCharacteristicDetail(id);
 
   if (state.status === "loading") {
     return (

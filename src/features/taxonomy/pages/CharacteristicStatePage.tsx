@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { Button, Group, Loader, Stack, Text } from "@mantine/core";
 import {
   FeedbackAlert,
@@ -7,17 +7,7 @@ import {
   SectionCard,
 } from "../../../components/shared";
 import { useCharacteristicDetail } from "../hooks/useCharacteristicDetail";
-import {
-  scenariosCatalogoCaracteristica,
-  type CharacteristicCatalogScenario,
-} from "../services/characteristicRepository";
 import { characteristicService } from "../services/characteristicService";
-
-function parseScenario(raw: string | null): CharacteristicCatalogScenario {
-  return scenariosCatalogoCaracteristica.some((item) => item.value === raw)
-    ? (raw as CharacteristicCatalogScenario)
-    : "default";
-}
 
 export function CharacteristicStatePage() {
   const { id } = useParams<{ id: string }>();
@@ -33,9 +23,7 @@ export function CharacteristicStatePage() {
 
 function CharacteristicStateLoader({ id }: { id: string }) {
   const navigate = useNavigate();
-  const [params] = useSearchParams();
-  const scenario = parseScenario(params.get("escenario"));
-  const { state } = useCharacteristicDetail(id, scenario);
+  const { state } = useCharacteristicDetail(id);
 
   if (state.status === "loading") {
     return (

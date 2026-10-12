@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { characteristicService } from "../services/characteristicService";
-import type { CharacteristicCatalogScenario } from "../services/characteristicRepository";
 import type { CharacteristicDetail } from "../types";
 
 export type CharacteristicDetailState =
@@ -9,10 +8,10 @@ export type CharacteristicDetailState =
   | { status: "not-found" }
   | { status: "error"; message: string };
 
-export function useCharacteristicDetail(
-  id: string,
-  scenario: CharacteristicCatalogScenario,
-): { state: CharacteristicDetailState; reload: () => void } {
+export function useCharacteristicDetail(id: string): {
+  state: CharacteristicDetailState;
+  reload: () => void;
+} {
   const [state, setState] = useState<CharacteristicDetailState>({
     status: "loading",
   });
@@ -20,7 +19,7 @@ export function useCharacteristicDetail(
 
   useEffect(() => {
     const controller = new AbortController();
-    void characteristicService.obtener(id, scenario, controller.signal).then(
+    void characteristicService.obtener(id, controller.signal).then(
       (detalle) => {
         if (controller.signal.aborted) return;
         if (detalle) {
@@ -41,7 +40,7 @@ export function useCharacteristicDetail(
       },
     );
     return () => controller.abort();
-  }, [id, scenario, reloadToken]);
+  }, [id, reloadToken]);
 
   const reload = () => setReloadToken((token) => token + 1);
 

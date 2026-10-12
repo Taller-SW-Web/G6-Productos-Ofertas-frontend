@@ -1,5 +1,5 @@
 import { useMemo, useState, type FormEvent } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   Button,
   Group,
@@ -21,47 +21,7 @@ import { SufijoResaltado } from "../components/SufijoResaltado";
 import { useCategoryDetail } from "../hooks/useCategoryDetail";
 import { useCategoryTree } from "../hooks/useCategoryTree";
 import { useUpdateCategory } from "../hooks/useUpdateCategory";
-import {
-  scenariosCatalogo,
-  type CategoryCatalogScenario,
-  type CategoryFormScenario,
-} from "../services/categoryRepository";
-import { parseCatalogScenario } from "../services/scenarioParams";
 import type { CategoryDetail, CategoryNode } from "../types";
-
-const slugScenarios: { value: CategoryFormScenario; label: string }[] = [
-  { value: "default", label: "Por defecto" },
-  { value: "slug-sin-colision", label: "Slug sin colisión" },
-  { value: "slug-con-colision", label: "Slug con colisión" },
-  { value: "slug-carrera-409", label: "Colisión al guardar (409)" },
-];
-
-function parseFormScenario(raw: string | null): CategoryFormScenario {
-  return slugScenarios.some((item) => item.value === raw)
-    ? (raw as CategoryFormScenario)
-    : "default";
-}
-
-function SelectorEscenarioCatalogo({
-  value,
-  onChange,
-}: {
-  value: CategoryCatalogScenario;
-  onChange: (value: CategoryCatalogScenario) => void;
-}) {
-  return (
-    <Select
-      label="Escenario de revisión de carga"
-      value={value}
-      data={scenariosCatalogo}
-      maw={320}
-      onChange={(next) => {
-        if (!next) return;
-        onChange(next as CategoryCatalogScenario);
-      }}
-    />
-  );
-}
 
 // MK-008-S03: editar categoría en `/categorias/:id/editar`.
 export function EditCategoryPage() {
@@ -78,11 +38,7 @@ export function EditCategoryPage() {
 
 function EditCategoryLoader({ id }: { id: string }) {
   const navigate = useNavigate();
-  const [params, setParams] = useSearchParams();
-  const isRevisionMode =
-    import.meta.env.DEV && params.get("modoRevision") === "1";
-  const catalogScenario = parseCatalogScenario(params.get("escenario"));
-  const { state } = useCategoryDetail(id, catalogScenario);
+  const { state } = useCategoryDetail(id);
 
   const contenido =
     state.status === "loading" ? (
@@ -107,7 +63,7 @@ function EditCategoryLoader({ id }: { id: string }) {
         La categoría solicitada no existe o ya no está disponible.
       </FeedbackAlert>
     ) : (
-      <EditCategoryForm detalle={state.detalle} isRevisionMode={isRevisionMode} />
+      <EditCategoryForm detalle={state.detalle} />
     );
 
   return (
@@ -120,35 +76,13 @@ function EditCategoryLoader({ id }: { id: string }) {
           { label: "Editar" },
         ]}
       />
-      <Stack gap="lg">
-        {isRevisionMode && (
-          <SelectorEscenarioCatalogo
-            value={catalogScenario}
-            onChange={(next) =>
-              setParams((prev) => {
-                const copy = new URLSearchParams(prev);
-                copy.set("escenario", next);
-                return copy;
-              })
-            }
-          />
-        )}
-        {contenido}
-      </Stack>
+      <Stack gap="lg">{contenido}</Stack>
     </>
   );
 }
 
-function EditCategoryForm({
-  detalle,
-  isRevisionMode,
-}: {
-  detalle: CategoryDetail;
-  isRevisionMode: boolean;
-}) {
+function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
   const navigate = useNavigate();
-  const [params, setParams] = useSearchParams();
-  const slugScenario = parseFormScenario(params.get("slugEscenario"));
 
   const { state: treeState } = useCategoryTree();
   const {
@@ -161,7 +95,7 @@ function EditCategoryForm({
     comprobar,
     actualizar,
     cerrar,
-  } = useUpdateCategory(slugScenario);
+  } = useUpdateCategory();
 
   const [nombre, setNombre] = useState(detalle.nombre);
   const [padreId, setPadreId] = useState<string | null>(detalle.padreId ?? null);
@@ -231,22 +165,6 @@ function EditCategoryForm({
 
   return (
     <>
-      {isRevisionMode && (
-        <Select
-          label="Escenario de revisión del slug"
-          value={slugScenario}
-          data={slugScenarios}
-          maw={320}
-          onChange={(next) => {
-            if (!next) return;
-            setParams((prev) => {
-              const copy = new URLSearchParams(prev);
-              copy.set("slugEscenario", next);
-              return copy;
-            });
-          }}
-        />
-      )}
       {resultado ? (
         <FeedbackAlert
           semantic="success"

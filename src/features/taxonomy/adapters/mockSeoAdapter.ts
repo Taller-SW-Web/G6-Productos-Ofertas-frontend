@@ -36,28 +36,37 @@ const normalizar = (s: string) =>
 
 const aRegistro = (r: RegistroSeo) => ({ ...r });
 
+// Deterministic local states used only for review. The repository contract does not
+// accept scenarios; reviewers change these values to reproduce error or edge cases
+// without touching pages, hooks or the service contract.
+type EscenarioLista = "default" | "empty" | "error";
+
+const MOCK: { lista: EscenarioLista } = {
+  lista: "default",
+};
+
 export const mockSeoAdapter: SeoRepository = {
-  async list(scenario, signal) {
-    signal.throwIfAborted();
+  async list(signal) {
+    signal?.throwIfAborted();
     await esperar(200);
-    signal.throwIfAborted();
-    if (scenario === "error") throw new Error("No se pudieron cargar los metadatos SEO.");
-    if (scenario === "empty") return { items: [] };
+    signal?.throwIfAborted();
+    if (MOCK.lista === "error") throw new Error("No se pudieron cargar los metadatos SEO.");
+    if (MOCK.lista === "empty") return { items: [] };
     return { items: store.map(aRegistro) };
   },
 
   async obtener(id, signal) {
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     await esperar(200);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     const r = store.find((x) => x.id === id);
     return r ? aRegistro(r) : null;
   },
 
   async proponerSlug(nombre, signal) {
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     await esperar(150);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     let slug = normalizar(nombre);
     let colision = false;
     if (store.some((x) => x.slug === slug)) {
@@ -70,9 +79,9 @@ export const mockSeoAdapter: SeoRepository = {
   },
 
   async guardar({ id, slug, metaTitulo, metaDescripcion }, signal) {
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     await esperar(250);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     const r = store.find((x) => x.id === id);
     if (!r) {
       throw new Error("La categoría no existe o ya no está disponible.");
@@ -102,9 +111,9 @@ export const mockSeoAdapter: SeoRepository = {
   },
 
   async historial(id, signal) {
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     await esperar(150);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     return (historial[id] ?? []).slice();
   },
 };

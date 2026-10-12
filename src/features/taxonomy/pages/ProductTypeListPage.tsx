@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { Box, Button, Select, Stack, Text } from "@mantine/core";
+import { useNavigate } from "react-router-dom";
+import { Box, Button, Stack, Text } from "@mantine/core";
 import { IconPlus } from "@tabler/icons-react";
 import {
   EntityTable,
@@ -14,31 +14,13 @@ import {
 } from "../../../components/shared";
 import { useProductTypeList } from "../hooks/useProductTypeList";
 import { estadoCaracteristicaSemantic } from "../services/estadoSemantic";
-import {
-  scenariosProductTypes,
-  type ProductTypeListScenario,
-} from "../services/productTypeRepository";
 import type { ProductTypeListItem } from "../types";
 
 export function ProductTypeListPage() {
-  const [params] = useSearchParams();
-  const isRevisionMode =
-    import.meta.env.DEV && params.get("modoRevision") === "1";
-
-  return <ProductTypeListContent isRevisionMode={isRevisionMode} />;
-}
-
-function ProductTypeListContent({
-  isRevisionMode,
-}: {
-  isRevisionMode: boolean;
-}) {
   const navigate = useNavigate();
-  const [scenario, setScenario] =
-    useState<ProductTypeListScenario>("default");
   const [revision, setRevision] = useState(0);
   const [busqueda, setBusqueda] = useState("");
-  const { state } = useProductTypeList(scenario, revision);
+  const { state } = useProductTypeList(revision);
 
   const resultado = state.status === "success" ? state.result : undefined;
   const tipos = useMemo(() => resultado?.items ?? [], [resultado]);
@@ -108,10 +90,7 @@ function ProductTypeListContent({
             action: (
               <Button
                 variant="outline"
-                onClick={() => {
-                  setScenario("default");
-                  setRevision((value) => value + 1);
-                }}
+                onClick={() => setRevision((value) => value + 1)}
               >
                 Volver a intentar
               </Button>
@@ -152,20 +131,6 @@ function ProductTypeListContent({
           Los tipos de producto mostrados son simulados. Esta pantalla no
           consulta ni modifica tipos reales del catálogo.
         </FeedbackAlert>
-        {isRevisionMode && (
-          <Select
-            label="Escenario de revisión del piloto"
-            value={scenario}
-            data={scenariosProductTypes}
-            maw={320}
-            onChange={(value) => {
-              const opcion = scenariosProductTypes.find(
-                (item) => item.value === value,
-              );
-              if (opcion) setScenario(opcion.value);
-            }}
-          />
-        )}
         <FilterBar summary={`${filas.length} tipos de producto visibles`}>
           <Box w={320}>
             <SearchField

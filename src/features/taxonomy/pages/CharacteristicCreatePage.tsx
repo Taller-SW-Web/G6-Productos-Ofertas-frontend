@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Button, Group, Select, Stack, TextInput } from "@mantine/core";
 import {
   FeedbackAlert,
@@ -7,11 +7,7 @@ import {
   SectionCard,
 } from "../../../components/shared";
 import { useCreateCharacteristic } from "../hooks/useCreateCharacteristic";
-import {
-  characteristicConfigDefaults,
-  scenariosFormularioCaracteristica,
-  type CharacteristicFormScenario,
-} from "../services/characteristicRepository";
+import { characteristicConfigDefaults } from "../services/characteristicRepository";
 import {
   describirReglaTipo,
   etiquetaTipoCaracteristica,
@@ -34,18 +30,8 @@ const estados: { value: CharacteristicStatus; label: string }[] = [
 
 export function CharacteristicCreatePage() {
   const navigate = useNavigate();
-  const [params, setParams] = useSearchParams();
-  const isRevisionMode =
-    import.meta.env.DEV && params.get("modoRevision") === "1";
-  const rawScenario = params.get("escenario");
-  const scenario: CharacteristicFormScenario = scenariosFormularioCaracteristica.some(
-    (item) => item.value === rawScenario,
-  )
-    ? (rawScenario as CharacteristicFormScenario)
-    : "default";
 
-  const { phase, error, creado, crear, reiniciar } =
-    useCreateCharacteristic(scenario);
+  const { phase, error, creado, crear, reiniciar } = useCreateCharacteristic();
 
   const [nombre, setNombre] = useState("");
   const [tipo, setTipo] = useState<CharacteristicType>("TEXTO");
@@ -101,25 +87,6 @@ export function CharacteristicCreatePage() {
         ]}
       />
       <Stack gap="lg">
-        {isRevisionMode && (
-          <Select
-            label="Escenario de revisión del piloto"
-            value={scenario}
-            data={scenariosFormularioCaracteristica}
-            maw={320}
-            onChange={(value) => {
-              const opcion = scenariosFormularioCaracteristica.find(
-                (item) => item.value === value,
-              );
-              if (!opcion) return;
-              setParams((prev) => {
-                const next = new URLSearchParams(prev);
-                next.set("escenario", opcion.value);
-                return next;
-              });
-            }}
-          />
-        )}
         {creado ? (
           <FeedbackAlert
             semantic="success"

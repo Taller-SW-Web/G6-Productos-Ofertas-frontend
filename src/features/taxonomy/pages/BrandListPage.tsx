@@ -13,15 +13,13 @@ import {
   type TableState,
 } from "../../../components/shared";
 import { useBrandList } from "../hooks/useBrandList";
-import type { BrandListScenario } from "../services/brandRepository";
 import type { BrandListItem } from "../types";
 
 export function BrandListPage() {
   const navigate = useNavigate();
-  const [scenario, setScenario] = useState<BrandListScenario>("default");
   const [revision, setRevision] = useState(0);
   const [busqueda, setBusqueda] = useState("");
-  const { state } = useBrandList(scenario, revision);
+  const { state } = useBrandList(revision);
 
   const resultado = state.status === "success" ? state.result : undefined;
   const marcas = useMemo(() => resultado?.items ?? [], [resultado]);
@@ -76,10 +74,7 @@ export function BrandListPage() {
             action: (
               <Button
                 variant="outline"
-                onClick={() => {
-                  setScenario("default");
-                  setRevision((v) => v + 1);
-                }}
+                onClick={() => setRevision((v) => v + 1)}
               >
                 Volver a intentar
               </Button>

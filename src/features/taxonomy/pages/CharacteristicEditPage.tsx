@@ -1,10 +1,9 @@
 import { useState, type FormEvent } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   Button,
   Group,
   Loader,
-  Select,
   Stack,
   Text,
   TextInput,
@@ -18,30 +17,12 @@ import { useCharacteristicDetail } from "../hooks/useCharacteristicDetail";
 import { useUpdateCharacteristic } from "../hooks/useUpdateCharacteristic";
 import {
   characteristicConfigDefaults,
-  scenariosCatalogoCaracteristica,
-  scenariosFormularioCaracteristica,
-  type CharacteristicCatalogScenario,
-  type CharacteristicFormScenario,
 } from "../services/characteristicRepository";
 import {
   describirReglaTipo,
   etiquetaTipoCaracteristica,
 } from "../services/characteristicPresentation";
 import type { CharacteristicDetail } from "../types";
-
-function parseCatalogScenario(
-  raw: string | null,
-): CharacteristicCatalogScenario {
-  return scenariosCatalogoCaracteristica.some((item) => item.value === raw)
-    ? (raw as CharacteristicCatalogScenario)
-    : "default";
-}
-
-function parseFormScenario(raw: string | null): CharacteristicFormScenario {
-  return scenariosFormularioCaracteristica.some((item) => item.value === raw)
-    ? (raw as CharacteristicFormScenario)
-    : "default";
-}
 
 export function CharacteristicEditPage() {
   const { id } = useParams<{ id: string }>();
@@ -57,11 +38,7 @@ export function CharacteristicEditPage() {
 
 function CharacteristicEditLoader({ id }: { id: string }) {
   const navigate = useNavigate();
-  const [params, setParams] = useSearchParams();
-  const isRevisionMode =
-    import.meta.env.DEV && params.get("modoRevision") === "1";
-  const catalogScenario = parseCatalogScenario(params.get("escenario"));
-  const { state } = useCharacteristicDetail(id, catalogScenario);
+  const { state } = useCharacteristicDetail(id);
 
   const contenido =
     state.status === "loading" ? (
@@ -89,10 +66,7 @@ function CharacteristicEditLoader({ id }: { id: string }) {
         La característica solicitada no existe o ya no está disponible.
       </FeedbackAlert>
     ) : (
-      <CharacteristicEditForm
-        detalle={state.detalle}
-        isRevisionMode={isRevisionMode}
-      />
+      <CharacteristicEditForm detalle={state.detalle} />
     );
 
   return (
@@ -105,41 +79,14 @@ function CharacteristicEditLoader({ id }: { id: string }) {
           { label: "Editar" },
         ]}
       />
-      <Stack gap="lg">
-        {isRevisionMode && (
-          <Select
-            label="Escenario de revisión de carga"
-            value={catalogScenario}
-            data={scenariosCatalogoCaracteristica}
-            maw={320}
-            onChange={(next) => {
-              if (!next) return;
-              setParams((prev) => {
-                const copy = new URLSearchParams(prev);
-                copy.set("escenario", next);
-                return copy;
-              });
-            }}
-          />
-        )}
-        {contenido}
-      </Stack>
+      <Stack gap="lg">{contenido}</Stack>
     </>
   );
 }
 
-function CharacteristicEditForm({
-  detalle,
-  isRevisionMode,
-}: {
-  detalle: CharacteristicDetail;
-  isRevisionMode: boolean;
-}) {
+function CharacteristicEditForm({ detalle }: { detalle: CharacteristicDetail }) {
   const navigate = useNavigate();
-  const [params, setParams] = useSearchParams();
-  const formScenario = parseFormScenario(params.get("guardado"));
-  const { phase, error, resultado, actualizar } =
-    useUpdateCharacteristic(formScenario);
+  const { phase, error, resultado, actualizar } = useUpdateCharacteristic();
 
   const [nombre, setNombre] = useState(detalle.nombre);
   const [unidad, setUnidad] = useState(detalle.unidad ?? "");
@@ -195,22 +142,6 @@ function CharacteristicEditForm({
 
   return (
     <>
-      {isRevisionMode && (
-        <Select
-          label="Escenario de revisión de guardado"
-          value={formScenario}
-          data={scenariosFormularioCaracteristica}
-          maw={320}
-          onChange={(next) => {
-            if (!next) return;
-            setParams((prev) => {
-              const copy = new URLSearchParams(prev);
-              copy.set("guardado", next);
-              return copy;
-            });
-          }}
-        />
-      )}
       <FeedbackAlert semantic="info" title="Datos de demostración">
         El formulario es simulado. No actualiza características reales ni envía
         datos a un backend.

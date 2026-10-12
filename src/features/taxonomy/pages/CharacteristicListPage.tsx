@@ -1,11 +1,10 @@
 import { useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import {
   ActionIcon,
   Box,
   Button,
   Group,
-  Select,
   Stack,
   Text,
 } from "@mantine/core";
@@ -31,10 +30,6 @@ import {
   describirReglaCaracteristica,
   etiquetaTipoCaracteristica,
 } from "../services/characteristicPresentation";
-import {
-  scenariosCaracteristicas,
-  type CharacteristicListScenario,
-} from "../services/characteristicRepository";
 import type {
   CharacteristicCatalogConfig,
   CharacteristicListItem,
@@ -46,24 +41,10 @@ const configVacia: CharacteristicCatalogConfig = {
 };
 
 export function CharacteristicListPage() {
-  const [params] = useSearchParams();
-  const isRevisionMode =
-    import.meta.env.DEV && params.get("modoRevision") === "1";
-
-  return <CharacteristicListContent isRevisionMode={isRevisionMode} />;
-}
-
-function CharacteristicListContent({
-  isRevisionMode,
-}: {
-  isRevisionMode: boolean;
-}) {
   const navigate = useNavigate();
-  const [scenario, setScenario] =
-    useState<CharacteristicListScenario>("default");
   const [revision, setRevision] = useState(0);
   const [busqueda, setBusqueda] = useState("");
-  const { state } = useCharacteristicList(scenario, revision);
+  const { state } = useCharacteristicList(revision);
 
   const resultado = state.status === "success" ? state.result : undefined;
   const caracteristicas = useMemo(
@@ -159,10 +140,7 @@ function CharacteristicListContent({
             action: (
               <Button
                 variant="outline"
-                onClick={() => {
-                  setScenario("default");
-                  setRevision((value) => value + 1);
-                }}
+                onClick={() => setRevision((value) => value + 1)}
               >
                 Volver a intentar
               </Button>
@@ -203,20 +181,6 @@ function CharacteristicListContent({
           Las características mostradas son simuladas. Esta pantalla no consulta
           ni modifica características reales del catálogo.
         </FeedbackAlert>
-        {isRevisionMode && (
-          <Select
-            label="Escenario de revisión del piloto"
-            value={scenario}
-            data={scenariosCaracteristicas}
-            maw={320}
-            onChange={(value) => {
-              const opcion = scenariosCaracteristicas.find(
-                (item) => item.value === value,
-              );
-              if (opcion) setScenario(opcion.value);
-            }}
-          />
-        )}
         <FilterBar summary={`${filas.length} características visibles`}>
           <Box w={320}>
             <SearchField

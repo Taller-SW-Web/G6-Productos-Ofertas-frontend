@@ -138,41 +138,75 @@ const aDetalle = (registro: RegistroCategoria): CategoryDetail => {
   };
 };
 
+// BLOCKED_CONTRACT: no hay contrato OpenAPI confirmado para el sondeo del resultado
+// de una baja asíncrona (202). Este registro mantiene las operaciones pendientes en
+// memoria para que la UI pueda consultar su estado sin inventar un endpoint HTTP.
+interface OperacionBajaCategoria {
+  categoriaId: string;
+  estado: "pendiente" | "confirmada";
+}
+
+const operacionesBaja = new Map<string, OperacionBajaCategoria>();
+
+// Deterministic local states used only for review. The repository contract does not
+// accept scenarios; reviewers change these values to reproduce error or edge cases
+// without touching pages, hooks or the service contract.
+type EscenarioDetalle = "default" | "no-encontrado" | "error";
+type EscenarioSlug =
+  | "default"
+  | "slug-sin-colision"
+  | "slug-con-colision"
+  | "slug-carrera-409";
+type EscenarioBaja = "default" | "rechazada-subcategorias" | "rechazada-productos" | "error";
+type EscenarioReactivacion = "default" | "bloqueada" | "error";
+
+const MOCK: {
+  detalle: EscenarioDetalle;
+  slug: EscenarioSlug;
+  baja: EscenarioBaja;
+  reactivacion: EscenarioReactivacion;
+} = {
+  detalle: "default",
+  slug: "default",
+  baja: "default",
+  reactivacion: "default",
+};
+
 // Mock adapter: returns deterministic fixtures, never a real backend response.
 export const mockCategoryAdapter: CategoryRepository = {
   async list(signal) {
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     await esperar(400);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     return { nodos: hijasDe(null).map(aNodo), colapsadosPorId: [] };
   },
 
-  async obtener(id, scenario, signal) {
-    signal.throwIfAborted();
+  async obtener(id, signal) {
+    signal?.throwIfAborted();
     await esperar(400);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
 
-    if (scenario === "error") {
+    if (MOCK.detalle === "error") {
       throw new Error("No se pudo cargar la categoría. Inténtalo de nuevo.");
     }
-    if (scenario === "no-encontrado") return null;
+    if (MOCK.detalle === "no-encontrado") return null;
 
     const registro = hallar(id);
     return registro ? aDetalle(registro) : null;
   },
 
-  async comprobarSlug(slug, scenario, signal) {
-    signal.throwIfAborted();
+  async comprobarSlug(slug, signal) {
+    signal?.throwIfAborted();
     await esperar(300);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
 
-    if (scenario === "slug-sin-colision") {
+    if (MOCK.slug === "slug-sin-colision") {
       return { slug, disponible: true };
     }
-    if (scenario === "slug-con-colision") {
+    if (MOCK.slug === "slug-con-colision") {
       return { slug, disponible: false, alternativo: `${slug}-2` };
     }
-    if (scenario === "slug-carrera-409") {
+    if (MOCK.slug === "slug-carrera-409") {
       // Looks free here; the collision only appears when saving.
       return { slug, disponible: true };
     }
@@ -183,12 +217,12 @@ export const mockCategoryAdapter: CategoryRepository = {
       : { slug, disponible, alternativo: `${slug}-2` };
   },
 
-  async crear(input, scenario, signal) {
-    signal.throwIfAborted();
+  async crear(input, signal) {
+    signal?.throwIfAborted();
     await esperar(400);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
 
-    if (scenario === "slug-carrera-409" || slugEnUso(input.slug)) {
+    if (MOCK.slug === "slug-carrera-409" || slugEnUso(input.slug)) {
       throw new Error(
         "El slug ya está en uso. Elige la alternativa sugerida o modifica el slug.",
       );
@@ -209,16 +243,16 @@ export const mockCategoryAdapter: CategoryRepository = {
     return { id, nombre: input.nombre, slug: input.slug };
   },
 
-  async actualizar(input, scenario, signal) {
-    signal.throwIfAborted();
+  async actualizar(input, signal) {
+    signal?.throwIfAborted();
     await esperar(400);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
 
     const registro = hallar(input.id);
     if (!registro) {
       throw new Error("La categoría ya no está disponible para editar.");
     }
-    if (scenario === "slug-carrera-409" || slugEnUso(input.slug, input.id)) {
+    if (MOCK.slug === "slug-carrera-409" || slugEnUso(input.slug, input.id)) {
       throw new Error(
         "El slug ya está en uso. Elige la alternativa sugerida o modifica el slug.",
       );
@@ -240,21 +274,21 @@ export const mockCategoryAdapter: CategoryRepository = {
     return aDetalle(registro);
   },
 
-  async solicitarBaja(id, scenario, signal) {
-    signal.throwIfAborted();
+  async solicitarBaja(id, signal) {
+    signal?.throwIfAborted();
     await esperar(500);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
 
     const registro = hallar(id);
     if (!registro) {
       throw new Error("La categoría ya no está disponible para desactivar.");
     }
 
-    if (scenario === "error") {
+    if (MOCK.baja === "error") {
       throw new Error("No se pudo verificar la baja. Inténtalo de nuevo.");
     }
 
-    if (scenario === "rechazada-subcategorias") {
+    if (MOCK.baja === "rechazada-subcategorias") {
       const cantidad = hijasDe(id).filter((item) => item.estado === "Activo").length || 1;
       return {
         resultado: "rechazada",
@@ -271,7 +305,7 @@ export const mockCategoryAdapter: CategoryRepository = {
       };
     }
 
-    if (scenario === "rechazada-productos") {
+    if (MOCK.baja === "rechazada-productos") {
       const cantidad = registro.productosActivos || 1;
       return {
         resultado: "rechazada",
@@ -287,7 +321,7 @@ export const mockCategoryAdapter: CategoryRepository = {
       };
     }
 
-    if (scenario === "default") {
+    if (MOCK.baja === "default") {
       const hijasActivas = hijasDe(id).filter((item) => item.estado === "Activo");
       if (hijasActivas.length > 0) {
         return {
@@ -323,26 +357,66 @@ export const mockCategoryAdapter: CategoryRepository = {
     }
 
     registro.estado = "Verificando baja";
+    const operacionId = `op-baja-categoria-${id}`;
+    operacionesBaja.set(operacionId, {
+      categoriaId: id,
+      estado: "pendiente",
+    });
     return {
       resultado: "verificando",
       categoria: aDetalle(registro),
       bloqueos: [],
       mensaje:
         "La solicitud de baja quedó en verificación. La categoría se marcará como inactiva al finalizar.",
+      operacionId,
     };
   },
 
-  async reactivar(id, scenario, signal) {
-    signal.throwIfAborted();
+  async consultarEstadoOperacion(operacionId, signal) {
+    signal?.throwIfAborted();
+    await esperar(400);
+    signal?.throwIfAborted();
+
+    const operacion = operacionesBaja.get(operacionId);
+    if (!operacion) {
+      throw new Error("No se encontró la operación de baja solicitada.");
+    }
+    const registro = hallar(operacion.categoriaId);
+    if (!registro) {
+      throw new Error("La categoría ya no está disponible.");
+    }
+
+    if (operacion.estado === "pendiente") {
+      operacion.estado = "confirmada";
+      registro.estado = "Inactivo";
+      return {
+        operacionId,
+        estado: "confirmada",
+        mensaje:
+          "Verificación concluida: la categoría quedó Inactiva sin eliminar el registro.",
+        categoria: aDetalle(registro),
+      };
+    }
+
+    return {
+      operacionId,
+      estado: "confirmada",
+      mensaje: "La baja de la categoría ya estaba confirmada.",
+      categoria: aDetalle(registro),
+    };
+  },
+
+  async reactivar(id, signal) {
+    signal?.throwIfAborted();
     await esperar(500);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
 
     const registro = hallar(id);
     if (!registro) {
       throw new Error("La categoría ya no está disponible para reactivar.");
     }
 
-    if (scenario === "error") {
+    if (MOCK.reactivacion === "error") {
       throw new Error("No se pudo reactivar la categoría. Inténtalo de nuevo.");
     }
 
@@ -351,8 +425,8 @@ export const mockCategoryAdapter: CategoryRepository = {
     const padreBloqueante = padre && padre.estado !== "Activo";
 
     const bloqueada =
-      scenario === "bloqueada" ||
-      (scenario === "default" && (productos > 0 || Boolean(padreBloqueante)));
+      MOCK.reactivacion === "bloqueada" ||
+      (MOCK.reactivacion === "default" && (productos > 0 || Boolean(padreBloqueante)));
 
     if (bloqueada) {
       const bloqueos: BloqueoDependencia[] = [];

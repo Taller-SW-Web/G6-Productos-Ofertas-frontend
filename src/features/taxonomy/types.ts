@@ -97,6 +97,7 @@ export interface BajaSolicitudResult {
   categoria: CategoryDetail;
   bloqueos: BloqueoDependencia[];
   mensaje: string;
+  operacionId?: string;
 }
 
 export interface ReactivacionResult {
@@ -249,6 +250,7 @@ export type OperationResultState = "exito" | "pendiente" | "rechazada";
 export interface ProductTypeDesasociarResult {
   resultado: OperationResultState;
   mensaje: string;
+  operacionId?: string;
 }
 
 export interface ProductTypeDesactivarResult {
@@ -327,4 +329,33 @@ export interface HistorialSlugItem {
   slugAnterior: string;
   slugActual: string;
   fecha: string;
+}
+
+// MK-008/009/010 — Seguimiento de operaciones asíncronas (202 Accepted).
+// BLOCKED_CONTRACT: no existe un contrato OpenAPI confirmado para el sondeo del
+// resultado de una operación asíncrona de baja/desasociación (la documentación de
+// contratos no está accesible en este entorno). Estos modelos solo representan el
+// estado devuelto por el servicio; no definen ni inventan un endpoint HTTP propio.
+export type OperationFollowUpStatus =
+  | "pendiente"
+  | "confirmada"
+  | "rechazada"
+  | "no-concluyente";
+
+export interface OperationFollowUpResult {
+  operacionId: string;
+  estado: OperationFollowUpStatus;
+  mensaje: string;
+}
+
+export interface BajaCategoriaSeguimiento extends OperationFollowUpResult {
+  categoria?: CategoryDetail;
+}
+
+export interface ValorBajaSeguimiento extends OperationFollowUpResult {
+  valor?: CharacteristicValue;
+}
+
+export interface DesasociacionSeguimiento extends OperationFollowUpResult {
+  tipoProducto?: ProductTypeDetail;
 }

@@ -1,9 +1,6 @@
 import { useEffect, useState } from "react";
 import { characteristicService } from "../services/characteristicService";
-import type {
-  CharacteristicListResult,
-  CharacteristicListScenario,
-} from "../services/characteristicRepository";
+import type { CharacteristicListResult } from "../services/characteristicRepository";
 
 export type CharacteristicListState =
   | { status: "loading" }
@@ -11,10 +8,9 @@ export type CharacteristicListState =
   | { status: "error"; message: string };
 
 export function useCharacteristicList(
-  scenario: CharacteristicListScenario,
   revision: number,
 ): { state: CharacteristicListState } {
-  const requestKey = JSON.stringify([scenario, revision]);
+  const requestKey = JSON.stringify([revision]);
   const [response, setResponse] = useState<{
     requestKey: string;
     state: CharacteristicListState;
@@ -22,7 +18,7 @@ export function useCharacteristicList(
 
   useEffect(() => {
     const controller = new AbortController();
-    void characteristicService.list(scenario, controller.signal).then(
+    void characteristicService.list(controller.signal).then(
       (result) => {
         if (controller.signal.aborted) return;
         setResponse({ requestKey, state: { status: "success", result } });
@@ -42,7 +38,7 @@ export function useCharacteristicList(
       },
     );
     return () => controller.abort();
-  }, [scenario, requestKey]);
+  }, [requestKey]);
 
   const state =
     response?.requestKey === requestKey

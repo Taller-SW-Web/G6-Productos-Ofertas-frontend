@@ -12,15 +12,13 @@ import {
   type TableState,
 } from "../../../components/shared";
 import { useSeoList } from "../hooks/useSeoList";
-import type { SeoListScenario } from "../services/seoRepository";
 import type { SeoCategory } from "../types";
 
 export function SeoListPage() {
   const navigate = useNavigate();
-  const [scenario, setScenario] = useState<SeoListScenario>("default");
   const [revision, setRevision] = useState(0);
   const [busqueda, setBusqueda] = useState("");
-  const { state } = useSeoList(scenario, revision);
+  const { state } = useSeoList(revision);
 
   const resultado = state.status === "success" ? state.result : undefined;
   const items = useMemo(() => resultado?.items ?? [], [resultado]);
@@ -55,7 +53,7 @@ export function SeoListPage() {
             status: "error",
             message: state.message,
             action: (
-              <Button variant="outline" onClick={() => { setScenario("default"); setRevision((v) => v + 1); }}>
+              <Button variant="outline" onClick={() => setRevision((v) => v + 1)}>
                 Volver a intentar
               </Button>
             ),

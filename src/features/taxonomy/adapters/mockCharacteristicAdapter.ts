@@ -122,17 +122,48 @@ const generarId = (nombre: string): string => {
   return id;
 };
 
+const contarActivos = (valores: RegistroValor[]): number =>
+  valores.filter((valor) => valor.estado === "Activo").length;
+
+// BLOCKED_CONTRACT: no hay contrato OpenAPI confirmado para el sondeo del resultado
+// de una baja asíncrona de valor (202). Este registro mantiene las operaciones
+// pendientes en memoria para que la UI consulte su estado sin inventar un endpoint.
+interface OperacionBajaValor {
+  caracteristicaId: string;
+  valorId: string;
+  estado: "pendiente" | "confirmada";
+}
+
+const operacionesBajaValor = new Map<string, OperacionBajaValor>();
+
+// Deterministic local states used only for review. The repository contract does not
+// accept scenarios; reviewers change these values to reproduce error or edge cases
+// without touching pages, hooks or the service contract.
+type EscenarioLista = "default" | "empty" | "error";
+type EscenarioCatalogo = "default" | "error" | "no-encontrado";
+type EscenarioFormulario = "default" | "error";
+
+const MOCK: {
+  lista: EscenarioLista;
+  catalogo: EscenarioCatalogo;
+  formulario: EscenarioFormulario;
+} = {
+  lista: "default",
+  catalogo: "default",
+  formulario: "default",
+};
+
 export const mockCharacteristicAdapter: CharacteristicRepository = {
-  async list(scenario, signal) {
-    signal.throwIfAborted();
+  async list(signal) {
+    signal?.throwIfAborted();
     await esperar(400);
-    signal.throwIfAborted();
-    if (scenario === "error") {
+    signal?.throwIfAborted();
+    if (MOCK.lista === "error") {
       throw new Error(
         "No se pudieron cargar las características. Inténtalo de nuevo.",
       );
     }
-    if (scenario === "empty") {
+    if (MOCK.lista === "empty") {
       return { caracteristicas: [], config: characteristicConfigDefaults };
     }
     return {
@@ -141,25 +172,25 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
     };
   },
 
-  async obtener(id, scenario, signal) {
-    signal.throwIfAborted();
+  async obtener(id, signal) {
+    signal?.throwIfAborted();
     await esperar(400);
-    signal.throwIfAborted();
-    if (scenario === "error") {
+    signal?.throwIfAborted();
+    if (MOCK.catalogo === "error") {
       throw new Error(
         "No se pudo cargar la característica. Inténtalo de nuevo.",
       );
     }
-    if (scenario === "no-encontrado") return null;
+    if (MOCK.catalogo === "no-encontrado") return null;
     const registro = hallar(id);
     return registro ? aDetalle(registro) : null;
   },
 
-  async crear(input, scenario, signal) {
-    signal.throwIfAborted();
+  async crear(input, signal) {
+    signal?.throwIfAborted();
     await esperar(500);
-    signal.throwIfAborted();
-    if (scenario === "error") {
+    signal?.throwIfAborted();
+    if (MOCK.formulario === "error") {
       throw new Error(
         "No se pudo crear la característica. Inténtalo de nuevo.",
       );
@@ -184,17 +215,17 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
     };
   },
 
-  async actualizar(input, scenario, signal) {
-    signal.throwIfAborted();
+  async actualizar(input, signal) {
+    signal?.throwIfAborted();
     await esperar(400);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     const registro = hallar(input.id);
     if (!registro) {
       throw new Error(
         "La característica ya no está disponible para editar.",
       );
     }
-    if (scenario === "error") {
+    if (MOCK.formulario === "error") {
       throw new Error(
         "No se pudo guardar la característica. Inténtalo de nuevo.",
       );
@@ -204,20 +235,28 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
     return aDetalle(registro);
   },
 
-  async listarValores(id, _scenario, signal) {
-    signal.throwIfAborted();
+  async listarValores(id, signal) {
+    signal?.throwIfAborted();
     await esperar(300);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     const r = hallar(id);
     return r ? ((r.valores ?? []).map((v) => ({ ...v })) as CharacteristicValue[]) : null;
   },
 
   async agregarValor(id, nombre, signal) {
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     await esperar(300);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     const r = hallar(id);
     if (!r) throw new Error("Característica no encontrada.");
+    // SPEC-009: el límite de valores permitidos se aplica también aquí y no solo como
+    // restricción visual del formulario (maxValoresLista sobre valores activos).
+    const existentes = r.valores ?? [];
+    if (contarActivos(existentes) >= characteristicConfigDefaults.maxValoresLista) {
+      throw new Error(
+        `Se alcanzó el límite de ${characteristicConfigDefaults.maxValoresLista} valores permitidos para esta característica.`,
+      );
+    }
     const base =
       nombre
         .trim()
@@ -228,8 +267,7 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
         .replace(/^-+|-+$/g, "") || "val";
     let vid = base;
     let i = 2;
-    const vals = r.valores ?? [];
-    while (vals.some((v) => v.valorId === vid)) {
+    while (existentes.some((v) => v.valorId === vid)) {
       vid = `${base}-${i}`;
       i += 1;
     }
@@ -241,14 +279,14 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
     };
     if (!r.valores) r.valores = [];
     r.valores.push(v);
-    r.valoresActivos = (r.valores.filter((x) => x.estado === "Activo")).length;
+    r.valoresActivos = contarActivos(r.valores);
     return { ...v };
   },
 
   async solicitarBajaValor(id, valorId, signal) {
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     await esperar(400);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     const r = hallar(id);
     const v = r?.valores?.find((x) => x.valorId === valorId);
     if (!r || !v) {
@@ -287,19 +325,25 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
     // Demostración de verificación en curso (equivalente a 202): la solicitud se
     // admite pero el valor conserva su estado hasta que se confirme.
     if (valorId === "negro") {
+      const operacionId = `baja-valor-${valorId}`;
+      operacionesBajaValor.set(operacionId, {
+        caracteristicaId: id,
+        valorId,
+        estado: "pendiente",
+      });
       return {
         resultado: "pendiente",
         valor: actual,
         mensaje:
           "Solicitud de baja admitida en revisión. El valor continúa Activo; la desactivación no quedó confirmada.",
         bloqueos: [],
-        operacionId: `baja-valor-${valorId}`,
+        operacionId,
       };
     }
     v.estado = "Inactivo";
     v.version += 1;
     if (r.valores) {
-      r.valoresActivos = (r.valores.filter((x) => x.estado === "Activo")).length;
+      r.valoresActivos = contarActivos(r.valores);
     }
     return {
       resultado: "exito",
@@ -315,10 +359,47 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
     };
   },
 
+  async consultarEstadoOperacion(operacionId, signal) {
+    signal?.throwIfAborted();
+    await esperar(400);
+    signal?.throwIfAborted();
+
+    const operacion = operacionesBajaValor.get(operacionId);
+    if (!operacion) {
+      throw new Error("No se encontró la operación de baja del valor.");
+    }
+    const r = hallar(operacion.caracteristicaId);
+    const v = r?.valores?.find((x) => x.valorId === operacion.valorId);
+    if (!r || !v) {
+      throw new Error("El valor ya no está disponible.");
+    }
+
+    if (operacion.estado === "pendiente") {
+      operacion.estado = "confirmada";
+      v.estado = "Inactivo";
+      v.version += 1;
+      r.valoresActivos = contarActivos(r.valores ?? []);
+      return {
+        operacionId,
+        estado: "confirmada",
+        mensaje:
+          "Verificación concluida: el valor quedó Inactivo sin eliminar el registro.",
+        valor: { ...v },
+      };
+    }
+
+    return {
+      operacionId,
+      estado: "confirmada",
+      mensaje: "La baja del valor ya estaba confirmada.",
+      valor: { ...v },
+    };
+  },
+
   async cambiarEstado(id, estado, signal) {
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     await esperar(300);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     const r = hallar(id);
     if (!r) return null;
     r.estado = estado;

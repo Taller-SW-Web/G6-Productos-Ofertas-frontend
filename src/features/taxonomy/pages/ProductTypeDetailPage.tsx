@@ -121,6 +121,11 @@ function ProductTypeDetailContent({ id }: { id: string }) {
   const detalle = state.status === "success" ? state.detalle : undefined;
   const filas = detalle?.asociadas ?? [];
   const tablaState: TableState = { status: "success" };
+  const desasociarPendiente =
+    desasociar.state.status === "success" &&
+    desasociar.state.result.resultado === "pendiente"
+      ? desasociar.state.result.operacionId
+      : undefined;
 
   return (
     <>
@@ -168,10 +173,40 @@ function ProductTypeDetailContent({ id }: { id: string }) {
                   : "Desasociación completada"
             }
             actions={
-              <Button onClick={desasociar.reiniciar}>Entendido</Button>
+              <Group gap="sm">
+                {desasociarPendiente && (
+                  <Button
+                    loading={desasociar.seguimiento.status === "consultando"}
+                    onClick={() =>
+                      desasociar.consultarEstado(desasociarPendiente, () =>
+                        reload(),
+                      )
+                    }
+                  >
+                    Consultar estado
+                  </Button>
+                )}
+                <Button onClick={desasociar.reiniciar}>Entendido</Button>
+              </Group>
             }
           >
             {desasociar.state.result.mensaje}
+          </FeedbackAlert>
+        )}
+        {desasociar.seguimiento.status === "success" && (
+          <FeedbackAlert
+            semantic="success"
+            title="Desasociación confirmada"
+          >
+            {desasociar.seguimiento.result.mensaje}
+          </FeedbackAlert>
+        )}
+        {desasociar.seguimiento.status === "error" && (
+          <FeedbackAlert
+            semantic="error"
+            title="No se pudo consultar la desasociación"
+          >
+            {desasociar.seguimiento.message}
           </FeedbackAlert>
         )}
         {desasociar.state.status === "error" && (

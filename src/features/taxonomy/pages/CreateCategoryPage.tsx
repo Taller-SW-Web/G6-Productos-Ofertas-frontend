@@ -1,5 +1,5 @@
 import { useMemo, useState, type FormEvent } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import {
   Button,
   Group,
@@ -18,32 +18,15 @@ import {
 import { SufijoResaltado } from "../components/SufijoResaltado";
 import { useCategoryTree } from "../hooks/useCategoryTree";
 import { useCreateCategory } from "../hooks/useCreateCategory";
-import type { CategoryFormScenario } from "../services/categoryRepository";
-
-const scenarios: { value: CategoryFormScenario; label: string }[] = [
-  { value: "default", label: "Por defecto" },
-  { value: "slug-sin-colision", label: "Slug sin colisión" },
-  { value: "slug-con-colision", label: "Slug con colisión" },
-  { value: "slug-carrera-409", label: "Colisión al guardar (409)" },
-];
 
 // MK-008-S02: crear categoría en `/categorias/nueva`.
 // MK-008-S02-C: confirmación de slug SEO (mismo flujo; ruta `/categorias/confirmar-slug`).
 export function CreateCategoryPage() {
   const navigate = useNavigate();
   const { state: treeState } = useCategoryTree();
-  const [params, setParams] = useSearchParams();
-  const isRevisionMode =
-    import.meta.env.DEV && params.get("modoRevision") === "1";
-  const rawScenario = params.get("escenario");
-  const scenario: CategoryFormScenario = scenarios.some(
-    (item) => item.value === rawScenario,
-  )
-    ? (rawScenario as CategoryFormScenario)
-    : "default";
 
   const { phase, slugCheck, slug, error, creado, setSlug, comprobar, confirmar, cerrar } =
-    useCreateCategory(scenario);
+    useCreateCategory();
 
   const [nombre, setNombre] = useState("");
   const [padreId, setPadreId] = useState<string | null>(null);
@@ -110,23 +93,6 @@ export function CreateCategoryPage() {
         ]}
       />
       <Stack gap="lg">
-        {isRevisionMode && (
-          <Select
-            label="Escenario de revisión del piloto"
-            value={scenario}
-            data={scenarios}
-            maw={320}
-            onChange={(value) => {
-              const option = scenarios.find((item) => item.value === value);
-              if (!option) return;
-              setParams((prev) => {
-                const next = new URLSearchParams(prev);
-                next.set("escenario", option.value);
-                return next;
-              });
-            }}
-          />
-        )}
         {creado ? (
           <FeedbackAlert
             semantic="success"

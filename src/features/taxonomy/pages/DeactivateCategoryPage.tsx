@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { Button, Group, Loader, Select, Stack, Text } from "@mantine/core";
+import { useNavigate, useParams } from "react-router-dom";
+import { Button, Group, Loader, Stack, Text } from "@mantine/core";
 import {
   ConfirmDialog,
   FeedbackAlert,
@@ -12,11 +12,6 @@ import { CampoDato } from "../components/CampoDato";
 import { ListaBloqueos } from "../components/ListaBloqueos";
 import { useCategoryDetail } from "../hooks/useCategoryDetail";
 import { useSolicitarBaja } from "../hooks/useSolicitarBaja";
-import {
-  scenariosBaja,
-  scenariosCatalogo,
-} from "../services/categoryRepository";
-import { parseBajaScenario, parseCatalogScenario } from "../services/scenarioParams";
 import { estadoSemantic } from "../services/estadoSemantic";
 import type { CategoryDetail } from "../types";
 
@@ -36,11 +31,7 @@ export function DeactivateCategoryPage() {
 
 function DeactivateCategoryLoader({ id }: { id: string }) {
   const navigate = useNavigate();
-  const [params, setParams] = useSearchParams();
-  const isRevisionMode =
-    import.meta.env.DEV && params.get("modoRevision") === "1";
-  const catalogScenario = parseCatalogScenario(params.get("escenario"));
-  const { state } = useCategoryDetail(id, catalogScenario);
+  const { state } = useCategoryDetail(id);
 
   const contenido =
     state.status === "loading" ? (
@@ -65,10 +56,7 @@ function DeactivateCategoryLoader({ id }: { id: string }) {
         La categoría solicitada no existe o ya no está disponible.
       </FeedbackAlert>
     ) : (
-      <DeactivateCategoryContent
-        detalle={state.detalle}
-        isRevisionMode={isRevisionMode}
-      />
+      <DeactivateCategoryContent detalle={state.detalle} />
     );
 
   return (
@@ -81,40 +69,15 @@ function DeactivateCategoryLoader({ id }: { id: string }) {
           { label: "Desactivar" },
         ]}
       />
-      <Stack gap="lg">
-        {isRevisionMode && (
-          <Select
-            label="Escenario de revisión de carga"
-            value={catalogScenario}
-            data={scenariosCatalogo}
-            maw={320}
-            onChange={(next) => {
-              if (!next) return;
-              setParams((prev) => {
-                const copy = new URLSearchParams(prev);
-                copy.set("escenario", next);
-                return copy;
-              });
-            }}
-          />
-        )}
-        {contenido}
-      </Stack>
+      <Stack gap="lg">{contenido}</Stack>
     </>
   );
 }
 
-function DeactivateCategoryContent({
-  detalle,
-  isRevisionMode,
-}: {
-  detalle: CategoryDetail;
-  isRevisionMode: boolean;
-}) {
+function DeactivateCategoryContent({ detalle }: { detalle: CategoryDetail }) {
   const navigate = useNavigate();
-  const [params, setParams] = useSearchParams();
-  const bajaScenario = parseBajaScenario(params.get("baja"));
-  const { state, solicitar, reiniciar } = useSolicitarBaja(detalle.id, bajaScenario);
+  const { state, seguimiento, solicitar, consultarEstado, reiniciar } =
+    useSolicitarBaja(detalle.id);
   const [confirmar, setConfirmar] = useState(false);
 
   const cerrarDialogo = () => {
@@ -126,22 +89,6 @@ function DeactivateCategoryContent({
 
   return (
     <>
-      {isRevisionMode && (
-        <Select
-          label="Escenario de revisión de la baja"
-          value={bajaScenario}
-          data={scenariosBaja}
-          maw={360}
-          onChange={(next) => {
-            if (!next) return;
-            setParams((prev) => {
-              const copy = new URLSearchParams(prev);
-              copy.set("baja", next);
-              return copy;
-            });
-          }}
-        />
-      )}
       {resultado === null ? (
         <>
           <FeedbackAlert semantic="warning" title="Confirmación requerida">
@@ -181,27 +128,61 @@ function DeactivateCategoryContent({
           </Group>
         </>
       ) : resultado.resultado === "verificando" ? (
-        <FeedbackAlert
-          semantic="warning"
-          title="Verificando baja"
-          actions={
-            <Group gap="sm">
-              <Button onClick={() => navigate(`/categorias/${detalle.id}`)}>
-                Ver categoría
-              </Button>
-              <Button variant="outline" onClick={() => navigate("/categorias")}>
-                Volver al árbol
-              </Button>
-            </Group>
-          }
-        >
-          <Stack gap="sm">
-            <Text size="sm">{resultado.mensaje}</Text>
-            <StatusBadge semantic={estadoSemantic[resultado.categoria.estado]}>
-              {resultado.categoria.estado}
-            </StatusBadge>
-          </Stack>
-        </FeedbackAlert>
+        <Stack gap="lg">
+          <FeedbackAlert
+            semantic="warning"
+            title="Verificando baja"
+            actions={
+              <Group gap="sm">
+                {resultado.operacionId && (
+                  <Button
+                    loading={seguimiento.status === "consultando"}
+                    onClick={() =>
+                      consultarEstado(resultado.operacionId as string)
+                    }
+                  >
+                    Consultar estado
+                  </Button>
+                )}
+                <Button onClick={() => navigate(`/categorias/${detalle.id}`)}>
+                  Ver categoría
+                </Button>
+                <Button variant="outline" onClick={() => navigate("/categorias")}>
+                  Volver al árbol
+                </Button>
+              </Group>
+            }
+          >
+            <Stack gap="sm">
+              <Text size="sm">{resultado.mensaje}</Text>
+              <StatusBadge semantic={estadoSemantic[resultado.categoria.estado]}>
+                {resultado.categoria.estado}
+              </StatusBadge>
+            </Stack>
+          </FeedbackAlert>
+          {seguimiento.status === "success" && (
+            <FeedbackAlert semantic="success" title="Baja confirmada">
+              <Stack gap="sm">
+                <Text size="sm">{seguimiento.result.mensaje}</Text>
+                {seguimiento.result.categoria && (
+                  <StatusBadge
+                    semantic={estadoSemantic[seguimiento.result.categoria.estado]}
+                  >
+                    {seguimiento.result.categoria.estado}
+                  </StatusBadge>
+                )}
+              </Stack>
+            </FeedbackAlert>
+          )}
+          {seguimiento.status === "error" && (
+            <FeedbackAlert
+              semantic="error"
+              title="No se pudo consultar el estado"
+            >
+              {seguimiento.message}
+            </FeedbackAlert>
+          )}
+        </Stack>
       ) : (
         <FeedbackAlert
           semantic="error"

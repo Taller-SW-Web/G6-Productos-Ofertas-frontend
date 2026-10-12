@@ -1,19 +1,19 @@
 import { useEffect, useState } from "react";
 import { brandService } from "../services/brandService";
-import type { BrandListResult, BrandListScenario } from "../services/brandRepository";
+import type { BrandListResult } from "../services/brandRepository";
 
 export type BrandListState =
   | { status: "loading" }
   | { status: "success"; result: BrandListResult }
   | { status: "error"; message: string };
 
-export function useBrandList(scenario: BrandListScenario, revision: number): { state: BrandListState } {
-  const requestKey = JSON.stringify([scenario, revision]);
+export function useBrandList(revision: number): { state: BrandListState } {
+  const requestKey = JSON.stringify([revision]);
   const [response, setResponse] = useState<{ requestKey: string; state: BrandListState }>();
 
   useEffect(() => {
     const controller = new AbortController();
-    void brandService.list(scenario, controller.signal).then(
+    void brandService.list(controller.signal).then(
       (result) => {
         if (controller.signal.aborted) return;
         setResponse({ requestKey, state: { status: "success", result } });
@@ -30,7 +30,7 @@ export function useBrandList(scenario: BrandListScenario, revision: number): { s
       },
     );
     return () => controller.abort();
-  }, [scenario, requestKey]);
+  }, [requestKey]);
 
   const state = response?.requestKey === requestKey ? response.state : ({ status: "loading" } as const);
   return { state };

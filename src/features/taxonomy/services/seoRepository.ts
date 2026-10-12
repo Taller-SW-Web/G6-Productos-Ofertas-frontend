@@ -1,16 +1,5 @@
 import type { HistorialSlugItem, SeoCategory, SlugPropuesta } from "../types";
 
-export type SeoListScenario = "default" | "empty" | "error";
-
-export const scenariosSeo: {
-  value: SeoListScenario;
-  label: string;
-}[] = [
-  { value: "default", label: "Con SEO" },
-  { value: "empty", label: "Sin SEO" },
-  { value: "error", label: "Error de carga" },
-];
-
 export interface SeoListResult {
   items: SeoCategory[];
 }
@@ -32,10 +21,15 @@ export class SeoConflictError extends Error {
   }
 }
 
+// Contract shaped like a real HTTP API: no simulation parameters. The mock adapter
+// decides locally which deterministic state to reproduce for local review.
 export interface SeoRepository {
-  list(scenario: SeoListScenario, signal: AbortSignal): Promise<SeoListResult>;
-  obtener(id: string, signal: AbortSignal): Promise<SeoCategory | null>;
-  proponerSlug(nombre: string, signal: AbortSignal): Promise<SlugPropuesta>;
-  guardar(input: GuardarSeoInput, signal: AbortSignal): Promise<SeoCategory | null>;
-  historial(id: string, signal: AbortSignal): Promise<HistorialSlugItem[]>;
+  list(signal?: AbortSignal): Promise<SeoListResult>;
+  obtener(id: string, signal?: AbortSignal): Promise<SeoCategory | null>;
+  proponerSlug(nombre: string, signal?: AbortSignal): Promise<SlugPropuesta>;
+  guardar(
+    input: GuardarSeoInput,
+    signal?: AbortSignal,
+  ): Promise<SeoCategory | null>;
+  historial(id: string, signal?: AbortSignal): Promise<HistorialSlugItem[]>;
 }

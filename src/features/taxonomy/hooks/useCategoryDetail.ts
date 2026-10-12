@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { categoryService } from "../services/categoryService";
-import type { CategoryCatalogScenario } from "../services/categoryRepository";
 import type { CategoryDetail } from "../types";
 
 export type CategoryDetailState =
@@ -9,16 +8,16 @@ export type CategoryDetailState =
   | { status: "not-found" }
   | { status: "error"; message: string };
 
-export function useCategoryDetail(
-  id: string,
-  scenario: CategoryCatalogScenario,
-): { state: CategoryDetailState; reload: () => void } {
+export function useCategoryDetail(id: string): {
+  state: CategoryDetailState;
+  reload: () => void;
+} {
   const [state, setState] = useState<CategoryDetailState>({ status: "loading" });
   const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
-    void categoryService.obtener(id, scenario, controller.signal).then(
+    void categoryService.obtener(id, controller.signal).then(
       (detalle) => {
         if (controller.signal.aborted) return;
         if (detalle) {
@@ -39,7 +38,7 @@ export function useCategoryDetail(
       },
     );
     return () => controller.abort();
-  }, [id, scenario, reloadToken]);
+  }, [id, reloadToken]);
 
   const reload = () => setReloadToken((token) => token + 1);
 

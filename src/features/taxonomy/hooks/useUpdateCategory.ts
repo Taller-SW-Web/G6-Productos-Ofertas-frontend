@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { categoryService } from "../services/categoryService";
 import { generarSlug } from "../services/slug";
-import type { CategoryFormScenario } from "../services/categoryRepository";
 import type {
   CategoryDetail,
   CategoryUpdateInput,
@@ -15,7 +14,7 @@ export type UpdateCategoryPhase =
   | "guardando"
   | "actualizado";
 
-export function useUpdateCategory(scenario: CategoryFormScenario) {
+export function useUpdateCategory() {
   const [phase, setPhase] = useState<UpdateCategoryPhase>("idle");
   const [slugCheck, setSlugCheck] = useState<SlugCheckResult | null>(null);
   const [slug, setSlug] = useState("");
@@ -35,7 +34,7 @@ export function useUpdateCategory(scenario: CategoryFormScenario) {
     setSlugCheck(null);
     setResultado(null);
     setPhase("comprobando");
-    void categoryService.comprobarSlug(propuesto, scenario, controller.signal).then(
+    void categoryService.comprobarSlug(propuesto, controller.signal).then(
       (result) => {
         if (controller.signal.aborted) return;
         setSlugCheck(result);
@@ -58,7 +57,7 @@ export function useUpdateCategory(scenario: CategoryFormScenario) {
     controllerRef.current = controller;
     setError(null);
     setPhase("guardando");
-    void categoryService.actualizar(input, scenario, controller.signal).then(
+    void categoryService.actualizar(input, controller.signal).then(
       (detalle) => {
         if (controller.signal.aborted) return;
         setResultado(detalle);

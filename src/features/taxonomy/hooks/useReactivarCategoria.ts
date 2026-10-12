@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { categoryService } from "../services/categoryService";
-import type { CategoryReactivacionScenario } from "../services/categoryRepository";
 import type { ReactivacionResult } from "../types";
 
 export type ReactivarState =
@@ -16,12 +15,12 @@ export function useReactivarCategoria() {
 
   useEffect(() => () => controllerRef.current?.abort(), []);
 
-  const reactivar = (id: string, scenario: CategoryReactivacionScenario) => {
+  const reactivar = (id: string) => {
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
     setState({ status: "enviando" });
-    void categoryService.reactivar(id, scenario, controller.signal).then(
+    void categoryService.reactivar(id, controller.signal).then(
       (result) => {
         if (controller.signal.aborted) return;
         setState(

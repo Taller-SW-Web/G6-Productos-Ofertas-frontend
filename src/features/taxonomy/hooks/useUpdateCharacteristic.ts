@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { characteristicService } from "../services/characteristicService";
-import type { CharacteristicFormScenario } from "../services/characteristicRepository";
 import type {
   CharacteristicDetail,
   CharacteristicUpdateInput,
@@ -8,7 +7,7 @@ import type {
 
 export type UpdateCharacteristicPhase = "idle" | "guardando" | "actualizado";
 
-export function useUpdateCharacteristic(scenario: CharacteristicFormScenario) {
+export function useUpdateCharacteristic() {
   const [phase, setPhase] = useState<UpdateCharacteristicPhase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [resultado, setResultado] = useState<CharacteristicDetail | null>(null);
@@ -23,7 +22,7 @@ export function useUpdateCharacteristic(scenario: CharacteristicFormScenario) {
     setError(null);
     setPhase("guardando");
     void characteristicService
-      .actualizar(input, scenario, controller.signal)
+      .actualizar(input, controller.signal)
       .then(
         (result) => {
           if (controller.signal.aborted) return;

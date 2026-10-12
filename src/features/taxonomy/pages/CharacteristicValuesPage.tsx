@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   ActionIcon,
   Box,
@@ -24,11 +24,7 @@ import {
 } from "../../../components/shared";
 import { ListaBloqueos } from "../components/ListaBloqueos";
 import { useCharacteristicDetail } from "../hooks/useCharacteristicDetail";
-import {
-  characteristicConfigDefaults,
-  scenariosCatalogoCaracteristica,
-  type CharacteristicCatalogScenario,
-} from "../services/characteristicRepository";
+import { characteristicConfigDefaults } from "../services/characteristicRepository";
 import { characteristicService } from "../services/characteristicService";
 import { estadoCaracteristicaSemantic } from "../services/estadoSemantic";
 import type { CharacteristicValue, ValorBajaResult } from "../types";
@@ -44,12 +40,6 @@ type BajaValorUi =
   | { status: "exito"; result: ValorBajaResult }
   | { status: "error"; message: string };
 
-function parseScenario(raw: string | null): CharacteristicCatalogScenario {
-  return scenariosCatalogoCaracteristica.some((item) => item.value === raw)
-    ? (raw as CharacteristicCatalogScenario)
-    : "default";
-}
-
 export function CharacteristicValuesPage() {
   const { id } = useParams<{ id: string }>();
   if (!id) {
@@ -64,9 +54,7 @@ export function CharacteristicValuesPage() {
 
 function CharacteristicValuesLoader({ id }: { id: string }) {
   const navigate = useNavigate();
-  const [params] = useSearchParams();
-  const scenario = parseScenario(params.get("escenario"));
-  const { state } = useCharacteristicDetail(id, scenario);
+  const { state } = useCharacteristicDetail(id);
 
   if (state.status === "loading") {
     return (
@@ -162,7 +150,7 @@ function CharacteristicValuesContent({
     const controller = new AbortController();
     const idDetalle = detalle.id;
     characteristicService
-      .listarValores(idDetalle, "default", controller.signal)
+      .listarValores(idDetalle, controller.signal)
       .then((res) => {
         if (controller.signal.aborted) return;
         if (res) {
@@ -199,7 +187,7 @@ function CharacteristicValuesContent({
     setLoadingValores(true);
     setErrorValores(null);
     characteristicService
-      .listarValores(detalle.id, "default", controller.signal)
+      .listarValores(detalle.id, controller.signal)
       .then((res) => {
         if (controller.signal.aborted) return;
         if (res) {
@@ -283,6 +271,59 @@ function CharacteristicValuesContent({
     bajaControllerRef.current?.abort();
     bajaControllerRef.current = null;
     setBaja({ status: "idle" });
+  };
+
+  const handleConsultarBaja = () => {
+    if (baja.status !== "pendiente" || !baja.result.operacionId) return;
+    const operacionId = baja.result.operacionId;
+    const valorActual = baja.result.valor;
+    bajaControllerRef.current?.abort();
+    const controller = new AbortController();
+    bajaControllerRef.current = controller;
+    characteristicService
+      .consultarEstadoOperacion(operacionId, controller.signal)
+      .then((res) => {
+        if (controller.signal.aborted) return;
+        const valor = res.valor ?? valorActual;
+        if (res.estado === "confirmada") {
+          setValores((prev) =>
+            prev.map((item) =>
+              item.valorId === valor.valorId ? valor : item,
+            ),
+          );
+          setBaja({
+            status: "exito",
+            result: {
+              resultado: "exito",
+              valor,
+              mensaje: res.mensaje,
+              bloqueos: [],
+              operacionId,
+            },
+          });
+        } else {
+          setBaja({
+            status: "pendiente",
+            result: {
+              resultado: "pendiente",
+              valor,
+              mensaje: res.mensaje,
+              bloqueos: [],
+              operacionId,
+            },
+          });
+        }
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        setBaja({
+          status: "error",
+          message:
+            err instanceof Error
+              ? err.message
+              : "No se pudo consultar el estado de la baja.",
+        });
+      });
   };
 
   const columnas: TableColumn<CharacteristicValue>[] = [
@@ -396,7 +437,14 @@ function CharacteristicValuesContent({
             semantic="warning"
             title="Solicitud de baja admitida (202 Accepted)"
             actions={
-              <Button onClick={cancelarBaja}>Entendido</Button>
+              <Group gap="sm">
+                {baja.result.operacionId && (
+                  <Button onClick={handleConsultarBaja}>
+                    Consultar estado
+                  </Button>
+                )}
+                <Button onClick={cancelarBaja}>Entendido</Button>
+              </Group>
             }
           >
             <Stack gap="sm">

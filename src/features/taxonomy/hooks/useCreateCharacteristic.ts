@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { characteristicService } from "../services/characteristicService";
-import type { CharacteristicFormScenario } from "../services/characteristicRepository";
 import type {
   CharacteristicCreateInput,
   CharacteristicCreateResult,
@@ -8,7 +7,7 @@ import type {
 
 export type CreateCharacteristicPhase = "idle" | "guardando" | "creado";
 
-export function useCreateCharacteristic(scenario: CharacteristicFormScenario) {
+export function useCreateCharacteristic() {
   const [phase, setPhase] = useState<CreateCharacteristicPhase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [creado, setCreado] = useState<CharacteristicCreateResult | null>(null);
@@ -22,7 +21,7 @@ export function useCreateCharacteristic(scenario: CharacteristicFormScenario) {
     controllerRef.current = controller;
     setError(null);
     setPhase("guardando");
-    void characteristicService.crear(input, scenario, controller.signal).then(
+    void characteristicService.crear(input, controller.signal).then(
       (result) => {
         if (controller.signal.aborted) return;
         setCreado(result);

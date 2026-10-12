@@ -36,14 +36,19 @@ function ProductTypeAssociateContent({ id }: { id: string }) {
   );
   const [validacion, setValidacion] = useState<string | null>(null);
 
-  const opciones = estadoDisponibles.status === "success"
-    ? estadoDisponibles.items.map((item) => ({
-        value: item.id,
-        label: `${item.nombre} — ${tipoLabel[item.tipo]}${
-          item.tipo === "NUMERO" && item.unidad ? ` (${item.unidad})` : ""
-        }`,
-      }))
-    : [];
+  const cargandoDisponibles = estadoDisponibles.status === "loading";
+  const errorDisponibles = estadoDisponibles.status === "error";
+  const exitosoDisponibles = estadoDisponibles.status === "success";
+
+  const opciones =
+    estadoDisponibles.status === "success"
+      ? estadoDisponibles.items.map((item) => ({
+          value: item.id,
+          label: `${item.nombre} — ${tipoLabel[item.tipo]}${
+            item.tipo === "NUMERO" && item.unidad ? ` (${item.unidad})` : ""
+          }`,
+        }))
+      : [];
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -54,8 +59,6 @@ function ProductTypeAssociateContent({ id }: { id: string }) {
     setValidacion(null);
     asociar.enviar(caracteristicaId, condicion === "obligatoria");
   };
-
-  const cargandoDisponibles = estadoDisponibles.status !== "success";
 
   return (
     <>
@@ -89,12 +92,22 @@ function ProductTypeAssociateContent({ id }: { id: string }) {
           </FeedbackAlert>
         )}
 
-        {estadoDisponibles.status === "error" && (
+        {cargandoDisponibles && (
+          <Group gap="sm" role="status">
+            <Loader size="sm" />
+            <Text size="sm">Cargando características disponibles…</Text>
+          </Group>
+        )}
+
+        {errorDisponibles && (
           <FeedbackAlert
             semantic="error"
             title="No se pudieron cargar las características"
             actions={
-              <Button variant="outline" onClick={() => navigate(`/tipos-producto/${id}`)}>
+              <Button
+                variant="outline"
+                onClick={() => navigate(`/tipos-producto/${id}`)}
+              >
                 Volver al detalle
               </Button>
             }
@@ -103,86 +116,80 @@ function ProductTypeAssociateContent({ id }: { id: string }) {
           </FeedbackAlert>
         )}
 
-        {cargandoDisponibles && (
-          <Group gap="sm" role="status">
-            <Loader size="sm" />
-            <Text size="sm">Cargando características disponibles…</Text>
-          </Group>
+        {exitosoDisponibles && estadoDisponibles.items.length === 0 && (
+          <FeedbackAlert
+            semantic="warning"
+            title="Sin características activas disponibles"
+            actions={
+              <Button
+                variant="outline"
+                onClick={() => navigate(`/tipos-producto/${id}`)}
+              >
+                Volver al detalle
+              </Button>
+            }
+          >
+            No hay características activas que aún no estén asociadas a este
+            tipo de producto.
+          </FeedbackAlert>
         )}
 
-        {estadoDisponibles.status === "success" &&
-          estadoDisponibles.items.length === 0 && (
-            <FeedbackAlert
-              semantic="warning"
-              title="Sin características activas disponibles"
-              actions={
-                <Button variant="outline" onClick={() => navigate(`/tipos-producto/${id}`)}>
-                  Volver al detalle
-                </Button>
-              }
-            >
-              No hay características activas que aún no estén asociadas a este
-              tipo de producto.
-            </FeedbackAlert>
-          )}
-
-        {estadoDisponibles.status === "success" &&
-          estadoDisponibles.items.length > 0 && (
-            <SectionCard
-              title="Asociar característica al tipo de producto"
-              description="Solo se muestran características activas que aún no están asociadas."
-            >
-              <form onSubmit={handleSubmit} noValidate>
-                <Stack gap="md">
-                  <Select
-                    label="Característica activa"
-                    placeholder="Selecciona una característica"
-                    data={opciones}
-                    value={caracteristicaId}
-                    onChange={(value) => setCaracteristicaId(value)}
-                    error={validacion}
-                    withAsterisk
-                    disabled={asociar.state.status === "enviando"}
-                  />
-                  <Stack gap="xs">
-                    <Text size="sm" fw={600}>
-                      Condición
-                    </Text>
-                    <Radio.Group
-                      value={condicion}
-                      onChange={(value) =>
-                        setCondicion(value as "obligatoria" | "opcional")
-                      }
-                    >
-                      <Stack gap="xs">
-                        <Radio
-                          value="obligatoria"
-                          label="Obligatoria"
-                          description="Se exigirá al volver a guardar o activar los productos que correspondan."
-                        />
-                        <Radio value="opcional" label="Opcional" />
-                      </Stack>
-                    </Radio.Group>
-                  </Stack>
-                  <Group justify="flex-end" gap="sm">
-                    <Button
-                      variant="outline"
-                      onClick={() => navigate(`/tipos-producto/${id}`)}
-                      disabled={asociar.state.status === "enviando"}
-                    >
-                      Cancelar
-                    </Button>
-                    <Button
-                      type="submit"
-                      loading={asociar.state.status === "enviando"}
-                    >
-                      Asociar
-                    </Button>
-                  </Group>
+        {exitosoDisponibles && estadoDisponibles.items.length > 0 && (
+          <SectionCard
+            title="Asociar característica al tipo de producto"
+            description="Solo se muestran características activas que aún no están asociadas."
+          >
+            <form onSubmit={handleSubmit} noValidate>
+              <Stack gap="md">
+                <Select
+                  label="Característica activa"
+                  placeholder="Selecciona una característica"
+                  data={opciones}
+                  value={caracteristicaId}
+                  onChange={(value) => setCaracteristicaId(value)}
+                  error={validacion}
+                  withAsterisk
+                  disabled={asociar.state.status === "enviando"}
+                />
+                <Stack gap="xs">
+                  <Text size="sm" fw={600}>
+                    Condición
+                  </Text>
+                  <Radio.Group
+                    value={condicion}
+                    onChange={(value) =>
+                      setCondicion(value as "obligatoria" | "opcional")
+                    }
+                  >
+                    <Stack gap="xs">
+                      <Radio
+                        value="obligatoria"
+                        label="Obligatoria"
+                        description="Se exigirá al volver a guardar o activar los productos que correspondan."
+                      />
+                      <Radio value="opcional" label="Opcional" />
+                    </Stack>
+                  </Radio.Group>
                 </Stack>
-              </form>
-            </SectionCard>
-          )}
+                <Group justify="flex-end" gap="sm">
+                  <Button
+                    variant="outline"
+                    onClick={() => navigate(`/tipos-producto/${id}`)}
+                    disabled={asociar.state.status === "enviando"}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="submit"
+                    loading={asociar.state.status === "enviando"}
+                  >
+                    Asociar
+                  </Button>
+                </Group>
+              </Stack>
+            </form>
+          </SectionCard>
+        )}
       </Stack>
     </>
   );

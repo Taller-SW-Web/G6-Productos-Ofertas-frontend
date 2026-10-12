@@ -1,13 +1,5 @@
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import {
-  Anchor,
-  Button,
-  Group,
-  Loader,
-  Select,
-  Stack,
-  Text,
-} from "@mantine/core";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { Anchor, Button, Group, Loader, Stack, Text } from "@mantine/core";
 import { IconPencil, IconPower, IconRefresh } from "@tabler/icons-react";
 import {
   EntityTable,
@@ -21,11 +13,6 @@ import { CampoDato } from "../components/CampoDato";
 import { ListaBloqueos } from "../components/ListaBloqueos";
 import { useCategoryDetail } from "../hooks/useCategoryDetail";
 import { useReactivarCategoria } from "../hooks/useReactivarCategoria";
-import { scenariosCatalogo, scenariosReactivacion } from "../services/categoryRepository";
-import {
-  parseCatalogScenario,
-  parseReactivacionScenario,
-} from "../services/scenarioParams";
 import { estadoSemantic } from "../services/estadoSemantic";
 import type { CategoryDetail, CategoryNode } from "../types";
 
@@ -75,11 +62,7 @@ export function CategoryDetailPage() {
 
 function CategoryDetailLoader({ id }: { id: string }) {
   const navigate = useNavigate();
-  const [params, setParams] = useSearchParams();
-  const isRevisionMode =
-    import.meta.env.DEV && params.get("modoRevision") === "1";
-  const catalogScenario = parseCatalogScenario(params.get("escenario"));
-  const { state, reload } = useCategoryDetail(id, catalogScenario);
+  const { state, reload } = useCategoryDetail(id);
 
   const titulo =
     state.status === "success" ? state.detalle.nombre : "Detalle de categoría";
@@ -107,22 +90,6 @@ function CategoryDetailLoader({ id }: { id: string }) {
         ]}
       />
       <Stack gap="lg">
-        {isRevisionMode && (
-          <Select
-            label="Escenario de revisión de carga"
-            value={catalogScenario}
-            data={scenariosCatalogo}
-            maw={320}
-            onChange={(next) => {
-              if (!next) return;
-              setParams((prev) => {
-                const copy = new URLSearchParams(prev);
-                copy.set("escenario", next);
-                return copy;
-              });
-            }}
-          />
-        )}
         {state.status === "loading" && (
           <Group gap="sm" role="status">
             <Loader size="sm" />
@@ -148,11 +115,7 @@ function CategoryDetailLoader({ id }: { id: string }) {
           </FeedbackAlert>
         )}
         {state.status === "success" && (
-          <CategoryDetailContent
-            detalle={state.detalle}
-            onReload={reload}
-            isRevisionMode={isRevisionMode}
-          />
+          <CategoryDetailContent detalle={state.detalle} onReload={reload} />
         )}
       </Stack>
     </>
@@ -162,38 +125,17 @@ function CategoryDetailLoader({ id }: { id: string }) {
 function CategoryDetailContent({
   detalle,
   onReload,
-  isRevisionMode,
 }: {
   detalle: CategoryDetail;
   onReload: () => void;
-  isRevisionMode: boolean;
 }) {
   const navigate = useNavigate();
-  const [params, setParams] = useSearchParams();
-  const reactivacionScenario = parseReactivacionScenario(params.get("reactivacion"));
   const { state, reactivar, reiniciar } = useReactivarCategoria();
 
   const esActivo = detalle.estado === "Activo";
 
   return (
     <>
-      {isRevisionMode && (
-        <Select
-          label="Escenario de revisión de reactivación"
-          value={reactivacionScenario}
-          data={scenariosReactivacion}
-          maw={360}
-          onChange={(next) => {
-            if (!next) return;
-            setParams((prev) => {
-              const copy = new URLSearchParams(prev);
-              copy.set("reactivacion", next);
-              return copy;
-            });
-          }}
-        />
-      )}
-
       {state.status === "reactivada" && (
         <FeedbackAlert
           semantic="success"
@@ -279,7 +221,7 @@ function CategoryDetailContent({
                 variant="outline"
                 leftSection={<IconRefresh size={16} stroke={2} aria-hidden="true" />}
                 loading={state.status === "enviando"}
-                onClick={() => reactivar(detalle.id, reactivacionScenario)}
+                onClick={() => reactivar(detalle.id)}
               >
                 Reactivar
               </Button>

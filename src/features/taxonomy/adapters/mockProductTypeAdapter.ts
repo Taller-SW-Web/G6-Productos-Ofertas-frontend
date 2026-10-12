@@ -3,6 +3,7 @@ import type { ProductTypeRepository } from "../services/productTypeRepository";
 import { PRODUCT_TYPE_ATTRIBUTE_LIMIT } from "../services/productTypeRepository";
 import type {
   CharacteristicListItem,
+  DesasociacionSeguimiento,
   ProductTypeAssociarInput,
   ProductTypeAssociationCharacteristic,
   ProductTypeCreateInput,
@@ -49,6 +50,7 @@ const store: RegistroTipoProducto[] = [
     asociadas: [
       { caracteristicaId: "talla", obligatoria: true },
       { caracteristicaId: "color", obligatoria: true },
+      { caracteristicaId: "temporada", obligatoria: false },
     ],
   },
   {
@@ -65,10 +67,10 @@ const esperar = (ms: number) =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
 const cargarCatalogo = async (
-  signal: AbortSignal,
+  signal: AbortSignal | undefined,
 ): Promise<Map<string, CharacteristicListItem>> => {
-  const catalogo = await mockCharacteristicAdapter.list("default", signal);
-  signal.throwIfAborted();
+  const catalogo = await mockCharacteristicAdapter.list(signal);
+  signal?.throwIfAborted();
   return new Map(catalogo.caracteristicas.map((item) => [item.id, item]));
 };
 
@@ -80,7 +82,7 @@ const aDetalle = (
     .map((asociacion) => catalogo.get(asociacion.caracteristicaId))
     .filter(
       (catalogoItem): catalogoItem is CharacteristicListItem =>
-        catalogoItem !== undefined && catalogoItem.estado === "Activo",
+        catalogoItem !== undefined,
     )
     .map((caracteristica) => ({
       caracteristicaId: caracteristica.id,
@@ -133,17 +135,37 @@ const generarId = (nombre: string): string => {
   return id;
 };
 
+// BLOCKED_CONTRACT: no hay contrato OpenAPI confirmado para el sondeo del resultado
+// de una desasociación asíncrona (202). Este registro mantiene las operaciones
+// pendientes en memoria para que la UI consulte su estado sin inventar un endpoint.
+interface OperacionDesasocio {
+  tipoProductoId: string;
+  caracteristicaId: string;
+  estado: "pendiente" | "confirmada";
+}
+
+const operacionesDesasocio = new Map<string, OperacionDesasocio>();
+
+// Deterministic local states used only for review. The repository contract does not
+// accept scenarios; reviewers change these values to reproduce error or edge cases
+// without touching pages, hooks or the service contract.
+type EscenarioLista = "default" | "empty" | "error";
+
+const MOCK: { lista: EscenarioLista } = {
+  lista: "default",
+};
+
 export const mockProductTypeAdapter: ProductTypeRepository = {
-  async list(scenario, signal) {
-    signal.throwIfAborted();
+  async list(signal) {
+    signal?.throwIfAborted();
     await esperar(400);
-    signal.throwIfAborted();
-    if (scenario === "error") {
+    signal?.throwIfAborted();
+    if (MOCK.lista === "error") {
       throw new Error(
         "No se pudieron cargar los tipos de producto. Inténtalo de nuevo.",
       );
     }
-    if (scenario === "empty") {
+    if (MOCK.lista === "empty") {
       return { items: [], limite: PRODUCT_TYPE_ATTRIBUTE_LIMIT };
     }
     return {
@@ -152,10 +174,10 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
     };
   },
 
-  async crear(input: ProductTypeCreateInput, signal: AbortSignal) {
-    signal.throwIfAborted();
+  async crear(input: ProductTypeCreateInput, signal) {
+    signal?.throwIfAborted();
     await esperar(400);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     const registro: RegistroTipoProducto = {
       tipoProductoId: generarId(input.nombre),
       nombre: input.nombre.trim(),
@@ -174,20 +196,20 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
     return resultado;
   },
 
-  async obtener(id: string, signal: AbortSignal) {
-    signal.throwIfAborted();
+  async obtener(id: string, signal): Promise<ProductTypeDetail | null> {
+    signal?.throwIfAborted();
     const registro = encontrar(id);
     if (!registro) return null;
     const catalogo = await cargarCatalogo(signal);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     return aDetalle(registro, catalogo);
   },
 
   async listarCaracteristicasDisponibles(
     id: string,
-    signal: AbortSignal,
+    signal,
   ): Promise<ProductTypeAssociationCharacteristic[]> {
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     const registro = encontrar(id);
     if (!registro) return [];
     const catalogo = await cargarCatalogo(signal);
@@ -202,13 +224,10 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
       .map((caracteristica) => ({ ...caracteristica }));
   },
 
-  async asociarCaracteristica(
-    input: ProductTypeAssociarInput,
-    signal: AbortSignal,
-  ) {
-    signal.throwIfAborted();
+  async asociarCaracteristica(input: ProductTypeAssociarInput, signal) {
+    signal?.throwIfAborted();
     await esperar(400);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     const registro = encontrar(input.tipoProductoId);
     if (!registro) throw new Error("TIPO_PRODUCTO_NO_ENCONTRADO");
     if (registro.estado !== "Activo")
@@ -241,11 +260,11 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
   async desasociarCaracteristica(
     id: string,
     caracteristicaId: string,
-    signal: AbortSignal,
+    signal,
   ): Promise<ProductTypeDesasociarResult> {
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     await esperar(500);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     const registro = encontrar(id);
     if (!registro) throw new Error("TIPO_PRODUCTO_NO_ENCONTRADO");
     const asociacion = registro.asociadas.find(
@@ -253,10 +272,17 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
     );
     if (!asociacion) throw new Error("CARACTERISTICA_NO_ASOCIADA");
     if (asociacion.obligatoria) {
+      const operacionId = `op-desasocio-${id}-${caracteristicaId}`;
+      operacionesDesasocio.set(operacionId, {
+        tipoProductoId: id,
+        caracteristicaId,
+        estado: "pendiente",
+      });
       return {
         resultado: "pendiente",
         mensaje:
           "La solicitud de desasociación se admitió (202) y quedó en verificación con Catálogo. El esquema aún no se modificó.",
+        operacionId,
       };
     }
     registro.asociadas = registro.asociadas.filter(
@@ -270,13 +296,48 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
     };
   },
 
+  async consultarEstadoOperacion(
+    operacionId: string,
+    signal,
+  ): Promise<DesasociacionSeguimiento> {
+    signal?.throwIfAborted();
+    await esperar(400);
+    signal?.throwIfAborted();
+
+    const operacion = operacionesDesasocio.get(operacionId);
+    if (!operacion) {
+      throw new Error("No se encontró la operación de desasociación.");
+    }
+    const registro = encontrar(operacion.tipoProductoId);
+    if (!registro) {
+      throw new Error("El tipo de producto ya no está disponible.");
+    }
+
+    if (operacion.estado === "pendiente") {
+      operacion.estado = "confirmada";
+      registro.asociadas = registro.asociadas.filter(
+        (item) => item.caracteristicaId !== operacion.caracteristicaId,
+      );
+      registro.schemaVersion += 1;
+    }
+
+    const catalogo = await cargarCatalogo(signal);
+    return {
+      operacionId,
+      estado: "confirmada",
+      mensaje:
+        "Verificación concluida: la característica se desasoció del esquema y se incrementó la versión del esquema.",
+      tipoProducto: aDetalle(registro, catalogo),
+    };
+  },
+
   async desactivar(
     id: string,
-    signal: AbortSignal,
+    signal,
   ): Promise<ProductTypeDesactivarResult> {
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     await esperar(500);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     const registro = encontrar(id);
     if (!registro) throw new Error("TIPO_PRODUCTO_NO_ENCONTRADO");
     if (registro.estado !== "Activo") throw new Error("TIPO_PRODUCTO_INVALIDO");

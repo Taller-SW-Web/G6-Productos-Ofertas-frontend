@@ -1,9 +1,6 @@
 import { useEffect, useState } from "react";
 import { productTypeService } from "../services/productTypeService";
-import type {
-  ProductTypeListResult,
-  ProductTypeListScenario,
-} from "../services/productTypeRepository";
+import type { ProductTypeListResult } from "../services/productTypeRepository";
 
 export type ProductTypeListState =
   | { status: "loading" }
@@ -11,10 +8,9 @@ export type ProductTypeListState =
   | { status: "error"; message: string };
 
 export function useProductTypeList(
-  scenario: ProductTypeListScenario,
   revision: number,
 ): { state: ProductTypeListState } {
-  const requestKey = JSON.stringify([scenario, revision]);
+  const requestKey = JSON.stringify([revision]);
   const [response, setResponse] = useState<{
     requestKey: string;
     state: ProductTypeListState;
@@ -22,7 +18,7 @@ export function useProductTypeList(
 
   useEffect(() => {
     const controller = new AbortController();
-    void productTypeService.list(scenario, controller.signal).then(
+    void productTypeService.list(controller.signal).then(
       (result) => {
         if (controller.signal.aborted) return;
         setResponse({ requestKey, state: { status: "success", result } });
@@ -42,7 +38,7 @@ export function useProductTypeList(
       },
     );
     return () => controller.abort();
-  }, [scenario, requestKey]);
+  }, [requestKey]);
 
   const state =
     response?.requestKey === requestKey

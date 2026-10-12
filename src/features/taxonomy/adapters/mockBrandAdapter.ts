@@ -94,32 +94,41 @@ const aDetalle = (r: RegistroMarca): BrandDetail => ({
   version: r.version,
 });
 
+// Deterministic local states used only for review. The repository contract does not
+// accept scenarios; reviewers change these values to reproduce error or edge cases
+// without touching pages, hooks or the service contract.
+type EscenarioLista = "default" | "empty" | "error";
+
+const MOCK: { lista: EscenarioLista } = {
+  lista: "default",
+};
+
 export const mockBrandAdapter: BrandRepository = {
-  async list(scenario, signal) {
-    signal.throwIfAborted();
+  async list(signal) {
+    signal?.throwIfAborted();
     await esperar(300);
-    signal.throwIfAborted();
-    if (scenario === "error") {
+    signal?.throwIfAborted();
+    if (MOCK.lista === "error") {
       throw new Error("No se pudieron cargar las marcas. Inténtalo de nuevo.");
     }
-    if (scenario === "empty") {
+    if (MOCK.lista === "empty") {
       return { items: [] };
     }
     return { items: store.map(aItem) };
   },
 
   async obtener(id, signal) {
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     await esperar(300);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     const r = store.find((item) => item.marcaId === id);
     return r ? aDetalle(r) : null;
   },
 
-  async crear(input: BrandCreateInput, signal: AbortSignal) {
-    signal.throwIfAborted();
+  async crear(input: BrandCreateInput, signal) {
+    signal?.throwIfAborted();
     await esperar(300);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     const r: RegistroMarca = {
       marcaId: generarId(input.nombre),
       nombre: input.nombre.trim(),
@@ -133,10 +142,10 @@ export const mockBrandAdapter: BrandRepository = {
     return aDetalle(r);
   },
 
-  async actualizar(input: BrandUpdateInput, signal: AbortSignal) {
-    signal.throwIfAborted();
+  async actualizar(input: BrandUpdateInput, signal) {
+    signal?.throwIfAborted();
     await esperar(300);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     const r = store.find((item) => item.marcaId === input.marcaId);
     if (!r) return null;
     r.nombre = input.nombre.trim();
@@ -147,9 +156,9 @@ export const mockBrandAdapter: BrandRepository = {
   },
 
   async solicitarBaja(id, signal) {
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     await esperar(400);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     const r = store.find((item) => item.marcaId === id);
     if (!r) {
       throw new Error("La marca no existe o ya no está disponible.");
@@ -189,9 +198,9 @@ export const mockBrandAdapter: BrandRepository = {
   },
 
   async consultarResultadoBaja(operacionId, signal) {
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     await esperar(600);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     const op = operacionesBaja.find((o) => o.operacionId === operacionId);
     if (!op) {
       throw new Error("No se encontró la operación de baja solicitada.");
