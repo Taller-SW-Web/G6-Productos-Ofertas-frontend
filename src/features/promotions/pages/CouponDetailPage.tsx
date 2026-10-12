@@ -1,5 +1,5 @@
-import { readCouponMutationScenario } from "../dev/demoScenarios";
-import { readCouponScenario } from "../dev/demoScenarios";
+import { usePromotionServices } from "../hooks/usePromotionServices";
+import { PromotionDataNotice } from "../components/PromotionDataNotice";
 import { useEffect, useRef, useState } from "react";
 import {
   Link,
@@ -26,14 +26,20 @@ export function CouponDetailPage({
   changeState?: boolean;
 }) {
   const { couponId = "" } = useParams();
-  const [params, setParams] = useSearchParams();
+  const [params] = useSearchParams();
+  const {
+    services,
+    confirmedServices,
+    revision: queryRevision,
+    retry,
+  } = usePromotionServices();
   const [revision, setRevision] = useState(0);
   const [dialogOpened, setDialogOpened] = useState(false);
   const [stateUpdated, setStateUpdated] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
-  const state = useCoupon(couponId, readCouponScenario(params), revision);
+  const state = useCoupon(couponId, services.coupons, revision + queryRevision);
   const coupon = state.status === "success" ? state.result : null;
   const suffix = params.size ? `?${params.toString()}` : "";
   useEffect(() => {
@@ -57,17 +63,6 @@ export function CouponDetailPage({
       {limitsOnly ? "Volver al detalle" : "Volver al listado"}
     </Button>
   );
-  const retry = () => {
-    setParams(
-      (current) => {
-        const next = new URLSearchParams(current);
-        next.delete("escenario");
-        return next;
-      },
-      { replace: true },
-    );
-    setRevision((value) => value + 1);
-  };
   return (
     <>
       <PageHeader
@@ -90,19 +85,15 @@ export function CouponDetailPage({
         actions={back}
       />
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Datos de demostración">
-          Los cupones y sus usos son simulados. Esta consulta no accede a
-          información comercial real.
-        </FeedbackAlert>
+        <PromotionDataNotice kind="coupons" />
         {location.state?.couponSaved && (
           <FeedbackAlert semantic="success" title="Cupón guardado">
-            La propuesta quedó guardada en la sesión de demostración.
+            La propuesta quedó guardada.
           </FeedbackAlert>
         )}
         {stateUpdated && (
           <FeedbackAlert semantic="success" title="Estado actualizado">
-            El nuevo estado fue confirmado en la sesión de demostración. Los
-            usos registrados se conservan.
+            El nuevo estado fue confirmado. Los usos registrados se conservan.
           </FeedbackAlert>
         )}
         {state.status === "loading" && (
@@ -174,7 +165,8 @@ export function CouponDetailPage({
             <CouponStateDialog
               key={coupon.id}
               coupon={coupon}
-              scenario={readCouponMutationScenario(params)}
+              repository={services.coupons}
+              confirmedRepository={confirmedServices.coupons}
               opened={dialogOpened || changeState}
               onCancel={closeState}
               onConfirmed={() => {

@@ -1,11 +1,10 @@
-import { administrationScenario } from "../dev/demoScenarios";
-import { reviewServices } from "../dev/reviewServices";
+import { usePromotionServices } from "../hooks/usePromotionServices";
+import { PromotionDataNotice } from "../components/PromotionDataNotice";
 import { useCallback } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Button, Group, Select, Stack } from "@mantine/core";
 import {
   EntityTable,
-  FeedbackAlert,
   FilterBar,
   PageHeader,
   StatusBadge,
@@ -20,6 +19,7 @@ import {
 } from "../services/couponPresentation";
 export function CampaignsPage() {
   const [params, setParams] = useSearchParams();
+  const { services, revision, retry } = usePromotionServices();
   const status =
     params.get("estado") === "active"
       ? "active"
@@ -37,18 +37,17 @@ export function CampaignsPage() {
       1,
       Number.MAX_SAFE_INTEGER,
     ),
-    pageSize = readPositiveInteger(params.get("tamanio"), 10, 100),
-    scenario = administrationScenario(params);
+    pageSize = readPositiveInteger(params.get("tamanio"), 10, 100);
   const read = useCallback(
     (signal: AbortSignal) =>
-      reviewServices(scenario).campaigns.list(
+      services.campaigns.list(
         { status, kind, page, pageSize },
         signal,
       ),
-    [status, kind, page, pageSize, scenario],
+    [status, kind, page, pageSize, services],
   );
   const state = useAdministrationRead(
-    JSON.stringify([status, kind, page, pageSize, scenario]),
+    JSON.stringify([status, kind, page, pageSize, revision]),
     read,
   );
   const update = (key: string, value: string, reset = true) =>
@@ -149,9 +148,7 @@ export function CampaignsPage() {
         }
       />
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Datos de demostración">
-          Los registros y cambios son simulados y se reinician al recargar.
-        </FeedbackAlert>
+        <PromotionDataNotice kind="campaigns" />
         <FilterBar
           summary={
             state.status === "success"
@@ -200,7 +197,7 @@ export function CampaignsPage() {
                   action: state.access ? undefined : (
                     <Button
                       variant="outline"
-                      onClick={() => update("escenario", "default", false)}
+                      onClick={retry}
                     >
                       Volver a consultar
                     </Button>

@@ -14,12 +14,47 @@ import {
   createPromotionHistory,
   promotionHistoryFixtures,
 } from "../mocks/promotionHistory";
+import { createReviewServiceResolver } from "../dev/reviewServices";
 
 export interface PromotionServices {
   coupons: CouponRepository;
   campaigns: CampaignRepository;
   recommendations: RecommendationRepository;
   catalog: PromotionCatalogRepository;
+}
+
+export type PromotionSource = "mock" | "backend";
+export interface PromotionServiceContext {
+  services: PromotionServices;
+  confirmedServices: PromotionServices;
+  prepareCreation(signal: AbortSignal): Promise<void>;
+  clearTransientParams(params: URLSearchParams): URLSearchParams;
+}
+export interface PromotionRuntime {
+  source: PromotionSource;
+  resolve(params: URLSearchParams): PromotionServiceContext;
+}
+
+// Source and DEV selection live at the composition boundary, not in consumers.
+export function createPromotionRuntime(
+  services: PromotionServices,
+  source: PromotionSource,
+): PromotionRuntime {
+  const context: PromotionServiceContext = {
+    services,
+    confirmedServices: services,
+    async prepareCreation(signal) {
+      signal.throwIfAborted();
+    },
+    clearTransientParams: (params) => new URLSearchParams(params),
+  };
+  return {
+    source,
+    resolve:
+      source === "mock" && import.meta.env?.DEV
+        ? createReviewServiceResolver(context)
+        : () => context,
+  };
 }
 
 // Composition point: a supplied HTTP adapter implements the same presentation port.
@@ -123,3 +158,4 @@ export function createMockPromotionServices(
 }
 
 export const promotionServices = createMockPromotionServices();
+export const promotionRuntime = createPromotionRuntime(promotionServices, "mock");

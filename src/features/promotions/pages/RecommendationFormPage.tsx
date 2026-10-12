@@ -9,6 +9,7 @@ import {
   StatusBadge,
 } from "../../../components/shared";
 import { EditorMessage } from "../components/EditorMessage";
+import { PromotionDataNotice } from "../components/PromotionDataNotice";
 import { RecommendationCandidates } from "../components/RecommendationCandidates";
 import {
   recommendationKindLabel,
@@ -90,10 +91,7 @@ export function RecommendationFormPage() {
           { label: initial ? "Editar" : recommendationKindLabel(draft.kind) },
         ]}
       />
-      <FeedbackAlert semantic="info" title="Datos de demostración">
-        Las recomendaciones no agregan ni reemplazan productos automáticamente.
-        Se configura una relación manual; no se calcula superioridad por precio.
-      </FeedbackAlert>
+      <PromotionDataNotice kind="recommendation-form" />
       <form
         ref={formRef}
         noValidate

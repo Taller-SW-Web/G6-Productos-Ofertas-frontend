@@ -119,31 +119,6 @@ export function administrationResponse<T>(
     );
   return structuredClone(record);
 }
-export function readCouponMutationScenario(
-  params: URLSearchParams,
-): CouponMutationScenario {
-  if (!import.meta.env.DEV || params.get("modoRevision") !== "1")
-    return "default";
-  switch (params.get("escenario")) {
-    case "saving":
-      return "saving";
-    case "save-error":
-      return "save-error";
-    case "rejected":
-      return "rejected";
-    case "unknown-result":
-      return "unknown-result";
-    case "conflict":
-      return "conflict";
-    case "session":
-      return "session";
-    case "forbidden":
-      return "forbidden";
-    default:
-      return "default";
-  }
-}
-
 export function readCouponScenario(params: URLSearchParams): CouponScenario {
   if (!import.meta.env.DEV || params.get("modoRevision") !== "1")
     return "default";

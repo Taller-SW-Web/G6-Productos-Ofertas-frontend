@@ -14,7 +14,7 @@ import {
   type AdministrationScenario,
 } from "./demoScenarios";
 
-// Fault injection wraps productive ports. It is selected only by reviewServices in DEV.
+// Fault injection wraps productive ports. Only the mock composition selects it in DEV.
 export function createDemoServices(
   base: PromotionServices,
   scenario: AdministrationScenario | "usage-unavailable",

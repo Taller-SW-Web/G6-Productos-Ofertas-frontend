@@ -1,5 +1,4 @@
-import { administrationScenario } from "../dev/demoScenarios";
-import { reviewServices, reviewCreationAccess } from "../dev/reviewServices";
+import { usePromotionServices } from "../hooks/usePromotionServices";
 import { useCallback } from "react";
 import {
   Link,
@@ -15,8 +14,6 @@ import { useAdministrationEditor } from "../hooks/useAdministrationEditor";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 import { UnsavedChangesDialog } from "../components/UnsavedChangesDialog";
 
-import { recommendationService } from "../services/recommendationService";
-import { promotionCatalogService } from "../services/catalogService";
 import {
   recommendationErrors,
   normalizeRecommendationDraft,
@@ -52,16 +49,15 @@ export function RecommendationEditorLayout({
   kind?: RecommendationKind;
 }) {
   const { ruleId } = useParams();
-  const [params] = useSearchParams(),
-    scenario = administrationScenario(params);
+  const { services, prepareCreation } = usePromotionServices();
   const read = useCallback(
     (signal: AbortSignal) =>
       ruleId
-        ? reviewServices(scenario).recommendations.read(ruleId, signal)
-        : reviewCreationAccess(scenario, signal).then(() => null),
-    [ruleId, scenario],
+        ? services.recommendations.read(ruleId, signal)
+        : prepareCreation(signal).then(() => null),
+    [ruleId, services, prepareCreation],
   );
-  const state = useAdministrationRead(JSON.stringify([ruleId, scenario]), read);
+  const state = useAdministrationRead(ruleId ?? kind, read);
   if (state.status === "loading")
     return (
       <Stack role="status">
@@ -107,9 +103,10 @@ function RecommendationEditorProvider({
   initial: RecommendationView | null;
   kind: RecommendationKind;
 }) {
-  const [params] = useSearchParams(),
-    scenario = administrationScenario(params),
-    suffix = params.size ? `?${params}` : "";
+  const [params] = useSearchParams();
+  const { services, confirmedServices, clearTransientParams } =
+    usePromotionServices();
+  const suffix = params.size ? `?${params}` : "";
   const root = initial
     ? `/recomendaciones/${initial.id}/editar`
     : `/recomendaciones/nueva/${kind === "upsell" ? "upselling" : "venta-cruzada"}`;
@@ -118,9 +115,9 @@ function RecommendationEditorProvider({
     { ...emptyRecommendation, kind },
     draftOf,
     recommendationErrors,
-    reviewServices(scenario).recommendations,
+    services.recommendations,
     normalizeRecommendationDraft,
-    recommendationService,
+    confirmedServices.recommendations,
   );
   const guard = useUnsavedChanges(
     form.dirty && !form.confirmed,
@@ -129,15 +126,14 @@ function RecommendationEditorProvider({
   );
   const readCatalog = useCallback(
     async (signal: AbortSignal) => ({
-      products: await reviewServices(scenario).catalog.products(signal),
-      categories: await promotionCatalogService.categories(signal),
+      products: await services.catalog.products(signal),
+      categories: await services.catalog.categories(signal),
     }),
-    [scenario],
+    [services],
   );
-  const catalog = useAdministrationRead(`catalog:${scenario}`, readCatalog);
+  const catalog = useAdministrationRead("catalog", readCatalog);
   if (form.confirmed) {
-    const next = new URLSearchParams(params);
-    next.delete("escenario");
+    const next = clearTransientParams(params);
     return (
       <Navigate
         replace

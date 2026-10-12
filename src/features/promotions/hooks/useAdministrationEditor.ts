@@ -12,7 +12,7 @@ export function useAdministrationEditor<T extends AdministrationRecord, D>(
   validate: (draft: D) => Record<string, string>,
   repository: AdministrationRepository<T, D>,
   normalize: (draft: D) => D,
-  reviewedRepository: AdministrationRepository<T, D> = repository,
+  confirmedRepository: AdministrationRepository<T, D> = repository,
 ) {
   const [original] = useState(() =>
     initial ? draftOf(initial) : structuredClone(empty),
@@ -50,7 +50,7 @@ export function useAdministrationEditor<T extends AdministrationRecord, D>(
     const result = await command.run(async (signal) => {
       try {
         return await (
-          conflict && current ? reviewedRepository : repository
+          conflict && current ? confirmedRepository : repository
         ).save(initial?.id ?? null, proposal, signal);
       } catch (cause: unknown) {
         if (cause instanceof AdministrationError) {
@@ -73,7 +73,7 @@ export function useAdministrationEditor<T extends AdministrationRecord, D>(
     }
     setChecking(true);
     try {
-      const result = await repository.read(
+      const result = await confirmedRepository.read(
         initial.id,
         new AbortController().signal,
       );

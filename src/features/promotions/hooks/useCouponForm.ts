@@ -1,13 +1,11 @@
-import { reviewServices } from "../dev/reviewServices";
-import { type CouponMutationScenario } from "../dev/demoScenarios";
 import { useState } from "react";
-import { couponService } from "../services/couponService";
 import {
   CouponWriteError,
   type CouponField,
   type CouponFieldErrors,
   type CouponInput,
   type CouponView,
+  type CouponRepository,
 } from "../services/couponRepository";
 import {
   couponDraftFromRecord,
@@ -20,7 +18,8 @@ import { usePromotionCommand } from "./usePromotionCommand";
 
 export function useCouponForm(
   initial: CouponView | null,
-  scenario: CouponMutationScenario,
+  repository: CouponRepository,
+  confirmedRepository: CouponRepository = repository,
 ) {
   const [original] = useState(() =>
     initial ? couponDraftFromRecord(initial) : { ...emptyCouponDraft },
@@ -62,13 +61,13 @@ export function useCouponForm(
     const result = await command.run(async (signal) => {
       try {
         if (!initial)
-          return await reviewServices(scenario).coupons.create(
+          return await repository.create(
             validation.values!,
             signal,
           );
         const { status, ...values } = validation.values!;
         void status;
-        return await reviewServices(scenario).coupons.update(
+        return await repository.update(
           initial.id,
           values,
           signal,
@@ -90,9 +89,9 @@ export function useCouponForm(
     try {
       const controller = new AbortController();
       const result = initial
-        ? await couponService.read(initial.id, controller.signal)
+        ? await confirmedRepository.read(initial.id, controller.signal)
         : (
-            await couponService.list(
+            await confirmedRepository.list(
               { status: "all", page: 1, pageSize: 100 },
               controller.signal,
             )

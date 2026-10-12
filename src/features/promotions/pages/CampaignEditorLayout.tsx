@@ -1,5 +1,4 @@
-import { administrationScenario } from "../dev/demoScenarios";
-import { reviewServices, reviewCreationAccess } from "../dev/reviewServices";
+import { usePromotionServices } from "../hooks/usePromotionServices";
 import { useCallback } from "react";
 import {
   Link,
@@ -15,7 +14,6 @@ import { useAdministrationEditor } from "../hooks/useAdministrationEditor";
 import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 import { UnsavedChangesDialog } from "../components/UnsavedChangesDialog";
 
-import { campaignService } from "../services/campaignService";
 import {
   campaignErrors,
   normalizeCampaignDraft,
@@ -38,19 +36,15 @@ export interface CampaignEditorContext {
 }
 export function CampaignEditorLayout() {
   const { promotionId } = useParams();
-  const [params] = useSearchParams();
-  const scenario = administrationScenario(params);
+  const { services, prepareCreation } = usePromotionServices();
   const read = useCallback(
     (signal: AbortSignal) =>
       promotionId
-        ? reviewServices(scenario).campaigns.read(promotionId, signal)
-        : reviewCreationAccess(scenario, signal).then(() => null),
-    [promotionId, scenario],
+        ? services.campaigns.read(promotionId, signal)
+        : prepareCreation(signal).then(() => null),
+    [promotionId, services, prepareCreation],
   );
-  const state = useAdministrationRead(
-    JSON.stringify([promotionId, scenario]),
-    read,
-  );
+  const state = useAdministrationRead(promotionId ?? "new", read);
   if (state.status === "loading")
     return (
       <Stack role="status">
@@ -87,8 +81,9 @@ export function CampaignEditorLayout() {
 }
 function CampaignEditorProvider({ initial }: { initial: CampaignView | null }) {
   const [params] = useSearchParams();
-  const scenario = administrationScenario(params),
-    suffix = params.size ? `?${params}` : "";
+  const { services, confirmedServices, clearTransientParams } =
+    usePromotionServices();
+  const suffix = params.size ? `?${params}` : "";
   const root = initial
     ? `/promociones/${initial.id}/editar`
     : "/promociones/nueva";
@@ -97,9 +92,9 @@ function CampaignEditorProvider({ initial }: { initial: CampaignView | null }) {
     emptyCampaign,
     draftOf,
     campaignErrors,
-    reviewServices(scenario).campaigns,
+    services.campaigns,
     normalizeCampaignDraft,
-    campaignService,
+    confirmedServices.campaigns,
   );
   const guard = useUnsavedChanges(
     form.dirty && !form.confirmed,
@@ -107,13 +102,12 @@ function CampaignEditorProvider({ initial }: { initial: CampaignView | null }) {
     root,
   );
   const readProducts = useCallback(
-    (signal: AbortSignal) => reviewServices(scenario).catalog.products(signal),
-    [scenario],
+    (signal: AbortSignal) => services.catalog.products(signal),
+    [services],
   );
-  const catalog = useAdministrationRead(`catalog:${scenario}`, readProducts);
+  const catalog = useAdministrationRead("catalog", readProducts);
   if (form.confirmed) {
-    const next = new URLSearchParams(params);
-    next.delete("escenario");
+    const next = clearTransientParams(params);
     return (
       <Navigate
         replace

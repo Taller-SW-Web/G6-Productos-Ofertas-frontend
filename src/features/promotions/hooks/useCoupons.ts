@@ -1,10 +1,9 @@
-import { reviewServices } from "../dev/reviewServices";
-import { type CouponScenario } from "../dev/demoScenarios";
 import { useCallback, useEffect, useState } from "react";
 import {
   CouponReadError,
   type CouponQuery,
   type CouponReadFailure,
+  type CouponRepository,
 } from "../services/couponRepository";
 
 type ReadState<T> =
@@ -18,6 +17,7 @@ function useCouponRead<T>(
 ) {
   const [response, setResponse] = useState<{
     key: string;
+    read: typeof read;
     state: ReadState<T>;
   }>();
   useEffect(() => {
@@ -25,12 +25,13 @@ function useCouponRead<T>(
     void read(controller.signal).then(
       (result) => {
         if (!controller.signal.aborted)
-          setResponse({ key, state: { status: "success", result } });
+          setResponse({ key, read, state: { status: "success", result } });
       },
       (error: unknown) => {
         if (!controller.signal.aborted)
           setResponse({
             key,
+            read,
             state: {
               status: "error",
               kind:
@@ -45,34 +46,34 @@ function useCouponRead<T>(
     );
     return () => controller.abort();
   }, [key, read]);
-  return response?.key === key
+  return response?.key === key && response.read === read
     ? response.state
     : ({ status: "loading" } as const);
 }
 
 export function useCouponList(
   query: CouponQuery,
-  scenario: CouponScenario,
+  repository: CouponRepository,
   revision: number,
 ) {
   const { status, page, pageSize } = query;
-  const key = JSON.stringify([status, page, pageSize, scenario, revision]);
+  const key = JSON.stringify([status, page, pageSize, revision]);
   const read = useCallback(
     (signal: AbortSignal) =>
-      reviewServices(scenario).coupons.list({ status, page, pageSize }, signal),
-    [status, page, pageSize, scenario],
+      repository.list({ status, page, pageSize }, signal),
+    [status, page, pageSize, repository],
   );
   return useCouponRead(key, read);
 }
 export function useCoupon(
   id: string,
-  scenario: CouponScenario,
+  repository: CouponRepository,
   revision: number,
 ) {
-  const key = JSON.stringify([id, scenario, revision]);
+  const key = JSON.stringify([id, revision]);
   const read = useCallback(
-    (signal: AbortSignal) => reviewServices(scenario).coupons.read(id, signal),
-    [id, scenario],
+    (signal: AbortSignal) => repository.read(id, signal),
+    [id, repository],
   );
   return useCouponRead(key, read);
 }

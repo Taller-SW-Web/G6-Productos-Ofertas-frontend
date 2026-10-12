@@ -1,11 +1,10 @@
-import { reviewServices } from "../dev/reviewServices";
-import { administrationScenario } from "../dev/demoScenarios";
+import { usePromotionServices } from "../hooks/usePromotionServices";
+import { PromotionDataNotice } from "../components/PromotionDataNotice";
 import { useCallback } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Button, Group, Select, Stack } from "@mantine/core";
 import {
   EntityTable,
-  FeedbackAlert,
   FilterBar,
   PageHeader,
   StatusBadge,
@@ -13,7 +12,6 @@ import {
 } from "../../../components/shared";
 import { useAdministrationRead } from "../hooks/useAdministrationRead";
 
-import { promotionCatalogService } from "../services/catalogService";
 import {
   recommendationKindLabel,
   type RecommendationView,
@@ -21,6 +19,7 @@ import {
 import { readPositiveInteger } from "../services/couponPresentation";
 export function RecommendationsPage() {
   const [params, setParams] = useSearchParams();
+  const { services, confirmedServices, revision, retry } = usePromotionServices();
   const status =
     params.get("estado") === "active"
       ? "active"
@@ -38,26 +37,25 @@ export function RecommendationsPage() {
       1,
       Number.MAX_SAFE_INTEGER,
     ),
-    pageSize = readPositiveInteger(params.get("tamanio"), 10, 100),
-    scenario = administrationScenario(params);
+    pageSize = readPositiveInteger(params.get("tamanio"), 10, 100);
   const read = useCallback(
     (signal: AbortSignal) =>
-      reviewServices(scenario).recommendations.list(
+      services.recommendations.list(
         { status, kind, page, pageSize },
         signal,
       ),
-    [status, kind, page, pageSize, scenario],
+    [status, kind, page, pageSize, services],
   );
   const state = useAdministrationRead(
-    JSON.stringify([status, kind, page, pageSize, scenario]),
+    JSON.stringify([status, kind, page, pageSize, revision]),
     read,
   );
   const readCatalog = useCallback(
     async (signal: AbortSignal) => ({
-      products: await promotionCatalogService.products(signal),
-      categories: await promotionCatalogService.categories(signal),
+      products: await confirmedServices.catalog.products(signal),
+      categories: await confirmedServices.catalog.categories(signal),
     }),
-    [],
+    [confirmedServices],
   );
   const catalog = useAdministrationRead("origins", readCatalog);
   const update = (key: string, value: string, reset = true) =>
@@ -177,10 +175,7 @@ export function RecommendationsPage() {
         }
       />
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Datos de demostración">
-          Las reglas y sus cambios son simulados. No agregan ni reemplazan
-          productos automáticamente.
-        </FeedbackAlert>
+        <PromotionDataNotice kind="recommendations" />
         <FilterBar
           summary={
             state.status === "success"
@@ -229,7 +224,7 @@ export function RecommendationsPage() {
                   action: state.access ? undefined : (
                     <Button
                       variant="outline"
-                      onClick={() => update("escenario", "default", false)}
+                      onClick={retry}
                     >
                       Volver a consultar
                     </Button>
