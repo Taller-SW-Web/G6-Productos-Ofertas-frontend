@@ -4,13 +4,21 @@ import { productNavigation, taxonomyNavigation } from "./navigation";
 
 export function ApplicationNavigation() {
   const { pathname } = useLocation();
+  const groups = [
+    ...Array.from(
+      new Set(productNavigation.map((item) => item.group ?? "Navegación")),
+    ).map((label) => ({
+      label,
+      items: productNavigation.filter(
+        (item) => (item.group ?? "Navegación") === label,
+      ),
+    })),
+    { label: "Taxonomía", items: taxonomyNavigation },
+  ];
   return (
     <Box component="nav" aria-label="Navegación de la aplicación">
       <Stack gap="lg">
-        {[
-          { label: "Precios", items: productNavigation },
-          { label: "Taxonomía", items: taxonomyNavigation },
-        ].map((group) => (
+        {groups.map((group) => (
           <Box key={group.label}>
             <Text size="xs" fw={600} c="dimmed" mb="sm">
               {group.label.toLocaleUpperCase("es")}

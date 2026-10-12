@@ -3,6 +3,11 @@ import {
   BrandDetailPage,
   BrandFormPage,
   BrandListPage,
+  CampaignDetailPage,
+  CampaignEditorLayout,
+  CampaignFormPage,
+  CampaignsPage,
+  CampaignScopePage,
   CategoryDetailPage,
   CategoryTreePage,
   CharacteristicCreatePage,
@@ -11,6 +16,9 @@ import {
   CharacteristicListPage,
   CharacteristicStatePage,
   CharacteristicValuesPage,
+  CouponDetailPage,
+  CouponFormPage,
+  CouponsPage,
   CreateCategoryPage,
   CurrentPricePage,
   DeactivateCategoryPage,
@@ -19,6 +27,11 @@ import {
   ProductTypeCreatePage,
   ProductTypeDetailPage,
   ProductTypeListPage,
+  RecommendationDetailPage,
+  RecommendationEditorLayout,
+  RecommendationFormPage,
+  RecommendationSelectorPage,
+  RecommendationsPage,
   SeoConfigPage,
   SeoListPage,
 } from "./productPages";
@@ -58,4 +71,71 @@ export const productRoutes: RouteObject[] = [
   // MK-012: SEO y metadatos
   { path: "/seo", element: <SeoListPage /> },
   { path: "/seo/:id", element: <SeoConfigPage /> },
+  // Recomendaciones / venta cruzada y upselling
+  { path: "/recomendaciones", element: <RecommendationsPage /> },
+  {
+    path: "/recomendaciones/nueva/venta-cruzada",
+    element: <RecommendationEditorLayout kind="cross-sell" />,
+    children: [
+      { index: true, element: <RecommendationFormPage /> },
+      { path: "productos", element: <RecommendationSelectorPage /> },
+    ],
+  },
+  {
+    path: "/recomendaciones/nueva/upselling",
+    element: <RecommendationEditorLayout kind="upsell" />,
+    children: [
+      { index: true, element: <RecommendationFormPage /> },
+      { path: "productos", element: <RecommendationSelectorPage /> },
+    ],
+  },
+  {
+    path: "/recomendaciones/:ruleId/editar",
+    element: <RecommendationEditorLayout />,
+    children: [
+      { index: true, element: <RecommendationFormPage /> },
+      { path: "productos", element: <RecommendationSelectorPage /> },
+    ],
+  },
+  { path: "/recomendaciones/:ruleId", element: <RecommendationDetailPage /> },
+  {
+    path: "/recomendaciones/:ruleId/estado",
+    element: <RecommendationDetailPage changeState />,
+  },
+  // Ofertas y promociones (campañas)
+  { path: "/promociones", element: <CampaignsPage /> },
+  {
+    path: "/promociones/nueva",
+    element: <CampaignEditorLayout />,
+    children: [
+      { index: true, element: <CampaignFormPage /> },
+      { path: "alcance", element: <CampaignScopePage /> },
+    ],
+  },
+  {
+    path: "/promociones/:promotionId/editar",
+    element: <CampaignEditorLayout />,
+    children: [
+      { index: true, element: <CampaignFormPage /> },
+      { path: "alcance", element: <CampaignScopePage /> },
+    ],
+  },
+  { path: "/promociones/:promotionId", element: <CampaignDetailPage /> },
+  {
+    path: "/promociones/:promotionId/estado",
+    element: <CampaignDetailPage changeState />,
+  },
+  // Cupones de descuento
+  { path: "/cupones", element: <CouponsPage /> },
+  { path: "/cupones/nuevo", element: <CouponFormPage /> },
+  { path: "/cupones/:couponId/editar", element: <CouponFormPage /> },
+  {
+    path: "/cupones/:couponId/estado",
+    element: <CouponDetailPage changeState />,
+  },
+  { path: "/cupones/:couponId", element: <CouponDetailPage /> },
+  {
+    path: "/cupones/:couponId/limites",
+    element: <CouponDetailPage limitsOnly />,
+  },
 ];

@@ -1,7 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
-import { BrowserRouter } from "react-router-dom";
 import "@mantine/core/styles.css";
 import "@fontsource/inter/latin-400.css";
 import "@fontsource/inter/latin-500.css";
@@ -19,9 +18,7 @@ createRoot(document.getElementById("root")!).render(
       cssVariablesResolver={cssVariablesResolver}
       forceColorScheme="light"
     >
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
+      <App />
     </MantineProvider>
   </StrictMode>,
 );
