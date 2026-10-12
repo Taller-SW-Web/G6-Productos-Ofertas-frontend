@@ -14,8 +14,26 @@ import {
   CouponFormPage,
   CouponsPage,
   CurrentPricePage,
+  ProductsPage,
+  ProductCreatePage,
+  ProductEditPage,
+  ProductDetailPage,
+  ProductPreparationPage,
 } from "./productPages";
 export const productRoutes: RouteObject[] = [
+  { path: "/productos", element: <ProductsPage /> },
+  { path: "/productos/nuevo", element: <ProductCreatePage /> },
+  { path: "/productos/:productId", element: <ProductDetailPage /> },
+  { path: "/productos/:productId/editar", element: <ProductEditPage /> },
+  { path: "/productos/:productId/preparacion", element: <ProductPreparationPage /> },
+  {
+    path: "/productos/:productId/activar",
+    element: <ProductDetailPage initialDialog="activar" />,
+  },
+  {
+    path: "/productos/:productId/desactivar",
+    element: <ProductDetailPage initialDialog="desactivar" />,
+  },
   { path: "/precios", element: <CurrentPricePage /> },
   { path: "/recomendaciones", element: <RecommendationsPage /> },
   {

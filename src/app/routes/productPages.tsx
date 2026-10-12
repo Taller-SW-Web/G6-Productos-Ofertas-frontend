@@ -69,3 +69,29 @@ export const CurrentPricePage = lazy(() =>
     default: module.CurrentPricePage,
   })),
 );
+export const ProductsPage = lazy(() =>
+  import("../../features/catalog/pages/ProductsPage").then((module) => ({
+    default: module.ProductsPage,
+  })),
+);
+export const ProductCreatePage = lazy(() =>
+  import("../../features/catalog/pages/ProductCreatePage").then((module) => ({
+    default: module.ProductCreatePage,
+  })),
+);
+export const ProductEditPage = lazy(() =>
+  import("../../features/catalog/pages/ProductEditPage").then((module) => ({
+    default: module.ProductEditPage,
+  })),
+);
+export const ProductDetailPage = lazy(() =>
+  import("../../features/catalog/pages/ProductDetailPage").then((module) => ({
+    default: module.ProductDetailPage,
+  })),
+);
+export const ProductPreparationPage = lazy(() =>
+  import("../../features/catalog/pages/ProductPreparationPage").then((module) => ({
+    default: module.ProductPreparationPage,
+  })),
+);
+
