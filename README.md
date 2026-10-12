@@ -1,6 +1,6 @@
 # Productos y Ofertas — Frontend
 
-Foundation React/TypeScript/Vite con Mantine y Tabler. Incluye el piloto **MK-013-S01 (precio vigente)** con adapters mock tipados. Estado: **MOCK_INTEGRATED / MOCK_ONLY**. Las muestras de S02–S05 permiten revisar componentes, sin edición comercial, programación, importación real o integración HTTP.
+Frontend React/TypeScript/Vite con Mantine y Tabler. Incluye el piloto **MK-013-S01 (precio vigente)** y **MK-005 Cupones, MK-006 Promociones y MK-007 Recomendaciones: 19 pantallas**, con altas, edición, selectores y confirmaciones sobre adapters mock tipados. Estado: **MOCK_INTEGRATED / MOCK_ONLY**, provisional mientras está pendiente la revisión funcional/UX. Las muestras de Pricing S02–S05 permiten revisar componentes; no hay integración HTTP.
 
 ## Ejecutar y validar
 
@@ -11,7 +11,7 @@ npm ci
 npm run dev
 ```
 
-Abrir `http://127.0.0.1:5173/precios`. Para validar:
+Abrir `http://127.0.0.1:5173/cupones`, `/promociones`, `/recomendaciones` o `/precios`. Para validar:
 
 ```powershell
 npm run typecheck
@@ -28,12 +28,34 @@ La aplicación funciona sin Backend, Docs, credenciales ni variables de entorno.
 | Ruta | Alcance |
 |---|---|
 | `/precios` | Piloto S01: selección producto/SKU, consulta local, herencia/override, fallback global y estados |
+| `/cupones` | MK-005-S01: listado, filtro por estado y paginación local |
+| `/cupones/nuevo` | MK-005-S02: alta con promoción de modalidad cupón, límites y política explícita |
+| `/cupones/:couponId/editar` | MK-005-S03: edición sin alterar usos registrados |
+| `/cupones/:couponId` | MK-005-S04: configuración y uso del cupón seleccionado |
+| `/cupones/:couponId/limites` | MK-005-S05: límites, uso confirmado de fixture y datos no disponibles |
+| `/cupones/:couponId/estado` | MK-005-S06: confirmación de activación/desactivación |
+| `/promociones` | MK-006-S01: estado/modalidad, paginación, detalle y edición |
+| `/promociones/nueva`, `/promociones/:promotionId/editar` | MK-006-S02/S03: beneficio, vigencia, canales, prioridad y política; cambio de modalidad solo con capacidad informada |
+| `/promociones/nueva/alcance`, `/promociones/:promotionId/editar/alcance` | MK-006-S04: selección de productos completos y SKU específicos |
+| `/promociones/:promotionId`, `/promociones/:promotionId/estado` | MK-006-S05/S06: configuración y cambio de estado |
+| `/recomendaciones` | MK-007-S01: estado/tipo, paginación y entradas de alta diferenciadas |
+| `/recomendaciones/nueva/venta-cruzada` | MK-007-S02: complementos por producto/categoría |
+| `/recomendaciones/:ruleId/editar` | MK-007-S03: edición conservando tipo, identidad y candidatos |
+| `/recomendaciones/nueva/upselling` | MK-007-S04: criterio explícito por candidato y justificación opcional |
+| Formularios de recomendaciones + `/productos` | MK-007-S05: selección temporal, excluye origen/inactivos/repetidos |
+| `/recomendaciones/:ruleId`, `/recomendaciones/:ruleId/estado` | MK-007-S06/S07: detalle ordenado y confirmación de estado |
 | `/foundation/listados` | Tabla, filtros, detalle, paginación y muestra opcional de tabla extensa |
 | `/foundation/formularios` | Formulario y confirmación de demostración |
 | `/foundation/estados` | Feedback y variantes semánticas |
 | `/foundation/pricing` | Muestras de componentes S02–S05; no flujos comerciales completos |
 
-`/` redirige a la galería; la ruta desconocida ofrece retorno. Los parámetros `target/channel` de `/precios` representan filtros **aplicados** de navegación, no un contrato HTTP. Las entradas editables no se aplican hasta pulsar Consultar. Atrás/Adelante restaura el contexto aplicado y reinicia cualquier borrador pendiente de ese contexto.
+`/` redirige a `/precios`; la ruta desconocida ofrece retorno. Las rutas `/foundation/*` están disponibles únicamente con el servidor de desarrollo y no aparecen en la navegación comercial. Los parámetros `target/channel` de `/precios` representan filtros **aplicados** de navegación, no un contrato HTTP. Las entradas editables no se aplican hasta pulsar Consultar. Atrás/Adelante restaura el contexto aplicado y reinicia cualquier borrador pendiente de ese contexto.
+
+Los tres listados conservan filtros/paginación en URL al abrir detalle, editar y regresar. Los parámetros representan contexto de UI. No hay buscador remoto no publicado ni acciones de consumo/restitución. El router de datos de React Router permite bloquear la salida con borrador pendiente, incluido Atrás; los layouts anidados conservan formularios al abrir/cancelar selectores.
+
+Las escrituras se guardan **en memoria de la pestaña y se reinician al recargar**. Una promoción de modalidad cupón creada en la sesión aparece al crear un cupón. Asociar un cupón o haber activado una promoción bloquea el cambio de modalidad; la UI depende de una capacidad informada por el mock. No se expanden productos completos a SKU ni se infiere superioridad por precio. Precio/disponibilidad de recomendaciones siguen **No disponible** por D-REC-01/02.
+
+Solo en desarrollo, `modoRevision=1&escenario=...` habilita escenarios deterministas: `loading`, `empty`, `error`, `missing`, `session`, `forbidden`, `saving`, `save-error`, `rejected`, `conflict`, `unknown-result`; además `usage-unavailable` en Cupones y `selection-empty`, `selection-error`, `unknown-capability` donde corresponden. Producción ignora estos parámetros. Ejemplo: `/promociones/carrera/editar?modoRevision=1&escenario=conflict`. Un resultado incierto bloquea repetir la escritura y permite consultar el resultado. Las creaciones de promociones/reglas sin identificador confirmado requieren localizar el registro en el listado, sin reenvío automático. Escenarios, capturas y límites en [AVANCE_FRONTEND_CUEVA.md](docs/AVANCE_FRONTEND_CUEVA.md).
 
 ## Arquitectura para añadir features
 
@@ -44,14 +66,15 @@ src/app/routes/          productRoutes/productPages y demoRoutes/demoPages separ
 src/components/shared/   Patrones de presentación usados en pilotos/muestras
 src/theme/               Tokens, defaults y variables CSS centrales
 src/features/pricing/    Página → componentes/hook → puerto/service → adapter mock → fixtures
+src/features/promotions/ Cupones/promociones/reglas: páginas/componentes → hooks → servicios/puertos → adapters mock → fixtures
 src/features/foundation/ Galería y casos de revisión de componentes
 ```
 
-Registrar una feature en `productRoutes.tsx` y su navegación en `navigation.ts`, reutilizando shell y theme. Mantener las demos en `demoRoutes.tsx`. Los shared no conocen endpoints, credenciales, DTOs externos ni reglas autoritativas de negocio. La [guía de componentes](docs/COMPONENTES_FOUNDATION.md) contiene APIs y ejemplos; la [guía de implementación](docs/GUIA_IMPLEMENTACION_FRONTEND_REACT.md) contiene el procedimiento y gates.
+Registrar una feature en `productRoutes.tsx` y su navegación en `navigation.ts` (con `group` para el grupo funcional), reutilizando shell y theme. Mantener las demos en `demoRoutes.tsx`. Los shared no conocen endpoints, credenciales, DTOs externos ni reglas autoritativas de negocio. La [guía de componentes](docs/COMPONENTES_FOUNDATION.md) contiene APIs y ejemplos; la [guía de implementación](docs/GUIA_IMPLEMENTACION_FRONTEND_REACT.md) contiene el procedimiento y gates.
 
 ## Documentación normativa de Docs
 
-Fuente visual: **[DESIGN.md 1.1.0](https://github.com/Taller-SW-Web/Productos-y-Ofertas-docs/blob/be5c2db16aca6d6d18b3005a2da4205f724038e3/ux/mockups/DESIGN.md)** de Docs `master`, commit **`be5c2db16aca6d6d18b3005a2da4205f724038e3`**. La revisión FND-01 actualiza la referencia inicial 1.0.0 y registra las diferencias en el [reporte](docs/VALIDACION_FOUNDATION.md).
+Fuente visual: **[DESIGN.md 1.1.0](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/be5c2db16aca6d6d18b3005a2da4205f724038e3/ux/mockups/DESIGN.md)** de Docs `master`, commit **`be5c2db16aca6d6d18b3005a2da4205f724038e3`**. La revisión FND-01 actualiza la referencia inicial 1.0.0 y registra las diferencias en el [reporte](docs/VALIDACION_FOUNDATION.md).
 
 | Fuente | Ruta vigente dentro de Docs |
 |---|---|
@@ -65,10 +88,10 @@ Frontend, Docs y Backend son repositorios independientes. Si Docs es la carpeta 
 
 ## Entrega, validación y revisión
 
-Base entregada/auditada: **`ceee9d203581b28d6ff8148e951837ec6d000fec`**, rama `vera`, [PR #2](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/2) contra `master`, vinculada al [issue #1](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/issues/1). El issue menciona `main`; la PR real usa la rama predeterminada `master`. No se cambia el destino por suposición.
+La Foundation de `vera` se integró mediante [PR #2](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/2) a `master`, commit **`731ae1d3cdad100d943d35111a4da6229a31fb96`**, el 10 de octubre de 2026. La consulta actual de GitHub confirma `merged=true`. El issue #1 menciona `main`; la PR real usó `master`.
 
-Código corregido FND-01–06 y validado localmente: **`95722ff3d1cab2d7eb8356a6ee36b2e813b5aafe`**, pendiente de publicación en la PR. GitHub Actions registra el SHA de cada ejecución en `validation-commit.txt` y adjunta capturas/resultados; la fuente visual permanece fijada al SHA de Docs. Las validaciones locales y los límites se registran en [VALIDACION_FOUNDATION.md](docs/VALIDACION_FOUNDATION.md). La descripción preparada está en [PR_FOUNDATION.md](docs/PR_FOUNDATION.md); el conector devolvió 403 al intentar actualizarla.
+[VALIDACION_FOUNDATION.md](docs/VALIDACION_FOUNDATION.md) y [PR_FOUNDATION.md](docs/PR_FOUNDATION.md) conservan el reporte histórico del 9 de octubre: sus referencias a publicación pendiente/403 no describen el estado actual de la PR ya fusionada. El diagnóstico y la entrega de los issues #7/#8/#9 en `cueva`, fuentes y verificaciones están en [AVANCE_FRONTEND_CUEVA.md](docs/AVANCE_FRONTEND_CUEVA.md). Una PR fusionada no acredita aprobación UX de todos los MK.
 
 El workflow `.github/workflows/frontend.yml` ejecuta instalación, typecheck, build, lint y la suite Playwright completa en Ubuntu/Node 22. Playwright valida Chromium a 1440×900 y genera evidencia en `docs/evidencias/`. Un workflow definido no acredita que ya haya corrido ni recibido aprobación.
 
-Pendientes: revisión técnica independiente y visto bueno UX humano de las correcciones. Q-013-01/02 mantienen bloqueados el contrato de archivo y la admisión con errores de Pricing; no bloquean S01. Autenticación, permisos, APIs, escritura comercial S02–S06, mobile/tablet y evaluación WCAG exhaustiva están fuera de esta Foundation.
+Pendientes: revisión técnica/UX independiente, aprobación documental y publicación de la entrega. Los contratos administrativos siguen provisionales y requieren provider/auth/grants comprobados antes de conectar HTTP. Q-013-01/02 mantienen abiertos el contrato de archivo y la admisión con errores de Pricing; no bloquean su S01. Autenticación, permisos reales, APIs, escritura comercial, mobile/tablet y evaluación WCAG exhaustiva no se acreditan mediante estos mocks.

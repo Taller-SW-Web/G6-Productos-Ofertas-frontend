@@ -1,0 +1,221 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
+import { Button, Group, Stack, Text } from "@mantine/core";
+import {
+  EmptyState,
+  FeedbackAlert,
+  PageHeader,
+  SectionCard,
+  StatusBadge,
+} from "../../../components/shared";
+import { AdministrationStateDialog } from "../components/AdministrationStateDialog";
+import { RecommendationCandidates } from "../components/RecommendationCandidates";
+import { useAdministrationRead } from "../hooks/useAdministrationRead";
+import { administrationScenario } from "../services/administration";
+import { recommendationService } from "../services/recommendationService";
+import { promotionCatalogService } from "../services/catalogService";
+import { recommendationKindLabel } from "../services/recommendationRepository";
+export function RecommendationDetailPage({
+  changeState = false,
+}: {
+  changeState?: boolean;
+}) {
+  const { ruleId = "" } = useParams();
+  const [params, setParams] = useSearchParams(),
+    scenario = administrationScenario(params),
+    suffix = params.size ? `?${params}` : "";
+  const [revision, setRevision] = useState(0),
+    [opened, setOpened] = useState(false),
+    [updated, setUpdated] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null),
+    location = useLocation(),
+    navigate = useNavigate();
+  const read = useCallback(
+    (signal: AbortSignal) =>
+      recommendationService.read(ruleId, scenario, signal),
+    [ruleId, scenario],
+  );
+  const state = useAdministrationRead(
+    `${ruleId}:${scenario}:${revision}`,
+    read,
+  );
+  const readCatalog = useCallback(
+    async (signal: AbortSignal) => ({
+      products: await promotionCatalogService.products("default", signal),
+      categories: await promotionCatalogService.categories("default", signal),
+    }),
+    [],
+  );
+  const catalog = useAdministrationRead("catalog", readCatalog),
+    record = state.status === "success" ? state.result : null;
+  useEffect(() => {
+    if (record && (location.state?.focusState || updated))
+      trigger.current?.focus();
+  }, [record, location.state, updated]);
+  const close = () => {
+    setOpened(false);
+    if (changeState)
+      navigate(`/recomendaciones/${ruleId}${suffix}`, {
+        replace: true,
+        state: { focusState: true },
+      });
+  };
+  const origins =
+    catalog.status === "success"
+      ? record?.configuration.originType === "category"
+        ? catalog.result.categories
+        : catalog.result.products
+      : [];
+  return (
+    <>
+      <PageHeader
+        title={record?.name ?? "Detalle de regla"}
+        actions={
+          <Button
+            component={Link}
+            variant="outline"
+            to={`/recomendaciones${suffix}`}
+          >
+            Volver al listado
+          </Button>
+        }
+      />
+      <Stack gap="lg">
+        <FeedbackAlert semantic="info" title="Datos de demostración">
+          Las recomendaciones no agregan ni reemplazan productos
+          automáticamente. No se reserva stock ni se calcula precio final.
+        </FeedbackAlert>
+        {location.state?.saved && (
+          <FeedbackAlert semantic="success" title="Regla guardada">
+            La configuración fue confirmada en esta sesión.
+          </FeedbackAlert>
+        )}
+        {updated && (
+          <FeedbackAlert semantic="success" title="Estado actualizado">
+            El cambio fue confirmado y los candidatos se conservan.
+          </FeedbackAlert>
+        )}
+        {state.status === "loading" && (
+          <Text role="status">Consultando regla…</Text>
+        )}
+        {state.status === "error" && (
+          <FeedbackAlert
+            semantic="error"
+            title="Consulta no disponible"
+            actions={
+              state.access ? undefined : (
+                <Button
+                  variant="outline"
+                  onClick={() =>
+                    setParams((current) => {
+                      const next = new URLSearchParams(current);
+                      next.delete("escenario");
+                      return next;
+                    })
+                  }
+                >
+                  Volver a consultar
+                </Button>
+              )
+            }
+          >
+            {state.message}
+          </FeedbackAlert>
+        )}
+        {state.status === "success" && !record && (
+          <EmptyState
+            title="Regla no encontrada"
+            description="Selecciona otro registro en el listado."
+          />
+        )}
+        {record && (
+          <>
+            <SectionCard
+              title="Configuración de la regla"
+              actions={
+                <StatusBadge>
+                  {record.status === "active" ? "Activa" : "Inactiva"}
+                </StatusBadge>
+              }
+            >
+              <Text size="sm">
+                Tipo: {recommendationKindLabel(record.configuration.kind)}
+              </Text>
+              <Text size="sm">
+                Origen{" "}
+                {record.configuration.originType === "category"
+                  ? "por categoría"
+                  : "por producto"}
+                :{" "}
+                {origins.find(
+                  (item) => item.id === record.configuration.originId,
+                )?.name ?? "No disponible"}
+              </Text>
+              <Text size="sm">Prioridad: {record.configuration.priority}</Text>
+              <Text size="sm">
+                Vigencia: {record.configuration.validFrom.replace("T", " ")} al{" "}
+                {record.configuration.validUntil.replace("T", " ")} ·
+                America/Lima
+              </Text>
+            </SectionCard>
+            <RecommendationCandidates
+              draft={record.configuration}
+              products={
+                catalog.status === "success" ? catalog.result.products : []
+              }
+            />
+            <Text size="sm" c="dimmed">
+              Precio y disponibilidad por producto: No disponible. La
+              configuración administrativa no depende de estos enriquecimientos.
+            </Text>
+            <Group gap="sm">
+              <Button
+                component={Link}
+                to={`/recomendaciones/${ruleId}/editar${suffix}`}
+              >
+                Editar regla
+              </Button>
+              <Button
+                ref={trigger}
+                variant="outline"
+                onClick={() => setOpened(true)}
+              >
+                {record.status === "active"
+                  ? "Desactivar regla"
+                  : "Activar regla"}
+              </Button>
+            </Group>
+            <AdministrationStateDialog
+              record={record}
+              entityLabel="regla"
+              opened={opened || changeState}
+              change={(status, signal) =>
+                recommendationService.changeStatus(
+                  ruleId,
+                  status,
+                  scenario,
+                  signal,
+                )
+              }
+              read={(signal) =>
+                recommendationService.read(ruleId, "default", signal)
+              }
+              onCancel={close}
+              onConfirmed={() => {
+                close();
+                setUpdated(true);
+                setRevision((value) => value + 1);
+              }}
+            />
+          </>
+        )}
+      </Stack>
+    </>
+  );
+}
