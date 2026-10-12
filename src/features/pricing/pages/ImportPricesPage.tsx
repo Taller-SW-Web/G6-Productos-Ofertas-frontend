@@ -1,4 +1,13 @@
-import { Button, Group, Radio, Stack, Stepper, Text } from "@mantine/core";
+import { useState } from "react";
+import {
+  Button,
+  Group,
+  Radio,
+  Stack,
+  Stepper,
+  Text,
+  TextInput,
+} from "@mantine/core";
 import { Link } from "react-router-dom";
 import {
   FeedbackAlert,
@@ -8,7 +17,6 @@ import {
 import { usePricingContext } from "../hooks/usePricingContext";
 import { usePriceImport } from "../hooks/usePriceImport";
 import { PricingPageFrame } from "../components/PricingPageFrame";
-import { PricingScenarioControl } from "../components/PricingScenarioControl";
 import { ImportRowsTable } from "../components/ImportRowsTable";
 import { UnsavedPriceGuard } from "../components/UnsavedPriceGuard";
 import { useUnsavedPriceNavigation } from "../hooks/useUnsavedPriceNavigation";
@@ -16,11 +24,13 @@ import { useUnsavedPriceNavigation } from "../hooks/useUnsavedPriceNavigation";
 export function ImportPricesPage() {
   const context = usePricingContext();
   const form = usePriceImport();
+  const [batchId, setBatchId] = useState("");
   const blocker = useUnsavedPriceNavigation(!!form.file, form.preview.busy);
   return (
     <PricingPageFrame
       title="Importar precios"
-      description="Selecciona un archivo y revisa las respuestas de prevalidación disponibles para demostración."
+      description="Selecciona un archivo y una política antes de solicitar su prevalidación."
+      requiresTarget={false}
     >
       <UnsavedPriceGuard blocker={blocker} busy={form.preview.busy} />
       <FeedbackAlert
@@ -28,8 +38,8 @@ export function ImportPricesPage() {
         title="Contrato de importación pendiente"
       >
         Q-013-01: falta definir el contenido del archivo. Q-013-02: falta
-        precisar la admisión con errores parciales. La selección no valida el
-        contenido; la confirmación de importación permanece bloqueada.
+        precisar la admisión con errores parciales. La confirmación de
+        importación permanece bloqueada.
       </FeedbackAlert>
       <Text size="sm">
         Alcance exclusivo de Pricing: no crea productos ni modifica inventario.
@@ -42,7 +52,7 @@ export function ImportPricesPage() {
         />
         <Stepper.Step
           label="Revisión y confirmación"
-          description="Respuesta de ejemplo"
+          description="Respuesta de prevalidación"
         />
       </Stepper>
       <SectionCard
@@ -54,7 +64,7 @@ export function ImportPricesPage() {
           value={form.file}
           onChange={form.changeFile}
           disabled={form.preview.busy}
-          description="Los bytes del archivo no se analizan ni se envían. Seleccionar otro archivo invalida la revisión."
+          description="Seleccionar otro archivo invalida la revisión anterior."
         />
         <Radio.Group
           label="Política ante errores"
@@ -78,67 +88,56 @@ export function ImportPricesPage() {
           Cambiar de política exige una nueva revisión. Su elección no habilita
           admisión con errores.
         </Text>
-        <PricingScenarioControl
-          visible={context.review}
-          label="Respuesta ficticia de prevalidación"
-          value={form.scenario}
-          onChange={form.changeScenario}
-          options={[
-            { value: "valid", label: "Sin errores reportados" },
-            { value: "rows", label: "Error por fila" },
-            { value: "unreadable", label: "Archivo no analizable" },
-            { value: "error", label: "Error de consulta" },
-          ]}
-        />
         <Button
           style={{ alignSelf: "flex-start" }}
           variant="outline"
           disabled={!form.file || !form.policy || form.preview.busy}
           loading={form.preview.busy}
-          onClick={() => void form.simulate()}
+          onClick={() => void form.prevalidate()}
         >
-          Simular respuesta de prevalidación
+          Prevalidar archivo
         </Button>
-        {!form.file || !form.policy ? (
+        {(!form.file || !form.policy) && (
           <Text size="sm">
-            Selecciona un archivo y una política para revisar la respuesta
-            ficticia.
-          </Text>
-        ) : (
-          <Text size="sm">
-            La respuesta usa un fixture independiente del archivo seleccionado;
-            no acredita que ese archivo sea válido.
+            Selecciona un archivo y una política para solicitar la
+            prevalidación.
           </Text>
         )}
         {form.preview.error && (
-          <FeedbackAlert semantic="error" title="Prevalidación no disponible">
+          <FeedbackAlert
+            semantic={
+              form.preview.error.kind === "blocked_contract"
+                ? "warning"
+                : "error"
+            }
+            title="Prevalidación no disponible"
+          >
             {form.preview.error.message}
           </FeedbackAlert>
         )}
       </SectionCard>
       {form.step === 1 && form.preview.result && (
-        <SectionCard title="Revisión de la respuesta ficticia">
+        <SectionCard title="Revisión de prevalidación">
           <Text size="sm">
-            Selección: {form.file?.name}. Política:{" "}
+            Archivo: {form.file?.name}. Política:{" "}
             {form.policy === "partial"
               ? "Permitir resultados parciales"
               : "Rechazar el lote si hay errores"}
-            . Total publicado por el fixture: {form.preview.result.total} filas.
+            . Total publicado: {form.preview.result.total} filas.
           </Text>
           <FeedbackAlert
             semantic={form.preview.result.valid ? "info" : "warning"}
             title={
               form.preview.result.valid
-                ? "Fixture sin errores"
-                : "Fixture con errores por fila"
+                ? "Sin errores reportados"
+                : "Errores por fila"
             }
           >
-            No se detectaron ni validaron filas del archivo elegido.{" "}
-            {form.preview.result.errors.length > 0 &&
-              "La política parcial no autoriza continuar mientras Q-013-02 siga abierto."}
+            La prevalidación no autoriza admisión mientras Q-013-01/02 sigan
+            abiertos.
           </FeedbackAlert>
           <ImportRowsTable
-            caption="Errores de la prevalidación ficticia"
+            caption="Errores de prevalidación"
             rows={form.preview.result.errors}
           />
           <Group justify="space-between">
@@ -154,21 +153,23 @@ export function ImportPricesPage() {
         </SectionCard>
       )}
       <SectionCard
-        title="Seguimiento de demostración"
-        description="Puedes consultar un lote ficticio existente, independiente de esta selección."
+        title="Consultar un lote existente"
+        description="Utiliza la referencia recibida de una importación previamente admitida."
       >
+        <TextInput
+          label="Referencia de lote"
+          value={batchId}
+          onChange={(event) => setBatchId(event.currentTarget.value)}
+        />
         <Button
-          style={{ alignSelf: "flex-start" }}
           component={Link}
-          to={`/precios/importaciones/batch-013-01${context.suffix}`}
+          to={`/precios/importaciones/${encodeURIComponent(batchId.trim())}${context.suffix}`}
+          disabled={!batchId.trim()}
           variant="outline"
+          style={{ alignSelf: "flex-start" }}
         >
-          Consultar lote de ejemplo
+          Consultar lote
         </Button>
-        <Text size="sm">
-          Al salir con un archivo seleccionado, se solicitará descartar la
-          selección. El lote de ejemplo no surge de esa importación.
-        </Text>
       </SectionCard>
     </PricingPageFrame>
   );

@@ -1,34 +1,39 @@
-import { useState } from "react";
-import { Button, Select, Skeleton } from "@mantine/core";
+import { Button, Select, Text } from "@mantine/core";
 import { Link } from "react-router-dom";
 import { EmptyState, FeedbackAlert } from "../../../components/shared";
 import { usePricingContext } from "../hooks/usePricingContext";
 import { useEditableRead } from "../hooks/usePriceEdit";
-import type { ReviewScenario } from "../services/pricingModels";
 import { PricingPageFrame } from "../components/PricingPageFrame";
-import { PricingScenarioControl } from "../components/PricingScenarioControl";
-import { mutationScenarios, readScenarios } from "../services/pricingScenarios";
 import { PriceEditForm } from "../components/PriceEditForm";
 
 export function EditPricePage() {
-  const context = usePricingContext();
-  const [readScenario, setReadScenario] = useState<ReviewScenario>("default");
-  const [scenario, setScenario] = useState<ReviewScenario>("default");
-  const scope =
-    context.target?.kind === "variant" &&
-    context.params.get("scope") !== "product"
-      ? "sku"
-      : "product";
-  const target = {
-    targetId: scope === "product" ? "base" : context.query.targetId,
-    channel: scope === "product" ? ("global" as const) : context.query.channel,
-  };
-  const read = useEditableRead(target, readScenario);
   return (
     <PricingPageFrame
       title="Editar precio"
       description="Revisa el objetivo y su versión antes de confirmar una propuesta."
     >
+      <EditContent />
+    </PricingPageFrame>
+  );
+}
+function EditContent() {
+  const context = usePricingContext();
+  const scope =
+    context.target?.kind === "variant" &&
+    context.params.get("scope") !== "product"
+      ? "sku"
+      : "product";
+  const parentId =
+    context.target?.kind === "variant"
+      ? context.target.productTargetId
+      : context.target?.id;
+  const target = {
+    targetId: scope === "product" ? (parentId ?? "") : context.query.targetId,
+    channel: scope === "product" ? ("global" as const) : context.query.channel,
+  };
+  const read = useEditableRead(target);
+  return (
+    <>
       <Select
         label="Alcance del precio"
         value={scope}
@@ -52,49 +57,22 @@ export function EditPricePage() {
         }
         maw={480}
       />
-      <PricingScenarioControl
-        visible={context.review}
-        value={readScenario}
-        onChange={setReadScenario}
-        options={[...readScenarios]}
-        label="Escenario de lectura"
-      />
-      <PricingScenarioControl
-        visible={context.review}
-        value={scenario}
-        onChange={setScenario}
-        options={mutationScenarios}
-        label="Escenario de guardado"
-      />
       {read.state.status === "loading" && (
-        <>
-          <span role="status">Cargando objetivo de escritura…</span>
-          <Skeleton height={120} />
-        </>
+        <Text size="sm" role="status">
+          Cargando objetivo de escritura…
+        </Text>
       )}
       {read.state.status === "error" && (
-        <FeedbackAlert
-          semantic="error"
-          title="Lectura requerida para editar"
-          actions={
-            <Button
-              variant="outline"
-              onClick={() => setReadScenario("default")}
-            >
-              Volver a consultar
-            </Button>
-          }
-        >
+        <FeedbackAlert semantic="error" title="Lectura requerida para editar">
           {read.state.message} La mutación está bloqueada.
         </FeedbackAlert>
       )}
       {read.state.status === "success" &&
         (read.state.result ? (
           <PriceEditForm
-            key={`${target.targetId}:${target.channel}:${read.state.result.view.version}`}
+            key={`${target.targetId}:${target.channel}:${read.state.result.version}`}
             target={target}
             initial={read.state.result}
-            scenario={scenario}
             back={`/precios${context.suffix}`}
           />
         ) : (
@@ -112,6 +90,6 @@ export function EditPricePage() {
             }
           />
         ))}
-    </PricingPageFrame>
+    </>
   );
 }

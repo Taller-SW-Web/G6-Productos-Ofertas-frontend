@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 import { Button, Group, Stack, Text } from "@mantine/core";
 import { Link } from "react-router-dom";
 import {
@@ -7,17 +7,24 @@ import {
   PageHeader,
 } from "../../../components/shared";
 import { usePricingContext } from "../hooks/usePricingContext";
+import { usePricingRuntime } from "../services/PricingContext";
 
 export function PricingPageFrame({
   title,
   description,
   children,
+  requiresTarget = true,
+  actions,
 }: {
   title: string;
   description: string;
   children: ReactNode;
+  requiresTarget?: boolean;
+  actions?: ReactNode;
 }) {
   const context = usePricingContext();
+  const runtime = usePricingRuntime();
+  const Tools = runtime.ReviewTools;
   return (
     <>
       <PageHeader
@@ -28,24 +35,40 @@ export function PricingPageFrame({
           { label: title },
         ]}
         actions={
-          <Button
-            component={Link}
-            to={`/precios${context.suffix}`}
-            variant="outline"
-          >
-            Volver a precios
-          </Button>
+          actions ?? (
+            <Button
+              component={Link}
+              to={`/precios${context.suffix}`}
+              variant="outline"
+            >
+              Volver a precios
+            </Button>
+          )
         }
       />
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Demostración local de Pricing">
-          Datos y respuestas ficticios. No hay operaciones comerciales reales.
-          Los cambios locales se reinician al recargar.
-        </FeedbackAlert>
-        {context.invalid ? (
+        {runtime.notice && (
+          <FeedbackAlert semantic="info" title={runtime.notice.title}>
+            {runtime.notice.description}
+          </FeedbackAlert>
+        )}
+        {Tools && (
+          <Suspense fallback={null}>
+            <Tools />
+          </Suspense>
+        )}
+        {requiresTarget && context.catalog.status === "loading" ? (
+          <Text size="sm" role="status">
+            Cargando productos y SKU…
+          </Text>
+        ) : requiresTarget && context.catalog.status === "error" ? (
+          <FeedbackAlert semantic="error" title="Selección no disponible">
+            {context.catalog.message}
+          </FeedbackAlert>
+        ) : requiresTarget && context.invalid ? (
           <EmptyState
             title="Selecciona un objetivo válido"
-            description="El contexto de la dirección no corresponde a un producto o SKU de demostración."
+            description="Selecciona un producto o SKU disponible en el catálogo conectado."
             action={
               <Button component={Link} to="/precios" variant="outline">
                 Seleccionar producto o SKU

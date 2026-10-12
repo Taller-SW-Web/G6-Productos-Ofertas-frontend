@@ -1,5 +1,7 @@
 # MK-013 — Implementación y validación local del issue #15
 
+> **Revisión vigente:** la auditoría H01–H16 corrige el acoplamiento y las limitaciones de esta entrega inicial. Consultar [AUDITORIA_MK013.md](AUDITORIA_MK013.md) para arquitectura, resultados actuales, sustitución de adapter y reloj de exposición del 17 de octubre. El contenido que sigue es el registro histórico de la implementación inicial, cuya base se consolidó en `c3ef0c9a1a4a171e6dc5131f1f4167c9f17c0e11`; sus métodos/escenarios/capturas no describen por sí solos la versión posterior a la auditoría.
+
 Fecha: 2026-10-11. Responsable del issue: Leonardo Vera Rodríguez. Rama real: `vera`, por instrucción explícita del usuario. Base Frontend: `dd8ac2bf41151efa3848c93a87eae83ff6c34a0c`. La rama inicial limpia `1c996775377c9f5dcaaf0028999c08039f9df5b5` se actualizó con `git fetch origin --prune` y `git merge --ff-only origin/master`. Este informe corresponde a cambios locales sobre esa base; no declara commit, push, PR publicada, merge ni despliegue.
 
 Entrega: **MOCK_INTEGRATED / MOCK_ONLY** en las partes implementables. **S04 PARCIAL / BLOCKED_CONTRACT: Q-013-01/02**. API real: NO. Aprobación UX/técnica independiente: PENDIENTE. El issue permanece abierto.

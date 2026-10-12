@@ -1,27 +1,10 @@
 import type { PriceQuery, PriceView } from "./pricingRepository";
-
-// Presentation/interaction models only. These are not HTTP DTOs.
-export type ReviewScenario =
-  | "default"
-  | "loading"
-  | "empty"
-  | "error"
-  | "conflict"
-  | "overlap"
-  | "unauthorized"
-  | "forbidden"
-  | "unknown";
 export type OfferAction = "CONSERVAR" | "ESTABLECER" | "ELIMINAR";
 export interface WriteTarget {
   targetId: string;
   channel: PriceQuery["channel"];
 }
-export interface EditablePrice {
-  view: PriceView;
-  regular: string;
-  offer: string | null;
-  currency: string;
-}
+export type EditablePrice = PriceView;
 export interface PriceDraft {
   regular: string;
   offer: string;
@@ -45,6 +28,7 @@ export interface ScheduleDraft {
 }
 export interface ScheduleView {
   id: string;
+  targetId: string;
   kind: ScheduleDraft["kind"];
   amount: string;
   currency: string;
@@ -82,16 +66,6 @@ export interface BatchView {
   failed: number;
   rows?: ImportRow[];
 }
-export type BatchScenario =
-  | "default"
-  | "queued"
-  | "processing"
-  | "completed"
-  | "failed"
-  | "no-rows"
-  | "error"
-  | "loading"
-  | "forbidden";
 export class PricingFailure extends Error {
   constructor(
     public kind:
@@ -100,7 +74,9 @@ export class PricingFailure extends Error {
       | "unauthorized"
       | "forbidden"
       | "unknown"
-      | "error",
+      | "error"
+      | "blocked_contract"
+      | "configuration",
     message: string,
   ) {
     super(message);

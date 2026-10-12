@@ -17,10 +17,10 @@ import {
 } from "../../../components/shared";
 import { tokens } from "../../../theme/tokens";
 import { usePriceEdit } from "../hooks/usePriceEdit";
+import { usePricingContext } from "../hooks/usePricingContext";
 import type {
   EditablePrice,
   PriceDraft,
-  ReviewScenario,
   WriteTarget,
 } from "../services/pricingModels";
 import { PriceSummary } from "./PriceSummary";
@@ -30,15 +30,17 @@ import { useUnsavedPriceNavigation } from "../hooks/useUnsavedPriceNavigation";
 export function PriceEditForm({
   target,
   initial,
-  scenario,
   back,
 }: {
   target: WriteTarget;
   initial: EditablePrice;
-  scenario: ReviewScenario;
   back: string;
 }) {
-  const edit = usePriceEdit(target, initial, scenario);
+  const edit = usePriceEdit(target, initial);
+  const context = usePricingContext();
+  const product =
+    context.targets.find((row) => row.id === target.targetId)?.kind ===
+    "product";
   const locked = edit.mutation.busy || edit.refresh.busy || edit.finished;
   const blocker = useUnsavedPriceNavigation(
     edit.dirty,
@@ -47,11 +49,6 @@ export function PriceEditForm({
   function change<K extends keyof PriceDraft>(field: K, value: PriceDraft[K]) {
     edit.change({ ...edit.draft, [field]: value });
   }
-  function focusError(form: HTMLFormElement) {
-    requestAnimationFrame(() =>
-      form.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus(),
-    );
-  }
   const failure = edit.mutation.error;
   return (
     <>
@@ -59,14 +56,10 @@ export function PriceEditForm({
         blocker={blocker}
         busy={edit.mutation.busy || edit.refresh.busy}
       />
-      <PriceSummary price={edit.mutation.result?.view ?? edit.readPrice.view} />
+      <PriceSummary price={edit.mutation.result ?? edit.readPrice} />
       {edit.mutation.result && (
-        <FeedbackAlert
-          semantic="success"
-          title="Precio actualizado — simulación local"
-        >
-          La respuesta mock confirmó la versión{" "}
-          {edit.mutation.result.view.version}.{" "}
+        <FeedbackAlert semantic="success" title="Precio actualizado">
+          La respuesta confirmó la versión {edit.mutation.result.version}.{" "}
           <Link to={back}>Consultar el precio vigente</Link>.
         </FeedbackAlert>
       )}
@@ -76,12 +69,19 @@ export function PriceEditForm({
           onSubmit={(event) => {
             event.preventDefault();
             if (edit.validate()) edit.setReviewing(true);
-            else focusError(event.currentTarget);
+            else {
+              const element = event.currentTarget;
+              requestAnimationFrame(() =>
+                element
+                  .querySelector<HTMLElement>('[aria-invalid="true"]')
+                  ?.focus(),
+              );
+            }
           }}
         >
           <SectionCard
             title="Propuesta de nuevos valores"
-            description={`Objetivo fijo: ${target.targetId === "base" ? "precio del producto; lo heredan variantes sin override" : "precio específico del SKU seleccionado"}. Versión leída: ${edit.readPrice.view.version}.`}
+            description={`Objetivo fijo: ${product ? "precio del producto; lo heredan variantes sin override" : "precio específico del SKU seleccionado"}. Versión leída: ${edit.readPrice.version}.`}
           >
             <Text size="sm">
               * Campo obligatorio. Canal de escritura:{" "}
@@ -101,12 +101,9 @@ export function PriceEditForm({
               />
               <TextInput
                 label="Moneda"
-                required
                 value={edit.draft.currency}
-                onChange={(event) =>
-                  change("currency", event.currentTarget.value)
-                }
-                disabled={locked}
+                readOnly
+                description="Moneda de la lectura. Su cambio requiere política de Pricing confirmada; no se convierten importes."
                 error={edit.errors.currency}
               />
             </SimpleGrid>
@@ -212,13 +209,13 @@ export function PriceEditForm({
               <SectionCard title="Comparar lectura y propuesta">
                 <SimpleGrid cols={3} spacing="lg">
                   <Text size="sm">
-                    Leído: v{edit.readPrice.view.version} ·{" "}
-                    {edit.readPrice.regular} {edit.readPrice.currency} · Oferta:{" "}
+                    Leído: v{edit.readPrice.version} · {edit.readPrice.regular}{" "}
+                    {edit.readPrice.currency} · Oferta:{" "}
                     {edit.readPrice.offer ?? "Sin oferta"}
                   </Text>
                   <Text size="sm">
-                    Actual: v{edit.current.view.version} ·{" "}
-                    {edit.current.regular} {edit.current.currency} · Oferta:{" "}
+                    Actual: v{edit.current.version} · {edit.current.regular}{" "}
+                    {edit.current.currency} · Oferta:{" "}
                     {edit.current.offer ?? "Sin oferta"}
                   </Text>
                   <Text size="sm">
@@ -237,7 +234,11 @@ export function PriceEditForm({
                     una nueva intención.
                   </Text>
                 ) : (
-                  <Button variant="outline" onClick={edit.acceptReview}>
+                  <Button
+                    variant="outline"
+                    style={{ alignSelf: "flex-start" }}
+                    onClick={edit.acceptReview}
+                  >
                     Revisé el precio actual; conservar propuesta
                   </Button>
                 )}
@@ -248,7 +249,6 @@ export function PriceEditForm({
                 component={Link}
                 to={back}
                 variant="outline"
-                style={{ alignSelf: "flex-start" }}
                 disabled={edit.mutation.busy}
               >
                 Cancelar
@@ -276,19 +276,19 @@ export function PriceEditForm({
       <ConfirmDialog
         opened={edit.reviewing && blocker.state !== "blocked"}
         title="Confirmar cambio de precio"
-        confirmLabel="Confirmar cambio local"
+        confirmLabel="Confirmar cambio de precio"
         submitting={edit.mutation.busy}
         onCancel={() => edit.setReviewing(false)}
         onConfirm={() => void edit.save()}
       >
         <Stack gap="md">
           <Text size="sm">
-            {edit.readPrice.view.name} ·{" "}
-            {target.targetId === "base"
+            {edit.readPrice.name} ·{" "}
+            {product
               ? "Producto; afecta a las variantes que heredan"
               : "Override del SKU"}{" "}
             · {target.channel === "retail" ? "Retail" : "Global"} · Versión{" "}
-            {edit.readPrice.view.version}.
+            {edit.readPrice.version}.
           </Text>
           <Text size="sm">
             Regular: {edit.readPrice.regular} → {edit.draft.regular}{" "}
@@ -301,8 +301,8 @@ export function PriceEditForm({
             .
           </Text>
           <Text size="sm">
-            Motivo: {edit.draft.reason}. Se simulará un cambio local sin
-            publicación ni persistencia comercial.
+            Motivo: {edit.draft.reason}. La respuesta de Pricing confirmará el
+            resultado.
           </Text>
         </Stack>
       </ConfirmDialog>

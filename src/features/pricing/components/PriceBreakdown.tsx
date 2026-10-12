@@ -5,7 +5,8 @@ import {
   type TableColumn,
 } from "../../../components/shared";
 import type { PriceView } from "../services/pricingRepository";
-import { priceOriginLabel } from "../services/pricePresentation";
+import { priceOriginLabel, formatMoney } from "../services/pricePresentation";
+import { displayInstant } from "../services/pricingValidation";
 
 const columns: TableColumn<PriceView>[] = [
   {
@@ -29,14 +30,15 @@ const columns: TableColumn<PriceView>[] = [
     header: "Regular / moneda",
     width: 120,
     align: "right",
-    render: (row) => row.regular,
+    render: (row) => formatMoney(row.regular, row.currency),
   },
   {
     key: "offer",
     header: "Oferta / moneda",
     width: 120,
     align: "right",
-    render: (row) => row.offer ?? "Sin oferta",
+    render: (row) =>
+      row.offer === null ? "Sin oferta" : formatMoney(row.offer, row.currency),
   },
   {
     key: "origin",
@@ -54,7 +56,8 @@ const columns: TableColumn<PriceView>[] = [
     key: "validUntil",
     header: "Vigencia hasta",
     width: 200,
-    render: (row) => row.validUntil ?? "Sin fin especificado",
+    render: (row) =>
+      row.validUntil ? displayInstant(row.validUntil) : "Sin fin especificado",
   },
 ];
 export function PriceBreakdown({ rows }: { rows: PriceView[] }) {

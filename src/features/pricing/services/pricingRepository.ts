@@ -1,25 +1,23 @@
 import type {
-  BatchScenario,
   BatchView,
-  EditablePrice,
   PrevalidationView,
   PriceChange,
-  ReviewScenario,
   ScheduleDraft,
   SchedulePage,
   ScheduleView,
   WriteTarget,
 } from "./pricingModels";
-// Typed UI models; these are not provider DTOs or a new HTTP contract.
-export type PriceScenario = "default" | "loading" | "empty" | "error";
-export interface PriceTarget {
+
+// Internal ports/models, independent of HTTP DTOs, fixtures and display formatting.
+export type PriceChannel = "global" | "retail";
+interface TargetContext {
   id: string;
   label: string;
   productId: string;
-  sku?: string;
-  kind: "product" | "variant";
-  referenceSku?: string;
 }
+export type PriceTarget =
+  | (TargetContext & { kind: "product"; referenceSku?: string })
+  | (TargetContext & { kind: "variant"; sku: string; productTargetId: string });
 export interface PriceView {
   id: string;
   name: string;
@@ -29,65 +27,54 @@ export interface PriceView {
   currency: string;
   version: number;
   origin: "product" | "sku";
-  channel: "global" | "retail";
+  channel: PriceChannel;
   validFrom: string;
   validUntil: string | null;
   inherited: boolean;
 }
 export interface PriceQuery {
   targetId: string;
-  channel: "global" | "retail";
+  channel: PriceChannel;
 }
 export interface PriceSnapshot {
   price: PriceView;
   breakdown: PriceView[];
 }
+export interface ImportInput {
+  file: File;
+  allowPartial: boolean;
+}
+export interface ReportFile {
+  data: Blob;
+  filename: string;
+}
 export interface PricingRepository {
+  listTargets(signal: AbortSignal): Promise<PriceTarget[]>;
+  read(query: PriceQuery, signal: AbortSignal): Promise<PriceSnapshot | null>;
   readEditable(
     target: WriteTarget,
-    scenario: ReviewScenario,
     signal: AbortSignal,
-  ): Promise<EditablePrice | null>;
-  update(
-    change: PriceChange,
-    scenario: ReviewScenario,
-    signal: AbortSignal,
-  ): Promise<EditablePrice>;
+  ): Promise<PriceView | null>;
+  update(change: PriceChange, signal: AbortSignal): Promise<PriceView>;
   listSchedules(
     targetId: string,
     page: number,
-    scenario: ReviewScenario,
     signal: AbortSignal,
   ): Promise<SchedulePage>;
   schedule(
     targetId: string,
     draft: ScheduleDraft,
-    scenario: ReviewScenario,
     signal: AbortSignal,
   ): Promise<ScheduleView>;
   readHistorical(
     query: PriceQuery,
     at: string,
-    scenario: ReviewScenario,
     signal: AbortSignal,
   ): Promise<{ price: PriceView; validityId: string } | null>;
-  previewFixture(
-    scenario: "valid" | "rows" | "unreadable" | "error",
+  prevalidate(
+    input: ImportInput,
     signal: AbortSignal,
   ): Promise<PrevalidationView>;
-  readBatch(
-    id: string,
-    scenario: BatchScenario,
-    signal: AbortSignal,
-  ): Promise<BatchView | null>;
-  report(
-    id: string,
-    scenario: BatchScenario,
-    signal: AbortSignal,
-  ): Promise<string>;
-  read(
-    query: PriceQuery,
-    scenario: PriceScenario,
-    signal: AbortSignal,
-  ): Promise<PriceSnapshot | null>;
+  readBatch(id: string, signal: AbortSignal): Promise<BatchView | null>;
+  report(id: string, signal: AbortSignal): Promise<ReportFile>;
 }

@@ -66,7 +66,7 @@ export function ImportRowsTable({
       empty={{
         title: "Sin errores reportados",
         description:
-          "Este resultado pertenece a la respuesta ficticia, no al contenido del archivo seleccionado.",
+          "La respuesta no contiene errores por fila. La admisión requiere una revisión independiente.",
       }}
     />
   );

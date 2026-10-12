@@ -7,6 +7,7 @@ import type {
 export const scheduleFixtures: ScheduleView[] = [
   {
     id: "schedule-01",
+    targetId: "base",
     kind: "OFERTA",
     amount: "189.90",
     currency: "PEN",
@@ -17,6 +18,7 @@ export const scheduleFixtures: ScheduleView[] = [
   },
   {
     id: "schedule-02",
+    targetId: "base",
     kind: "OFERTA",
     amount: "199.90",
     currency: "PEN",
@@ -27,6 +29,7 @@ export const scheduleFixtures: ScheduleView[] = [
   },
   {
     id: "schedule-03",
+    targetId: "base",
     kind: "OFERTA",
     amount: "179.90",
     currency: "PEN",

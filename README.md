@@ -1,6 +1,6 @@
 # Productos y Ofertas — Frontend
 
-React/TypeScript/Vite con Mantine y Tabler. **MK-013 / issue #15** extiende el piloto S01 con edición, programación, seguimiento de lotes e histórico navegables mediante adapters mock tipados. Estado: **MOCK_INTEGRATED / MOCK_ONLY**. S04 permite selección, política y revisión de respuestas ficticias; su parser y admisión permanecen **BLOCKED_CONTRACT: Q-013-01/02**. No hay integración HTTP ni escritura comercial real. Las muestras `/foundation/*` se conservan como galería independiente en desarrollo.
+React/TypeScript/Vite con Mantine y Tabler. **MK-013 / issue #15** cubre S01–S06 con puertos de datos sustituibles. Estado: **MOCK_INTEGRATED / MOCK_REPLACEABLE**, comprobado con un segundo adapter independiente y las mismas páginas. **Q-013-01/02** mantienen bloqueados el parser y la admisión de archivos; la política de cambio de moneda también requiere definición de Pricing. No hay integración HTTP ni escritura comercial real. Las muestras `/foundation/*` se conservan como galería independiente en desarrollo.
 
 ## Ejecutar y validar
 
@@ -21,7 +21,15 @@ npx playwright install chromium
 npm test
 ```
 
-La aplicación funciona sin Backend, Docs, credenciales ni variables de entorno. Inter/Oswald y el logo se sirven como assets locales. `npm run preview` permite revisar `dist/` después del build. Un hosting futuro deberá resolver las rutas hacia `index.html`; no se declara desplegada la app.
+El modo `mock` funciona sin Backend, Docs ni credenciales. Copiar `.env.example` a `.env.local` es opcional: el valor predeterminado visible de `VITE_DATA_MODE` es `mock`. Inter/Oswald y el logo se sirven como assets locales. `npm run preview` permite revisar `dist/` después del build. Un hosting futuro deberá resolver las rutas hacia `index.html`; no se declara desplegada la app.
+
+## Selección de adapters y prueba de sustitución
+
+`src/features/pricing/services/pricingService.ts` contiene el único selector. Recibe `mock` o `api` desde `VITE_DATA_MODE`, leído una vez en `src/main.tsx`. `mock` crea una instancia propia del repositorio de memoria, reloj de exposición y herramientas aisladas de desarrollo. `api` usa un factory inyectado compatible; mientras no se implemente y configure, muestra **«adapter API de Pricing no está configurado»**. Un fallo de API se propaga como error; no hay fallback al mock. Cambiar la variable requiere reiniciar Vite/reconstruir producción.
+
+Las páginas/hooks usan `PricingProvider` y el puerto `PricingRepository`: catálogo de productos/SKU, lecturas, escrituras, prevalidación `File + allowPartial` y reportes `Blob + filename`. No importan targets/fixtures ni reciben `scenario`. El contexto mantiene IDs opacos y la asociación `productTargetId`; no deriva producto desde SKU ni usa `base` como identidad productiva. Las monedas se conservan desde la lectura; no se habilita conversión ni elección de otra moneda sin política publicada. La validación preliminar de oferta programada consulta la vigencia correspondiente al inicio; la validación definitiva pertenece a Pricing.
+
+`tests/harness/pricing-adapter.html` monta el mismo `App` con `AlternatePricingRepository`: cafetera, otro UUID de producto, otro SKU, moneda CHF y otro lote. El harness es de pruebas, servido por Vite en desarrollo y ausente del build de producto; no es una ruta comercial. Ejecutar `npm test -- tests/pricing-audit.spec.ts` verifica sustitución, entradas de archivo/política, errores sin fallback y descarga del archivo de ese adapter.
 
 ## Rutas y límites
 
@@ -40,9 +48,11 @@ La aplicación funciona sin Backend, Docs, credenciales ni variables de entorno.
 
 `/` redirige a `/precios`; la ruta desconocida ofrece retorno. Los parámetros `target/channel` representan filtros **aplicados** de navegación, no un contrato HTTP. S06 conserva `at` como fecha/hora local de America/Bogota (UTC−5) y lo convierte a un instante explícito dentro del servicio mock. S02 usa `scope=product` para editar la base desde una variante; por defecto una variante propone su propio override. Las entradas de consulta se aplican al pulsar Consultar. Atrás/Adelante restaura el contexto aplicado. Una propuesta sin guardar en S02/S03, o un archivo seleccionado en S04, exige seguir trabajando o descartar explícitamente al navegar, incluso desde sidebar o historial.
 
-Los importes del formulario se conservan como cadenas decimales, sin calcular descuentos o precios finales. Los cambios confirmados en S02 se reflejan en S01 durante la misma sesión; S03 no altera anticipadamente el precio actual. Recargar reinicia los fixtures. El reloj de validación de programación es fijo: `2026-10-02T12:00:00Z`, según component-spec. La lista usa páginas de 2 filas del mock; no representa un límite contractual.
+Los modelos internos conservan importes como cadenas decimales, moneda como código y fechas como ISO; las etiquetas `S/`, zona y formato legible se aplican solo en presentación. Los cambios confirmados en S02 se reflejan en S01 durante la sesión; S03 no altera anticipadamente el precio actual. Recargar reinicia el mock. Las programaciones están asignadas a su objetivo y se rechaza superposición por objetivo/canal incluso entre regular/oferta. La lista usa páginas de 2 filas del mock; no representa un límite contractual.
 
-Para revisar errores localmente, añadir `modoRevision=1` a una ruta de Pricing en desarrollo. Los selectores de escenarios están ocultos en producción. Ejemplo: `/precios/editar?target=variant40&channel=retail&modoRevision=1`. S04 nunca analiza los bytes seleccionados; «Simular respuesta de prevalidación» consulta un fixture independiente. El reporte de S05 también es ficticio y se descarga con ese nombre. Ver [trazabilidad, evidencia y límites de MK-013](docs/VALIDACION_MK013.md).
+El reloj de producción es `systemClock`; las reglas reciben un `Clock`, sin fecha ficticia incrustada. El adapter de exposición fija **17/10/2026 07:00 America/Bogota = `2026-10-17T12:00:00Z`**, señalado en su aviso. Sus precios de octubre tienen intervalo `[2026-10-01T00:00:00Z, 2026-11-01T00:00:00Z)` y son aplicables el 17; después existe una lectura global sin oferta. El archivo normativo sigue registrando otro reloj de fixture, del 2 de octubre; el reloj de exposición es una variante local explícita, no una modificación de Docs.
+
+Para revisar errores en modo mock y desarrollo, añadir `modoRevision=1`. `mocks/PricingDemoPanel` controla un decorador de pruebas; los puertos y páginas no conocen esos escenarios. Ejemplo: `/precios/editar?target=variant40&channel=retail&modoRevision=1`. Las respuestas artificiales se restablecen desde ese panel. S04 entrega archivo/política al puerto, pero el mock normal rechaza prevalidar por Q-013-01/02; únicamente el decorador de revisión ofrece respuestas ficticias seleccionadas explícitamente, sin analizar bytes. La confirmación permanece bloqueada. El ejemplo de lote se abre desde el panel de revisión; en la página se puede introducir una referencia recibida. El reporte se descarga usando bytes/nombre del adapter, mediante un downloader separado. Ver [auditoría H01–H16 y prueba MOCK_REPLACEABLE](docs/AUDITORIA_MK013.md) y el [registro inicial](docs/VALIDACION_MK013.md).
 
 ## Arquitectura para añadir features
 

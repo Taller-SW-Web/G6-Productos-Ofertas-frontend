@@ -14,16 +14,12 @@ import {
 } from "../../../components/shared";
 import { usePricingContext } from "../hooks/usePricingContext";
 import { useHistoricalPrice } from "../hooks/useHistoricalPrice";
-import { priceTargets } from "../mocks/prices";
-import type { ReviewScenario } from "../services/pricingModels";
 import {
   displayInstant,
   localInstant,
   priceTimeZone,
 } from "../services/pricingValidation";
 import { PricingPageFrame } from "../components/PricingPageFrame";
-import { PricingScenarioControl } from "../components/PricingScenarioControl";
-import { readScenarios } from "../services/pricingScenarios";
 import { PriceSummary } from "../components/PriceSummary";
 
 export function HistoricalPricePage() {
@@ -43,17 +39,11 @@ function HistoricalContent() {
   const context = usePricingContext(true);
   const [draft, setDraft] = useState(context.query);
   const appliedAt = context.params.get("at");
-  const [at, setAt] = useState(appliedAt ?? "2026-09-10T07:00");
+  const [at, setAt] = useState(appliedAt ?? "");
   const [error, setError] = useState<string>();
-  const [scenario, setScenario] = useState<ReviewScenario>("default");
   const [revision, setRevision] = useState(0);
   const instant = appliedAt ? localInstant(appliedAt) : null;
-  const response = useHistoricalPrice(
-    context.query,
-    instant,
-    scenario,
-    revision,
-  );
+  const response = useHistoricalPrice(context.query, instant, revision);
   function consult() {
     if (!localInstant(at)) {
       setError("Indica un instante válido con fecha y hora.");
@@ -73,7 +63,7 @@ function HistoricalContent() {
     <>
       <SectionCard
         title="Parámetros de consulta"
-        description="La referencia del producto base usa su SKU base ficticio; las variantes usan el SKU seleccionado."
+        description="La referencia del producto usa su SKU base; las variantes usan el SKU seleccionado."
       >
         <form
           noValidate
@@ -86,12 +76,20 @@ function HistoricalContent() {
             <Select
               label="SKU de referencia"
               value={draft.targetId}
-              data={priceTargets.map((target) => ({
-                value: target.id,
-                label: target.sku ?? `${target.referenceSku} · SKU base`,
-              }))}
+              data={context.targets.flatMap((target) =>
+                target.kind === "variant"
+                  ? [{ value: target.id, label: target.sku }]
+                  : target.referenceSku
+                    ? [
+                        {
+                          value: target.id,
+                          label: `${target.referenceSku} · SKU base`,
+                        },
+                      ]
+                    : [],
+              )}
               onChange={(value) => {
-                if (priceTargets.some((row) => row.id === value))
+                if (context.targets.some((row) => row.id === value))
                   setDraft({ ...draft, targetId: value! });
               }}
             />
@@ -129,13 +127,6 @@ function HistoricalContent() {
           </Group>
         </form>
       </SectionCard>
-      <PricingScenarioControl
-        visible={context.review}
-        value={scenario}
-        onChange={setScenario}
-        options={[...readScenarios]}
-        label="Escenario histórico"
-      />
       {!appliedAt && (
         <Text size="sm">
           Elige un instante y pulsa Consultar precio. La consulta histórica no
@@ -146,7 +137,11 @@ function HistoricalContent() {
         <>
           <Text size="sm" fw={600}>
             Instante aplicado: {displayInstant(instant)} · {priceTimeZone} ·
-            SKU: {context.target?.sku ?? context.target?.referenceSku}.
+            SKU:{" "}
+            {context.target?.kind === "variant"
+              ? context.target.sku
+              : context.target?.referenceSku}
+            .
           </Text>
           {response.state.status === "loading" && (
             <Text size="sm" role="status">
@@ -160,10 +155,7 @@ function HistoricalContent() {
               actions={
                 <Button
                   variant="outline"
-                  onClick={() => {
-                    setScenario("default");
-                    setRevision((value) => value + 1);
-                  }}
+                  onClick={() => setRevision((value) => value + 1)}
                 >
                   Volver a consultar histórico
                 </Button>
@@ -182,12 +174,12 @@ function HistoricalContent() {
                   Este precio corresponde al instante aplicado; no se presenta
                   como precio vigente hoy.{" "}
                   {context.query.channel === "retail" &&
+                    response.state.result.price.channel === "global" &&
                     "El canal Retail solicitado resolvió al precio global efectivo."}
                 </FeedbackAlert>
                 <PriceSummary price={response.state.result.price} historical />
                 <Text size="sm">
-                  Referencia de vigencia ficticia:{" "}
-                  {response.state.result.validityId}.
+                  Referencia de vigencia: {response.state.result.validityId}.
                 </Text>
               </>
             ) : (

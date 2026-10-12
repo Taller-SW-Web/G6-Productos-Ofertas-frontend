@@ -1,32 +1,23 @@
 import { useCallback, useState } from "react";
-import { pricingService } from "../services/pricingService";
-import type {
-  ReviewScenario,
-  ScheduleDraft,
-  ScheduleView,
-} from "../services/pricingModels";
-import { validateSchedule } from "../services/pricingValidation";
+import {
+  usePricingRevision,
+  usePricingRuntime,
+} from "../services/PricingContext";
+import type { ScheduleDraft, ScheduleView } from "../services/pricingModels";
+import { localInstant, validateSchedule } from "../services/pricingValidation";
 import { usePricingAction, usePricingRead } from "./usePricingRequest";
 
-export const initialSchedule: ScheduleDraft = {
-  kind: "REGULAR",
-  amount: "",
-  currency: "PEN",
-  channel: "global",
-  start: "",
-  end: "",
-  reason: "",
-};
-export function usePriceSchedules(targetId: string, scenario: ReviewScenario) {
+export function usePriceSchedules(targetId: string) {
+  const { service } = usePricingRuntime();
+  const update = usePricingRevision("listSchedules");
   const [page, setPage] = useState(1);
   const [revision, setRevision] = useState(0);
   const read = useCallback(
-    (signal: AbortSignal) =>
-      pricingService.listSchedules(targetId, page, scenario, signal),
-    [targetId, page, scenario],
+    (signal: AbortSignal) => service.listSchedules(targetId, page, signal),
+    [service, targetId, page],
   );
   const listing = usePricingRead(
-    `${targetId}:${page}:${scenario}:${revision}`,
+    `${targetId}:${page}:${revision}:${update}`,
     read,
   );
   return {
@@ -43,20 +34,58 @@ export function useScheduleForm(
   targetId: string,
   currency: string,
   channel: "global" | "retail",
-  scenario: ReviewScenario,
   onCreated: () => void,
 ) {
-  const [draft, setDraft] = useState({ ...initialSchedule, currency, channel });
+  const { service, clock } = usePricingRuntime();
+  const update = usePricingRevision("readHistorical");
+  const initial = (): ScheduleDraft => ({
+    kind: "REGULAR",
+    amount: "",
+    currency,
+    channel,
+    start: "",
+    end: "",
+    reason: "",
+  });
+  const [draft, setDraft] = useState(initial);
   const [dirty, setDirty] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [errors, setErrors] = useState<ReturnType<typeof validateSchedule>>({});
   const action = usePricingAction<ScheduleView>();
+  const start = localInstant(draft.start);
+  const read = useCallback(
+    (signal: AbortSignal) =>
+      start
+        ? service.readHistorical(
+            { targetId, channel: draft.channel },
+            start,
+            signal,
+          )
+        : Promise.resolve(null),
+    [service, targetId, draft.channel, start],
+  );
+  const reference = usePricingRead(
+    `${targetId}:${draft.channel}:${start}:${update}`,
+    read,
+  );
   const change = (next: ScheduleDraft) => {
     setDraft(next);
     setDirty(true);
   };
   const validate = () => {
-    const next = validateSchedule(draft);
+    const price =
+      reference.state.status === "success"
+        ? (reference.state.result?.price ?? null)
+        : null;
+    const next = validateSchedule(draft, clock.now(), price);
+    if (
+      start &&
+      Date.parse(start) > Date.parse(clock.now()) &&
+      !price &&
+      !next.amount
+    )
+      next.amount =
+        "Consulta una vigencia disponible antes de confirmar la programación.";
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -64,7 +93,7 @@ export function useScheduleForm(
     if (!validate() || action.error?.kind === "unknown" || action.result)
       return;
     const result = await action.run((signal) =>
-      pricingService.schedule(targetId, draft, scenario, signal),
+      service.schedule(targetId, draft, signal),
     );
     setReviewing(false);
     if (result) {
@@ -74,7 +103,7 @@ export function useScheduleForm(
   }
   function newDraft() {
     action.clear();
-    setDraft({ ...initialSchedule, currency, channel });
+    setDraft(initial());
     setDirty(false);
     setErrors({});
   }
@@ -89,5 +118,7 @@ export function useScheduleForm(
     create,
     action,
     newDraft,
+    reference,
+    now: clock.now(),
   };
 }

@@ -1,17 +1,21 @@
 import { useCallback, useState } from "react";
-import { pricingService } from "../services/pricingService";
-import type { BatchScenario } from "../services/pricingModels";
+import {
+  usePricingRevision,
+  usePricingRuntime,
+} from "../services/PricingContext";
+import type { ReportFile } from "../services/pricingRepository";
 import { usePricingAction, usePricingRead } from "./usePricingRequest";
 
-export function usePriceBatch(id: string, scenario: BatchScenario) {
+export function usePriceBatch(id: string) {
+  const { service, downloader } = usePricingRuntime();
+  const update = usePricingRevision("readBatch");
   const [revision, setRevision] = useState(0);
   const read = useCallback(
-    (signal: AbortSignal) => pricingService.readBatch(id, scenario, signal),
-    [id, scenario],
+    (signal: AbortSignal) => service.readBatch(id, signal),
+    [service, id],
   );
-  // The reference remains stable when refreshing/error scenarios change.
-  const response = usePricingRead(`${id}:${scenario}:${revision}`, read, id);
-  const report = usePricingAction<string>();
+  const response = usePricingRead(`${id}:${revision}:${update}`, read, id);
+  const report = usePricingAction<ReportFile>();
   return {
     ...response,
     report,
@@ -20,6 +24,11 @@ export function usePriceBatch(id: string, scenario: BatchScenario) {
       setRevision((value) => value + 1);
     },
     download: () =>
-      report.run((signal) => pricingService.report(id, scenario, signal)),
+      report.run(async (signal) => {
+        const file = await service.report(id, signal);
+        signal.throwIfAborted();
+        downloader.save(file);
+        return file;
+      }),
   };
 }

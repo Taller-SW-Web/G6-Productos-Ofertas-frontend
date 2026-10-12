@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Button, Group, SimpleGrid, Text } from "@mantine/core";
 import { Link, useParams } from "react-router-dom";
 import {
@@ -8,9 +7,7 @@ import {
 } from "../../../components/shared";
 import { usePricingContext } from "../hooks/usePricingContext";
 import { usePriceBatch } from "../hooks/usePriceBatch";
-import type { BatchScenario } from "../services/pricingModels";
 import { PricingPageFrame } from "../components/PricingPageFrame";
-import { PricingScenarioControl } from "../components/PricingScenarioControl";
 import { ImportRowsTable } from "../components/ImportRowsTable";
 
 const labels = {
@@ -26,6 +23,7 @@ export function PriceImportResultPage() {
     <PricingPageFrame
       title="Resultado de importación"
       description="Consulta el estado y los resultados publicados de un lote identificado."
+      requiresTarget={false}
     >
       <BatchContent key={batchId} id={batchId} />
     </PricingPageFrame>
@@ -33,8 +31,7 @@ export function PriceImportResultPage() {
 }
 function BatchContent({ id }: { id: string }) {
   const context = usePricingContext();
-  const [scenario, setScenario] = useState<BatchScenario>("default");
-  const response = usePriceBatch(id, scenario);
+  const response = usePriceBatch(id);
   const batch =
     response.state.status === "success"
       ? response.state.result
@@ -47,40 +44,13 @@ function BatchContent({ id }: { id: string }) {
       <Text size="sm" fw={600}>
         Lote: {id}
       </Text>
-      <PricingScenarioControl
-        visible={context.review}
-        value={scenario}
-        onChange={(value) => {
-          response.report.clear();
-          setScenario(value);
-        }}
-        label="Escenario del lote"
-        options={[
-          { value: "default", label: "Parcial: 2 confirmadas y 1 rechazada" },
-          { value: "queued", label: "En cola" },
-          { value: "processing", label: "En proceso" },
-          { value: "completed", label: "Completado" },
-          { value: "failed", label: "Fallido" },
-          { value: "no-rows", label: "Detalle de filas ausente" },
-          { value: "error", label: "Error de refresco" },
-          { value: "loading", label: "Cargando" },
-          { value: "forbidden", label: "Sin autorización" },
-        ]}
-      />
-      <Group gap="sm">
-        <Button variant="outline" onClick={response.refresh}>
-          Consultar estado
-        </Button>
-        <Button
-          variant="outline"
-          onClick={() => {
-            setScenario("default");
-            response.refresh();
-          }}
-        >
-          Recuperar consulta del ejemplo
-        </Button>
-      </Group>
+      <Button
+        variant="outline"
+        onClick={response.refresh}
+        style={{ alignSelf: "flex-start" }}
+      >
+        Consultar estado
+      </Button>
       {response.state.status === "loading" && (
         <Text size="sm" role="status">
           Consultando estado del lote…
@@ -117,7 +87,7 @@ function BatchContent({ id }: { id: string }) {
               : "Rechazar el lote si hay errores"}
             .{" "}
             {terminal
-              ? "El resultado corresponde a una respuesta ficticia terminal."
+              ? "Resultado terminal publicado para este lote."
               : "La admisión no confirma que los precios se hayan actualizado. No hay reporte terminal disponible."}
           </FeedbackAlert>
           <SimpleGrid cols={3} spacing="lg">
@@ -127,7 +97,7 @@ function BatchContent({ id }: { id: string }) {
           </SimpleGrid>
           {batch.rows ? (
             <ImportRowsTable
-              caption="Resultados por fila del lote ficticio"
+              caption="Resultados por fila del lote"
               rows={batch.rows}
             />
           ) : (
@@ -143,18 +113,8 @@ function BatchContent({ id }: { id: string }) {
               loading={response.report.busy}
               onClick={() => void response.download()}
             >
-              Preparar reporte ficticio
+              Descargar reporte
             </Button>
-            {response.report.result && fresh && (
-              <Button
-                component="a"
-                variant="outline"
-                href={`data:text/csv;charset=utf-8,${encodeURIComponent(response.report.result)}`}
-                download={`reporte-ficticio-${id}.csv`}
-              >
-                Guardar CSV de demostración
-              </Button>
-            )}
             {batch.failed > 0 && (
               <Button
                 component={Link}
@@ -165,6 +125,11 @@ function BatchContent({ id }: { id: string }) {
               </Button>
             )}
           </Group>
+          {response.report.result && terminal && fresh && (
+            <Text size="sm" role="status">
+              Reporte descargado: {response.report.result.filename}.
+            </Text>
+          )}
           {response.report.error && (
             <FeedbackAlert semantic="error" title="Reporte no disponible">
               {response.report.error.message}
@@ -180,7 +145,7 @@ function BatchContent({ id }: { id: string }) {
       {fresh && !batch && (
         <EmptyState
           title="Lote no encontrado"
-          description="La referencia no corresponde a un lote disponible en el adapter de demostración. No se ha creado otro lote."
+          description="La referencia no corresponde a un lote disponible. No se ha creado otro lote."
         />
       )}
     </>

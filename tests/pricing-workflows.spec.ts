@@ -4,7 +4,7 @@ import {
   localInstant,
   validatePrice,
 } from "../src/features/pricing/services/pricingValidation";
-import { mockPricingRepository } from "../src/features/pricing/adapters/mockPricingRepository";
+import { createMockPricingRepository } from "../src/features/pricing/adapters/mockPricingRepository";
 
 async function select(page: Page, label: string, option: string) {
   await page.getByRole("combobox", { name: label, exact: true }).click();
@@ -23,7 +23,7 @@ async function confirmEdit(page: Page) {
     .getByRole("button", { name: "Guardar cambios", exact: true })
     .click();
   await page
-    .getByRole("button", { name: "Confirmar cambio local", exact: true })
+    .getByRole("button", { name: "Confirmar cambio de precio", exact: true })
     .click();
 }
 async function scheduleDraft(page: Page) {
@@ -137,7 +137,7 @@ test("MK-013-S02: validation, focus, dialog cancellation, offer removal and inhe
   ).toHaveValue("Ajuste de temporada");
   await confirmEdit(page);
   await expect(
-    page.getByText("Precio actualizado — simulación local", { exact: true }),
+    page.getByText("Precio actualizado", { exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole("region", {
@@ -200,7 +200,7 @@ test("MK-013-S02: version conflict preserves draft and requires reread and expli
     .click();
   await confirmEdit(page);
   await expect(
-    page.getByText("La respuesta mock confirmó la versión 6.", {
+    page.getByText("La respuesta confirmó la versión 6.", {
       exact: false,
     }),
   ).toBeVisible();
@@ -224,7 +224,7 @@ for (const scenario of [
       page.getByRole("textbox", { name: "Nuevo precio regular", exact: true }),
     ).toHaveValue("279.90");
     await expect(
-      page.getByText("Precio actualizado — simulación local", { exact: true }),
+      page.getByText("Precio actualizado", { exact: true }),
     ).toHaveCount(0);
     if (scenario === "Resultado desconocido") {
       await expect(
@@ -321,10 +321,10 @@ test("MK-013-S03: date validation, pagination and future creation preserve curre
     .getByRole("button", { name: "Programar precio", exact: true })
     .click();
   await page
-    .getByRole("button", { name: "Confirmar programación local", exact: true })
+    .getByRole("button", { name: "Confirmar programación", exact: true })
     .click();
   await expect(
-    page.getByText("Precio programado — simulación local", { exact: true }),
+    page.getByText("Precio programado", { exact: true }),
   ).toBeVisible();
   await capture(page, "docs/evidencias/mk-013-s03-programado-1440.png");
   await expect(
@@ -357,7 +357,7 @@ for (const scenario of [
       .click();
     await page
       .getByRole("button", {
-        name: "Confirmar programación local",
+        name: "Confirmar programación",
         exact: true,
       })
       .click();
@@ -368,7 +368,7 @@ for (const scenario of [
       }),
     ).toHaveValue("2027-02-01T00:00");
     await expect(
-      page.getByText("Precio programado — simulación local", { exact: true }),
+      page.getByText("Precio programado", { exact: true }),
     ).toHaveCount(0);
     await expect(
       page.getByText("Mostrando 1 a 2 de 3", { exact: true }),
@@ -396,7 +396,7 @@ test("MK-013-S04: changing file or policy invalidates simulated preview; import 
   await select(page, "Respuesta ficticia de prevalidación", "Error por fila");
   await page
     .getByRole("button", {
-      name: "Simular respuesta de prevalidación",
+      name: "Prevalidar archivo",
       exact: true,
     })
     .click();
@@ -415,13 +415,13 @@ test("MK-013-S04: changing file or policy invalidates simulated preview; import 
     .check();
   await expect(
     page.getByRole("region", {
-      name: "Revisión de la respuesta ficticia",
+      name: "Revisión de prevalidación",
       exact: true,
     }),
   ).toHaveCount(0);
   await page
     .getByRole("button", {
-      name: "Simular respuesta de prevalidación",
+      name: "Prevalidar archivo",
       exact: true,
     })
     .click();
@@ -432,7 +432,7 @@ test("MK-013-S04: changing file or policy invalidates simulated preview; import 
   });
   await expect(
     page.getByRole("region", {
-      name: "Revisión de la respuesta ficticia",
+      name: "Revisión de prevalidación",
       exact: true,
     }),
   ).toHaveCount(0);
@@ -443,7 +443,7 @@ test("MK-013-S04: changing file or policy invalidates simulated preview; import 
   );
   await page
     .getByRole("button", {
-      name: "Simular respuesta de prevalidación",
+      name: "Prevalidar archivo",
       exact: true,
     })
     .click();
@@ -468,7 +468,7 @@ test("MK-013-S05: queued, processing, partial, missing rows, failed refresh and 
   await capture(page, "docs/evidencias/mk-013-s05-cola-1440.png");
   await expect(
     page.getByRole("button", {
-      name: "Preparar reporte ficticio",
+      name: "Descargar reporte",
       exact: true,
     }),
   ).toBeDisabled();
@@ -484,12 +484,9 @@ test("MK-013-S05: queued, processing, partial, missing rows, failed refresh and 
   await expect(
     page.getByText("Completado parcialmente", { exact: true }),
   ).toBeVisible();
-  await page
-    .getByRole("button", { name: "Preparar reporte ficticio", exact: true })
-    .click();
   const downloadPromise = page.waitForEvent("download");
   await page
-    .getByRole("link", { name: "Guardar CSV de demostración", exact: true })
+    .getByRole("button", { name: "Descargar reporte", exact: true })
     .click();
   expect((await downloadPromise).suggestedFilename()).toBe(
     "reporte-ficticio-batch-013-01.csv",
@@ -503,7 +500,7 @@ test("MK-013-S05: queued, processing, partial, missing rows, failed refresh and 
   ).toBeVisible();
   await expect(
     page.getByRole("button", {
-      name: "Preparar reporte ficticio",
+      name: "Descargar reporte",
       exact: true,
     }),
   ).toBeDisabled();
@@ -530,6 +527,9 @@ test("MK-013-S06: as-of, fallback, error, absence and applied history retain con
   await page
     .getByRole("link", { name: "Consultar histórico", exact: true })
     .click();
+  await page
+    .getByRole("textbox", { name: "Fecha y hora de consulta", exact: true })
+    .fill("2026-09-10T07:00");
   await page
     .getByRole("button", { name: "Consultar precio", exact: true })
     .click();
@@ -590,11 +590,7 @@ test("MK-013: six direct views, desktop geometry, screenshots and no runtime err
   const cases = [
     ["s01", "/precios?target=variant40&channel=retail", "Gestión de precios"],
     ["s02", "/precios/editar?target=variant40", "Editar precio"],
-    [
-      "s03",
-      "/precios/programaciones?target=variant40",
-      "Programaciones de precio",
-    ],
+    ["s03", "/precios/programaciones?target=base", "Programaciones de precio"],
     ["s04", "/precios/importar", "Importar precios"],
     ["s05", "/precios/importaciones/batch-013-01", "Resultado de importación"],
     [
@@ -664,57 +660,49 @@ test("MK-013: decimal precision, temporal boundaries and stale writes are checke
         currency: "PEN",
         reason: "Revisión",
       },
-      null,
+      { offer: null, currency: "PEN" },
     ),
   ).toEqual({});
   expect(localInstant("2026-02-30T07:00")).toBeNull();
   expect(localInstant("2026-09-10T07:00")).toBe("2026-09-10T12:00:00.000Z");
+  const repository = createMockPricingRepository({
+    now: () => "2026-10-17T12:00:00Z",
+  });
   const signal = new AbortController().signal;
   const target = { targetId: "override42", channel: "retail" as const };
-  const initial = (await mockPricingRepository.readEditable(
-    target,
-    "default",
-    signal,
-  ))!;
+  const initial = (await repository.readEditable(target, signal))!;
   const change = {
     target,
-    version: initial.view.version,
+    version: initial.version,
     draft: {
       regular: "9007199254740993.002",
       offer: "9007199254740993.001",
       offerAction: "ESTABLECER" as const,
-      currency: "USD",
+      currency: "PEN",
       reason: "Precisión de demostración",
     },
   };
-  const saved = await mockPricingRepository.update(change, "default", signal);
+  const saved = await repository.update(change, signal);
   expect(saved.regular).toBe("9007199254740993.002");
-  expect(saved.view.channel).toBe("retail");
-  await expect(
-    mockPricingRepository.update(change, "default", signal),
-  ).rejects.toMatchObject({ kind: "conflict" });
+  expect(saved.channel).toBe("retail");
+  await expect(repository.update(change, signal)).rejects.toMatchObject({
+    kind: "conflict",
+  });
   expect(
-    (
-      await mockPricingRepository.readEditable(
-        { ...target, channel: "global" },
-        "default",
-        signal,
-      )
-    )?.currency,
-  ).toBe("PEN");
+    (await repository.readEditable({ ...target, channel: "global" }, signal))
+      ?.regular,
+  ).toBe("259.90");
   expect(
-    await mockPricingRepository.readHistorical(
+    await repository.readHistorical(
       { targetId: "base", channel: "global" },
       "2026-09-01T00:00:00.000Z",
-      "default",
       signal,
     ),
   ).not.toBeNull();
   expect(
-    await mockPricingRepository.readHistorical(
+    await repository.readHistorical(
       { targetId: "base", channel: "global" },
-      "2026-10-01T00:00:00.000Z",
-      "default",
+      "2026-08-31T23:59:59.000Z",
       signal,
     ),
   ).toBeNull();

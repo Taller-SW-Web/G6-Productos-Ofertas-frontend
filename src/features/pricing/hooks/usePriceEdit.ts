@@ -1,28 +1,29 @@
 import { useCallback, useState } from "react";
-import { pricingService } from "../services/pricingService";
+import {
+  usePricingRevision,
+  usePricingRuntime,
+} from "../services/PricingContext";
 import type {
   EditablePrice,
   PriceDraft,
-  ReviewScenario,
   WriteTarget,
 } from "../services/pricingModels";
 import { validatePrice } from "../services/pricingValidation";
 import { usePricingAction, usePricingRead } from "./usePricingRequest";
 
-export function useEditableRead(target: WriteTarget, scenario: ReviewScenario) {
+export function useEditableRead(target: WriteTarget) {
+  const { service } = usePricingRuntime();
+  const revision = usePricingRevision("readEditable");
   const { targetId, channel } = target;
   const read = useCallback(
     (signal: AbortSignal) =>
-      pricingService.readEditable({ targetId, channel }, scenario, signal),
-    [targetId, channel, scenario],
+      service.readEditable({ targetId, channel }, signal),
+    [service, targetId, channel],
   );
-  return usePricingRead(`${targetId}:${channel}:${scenario}`, read);
+  return usePricingRead(`${targetId}:${channel}:${revision}`, read);
 }
-export function usePriceEdit(
-  target: WriteTarget,
-  initial: EditablePrice,
-  scenario: ReviewScenario,
-) {
+export function usePriceEdit(target: WriteTarget, initial: EditablePrice) {
+  const { service } = usePricingRuntime();
   const [readPrice, setReadPrice] = useState(initial);
   const [current, setCurrent] = useState<EditablePrice>();
   const [draft, setDraft] = useState<PriceDraft>({
@@ -44,7 +45,7 @@ export function usePriceEdit(
     setDirty(true);
   };
   const validate = () => {
-    const next = validatePrice(draft, readPrice.offer);
+    const next = validatePrice(draft, readPrice);
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -56,11 +57,7 @@ export function usePriceEdit(
     )
       return;
     const result = await mutation.run((signal) =>
-      pricingService.update(
-        { target, draft, version: readPrice.view.version },
-        resolved && scenario === "conflict" ? "default" : scenario,
-        signal,
-      ),
+      service.update({ target, draft, version: readPrice.version }, signal),
     );
     setReviewing(false);
     if (result) {
@@ -70,7 +67,7 @@ export function usePriceEdit(
   }
   async function reread() {
     const latest = await refresh.run((signal) =>
-      pricingService.readEditable(target, "default", signal),
+      service.readEditable(target, signal),
     );
     if (latest) setCurrent(latest);
   }
@@ -80,7 +77,6 @@ export function usePriceEdit(
     setResolved(true);
     mutation.clear();
     setCurrent(undefined);
-    // The new version is accepted only by an explicit review action, never by a background GET.
   }
   return {
     readPrice,

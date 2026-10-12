@@ -1,30 +1,28 @@
 import { useCallback } from "react";
-import { pricingService } from "../services/pricingService";
+import {
+  usePricingRevision,
+  usePricingRuntime,
+} from "../services/PricingContext";
 import type { PriceQuery } from "../services/pricingRepository";
-import type { ReviewScenario } from "../services/pricingModels";
 import { usePricingRead } from "./usePricingRequest";
 
 export function useHistoricalPrice(
   query: PriceQuery,
   at: string | null,
-  scenario: ReviewScenario,
   revision: number,
 ) {
+  const { service } = usePricingRuntime();
+  const update = usePricingRevision("readHistorical");
   const { targetId, channel } = query;
   const read = useCallback(
     (signal: AbortSignal) =>
       at
-        ? pricingService.readHistorical(
-            { targetId, channel },
-            at,
-            scenario,
-            signal,
-          )
+        ? service.readHistorical({ targetId, channel }, at, signal)
         : Promise.resolve(null),
-    [targetId, channel, at, scenario],
+    [service, targetId, channel, at],
   );
   return usePricingRead(
-    `${targetId}:${channel}:${at}:${scenario}:${revision}`,
+    `${targetId}:${channel}:${at}:${revision}:${update}`,
     read,
   );
 }

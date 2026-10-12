@@ -15,12 +15,9 @@ import {
 } from "../../../components/shared";
 import { tokens } from "../../../theme/tokens";
 import { useScheduleForm } from "../hooks/usePriceSchedules";
-import type { ReviewScenario, ScheduleDraft } from "../services/pricingModels";
-import {
-  displayInstant,
-  mockClock,
-  priceTimeZone,
-} from "../services/pricingValidation";
+import type { ScheduleDraft } from "../services/pricingModels";
+import { displayInstant, priceTimeZone } from "../services/pricingValidation";
+import { formatMoney } from "../services/pricePresentation";
 import { UnsavedPriceGuard } from "./UnsavedPriceGuard";
 import { useUnsavedPriceNavigation } from "../hooks/useUnsavedPriceNavigation";
 
@@ -28,22 +25,14 @@ export function ScheduleForm({
   targetId,
   currency,
   channel,
-  scenario,
   onCreated,
 }: {
   targetId: string;
   currency: string;
   channel: "global" | "retail";
-  scenario: ReviewScenario;
   onCreated: () => void;
 }) {
-  const form = useScheduleForm(
-    targetId,
-    currency,
-    channel,
-    scenario,
-    onCreated,
-  );
+  const form = useScheduleForm(targetId, currency, channel, onCreated);
   const locked = form.action.busy || !!form.action.result;
   const blocker = useUnsavedPriceNavigation(form.dirty, form.action.busy);
   function change<K extends keyof ScheduleDraft>(
@@ -52,6 +41,10 @@ export function ScheduleForm({
   ) {
     form.change({ ...form.draft, [key]: value });
   }
+  const reference =
+    form.reference.state.status === "success"
+      ? form.reference.state.result?.price
+      : undefined;
   return (
     <>
       <UnsavedPriceGuard blocker={blocker} busy={form.action.busy} />
@@ -76,8 +69,8 @@ export function ScheduleForm({
             description="Una programación futura no reemplaza anticipadamente el precio vigente."
           >
             <Text size="sm">
-              * Campo obligatorio. Zona: {priceTimeZone}. Reloj fijo de
-              demostración: {displayInstant(mockClock)}.
+              * Campo obligatorio. Zona: {priceTimeZone}. Fecha de referencia:{" "}
+              {displayInstant(form.now)}.
             </Text>
             <SimpleGrid cols={2} spacing="lg">
               <Select
@@ -107,12 +100,9 @@ export function ScheduleForm({
               />
               <TextInput
                 label="Moneda"
-                required
                 value={form.draft.currency}
-                onChange={(event) =>
-                  change("currency", event.currentTarget.value)
-                }
-                disabled={locked}
+                readOnly
+                description="Moneda de la lectura; no se convierten importes. Su cambio requiere definición del provider."
                 error={form.errors.currency}
               />
               <Select
@@ -147,6 +137,30 @@ export function ScheduleForm({
                 error={form.errors.end}
               />
             </SimpleGrid>
+            {form.draft.start && form.reference.state.status === "loading" && (
+              <Text size="sm" role="status">
+                Consultando precio regular para la vigencia…
+              </Text>
+            )}
+            {form.draft.start && form.reference.state.status === "error" && (
+              <FeedbackAlert
+                semantic="error"
+                title="Vigencia de referencia no disponible"
+              >
+                {form.reference.state.message}
+              </FeedbackAlert>
+            )}
+            {reference && (
+              <Text size="sm">
+                Regular de referencia:{" "}
+                {formatMoney(reference.regular, reference.currency)} ·{" "}
+                {displayInstant(reference.validFrom)} →{" "}
+                {reference.validUntil
+                  ? displayInstant(reference.validUntil)
+                  : "Sin fin"}
+                . La validación definitiva corresponde a Pricing.
+              </Text>
+            )}
             <Textarea
               label="Motivo de la programación"
               required
@@ -172,10 +186,7 @@ export function ScheduleForm({
               </FeedbackAlert>
             )}
             {form.action.result && (
-              <FeedbackAlert
-                semantic="success"
-                title="Precio programado — simulación local"
-              >
+              <FeedbackAlert semantic="success" title="Precio programado">
                 Vigencia pendiente: {displayInstant(form.action.result.start)} →{" "}
                 {form.action.result.end
                   ? displayInstant(form.action.result.end)
@@ -203,7 +214,7 @@ export function ScheduleForm({
       <ConfirmDialog
         opened={form.reviewing && blocker.state !== "blocked"}
         title="Confirmar programación futura"
-        confirmLabel="Confirmar programación local"
+        confirmLabel="Confirmar programación"
         submitting={form.action.busy}
         onCancel={() => form.setReviewing(false)}
         onConfirm={() => void form.create()}
@@ -213,8 +224,8 @@ export function ScheduleForm({
           {form.draft.amount} {form.draft.currency} ·{" "}
           {form.draft.channel === "retail" ? "Retail" : "Global"}. Inicio{" "}
           {form.draft.start}; fin {form.draft.end || "Sin fin"}, {priceTimeZone}
-          . Motivo: {form.draft.reason}. Se simulará una vigencia futura sin
-          modificar el precio actual.
+          . Motivo: {form.draft.reason}. La vigencia futura no reemplaza
+          anticipadamente el precio actual.
         </Text>
       </ConfirmDialog>
     </>
