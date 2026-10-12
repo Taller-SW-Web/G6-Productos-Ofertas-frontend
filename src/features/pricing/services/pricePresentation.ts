@@ -7,3 +7,7 @@ export function priceOriginLabel(price: PriceView) {
       ? "Precio específico del SKU"
       : "Precio del producto";
 }
+export function formatMoney(amount: string, currency: string) {
+  const [integer, decimals = ""] = amount.split(".");
+  return `${currency === "PEN" ? "S/" : currency} ${integer}.${decimals.padEnd(2, "0")}`;
+}

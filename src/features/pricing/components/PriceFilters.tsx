@@ -1,24 +1,24 @@
 import { Button, Select, Text } from "@mantine/core";
 import { IconSearch } from "@tabler/icons-react";
 import { FilterBar } from "../../../components/shared";
-import { priceTargets } from "../mocks/prices";
-import type { PriceQuery } from "../services/pricingRepository";
+import type { PriceQuery, PriceTarget } from "../services/pricingRepository";
 
 export function PriceFilters({
+  targets,
   draft,
   applied,
   onChange,
   onConsult,
 }: {
+  targets: readonly PriceTarget[];
   draft: PriceQuery;
   applied: PriceQuery;
   onChange: (query: PriceQuery) => void;
   onConsult: () => void;
 }) {
   const product =
-    priceTargets.find((target) => target.id === draft.targetId)?.kind ===
-    "product";
-  const appliedName = priceTargets.find(
+    targets.find((target) => target.id === draft.targetId)?.kind === "product";
+  const appliedName = targets.find(
     (target) => target.id === applied.targetId,
   )?.label;
   return (
@@ -29,7 +29,7 @@ export function PriceFilters({
       <Select
         label="Producto o SKU"
         value={draft.targetId}
-        data={priceTargets.map((item) => ({
+        data={targets.map((item) => ({
           value: item.id,
           label: item.label,
         }))}
@@ -37,7 +37,7 @@ export function PriceFilters({
         allowDeselect={false}
         style={{ flex: "1 1 440px" }}
         onChange={(value) => {
-          const target = priceTargets.find((item) => item.id === value);
+          const target = targets.find((item) => item.id === value);
           if (target)
             onChange({
               targetId: target.id,

@@ -16,6 +16,7 @@ import {
 } from "../../../components/shared";
 import { CampaignScope } from "../components/CampaignScope";
 import { EditorMessage } from "../components/EditorMessage";
+import { PromotionDataNotice } from "../components/PromotionDataNotice";
 import {
   channelChoices,
   type CampaignDraft,
@@ -84,10 +85,7 @@ export function CampaignFormPage() {
           { label: initial ? "Editar" : "Crear" },
         ]}
       />
-      <FeedbackAlert semantic="info" title="Datos de demostración">
-        Los cambios se guardan en esta sesión y se reinician al recargar. No se
-        evalúan compras.
-      </FeedbackAlert>
+      <PromotionDataNotice kind="campaign-form" />
       <form
         ref={formRef}
         noValidate

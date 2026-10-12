@@ -18,9 +18,11 @@ export function normalizeCampaignDraft(draft: CampaignDraft): CampaignDraft {
 export function campaignErrors(draft: CampaignDraft) {
   const errors: Record<string, string> = {};
   if (!draft.name.trim()) errors.name = "Ingresa el nombre de la promoción.";
-  if (!draft.mode) errors.mode = "Selecciona una modalidad.";
-  if (!draft.status) errors.status = "Selecciona el estado inicial.";
-  if (!draft.discountType)
+  if (draft.mode !== "automatic" && draft.mode !== "coupon")
+    errors.mode = "Selecciona una modalidad.";
+  if (draft.status !== "active" && draft.status !== "inactive")
+    errors.status = "Selecciona el estado inicial.";
+  if (draft.discountType !== "percentage" && draft.discountType !== "amount")
     errors.discountType = "Selecciona el tipo de beneficio.";
   const amount = draft.benefit.trim().replace(",", ".");
   if (
@@ -46,5 +48,17 @@ export function campaignErrors(draft: CampaignDraft) {
     errors.channels = "Selecciona al menos un canal habilitado.";
   if (!draft.productIds.length && !draft.skus.length)
     errors.scope = "Selecciona al menos un producto completo o SKU activo.";
+  if (
+    !draft.combination ||
+    Object.values(draft.combination).some(
+      (value) => typeof value !== "boolean",
+    ) ||
+    [
+      draft.combination.pricing,
+      draft.combination.automatic,
+      draft.combination.coupon,
+    ].some((value) => typeof value !== "boolean")
+  )
+    errors.combination = "Selecciona una política de combinación válida.";
   return errors;
 }

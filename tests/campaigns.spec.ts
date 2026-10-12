@@ -1,3 +1,4 @@
+import { evidencePath } from "./support/evidence";
 import { expect, test, type Page } from "@playwright/test";
 async function choose(page: Page, label: string, option: string) {
   await page.getByRole("combobox", { name: label, exact: true }).click();
@@ -324,7 +325,7 @@ test("MK-006: desktop evidence for all six views", async ({ page }) => {
       await page.evaluate(() => document.documentElement.scrollWidth <= 1440),
     ).toBe(true);
     await page.screenshot({
-      path: `docs/evidencias/promociones-${file}-1440.png`,
+      path: evidencePath(`promociones-${file}-1440.png`),
       fullPage: file !== "s06",
     });
   }

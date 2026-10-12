@@ -1,15 +1,5 @@
 // Presentation models for administrative reading; these are not HTTP DTOs.
 export type CouponStatus = "active" | "inactive";
-export type CouponScenario =
-  | "default"
-  | "loading"
-  | "empty"
-  | "error"
-  | "session"
-  | "forbidden"
-  | "missing"
-  | "usage-unavailable";
-
 export interface CouponView {
   id: string;
   promotionId: string;
@@ -50,33 +40,19 @@ export class CouponReadError extends Error {
 }
 export interface CouponRepository {
   promotions(signal: AbortSignal): Promise<CouponPromotion[]>;
-  create(
-    values: CouponInput,
-    scenario: CouponMutationScenario,
-    signal: AbortSignal,
-  ): Promise<CouponView>;
+  create(values: CouponInput, signal: AbortSignal): Promise<CouponView>;
   update(
     id: string,
     values: Omit<CouponInput, "status">,
-    scenario: CouponMutationScenario,
     signal: AbortSignal,
   ): Promise<CouponView>;
   changeStatus(
     id: string,
     status: CouponStatus,
-    scenario: CouponMutationScenario,
     signal: AbortSignal,
   ): Promise<CouponView>;
-  list(
-    query: CouponQuery,
-    scenario: CouponScenario,
-    signal: AbortSignal,
-  ): Promise<CouponListResult>;
-  read(
-    id: string,
-    scenario: CouponScenario,
-    signal: AbortSignal,
-  ): Promise<CouponView | null>;
+  list(query: CouponQuery, signal: AbortSignal): Promise<CouponListResult>;
+  read(id: string, signal: AbortSignal): Promise<CouponView | null>;
 }
 
 export interface CouponPromotion {
@@ -95,15 +71,6 @@ export interface CouponInput {
   minimumAmount: string | null;
   cancellationPolicy: "restore" | "keep";
 }
-export type CouponMutationScenario =
-  | "default"
-  | "saving"
-  | "save-error"
-  | "rejected"
-  | "conflict"
-  | "unknown-result"
-  | "session"
-  | "forbidden";
 export type CouponField = keyof CouponInput;
 export type CouponFieldErrors = Partial<Record<CouponField, string>>;
 export class CouponWriteError extends Error {

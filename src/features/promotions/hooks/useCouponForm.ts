@@ -1,12 +1,11 @@
 import { useState } from "react";
-import { couponService } from "../services/couponService";
 import {
   CouponWriteError,
   type CouponField,
   type CouponFieldErrors,
   type CouponInput,
-  type CouponMutationScenario,
   type CouponView,
+  type CouponRepository,
 } from "../services/couponRepository";
 import {
   couponDraftFromRecord,
@@ -19,7 +18,8 @@ import { usePromotionCommand } from "./usePromotionCommand";
 
 export function useCouponForm(
   initial: CouponView | null,
-  scenario: CouponMutationScenario,
+  repository: CouponRepository,
+  confirmedRepository: CouponRepository = repository,
 ) {
   const [original] = useState(() =>
     initial ? couponDraftFromRecord(initial) : { ...emptyCouponDraft },
@@ -61,14 +61,17 @@ export function useCouponForm(
     const result = await command.run(async (signal) => {
       try {
         if (!initial)
-          return await couponService.create(
+          return await repository.create(
             validation.values!,
-            scenario,
             signal,
           );
         const { status, ...values } = validation.values!;
         void status;
-        return await couponService.update(initial.id, values, scenario, signal);
+        return await repository.update(
+          initial.id,
+          values,
+          signal,
+        );
       } catch (cause: unknown) {
         if (cause instanceof CouponWriteError && cause.kind === "validation") {
           setErrors(cause.fields);
@@ -86,11 +89,10 @@ export function useCouponForm(
     try {
       const controller = new AbortController();
       const result = initial
-        ? await couponService.read(initial.id, "default", controller.signal)
+        ? await confirmedRepository.read(initial.id, controller.signal)
         : (
-            await couponService.list(
+            await confirmedRepository.list(
               { status: "all", page: 1, pageSize: 100 },
-              "default",
               controller.signal,
             )
           ).items.find((item) => item.code === proposal.code);

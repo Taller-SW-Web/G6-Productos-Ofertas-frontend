@@ -1,6 +1,7 @@
 import {
   IconCalculator,
   IconCategory,
+  IconUpload,
   IconComponents,
   IconForms,
   IconLayoutList,
@@ -19,6 +20,7 @@ export interface NavigationItem {
   label: string;
   icon: TablerIcon;
   group?: string;
+  matchPaths?: readonly string[];
 }
 export const productNavigation: NavigationItem[] = [
   {
@@ -44,6 +46,13 @@ export const productNavigation: NavigationItem[] = [
     label: "Cupones de descuento",
     icon: IconTicket,
     group: "Promociones",
+  },
+  {
+    to: "/precios/importar",
+    label: "Importar precios",
+    icon: IconUpload,
+    group: "Precios",
+    matchPaths: ["/precios/importaciones"],
   },
 ];
 export const taxonomyNavigation: NavigationItem[] = [

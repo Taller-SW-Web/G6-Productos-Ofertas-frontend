@@ -23,6 +23,11 @@ import {
   CurrentPricePage,
   DeactivateCategoryPage,
   EditCategoryPage,
+  EditPricePage,
+  HistoricalPricePage,
+  ImportPricesPage,
+  PriceImportResultPage,
+  PriceSchedulesPage,
   ProductTypeAssociatePage,
   ProductTypeCreatePage,
   ProductTypeDetailPage,
@@ -37,6 +42,14 @@ import {
 } from "./productPages";
 export const productRoutes: RouteObject[] = [
   { path: "/precios", element: <CurrentPricePage /> },
+  { path: "/precios/editar", element: <EditPricePage /> },
+  { path: "/precios/programaciones", element: <PriceSchedulesPage /> },
+  { path: "/precios/importar", element: <ImportPricesPage /> },
+  {
+    path: "/precios/importaciones/:batchId",
+    element: <PriceImportResultPage />,
+  },
+  { path: "/precios/historico", element: <HistoricalPricePage /> },
   // MK-008-S01: árbol/listado de categorías
   { path: "/categorias", element: <CategoryTreePage /> },
   // MK-008-S02: crear categoría
