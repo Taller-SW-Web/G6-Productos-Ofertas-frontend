@@ -5,6 +5,7 @@ import { tokens } from "../../theme/tokens";
 import brandLogo from "../../assets/brand/INKA_ATHLETICS.svg";
 import { ApplicationNavigation } from "../navigation/ApplicationNavigation";
 import classes from "../app.module.css";
+import { CommercialModeGate } from "../config/CommercialModeGate";
 
 export function ApplicationShell() {
   return (
@@ -43,7 +44,9 @@ export function ApplicationShell() {
             </Text>
           }
         >
-          <Outlet />
+          <CommercialModeGate>
+            <Outlet />
+          </CommercialModeGate>
         </Suspense>
       </AppShell.Main>
     </AppShell>

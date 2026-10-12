@@ -19,31 +19,40 @@ export function ApplicationNavigation() {
   return (
     <Box component="nav" aria-label="Navegación de la aplicación">
       <Stack gap="lg">
-        {[{ label: "Precios", items: productNavigation }].map((group) => (
-          <Box key={group.label}>
-            <Text size="xs" fw={600} c="dimmed" mb="sm">
-              {group.label.toLocaleUpperCase("es")}
-            </Text>
-            <Stack gap="xs">
-              {group.items.map(({ to, label, icon: Icon }) => {
-                const active = activeDestination === to;
-                return (
-                  <NavLink
-                    key={to}
-                    component={Link}
-                    to={to}
-                    active={active}
-                    aria-current={active ? "page" : undefined}
-                    label={label}
-                    leftSection={
-                      <Icon size={20} stroke={2} aria-hidden="true" />
-                    }
-                  />
-                );
-              })}
-            </Stack>
-          </Box>
-        ))}
+        {Array.from(
+          new Set(productNavigation.map((item) => item.group ?? "Navegación")),
+        )
+          .map((label) => ({
+            label,
+            items: productNavigation.filter(
+              (item) => (item.group ?? "Navegación") === label,
+            ),
+          }))
+          .map((group) => (
+            <Box key={group.label}>
+              <Text size="xs" fw={600} c="dimmed" mb="sm">
+                {group.label.toLocaleUpperCase("es")}
+              </Text>
+              <Stack gap="xs">
+                {group.items.map(({ to, label, icon: Icon }) => {
+                  const active = activeDestination === to;
+                  return (
+                    <NavLink
+                      key={to}
+                      component={Link}
+                      to={to}
+                      active={active}
+                      aria-current={active ? "page" : undefined}
+                      label={label}
+                      leftSection={
+                        <Icon size={20} stroke={2} aria-hidden="true" />
+                      }
+                    />
+                  );
+                })}
+              </Stack>
+            </Box>
+          ))}
       </Stack>
     </Box>
   );

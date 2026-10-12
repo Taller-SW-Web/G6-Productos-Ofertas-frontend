@@ -12,29 +12,38 @@ import "./theme/global.css";
 import { App } from "./app/App";
 import { createPricingRuntime } from "./features/pricing/services/pricingService";
 import { PricingProvider } from "./features/pricing/components/PricingProvider";
+import { resolveDataMode } from "./app/config/dataMode";
+import { DataModeContext } from "./app/config/DataModeContext";
 
 const root = createRoot(document.getElementById("root")!);
-void createPricingRuntime(import.meta.env.VITE_DATA_MODE ?? "mock").then(
-  (runtime) =>
-    root.render(
-      <StrictMode>
-        <MantineProvider
-          theme={theme}
-          cssVariablesResolver={cssVariablesResolver}
-          forceColorScheme="light"
-        >
+async function start() {
+  const mode = resolveDataMode(
+    import.meta.env.VITE_DATA_MODE,
+    import.meta.env.DEV,
+  );
+  const runtime = await createPricingRuntime(mode);
+  root.render(
+    <StrictMode>
+      <MantineProvider
+        theme={theme}
+        cssVariablesResolver={cssVariablesResolver}
+        forceColorScheme="light"
+      >
+        <DataModeContext.Provider value={mode}>
           <PricingProvider runtime={runtime}>
             <App />
           </PricingProvider>
-        </MantineProvider>
-      </StrictMode>,
-    ),
-  (error: unknown) =>
-    root.render(
-      <div role="alert">
-        {error instanceof Error
-          ? error.message
-          : "No se pudo iniciar la aplicación."}
-      </div>,
-    ),
+        </DataModeContext.Provider>
+      </MantineProvider>
+    </StrictMode>,
+  );
+}
+void start().catch((error: unknown) =>
+  root.render(
+    <div role="alert">
+      {error instanceof Error
+        ? error.message
+        : "No se pudo iniciar la aplicación."}
+    </div>,
+  ),
 );

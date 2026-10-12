@@ -7,7 +7,10 @@ import {
   PageHeader,
 } from "../../../components/shared";
 import { usePricingContext } from "../hooks/usePricingContext";
-import { usePricingRuntime } from "../services/PricingContext";
+import {
+  usePricingRuntime,
+  useRetryPricingCatalog,
+} from "../services/PricingContext";
 
 export function PricingPageFrame({
   title,
@@ -24,6 +27,7 @@ export function PricingPageFrame({
 }) {
   const context = usePricingContext();
   const runtime = usePricingRuntime();
+  const retryCatalog = useRetryPricingCatalog();
   const Tools = runtime.ReviewTools;
   return (
     <>
@@ -62,7 +66,15 @@ export function PricingPageFrame({
             Cargando productos y SKU…
           </Text>
         ) : requiresTarget && context.catalog.status === "error" ? (
-          <FeedbackAlert semantic="error" title="Selección no disponible">
+          <FeedbackAlert
+            semantic="error"
+            title="Selección no disponible"
+            actions={
+              <Button variant="outline" onClick={retryCatalog}>
+                Volver a cargar productos y SKU
+              </Button>
+            }
+          >
             {context.catalog.message}
           </FeedbackAlert>
         ) : requiresTarget && context.invalid ? (

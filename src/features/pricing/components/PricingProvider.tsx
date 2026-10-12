@@ -1,4 +1,4 @@
-import { useCallback, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { PricingContext } from "../services/PricingContext";
 import type { PricingRuntime } from "../services/pricingRuntime";
 import { usePricingRead } from "../hooks/usePricingRequest";
@@ -10,13 +10,18 @@ export function PricingProvider({
   runtime: PricingRuntime;
   children: ReactNode;
 }) {
+  const [catalogRevision, setCatalogRevision] = useState(0);
+  const retryCatalog = useCallback(
+    () => setCatalogRevision((value) => value + 1),
+    [],
+  );
   const read = useCallback(
     (signal: AbortSignal) => runtime.service.listTargets(signal),
     [runtime],
   );
-  const { state } = usePricingRead("catalog", read);
+  const { state } = usePricingRead(`catalog:${catalogRevision}`, read);
   return (
-    <PricingContext.Provider value={{ runtime, catalog: state }}>
+    <PricingContext.Provider value={{ runtime, catalog: state, retryCatalog }}>
       {children}
     </PricingContext.Provider>
   );

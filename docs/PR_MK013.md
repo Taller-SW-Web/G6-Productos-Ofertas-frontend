@@ -1,17 +1,35 @@
-# feat(frontend): MK-013 — Gestión de precios individuales y masivos
+# PR #21 — MK-013 e integración de master
 
-Refs #15. Destino: `master`. Rama: `vera`. La base de esta corrección es `c3ef0c9a1a4a171e6dc5131f1f4167c9f17c0e11`, que incorpora la entrega inicial de MK-013. Esta descripción se mantiene preparada localmente; no acredita una PR publicada ni revisión aprobada.
+Descripción de la [PR #21 publicada](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/21). Su descripción y checks registran el SHA subido y resultado de Actions de la entrega actual.
 
-S01–S06 ya eran navegables, pero el puerto incluía escenarios artificiales, la UI importaba targets de fixtures y los importes/fechas se mezclaban con etiquetas. Ahora las mismas páginas reciben catálogo y operaciones por un puerto sin escenarios, seleccionado en un único factory e inyectado mediante provider. La prueba independiente utiliza cafetera, otro UUID/SKU, moneda CHF y otro lote sin modificar las páginas.
+Refs #15. Rama `vera` → `master`. PR abierta para última auditoría; no fusionar ni cerrar el issue.
 
-Retail conserva el mismo precio en resumen/desglose. La programación consulta el regular del instante futuro, verifica relación oferta/regular y conserva la asignación por producto/SKU. La superposición se rechaza por objetivo/canal entre regular y oferta conforme a SPEC-013. La moneda queda vinculada a la lectura: no hay conservación automática/conversión ni selector de monedas admitidas inventado.
+Se integra `master@421951b30d506589e43dcc4c07b4194eea2026b8` sobre la entrega auditada de Pricing `00265438fe6b4a3802358574533db4691e79b872`. Se conservan las seis pantallas MK-013 y las 19 de MK-005/006/007 de Cueva, con sus servicios, formularios y selectores.
 
-`VITE_DATA_MODE=mock|api` elige el adapter una vez. API ausente o fallida se presenta como error, sin recurrir a datos ficticios. El reloj de reglas es inyectable y el modo API usa el del sistema. La exposición mock fija explícitamente el **17/10/2026 07:00 America/Bogota** y sus precios son vigentes en ese instante. Importes/códigos/ISO se normalizan; el reporte sale como archivo binario con nombre del adapter y se descarga mediante un puerto de navegador.
+| Archivo compartido | Resolución |
+|---|---|
+| `productRoutes.tsx` | Unión de Pricing y Cupones/Promociones/Recomendaciones; una sola `/precios`; conserva hijos `alcance`/`productos` y layouts con borrador. |
+| `productPages.tsx` | Conserva los 19 exports diferidos: seis de Pricing y trece componentes de los otros módulos. |
+| `navigation.ts` | Grupos de master + cinco destinos, incluida importación con `matchPaths` para resultados. |
+| `ApplicationNavigation.tsx` | Grupos de master + coincidencia del prefijo más específico; una sola entrada activa. |
+| `AppRoutes.tsx` | Un único `createBrowserRouter`, shell común, redirección raíz, rutas anidadas y demos DEV. |
+| `main.tsx` | Mantine/theme/assets + `PricingProvider`, factory único y modo explícito validado. |
+| `README.md` | Inventario de las 25 pantallas, configuración, PR publicada, límites y evidencia actual. |
 
-S04 envía `File + allowPartial` al puerto. El mock normal conserva **BLOCKED_CONTRACT: Q-013-01/02**; las respuestas artificiales están exclusivamente en el decorador de desarrollo. No se define parser/plantilla ni se habilita admisión. La política de cambio de moneda tampoco está publicada y queda explícita. No hay backend, HTTP, autenticación ni persistencia comercial verificados; **MOCK_REPLACEABLE no equivale a API_INTEGRATED ni cierra el issue**.
+N03: producción exige `VITE_DATA_MODE=mock|api`; un valor ausente/inválido detiene el build. Solo desarrollo tiene default mock. En `api`, Pricing sin provider falla explícitamente; los tres módulos que todavía solo tienen mocks quedan deshabilitados antes de cargar sus páginas/adapters. La demo explícita mantiene sus funcionalidades. Actions configura `mock` explícitamente.
 
-En esta auditoría no cambian `AppRoutes`, `productRoutes`, `productPages` ni navegación. Se añade el provider en `main.tsx`. Los cambios de router/navegación de la entrega inicial siguen siendo parte del diff de la PR frente a master; se solicita revisar su integración con MK-001 y futuras rutas de otros owners, sin eliminar registros ajenos.
+N05: el error de catálogo ofrece **Volver a cargar productos y SKU**; repite la lectura con el mismo runtime, conserva URL/aplicación y cancela solicitudes anteriores. La prueba verifica dos lecturas y el mismo `performance.timeOrigin`.
 
-Fuentes: Docs `master@be5c2db16aca6d6d18b3005a2da4205f724038e3`, DESIGN 1.1.0 y UX 2.0. MK-013 sigue En revisión, sin validation-report oficial. [AUDITORIA_MK013.md](AUDITORIA_MK013.md) contiene la matriz H01–H16, archivos, bloqueos, comandos, prueba del segundo adapter y capturas. [VALIDACION_MK013.md](VALIDACION_MK013.md) conserva el registro inicial.
+H01–H16 siguen cubiertos: coherencia Retail/resumen/desglose, referencia regular al programar oferta, moneda vinculada a la lectura, ámbito producto/SKU y superposiciones, catálogo por puerto, archivo/política por puerto, selección de adapter sin fallback, reloj inyectado, descarga abstraída, controles demo aislados y modelos normalizados. Fixtures de exposición explícitos para el 17 de octubre.
 
-Validación local: typecheck/build/lint PASS; suite completa **48 PASS** (34 previas + 14 nuevas), 1.2 min. Tras el último ajuste de resolución heredada, **14 pruebas de auditoría PASS** (9.8 s) y checks técnicos repetidos. Capturas Chromium 1440×900 de las seis vistas y cuatro casos del segundo adapter, con inspección de ausencia de overflow. El informe conserva los límites y la secuencia de validación. Revisión técnica/funcional y UX independiente pendiente; no atribuir CI remoto o integración real a las pruebas locales.
+**MOCK_REPLACEABLE de Pricing continúa comprobado** con `AlternatePricingRepository`: cafetera, UUID y SKU distintos, CHF y lote independiente; usa el mismo App/páginas y no carga fixtures originales. No se atribuye este criterio a los adapters de Cueva.
+
+**BLOCKED_CONTRACT: Q-013-01/02**. S04 no inventa parser, plantilla, endpoint o admisión; confirmación deshabilitada. También pendientes política de conversión de moneda, D-REC-01/02, providers administrativos/auth/grants y aprobación funcional/UX. Estado **MOCK_INTEGRATED / MOCK_ONLY**, sin API real ni persistencia comercial.
+
+Validación local tras integrar: `npm ci`, `npm run typecheck`, `npm run lint`, `npm run build` con `VITE_DATA_MODE=mock`, `npm test` y `git diff --check` PASS. Suite completa **85 PASS** (48 anteriores de Foundation/Pricing + 29 de Cueva + 8 de integración), Chromium 1440×900, 3.3 min. Build con `api` PASS; sin configuración falla intencionalmente. `node scripts/verify-production.mjs api` y `mock` PASS sobre `npm run preview`: cuatro rutas por modo, cero errores y ninguna carga de mocks en API.
+
+Capturas renovadas de las 25 pantallas en [docs/evidencias](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/tree/vera/docs/evidencias), sin overflow horizontal; inspección visual de los cuatro conjuntos. Suite incluye acceso directo, sidebar, navegación Atrás/Adelante, borradores y retorno desde selectores/formularios.
+
+Fuentes: Docs `master@be5c2db16aca6d6d18b3005a2da4205f724038e3`, DESIGN 1.1.0, UX 2.0; fuentes de MK-013 y entregas MK-005/006/007 registradas. Docs y Backend no modificados.
+
+Detalle y comandos en [INTEGRACION_VERA_MASTER.md](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/blob/vera/docs/INTEGRACION_VERA_MASTER.md); matriz histórica H01–H16 en [AUDITORIA_MK013.md](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/blob/vera/docs/AUDITORIA_MK013.md). El resultado remoto del nuevo commit se registra en la descripción/checks de esta PR antes de solicitar revisión.

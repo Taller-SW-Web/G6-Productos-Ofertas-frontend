@@ -34,6 +34,7 @@ export interface AdapterAudit {
   calls: AdapterCall[];
   failRead: boolean;
   failReport: boolean;
+  failCatalog: boolean;
 }
 export const alternateIds = {
   product: "catalog-coffee-908",
@@ -46,6 +47,7 @@ export class AlternatePricingRepository implements PricingRepository {
     calls: [],
     failRead: false,
     failReport: false,
+    failCatalog: false,
   };
   private readonly targets: PriceTarget[] = [
     {
@@ -114,6 +116,8 @@ export class AlternatePricingRepository implements PricingRepository {
   async listTargets(signal: AbortSignal) {
     signal.throwIfAborted();
     this.audit.calls.push({ operation: "listTargets" });
+    if (this.audit.failCatalog)
+      throw new Error("Catálogo alternativo no disponible.");
     return structuredClone(this.targets);
   }
   async read(query: PriceQuery, signal: AbortSignal) {

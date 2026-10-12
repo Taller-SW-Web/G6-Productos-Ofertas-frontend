@@ -10,6 +10,7 @@ import "../../src/theme/global.css";
 import { theme, cssVariablesResolver } from "../../src/theme/theme";
 import { PricingProvider } from "../../src/features/pricing/components/PricingProvider";
 import { createPricingRuntime } from "../../src/features/pricing/services/pricingService";
+import { DataModeContext } from "../../src/app/config/DataModeContext";
 import {
   AlternatePricingRepository,
   type AdapterAudit,
@@ -24,6 +25,7 @@ const params = new URLSearchParams(window.location.search);
 const clock = { now: () => "2026-10-17T12:00:00Z" };
 const repository = new AlternatePricingRepository(clock);
 window.pricingAudit = repository.audit;
+repository.audit.failCatalog = params.get("fail-catalog") === "1";
 const runtime = await createPricingRuntime("api", {
   api: params.get("missing") === "1" ? undefined : async () => repository,
   clock,
@@ -43,8 +45,10 @@ createRoot(document.getElementById("root")!).render(
     cssVariablesResolver={cssVariablesResolver}
     forceColorScheme="light"
   >
-    <PricingProvider runtime={runtime}>
-      <App />
-    </PricingProvider>
+    <DataModeContext.Provider value="api">
+      <PricingProvider runtime={runtime}>
+        <App />
+      </PricingProvider>
+    </DataModeContext.Provider>
   </MantineProvider>,
 );

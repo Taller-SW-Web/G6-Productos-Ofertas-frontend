@@ -16,7 +16,7 @@ export interface PricingRuntimeDependencies {
 }
 // The only environment selection point. Errors from API propagate; there is no catch-to-mock.
 export async function createPricingRuntime(
-  mode: string = "mock",
+  mode: string,
   dependencies: PricingRuntimeDependencies = {},
 ): Promise<PricingRuntime> {
   const downloader = dependencies.downloader ?? browserReportDownloader;

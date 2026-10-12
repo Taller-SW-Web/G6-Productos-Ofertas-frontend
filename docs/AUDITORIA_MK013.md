@@ -1,5 +1,7 @@
 # Auditoría MK-013 — H01–H16 / MOCK_REPLACEABLE
 
+Este informe conserva la ejecución histórica anterior al commit `0026543`. La entrega actual está publicada en [PR #21](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/21). La integración posterior con `master`, N03–N05 y la suite completa de los cuatro módulos se registran en [INTEGRACION_VERA_MASTER.md](INTEGRACION_VERA_MASTER.md); las menciones históricas a cambios locales/no push no describen el estado de esa PR.
+
 Fecha de ejecución: **2026-10-11**, America/Bogota. Rama comprobada: **vera**. Base limpia: **c3ef0c9a1a4a171e6dc5131f1f4167c9f17c0e11**. Los cambios de auditoría permanecen locales sobre ese commit. El fetch confirmó `origin/master@dd8ac2bf41151efa3848c93a87eae83ff6c34a0c`; no se hizo merge de ramas de otros owners ni push.
 
 **Resultado:** criterio local **MOCK_REPLACEABLE comprobado**; entrega **MOCK_INTEGRATED / MOCK_ONLY**. No se acredita API_INTEGRATED, aprobación UX humana, merge, despliegue o cierre del issue #15. S04 permanece PARCIAL / BLOCKED_CONTRACT por Q-013-01/02. El cambio de moneda exige política del provider y está bloqueado en el formulario.
