@@ -310,7 +310,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
                 actions={
                   <Button
                     component={Link}
-                    to="/MK-004"
+                    to={`/productos/${p.id}/variantes`}
                     size="xs"
                     variant="outline"
                     rightSection={<IconExternalLink size={14} />}
@@ -344,7 +344,16 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
                         {p.variants.map((v) => (
                           <Table.Tr key={v.variantId}>
                             <Table.Td ff="monospace" fw={600}>
-                              <Text size="xs">{v.sku}</Text>
+                              <Button
+                                component={Link}
+                                to={`/productos/${p.id}/variantes/${v.variantId}`}
+                                variant="subtle"
+                                size="xs"
+                                p={0}
+                                ff="monospace"
+                              >
+                                {v.sku}
+                              </Button>
                             </Table.Td>
                             <Table.Td>
                               <Text size="xs">{v.attributesSummary}</Text>

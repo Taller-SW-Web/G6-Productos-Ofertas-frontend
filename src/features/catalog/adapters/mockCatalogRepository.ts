@@ -8,13 +8,21 @@ import type {
   ProductUpdatePayload,
   RetryPreparationPayload,
   StateMutationPayload,
+  VariantCreatePayload,
+  VariantDetailView,
+  VariantMutationResult,
+  VariantPageResult,
+  VariantQuery,
+  VariantUpdatePayload,
+  ProductAttributeValue,
 } from "../services/catalogRepository";
 import { CatalogError } from "../services/catalogRepository";
-import { initialProducts } from "../mocks/catalogFixtures";
+import { initialProducts, initialVariants } from "../mocks/catalogFixtures";
 import { initialCategories, initialBrands, initialProductTypes, attributeSchemasByType } from "../mocks/taxonomyFixtures";
 
 export class MockCatalogRepository implements CatalogRepository {
   private products: ProductDetailView[] = [];
+  private variants: VariantDetailView[] = [];
 
   constructor() {
     this.reset();
@@ -22,6 +30,7 @@ export class MockCatalogRepository implements CatalogRepository {
 
   reset() {
     this.products = JSON.parse(JSON.stringify(initialProducts));
+    this.variants = JSON.parse(JSON.stringify(initialVariants));
   }
 
   async list(
@@ -588,6 +597,621 @@ export class MockCatalogRepository implements CatalogRepository {
     return {
       accepted: true,
       message: "HTTP 202: Reintento admitido. Nuevo ciclo de preparación en curso.",
+    };
+  }
+
+  // ==========================================
+  // MK-004: Variant Operations
+  // ==========================================
+
+  async listVariants(
+    productId: string,
+    query?: VariantQuery,
+    scenario?: string,
+    signal?: AbortSignal,
+  ): Promise<VariantPageResult> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
+    if (scenario === "list-loading" || scenario === "loading") {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    }
+    if (scenario === "list-error" || scenario === "error") {
+      throw new CatalogError(
+        "unknown",
+        "Error al consultar las variantes del producto. Los filtros se conservan.",
+      );
+    }
+
+    const parent = this.products.find((p) => p.id === productId);
+    if (!parent) {
+      throw new CatalogError("not_found", "Producto padre no encontrado.");
+    }
+    if (!parent.hasVariants || scenario === "parent-simple") {
+      throw new CatalogError(
+        "product_not_variants",
+        "El producto simple no admite variantes.",
+      );
+    }
+
+    if (scenario === "list-empty" || scenario === "empty") {
+      return { items: [], total: 0, page: 1, pageSize: query?.pageSize || 10 };
+    }
+    if (scenario === "list-no-results") {
+      return { items: [], total: 0, page: query?.page || 1, pageSize: query?.pageSize || 10 };
+    }
+
+    let items = this.variants.filter((v) => v.productId === productId);
+
+    if (query?.status && query.status !== "all") {
+      items = items.filter((v) => v.status === query.status);
+    }
+
+    const total = items.length;
+    const page = Math.max(1, query?.page || 1);
+    const pageSize = Math.max(1, query?.pageSize || 10);
+    const start = (page - 1) * pageSize;
+    const paginated = items.slice(start, start + pageSize);
+
+    return {
+      items: JSON.parse(JSON.stringify(paginated)),
+      total,
+      page,
+      pageSize,
+    };
+  }
+
+  async getVariantById(
+    productId: string,
+    variantId: string,
+    scenario?: string,
+    signal?: AbortSignal,
+  ): Promise<VariantDetailView | null> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
+    if (scenario === "loading") {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    }
+    if (scenario === "error") {
+      throw new CatalogError("unknown", "Error al consultar la variante.");
+    }
+    if (scenario === "variant-not-found" || scenario === "missing") {
+      return null;
+    }
+
+    const found = this.variants.find(
+      (v) => v.variantId === variantId && v.productId === productId,
+    );
+    if (!found) return null;
+
+    const cloned: VariantDetailView = JSON.parse(JSON.stringify(found));
+
+    // Review scenario overrides
+    if (scenario === "prep-pending") {
+      cloned.inventoryPreparationStatus = "PENDING";
+      cloned.inventoryManualRetryAllowed = false;
+    } else if (scenario === "prep-rejected") {
+      cloned.inventoryPreparationStatus = "REJECTED";
+      cloned.inventoryPreparationCode = "INV_SKU_INITIALIZATION_FAILED";
+      cloned.inventoryManualRetryAllowed = true;
+    } else if (scenario === "prep-completed") {
+      cloned.inventoryPreparationStatus = "COMPLETED";
+      cloned.inventoryManualRetryAllowed = false;
+    } else if (scenario === "activate-missing-physical") {
+      cloned.status = "BORRADOR";
+      cloned.physicalProfile = { pesoKg: 0.25, dimensionesCm: null };
+    } else if (scenario === "activate-success") {
+      cloned.status = "BORRADOR";
+      cloned.inventoryPreparationStatus = "COMPLETED";
+      cloned.physicalProfile = {
+        pesoKg: 0.85,
+        dimensionesCm: { largo: 32, ancho: 22, alto: 12 },
+      };
+    } else if (scenario === "reactivate-valid") {
+      cloned.status = "INACTIVA";
+      cloned.inventoryPreparationStatus = "COMPLETED";
+      cloned.physicalProfile = {
+        pesoKg: 0.82,
+        dimensionesCm: { largo: 31, ancho: 21, alto: 12 },
+      };
+    } else if (scenario === "reactivate-invalid") {
+      cloned.status = "INACTIVA";
+      cloned.physicalProfile = null;
+    }
+
+    return cloned;
+  }
+
+  async createVariant(
+    productId: string,
+    payload: VariantCreatePayload,
+    scenario?: string,
+    signal?: AbortSignal,
+  ): Promise<VariantDetailView> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
+    const parent = this.products.find((p) => p.id === productId);
+    if (!parent) {
+      throw new CatalogError("not_found", "Producto padre no encontrado.");
+    }
+    if (!parent.hasVariants || scenario === "parent-simple") {
+      throw new CatalogError(
+        "product_not_variants",
+        "Solo productos con variantes permiten crearlas (CA-01).",
+      );
+    }
+
+    // Scenarios
+    if (scenario === "create-duplicate-sku") {
+      throw new CatalogError(
+        "duplicate_sku",
+        `El SKU "${payload.sku}" ya está registrado en el catálogo.`,
+        { sku: "SKU duplicado" },
+      );
+    }
+    if (scenario === "create-duplicate-combination") {
+      throw new CatalogError(
+        "duplicate_combination",
+        "La combinación de atributos identificadores ya existe dentro de este producto (CA-03).",
+      );
+    }
+    if (scenario === "create-invalid-attribute") {
+      throw new CatalogError(
+        "invalid_attribute",
+        "Se requiere al menos un atributo identificador válido.",
+      );
+    }
+    if (scenario === "create-invalid-image") {
+      throw new CatalogError(
+        "invalid_image",
+        "La URL de imagen es obligatoria y debe tener formato válido.",
+      );
+    }
+    if (scenario === "create-invalid-physical") {
+      throw new CatalogError(
+        "invalid_physical",
+        "Las medidas y peso físico deben ser mayores que cero.",
+      );
+    }
+    if (scenario === "write-unknown") {
+      throw new CatalogError(
+        "unknown",
+        "No se recibió confirmación del servidor al guardar la variante.",
+      );
+    }
+
+    // Validations
+    const idAttrs = payload.atributosIdentificadores || payload.identifyingAttributes || [];
+    if (idAttrs.length === 0) {
+      throw new CatalogError(
+        "invalid_attribute",
+        "Debes seleccionar al menos un atributo identificador (CA-03).",
+      );
+    }
+
+    const imgUrl = (payload.imagenUrl || payload.imageUrl || "").trim();
+    if (imgUrl) {
+      try {
+        const u = new URL(imgUrl);
+        if (!["http:", "https:"].includes(u.protocol)) {
+          throw new Error();
+        }
+      } catch {
+        throw new CatalogError("invalid_image", "La URL de la imagen no es válida.");
+      }
+    }
+
+    // Physical profile validation: in draft, if supplied, values must be > 0
+    const pf = payload.perfilFisico || payload.physicalProfile;
+    if (pf) {
+      if (pf.pesoKg !== undefined && pf.pesoKg <= 0) {
+        throw new CatalogError("invalid_physical", "El peso debe ser mayor que cero.");
+      }
+      const largo = pf.largoCm ?? pf.dimensionesCm?.largo;
+      const ancho = pf.anchoCm ?? pf.dimensionesCm?.ancho;
+      const alto = pf.altoCm ?? pf.dimensionesCm?.alto;
+      if (
+        (largo !== undefined && largo <= 0) ||
+        (ancho !== undefined && ancho <= 0) ||
+        (alto !== undefined && alto <= 0)
+      ) {
+        throw new CatalogError(
+          "invalid_physical",
+          "Las dimensiones físicas suministradas deben ser mayores que cero.",
+        );
+      }
+    }
+
+    // SKU determination (optional on create, generated by catalog if omitted)
+    let assignedSku = payload.sku?.trim().toUpperCase();
+    if (!assignedSku) {
+      const seq = this.variants.filter((v) => v.productId === productId).length + 1;
+      assignedSku = `${parent.skuBase}-V${seq}`;
+    }
+
+    // SKU global uniqueness check (CA-02)
+    const existsSku = this.variants.some((v) => v.sku.toUpperCase() === assignedSku);
+    if (existsSku) {
+      throw new CatalogError(
+        "duplicate_sku",
+        `El SKU "${assignedSku}" ya existe en el catálogo (CA-02).`,
+      );
+    }
+
+    // Identifying combination uniqueness check within product (CA-03)
+    const getCombinationKey = (attrs: ProductAttributeValue[]) =>
+      attrs
+        .map((a) => `${a.caracteristicaId || a.nombre}:${String(a.valor).trim().toUpperCase()}`)
+        .sort()
+        .join("|");
+
+    const newCombKey = getCombinationKey(idAttrs);
+    const existingVariantsForProduct = this.variants.filter(
+      (v) => v.productId === productId,
+    );
+    const hasDuplicateComb = existingVariantsForProduct.some(
+      (v) => getCombinationKey(v.identifyingAttributes) === newCombKey,
+    );
+    if (hasDuplicateComb) {
+      throw new CatalogError(
+        "duplicate_combination",
+        "Ya existe una variante con la misma combinación identificadora en este producto (CA-03).",
+      );
+    }
+
+    const newVariantId = `VAR-${Date.now().toString().slice(-4)}`;
+    const nonIdAttrs = payload.atributosNoIdentificadores || payload.nonIdentifyingAttributes || [];
+    const physProf = payload.perfilFisico || payload.physicalProfile || null;
+
+    const newVariant: VariantDetailView = {
+      variantId: newVariantId,
+      sku: assignedSku,
+      productId,
+      status: "BORRADOR",
+      identifyingAttributes: idAttrs,
+      nonIdentifyingAttributes: nonIdAttrs,
+      images: imgUrl ? [imgUrl] : [],
+      imageUrl: imgUrl,
+      physicalProfile: physProf,
+      catalogVersion: 1,
+      inventoryPreparationStatus: "PENDING",
+      inventoryPreparationCode: null,
+      inventoryManualRetryAllowed: false,
+      inventoryStatus: "PENDING",
+    };
+
+    this.variants.push(newVariant);
+
+    // Synchronize parent product's variants and preparation summary
+    parent.variants.push({
+      variantId: newVariantId,
+      sku: assignedSku,
+      attributesSummary: idAttrs
+        .map((a) => `${a.nombre}: ${a.valor}`)
+        .join(" · "),
+      status: "BORRADOR",
+      preparationStatus: "PENDING",
+      manualRetryAllowed: false,
+    });
+
+    parent.preparation.variantes.push({
+      variantId: newVariantId,
+      sku: assignedSku,
+      inventario: {
+        status: "PENDING",
+        manualRetryAllowed: false,
+        code: null,
+      },
+    });
+
+    return JSON.parse(JSON.stringify(newVariant));
+  }
+
+  async updateVariant(
+    productId: string,
+    variantId: string,
+    payload: VariantUpdatePayload,
+    scenario?: string,
+    signal?: AbortSignal,
+  ): Promise<VariantDetailView> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
+    if (scenario === "edit-version-conflict") {
+      throw new CatalogError(
+        "version_conflict",
+        "Conflicto de versión (409): Otro gestor modificó esta variante.",
+      );
+    }
+    if (scenario === "edit-active-rejected") {
+      throw new CatalogError(
+        "active_rejected",
+        "La edición fue rechazada: una variante activa no puede perder sus requisitos de publicación.",
+      );
+    }
+    if (scenario === "write-unknown") {
+      throw new CatalogError(
+        "unknown",
+        "No se recibió confirmación concluyente del servidor al guardar la edición.",
+      );
+    }
+
+    const idx = this.variants.findIndex(
+      (v) => v.variantId === variantId && v.productId === productId,
+    );
+    if (idx === -1) {
+      throw new CatalogError("not_found", "Variante no encontrada.");
+    }
+
+    const current = this.variants[idx];
+    if (!current) throw new CatalogError("not_found", "Variante no encontrada.");
+
+    // Version conflict validation
+    if (
+      payload.catalogVersion !== undefined &&
+      payload.catalogVersion !== current.catalogVersion
+    ) {
+      throw new CatalogError(
+        "version_conflict",
+        `Conflicto de versión (409): versión actual ${current.catalogVersion}, recibida ${payload.catalogVersion}.`,
+      );
+    }
+
+    // If variant is ACTIVA, validate that edition doesn't break activation prerequisites (CA-11)
+    if (current.status === "ACTIVA") {
+      const activeImg = payload.imagenUrl || payload.imageUrl || current.imageUrl;
+      if (!activeImg?.trim()) {
+        throw new CatalogError(
+          "active_rejected",
+          "Una variante activa no puede quedar sin imagen de publicación (CA-11).",
+        );
+      }
+      const pf = payload.perfilFisico || payload.physicalProfile || current.physicalProfile;
+      const largo = pf?.largoCm ?? pf?.dimensionesCm?.largo;
+      const ancho = pf?.anchoCm ?? pf?.dimensionesCm?.ancho;
+      const alto = pf?.altoCm ?? pf?.dimensionesCm?.alto;
+      if (
+        !pf ||
+        !pf.pesoKg ||
+        pf.pesoKg <= 0 ||
+        !largo ||
+        largo <= 0 ||
+        !ancho ||
+        ancho <= 0 ||
+        !alto ||
+        alto <= 0
+      ) {
+        throw new CatalogError(
+          "active_rejected",
+          "Una variante activa exige las 4 medidas físicas completas (peso, largo, ancho y alto) mayores a cero (CA-11).",
+        );
+      }
+    }
+
+    // Retain immutable identity: variantId, sku, identifyingAttributes are immutable
+    current.nonIdentifyingAttributes =
+      payload.atributosNoIdentificadores || payload.nonIdentifyingAttributes || [];
+    const newImg = (payload.imagenUrl || payload.imageUrl || current.imageUrl).trim();
+    current.imageUrl = newImg;
+    current.images = newImg ? [newImg] : [];
+    if (payload.perfilFisico !== undefined || payload.physicalProfile !== undefined) {
+      current.physicalProfile = payload.perfilFisico ?? payload.physicalProfile ?? null;
+    }
+    current.catalogVersion += (payload.catalogVersion ? 1 : 1);
+
+    return JSON.parse(JSON.stringify(current));
+  }
+
+  async activateVariant(
+    productId: string,
+    variantId: string,
+    scenario?: string,
+    signal?: AbortSignal,
+  ): Promise<VariantMutationResult> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
+    if (scenario === "activate-missing-physical") {
+      throw new CatalogError(
+        "activation_rejected",
+        "La activación exige medidas físicas completas en kg/cm con valores mayores que cero (CA-07, CA-09).",
+      );
+    }
+
+    const variant = this.variants.find(
+      (v) => v.variantId === variantId && v.productId === productId,
+    );
+    if (!variant) throw new CatalogError("not_found", "Variante no encontrada.");
+
+    const parent = this.products.find((p) => p.id === productId);
+    if (!parent) throw new CatalogError("not_found", "Producto padre no encontrado.");
+
+    // Validate activation conditions (CA-07)
+    if (!variant.imageUrl?.trim()) {
+      throw new CatalogError("activation_rejected", "Se requiere una imagen válida.");
+    }
+    const pf = variant.physicalProfile;
+    if (
+      !pf ||
+      !pf.pesoKg ||
+      pf.pesoKg <= 0 ||
+      !pf.dimensionesCm?.largo ||
+      pf.dimensionesCm.largo <= 0 ||
+      !pf.dimensionesCm?.ancho ||
+      pf.dimensionesCm.ancho <= 0 ||
+      !pf.dimensionesCm?.alto ||
+      pf.dimensionesCm.alto <= 0
+    ) {
+      throw new CatalogError(
+        "activation_rejected",
+        "Activar exige las cuatro medidas físicas completas mayores a cero (CA-07).",
+      );
+    }
+
+    if (variant.inventoryPreparationStatus !== "COMPLETED") {
+      throw new CatalogError(
+        "activation_rejected",
+        "Activar exige Inventario confirmado (COMPLETED). La inicialización aún no ha finalizado (CA-07).",
+      );
+    }
+
+    variant.status = "ACTIVA";
+
+    // Synchronize parent variant summary
+    const parentVar = parent.variants.find((v) => v.variantId === variantId);
+    if (parentVar) parentVar.status = "ACTIVA";
+
+    return {
+      variant: JSON.parse(JSON.stringify(variant)),
+      parentStatusChanged: false,
+    };
+  }
+
+  async deactivateVariant(
+    productId: string,
+    variantId: string,
+    scenario?: string,
+    signal?: AbortSignal,
+  ): Promise<VariantMutationResult> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
+    const variant = this.variants.find(
+      (v) => v.variantId === variantId && v.productId === productId,
+    );
+    if (!variant) throw new CatalogError("not_found", "Variante no encontrada.");
+
+    const parent = this.products.find((p) => p.id === productId);
+    if (!parent) throw new CatalogError("not_found", "Producto padre no encontrado.");
+
+    variant.status = "INACTIVA";
+
+    // Synchronize parent variant summary
+    const parentVar = parent.variants.find((v) => v.variantId === variantId);
+    if (parentVar) parentVar.status = "INACTIVA";
+
+    // CA-12 / FLOW-004 §4.4:
+    // "Si era la última variante activa y el padre estaba activo, se inactiva al padre;
+    // si estaba en borrador o inactivo, conserva su estado."
+    let parentStatusChanged = false;
+    let parentNewStatus: typeof parent.status | undefined;
+
+    const remainingActiveVariants = this.variants.filter(
+      (v) => v.productId === productId && v.variantId !== variantId && v.status === "ACTIVA",
+    );
+
+    if (remainingActiveVariants.length === 0 || scenario === "deactivate-last-active-parent") {
+      if (parent.status === "ACTIVO" || scenario === "deactivate-last-active-parent") {
+        parent.status = "INACTIVO";
+        parentStatusChanged = true;
+        parentNewStatus = "INACTIVO";
+      }
+    }
+
+    return {
+      variant: JSON.parse(JSON.stringify(variant)),
+      parentStatusChanged,
+      parentNewStatus,
+    };
+  }
+
+  async reactivateVariant(
+    productId: string,
+    variantId: string,
+    scenario?: string,
+    signal?: AbortSignal,
+  ): Promise<VariantMutationResult> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
+    if (scenario === "reactivate-invalid") {
+      throw new CatalogError(
+        "activation_rejected",
+        "Faltan requisitos: la reactivación exige medidas físicas completas e inventario COMPLETED (CA-13).",
+      );
+    }
+
+    const variant = this.variants.find(
+      (v) => v.variantId === variantId && v.productId === productId,
+    );
+    if (!variant) throw new CatalogError("not_found", "Variante no encontrada.");
+
+    const parent = this.products.find((p) => p.id === productId);
+    if (!parent) throw new CatalogError("not_found", "Producto padre no encontrado.");
+
+    // Revalidate conditions (CA-13)
+    const pf = variant.physicalProfile;
+    if (
+      !pf ||
+      !pf.pesoKg ||
+      pf.pesoKg <= 0 ||
+      !pf.dimensionesCm?.largo ||
+      pf.dimensionesCm.largo <= 0 ||
+      !pf.dimensionesCm?.ancho ||
+      pf.dimensionesCm.ancho <= 0 ||
+      !pf.dimensionesCm?.alto ||
+      pf.dimensionesCm.alto <= 0
+    ) {
+      throw new CatalogError(
+        "activation_rejected",
+        "Reactivar exige las cuatro medidas físicas completas (peso, largo, ancho, alto) mayores que cero (CA-13).",
+      );
+    }
+
+    if (variant.inventoryPreparationStatus !== "COMPLETED") {
+      throw new CatalogError(
+        "activation_rejected",
+        "Reactivar exige Inventario confirmado como COMPLETED (CA-13).",
+      );
+    }
+
+    variant.status = "ACTIVA";
+
+    // Synchronize parent variant summary
+    const parentVar = parent.variants.find((v) => v.variantId === variantId);
+    if (parentVar) parentVar.status = "ACTIVA";
+
+    // CA-14: Reactivar la variante NO reactiva automáticamente al padre.
+    return {
+      variant: JSON.parse(JSON.stringify(variant)),
+      parentStatusChanged: false,
+    };
+  }
+
+  async retryVariantPreparation(
+    productId: string,
+    variantId: string,
+    scenario?: string,
+    signal?: AbortSignal,
+  ): Promise<{ accepted: boolean; message: string; operationId?: string }> {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
+    const variant = this.variants.find(
+      (v) => v.variantId === variantId && v.productId === productId,
+    );
+    if (!variant) throw new CatalogError("not_found", "Variante no encontrada.");
+
+    if (variant.inventoryPreparationStatus === "COMPLETED") {
+      throw new CatalogError(
+        "prep_not_retryable",
+        "HTTP 409: La inicialización de inventario ya se encuentra COMPLETED y es terminal (CA-21).",
+      );
+    }
+
+    if (scenario === "prep-not-retryable" || !variant.inventoryManualRetryAllowed) {
+      throw new CatalogError(
+        "prep_not_retryable",
+        "HTTP 409 PREPARACION_NO_REINTENTABLE: la acción no es admisible en el estado actual.",
+      );
+    }
+
+    variant.inventoryPreparationStatus = "PENDING";
+    variant.inventoryManualRetryAllowed = false;
+
+    // Simulate completion in session
+    setTimeout(() => {
+      variant.inventoryPreparationStatus = "COMPLETED";
+    }, 500);
+
+    return {
+      accepted: true,
+      message: "HTTP 202 Accepted: Reintento de inventario admitido en Catálogo (CA-19).",
+      operationId: `OP-INV-${variant.variantId}`,
     };
   }
 }

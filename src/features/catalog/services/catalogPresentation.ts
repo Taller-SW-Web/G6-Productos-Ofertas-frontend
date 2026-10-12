@@ -1,4 +1,9 @@
-import type { ProductStatus, PreparationStatus } from "./catalogRepository";
+import type {
+  ProductStatus,
+  VariantStatus,
+  PreparationStatus,
+  ProductAttributeValue,
+} from "./catalogRepository";
 
 export function readCatalogScenario(params: URLSearchParams): string | undefined {
   const mode = params.get("modoRevision");
@@ -28,6 +33,17 @@ export function productStatusLabel(status: ProductStatus): string {
   }
 }
 
+export function variantStatusLabel(status: VariantStatus): string {
+  switch (status) {
+    case "ACTIVA":
+      return "Activa";
+    case "BORRADOR":
+      return "Borrador";
+    case "INACTIVA":
+      return "Inactiva";
+  }
+}
+
 export function preparationStatusLabel(status: PreparationStatus): string {
   switch (status) {
     case "COMPLETED":
@@ -48,4 +64,11 @@ export function calculateVolumeCm3(
     return null;
   }
   return largo * ancho * alto;
+}
+
+export function formatIdentifyingAttributes(
+  attrs: ProductAttributeValue[],
+): string {
+  if (!attrs || attrs.length === 0) return "Sin atributos";
+  return attrs.map((a) => String(a.valor)).join(" / ");
 }

@@ -131,7 +131,7 @@ for (const module of modules) {
       const navigation = page.getByRole("navigation", {
         name: "Navegación de la aplicación",
       });
-      await expect(navigation.getByRole("link")).toHaveCount(5);
+      await expect(navigation.getByRole("link")).toHaveCount(6);
       await expect(
         navigation.getByText("PROMOCIONES", { exact: true }),
       ).toBeVisible();

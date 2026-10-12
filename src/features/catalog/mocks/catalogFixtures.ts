@@ -491,3 +491,246 @@ export const initialProducts: ProductDetailView[] = [
     ],
   },
 ];
+
+import type { VariantDetailView } from "../services/catalogRepository";
+
+export const initialVariants: VariantDetailView[] = [
+  {
+    variantId: "VAR-OXF-BLA-M",
+    sku: "CAM-OXF-BLA-M",
+    productId: "PROD-OXF-001",
+    status: "ACTIVA",
+    identifyingAttributes: [
+      {
+        caracteristicaId: "CAR-COLOR",
+        nombre: "Color principal",
+        tipo: "TEXTO",
+        valor: "Blanco",
+      },
+      {
+        caracteristicaId: "CAR-TALLA",
+        nombre: "Talla",
+        tipo: "TEXTO",
+        valor: "M",
+      },
+    ],
+    nonIdentifyingAttributes: [
+      {
+        caracteristicaId: "CAR-MAT",
+        nombre: "Material de confección",
+        tipo: "TEXTO",
+        valor: "100% Algodón Pima",
+      },
+    ],
+    images: [
+      "https://images.unsplash.com/photo-1598033129183-c4f50c736f10?w=400&auto=format&fit=crop&q=60",
+    ],
+    imageUrl:
+      "https://images.unsplash.com/photo-1598033129183-c4f50c736f10?w=400&auto=format&fit=crop&q=60",
+    physicalProfile: {
+      pesoKg: 0.28,
+      largoCm: 35,
+      anchoCm: 25,
+      altoCm: 3,
+      dimensionesCm: {
+        largo: 35,
+        ancho: 25,
+        alto: 3,
+      },
+    },
+    catalogVersion: 1,
+    inventoryPreparationStatus: "COMPLETED",
+    inventoryPreparationCode: null,
+    inventoryManualRetryAllowed: false,
+    inventoryStatus: "COMPLETED",
+  },
+  {
+    variantId: "VAR-OXF-AZU-L",
+    sku: "CAM-OXF-AZU-L",
+    productId: "PROD-OXF-001",
+    status: "ACTIVA",
+    identifyingAttributes: [
+      {
+        caracteristicaId: "CAR-COLOR",
+        nombre: "Color principal",
+        tipo: "TEXTO",
+        valor: "Azul Índigo",
+      },
+      {
+        caracteristicaId: "CAR-TALLA",
+        nombre: "Talla",
+        tipo: "TEXTO",
+        valor: "L",
+      },
+    ],
+    nonIdentifyingAttributes: [
+      {
+        caracteristicaId: "CAR-MAT",
+        nombre: "Material de confección",
+        tipo: "TEXTO",
+        valor: "100% Algodón Pima",
+      },
+    ],
+    images: [
+      "https://images.unsplash.com/photo-1598033129183-c4f50c736f10?w=400&auto=format&fit=crop&q=60",
+    ],
+    imageUrl:
+      "https://images.unsplash.com/photo-1598033129183-c4f50c736f10?w=400&auto=format&fit=crop&q=60",
+    physicalProfile: {
+      pesoKg: 0.32,
+      largoCm: 36,
+      anchoCm: 26,
+      altoCm: 3.5,
+      dimensionesCm: {
+        largo: 36,
+        ancho: 26,
+        alto: 3.5,
+      },
+    },
+    catalogVersion: 1,
+    inventoryPreparationStatus: "COMPLETED",
+    inventoryPreparationCode: null,
+    inventoryManualRetryAllowed: false,
+    inventoryStatus: "COMPLETED",
+  },
+  {
+    variantId: "VAR-OXF-NEG-S",
+    sku: "CAM-OXF-NEG-S",
+    productId: "PROD-OXF-001",
+    status: "INACTIVA",
+    identifyingAttributes: [
+      {
+        caracteristicaId: "CAR-COLOR",
+        nombre: "Color principal",
+        tipo: "TEXTO",
+        valor: "Negro",
+      },
+      {
+        caracteristicaId: "CAR-TALLA",
+        nombre: "Talla",
+        tipo: "TEXTO",
+        valor: "S",
+      },
+    ],
+    nonIdentifyingAttributes: [],
+    images: [
+      "https://images.unsplash.com/photo-1598033129183-c4f50c736f10?w=400&auto=format&fit=crop&q=60",
+    ],
+    imageUrl:
+      "https://images.unsplash.com/photo-1598033129183-c4f50c736f10?w=400&auto=format&fit=crop&q=60",
+    physicalProfile: {
+      pesoKg: 0.25,
+      largoCm: 34,
+      anchoCm: 24,
+      altoCm: 3,
+      dimensionesCm: {
+        largo: 34,
+        ancho: 24,
+        alto: 3,
+      },
+    },
+    catalogVersion: 1,
+    inventoryPreparationStatus: "COMPLETED",
+    inventoryPreparationCode: null,
+    inventoryManualRetryAllowed: false,
+    inventoryStatus: "COMPLETED",
+  },
+  {
+    variantId: "VAR-ZAP-41",
+    sku: "ZAP-RUN-41",
+    productId: "PROD-ZAP-001",
+    status: "ACTIVA",
+    identifyingAttributes: [
+      {
+        caracteristicaId: "CAR-TALLA",
+        nombre: "Talla",
+        tipo: "TEXTO",
+        valor: "41",
+      },
+      {
+        caracteristicaId: "CAR-COLOR",
+        nombre: "Color principal",
+        tipo: "TEXTO",
+        valor: "Rojo Fuego",
+      },
+    ],
+    nonIdentifyingAttributes: [
+      {
+        caracteristicaId: "CAR-SUELA",
+        nombre: "Material de suela",
+        tipo: "TEXTO",
+        valor: "Caucho vulcanizado Vibram",
+      },
+    ],
+    images: [
+      "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400&auto=format&fit=crop&q=60",
+    ],
+    imageUrl:
+      "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400&auto=format&fit=crop&q=60",
+    physicalProfile: {
+      pesoKg: 0.82,
+      largoCm: 31,
+      anchoCm: 21,
+      altoCm: 12,
+      dimensionesCm: {
+        largo: 31,
+        ancho: 21,
+        alto: 12,
+      },
+    },
+    catalogVersion: 1,
+    inventoryPreparationStatus: "COMPLETED",
+    inventoryPreparationCode: null,
+    inventoryManualRetryAllowed: false,
+    inventoryStatus: "COMPLETED",
+  },
+  {
+    variantId: "VAR-TER-S",
+    sku: "CAS-TER-S",
+    productId: "PROD-TRA-004",
+    status: "BORRADOR",
+    identifyingAttributes: [
+      {
+        caracteristicaId: "CAR-TALLA",
+        nombre: "Talla",
+        tipo: "TEXTO",
+        valor: "S",
+      },
+      {
+        caracteristicaId: "CAR-COLOR",
+        nombre: "Color principal",
+        tipo: "TEXTO",
+        valor: "Azul Marino",
+      },
+    ],
+    nonIdentifyingAttributes: [
+      {
+        caracteristicaId: "CAR-IMP",
+        nombre: "Impermeabilidad",
+        tipo: "TEXTO",
+        valor: "15,000 mm",
+      },
+    ],
+    images: [
+      "https://images.unsplash.com/photo-1544441893-675973e31985?w=400&auto=format&fit=crop&q=60",
+    ],
+    imageUrl:
+      "https://images.unsplash.com/photo-1544441893-675973e31985?w=400&auto=format&fit=crop&q=60",
+    physicalProfile: {
+      pesoKg: 0.42,
+      largoCm: 30,
+      anchoCm: 20,
+      altoCm: 6,
+      dimensionesCm: {
+        largo: 30,
+        ancho: 20,
+        alto: 6,
+      },
+    },
+    catalogVersion: 1,
+    inventoryPreparationStatus: "PENDING",
+    inventoryPreparationCode: null,
+    inventoryManualRetryAllowed: false,
+    inventoryStatus: "PENDING",
+  },
+];

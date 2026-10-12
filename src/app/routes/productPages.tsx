@@ -94,6 +94,31 @@ export const ProductPreparationPage = lazy(() =>
     default: module.ProductPreparationPage,
   })),
 );
+export const VariantListPage = lazy(() =>
+  import("../../features/catalog/pages/VariantListPage").then((module) => ({
+    default: module.VariantListPage,
+  })),
+);
+export const VariantCreatePage = lazy(() =>
+  import("../../features/catalog/pages/VariantCreatePage").then((module) => ({
+    default: module.VariantCreatePage,
+  })),
+);
+export const VariantEditPage = lazy(() =>
+  import("../../features/catalog/pages/VariantEditPage").then((module) => ({
+    default: module.VariantEditPage,
+  })),
+);
+export const VariantDetailPage = lazy(() =>
+  import("../../features/catalog/pages/VariantDetailPage").then((module) => ({
+    default: module.VariantDetailPage,
+  })),
+);
+export const VariantPreparationPage = lazy(() =>
+  import("../../features/catalog/pages/VariantPreparationPage").then((module) => ({
+    default: module.VariantPreparationPage,
+  })),
+);
 export const EditPricePage = lazy(() =>
   import("../../features/pricing/pages/EditPricePage").then((module) => ({
     default: module.EditPricePage,
