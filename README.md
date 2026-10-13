@@ -36,7 +36,7 @@ Las páginas/hooks usan `PricingProvider` y el puerto `PricingRepository`: catá
 
 ## Rutas y límites
 
-**MK-014 / issue #16** añade el historial de auditoría de precios, independiente del precio vigente y del histórico as-of de MK-013. Son cinco vistas/variantes sobre puertos sustituibles: listado, detalle y no encontrado en modal, exportación CSV y PDF. Implementación local en `vera`, sin commit ni push por instrucción del owner. [VALIDACION_MK014.md](docs/VALIDACION_MK014.md) registra fuentes, pruebas, archivos y bloqueos.
+**MK-014 / issue #16** añade el historial de auditoría de precios, independiente del precio vigente y del histórico as-of de MK-013. Son cinco vistas/variantes sobre puertos sustituibles: listado, detalle y no encontrado en modal, exportación CSV y PDF. La entrega inicial está publicada en `vera@6903d9ddd39be8a671a5909dd790a90614ca7161`, [PR #26](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/26), abierta hacia `master`. Su [CI aprobado](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/38353389421) registra **156 pruebas aprobadas**, builds y smoke tests mock/API. Las [evidencias de CI](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/38353389421/artifacts/11791379951) y [VALIDACION_MK014.md](docs/VALIDACION_MK014.md) registran fuentes, capturas, correcciones posteriores y bloqueos. Publicación no equivale a aprobación final ni merge.
 
 | Ruta MK-014 | Alcance |
 |---|---|
@@ -55,7 +55,9 @@ Las exportaciones conservan el estado de solicitud separado del de generación y
 
 La demo usa registros fijos de septiembre/octubre de 2026 y un reloj de trabajos `2026-10-02T12:00:00Z`, fiel a las fuentes de MK-014. CSV/PDF son **archivos de muestra preparados**, no archivos creados por un backend ni garantías de que su contenido represente los filtros actuales. El PDF incluye esta aclaración y «Moneda no informada». En DEV y mock, `/precios/auditoria?modoRevision=1` habilita controles en `mocks/AuditReviewTools`; en producción/API se ignoran. Los totales 500/501 y 100 000/100 001 de revisión son metadatos de prueba, sin arrays gigantes.
 
-Fuentes MK-014: Docs `master@78a923bbc6bada31b39b3d386331f90a4f812b31`, `component-spec/plan/tasks` 1.0.0 En revisión, sin validation-report oficial. DESIGN 1.1.0 y UX 2.0 tienen los mismos blobs que la revisión base del theme. Se corrigen en React los importes S/ inventados, el código técnico del 404, los badges decorativos y las promesas de firmas del HTML, siguiendo SPEC/UX/DESIGN. La revisión técnica/funcional/UX independiente permanece pendiente; se usa `Refs #16`, sin cerrar el issue.
+La revisión P1/P2 permite recuperar el listado después de una denegación solo tras una nueva lectura autorizada; conserva literalmente los orígenes abiertos que no tienen etiqueta conocida y valida fechas existentes, horas y zona, sin aceptar normalizaciones de Date.parse. Al cambiar `exportId` se invalidan inmediatamente trabajo/errores anteriores y se cancelan lecturas/descargas pendientes; solo se descarga el ID y formato actuales confirmados. Cuatro pruebas de regresión amplían la suite de 156 a 160 casos.
+
+Fuentes MK-014: revisión inicial Docs `78a923bbc6bada31b39b3d386331f90a4f812b31`; auditada nuevamente en `master@942bf7322eb388fe5b0fcc9c5a565152e1099139`, sin cambios de blobs en las fuentes de MK-014, UX y contratos. `component-spec/plan/tasks` 1.0.0 En revisión, sin validation-report oficial. DESIGN 1.1.0 y UX 2.0 tienen los mismos blobs que la revisión base del theme. Se corrigen en React los importes S/ inventados, el código técnico del 404, los badges decorativos y las promesas de firmas del HTML, siguiendo SPEC/UX/DESIGN. La revisión técnica/funcional/UX independiente permanece pendiente; se usa `Refs #16`, sin cerrar el issue.
 
 | Ruta | Alcance |
 |---|---|

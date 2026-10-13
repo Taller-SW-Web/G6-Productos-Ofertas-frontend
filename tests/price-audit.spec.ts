@@ -2,7 +2,11 @@ import { test, expect, type Page } from "@playwright/test";
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { createAuditRuntime } from "../src/features/price-audit/services/auditService";
-import { fromLocal } from "../src/features/price-audit/services/auditPresentation";
+import {
+  fromLocal,
+  isValidAuditInstant,
+  originLabel,
+} from "../src/features/price-audit/services/auditPresentation";
 import { alternateAuditId } from "./adapters/alternateAuditRepository";
 import { evidencePath } from "./support/evidence";
 
@@ -122,9 +126,15 @@ test("MK-014: null, zero, absent actor and unknown origins remain distinct witho
   }
   await mount(page, `/precios/auditoria/asientos/${alternateAuditId}`);
   const dialog = page.getByRole("dialog");
-  await expect(dialog).toContainText("Origen no identificado");
+  await expect(dialog).toContainText("Origen: UNRECOGNIZED");
   await expect(dialog).toContainText("99.999.999.999.999.999,12345");
-  await expect(dialog).not.toContainText("UNRECOGNIZED");
+  for (const origin of [
+    "WEB_PARTNER_2027",
+    "constructor",
+    "__proto__",
+    "toString",
+  ])
+    expect(originLabel(origin)).toBe(origin);
   await expect(dialog).toContainText("Moneda no informada");
 });
 
@@ -658,4 +668,189 @@ test("MK-014: an admitted job remains admitted when a later list count grows bey
   expect(await page.evaluate(() => window.auditControl.requests.length)).toBe(
     1,
   );
+});
+
+test("MK-014 regression: detail denial stays hidden until fresh access succeeds and recovers without reload", async ({
+  page,
+}) => {
+  await mount(page, "/precios/auditoria?sku=COF-STEEL-XL&pagina=2", 25);
+  const opener = () =>
+    page.getByRole("link", { name: `Ver detalle de ${alternateAuditId}` });
+  await page.evaluate(() => {
+    window.auditControl.detailFailure = "forbidden";
+  });
+  await opener().click();
+  await expect(page.getByRole("dialog")).toContainText("No tienes permiso");
+  await expect(page.getByRole("table", { includeHidden: true })).toHaveCount(0);
+  await page.evaluate(() => {
+    window.auditControl.listFailure = "forbidden";
+  });
+  await close(page);
+  await expect(page.getByRole("alert").last()).toContainText(
+    "No tienes permiso",
+  );
+  await expect(page.getByRole("table")).toHaveCount(0);
+  await page.evaluate(() => {
+    window.auditControl.listFailure = undefined;
+    window.auditControl.detailFailure = undefined;
+    window.auditControl.slowSku = "COF-STEEL-XL";
+  });
+  await page
+    .getByRole("button", { name: "Volver a consultar", exact: true })
+    .click();
+  await expect(page.getByRole("table")).toHaveCount(0);
+  await expect(page.getByRole("table")).toContainText("COF-STEEL-XL");
+  await expect(
+    page.getByText("Acceso no disponible", { exact: true }),
+  ).toHaveCount(0);
+  await expect(page).toHaveURL(/sku=COF-STEEL-XL&pagina=2/);
+  await opener().click();
+  await expect(page.getByRole("dialog")).toContainText(
+    "Asiento: audit-coffee-908",
+  );
+  await close(page);
+  await expect(page.getByRole("table")).toContainText("COF-STEEL-XL");
+});
+
+test("MK-014 regression: exportId changes, back/forward, stale reads and downloads cannot expose a prior job", async ({
+  page,
+}) => {
+  await mount(page, "/precios/auditoria/exportar/csv");
+  await page.evaluate(() => {
+    window.auditControl.phase = "COMPLETED";
+  });
+  await page.getByRole("button", { name: "Solicitar CSV" }).click();
+  await expect(
+    page.getByRole("button", { name: "Descargar CSV" }),
+  ).toBeEnabled();
+  const first = new URL(page.url()).searchParams.get("exportId")!;
+  const setId = async (id: string | null) => {
+    await page.evaluate((value) => {
+      const url = new URL(location.href);
+      if (value) url.searchParams.set("exportId", value);
+      else url.searchParams.delete("exportId");
+      history.pushState(null, "", url);
+      dispatchEvent(new PopStateEvent("popstate"));
+    }, id);
+  };
+  await setId(null);
+  await expect(
+    page.getByRole("button", { name: "Solicitar CSV" }),
+  ).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Descargar CSV" })).toHaveCount(
+    0,
+  );
+  await page.getByRole("button", { name: "Solicitar CSV" }).click();
+  await expect(
+    page.getByRole("button", { name: "Descargar CSV" }),
+  ).toBeEnabled();
+  const second = new URL(page.url()).searchParams.get("exportId")!;
+  expect(second).not.toBe(first);
+  await page.evaluate((id) => {
+    window.auditControl.slowExportId = id;
+  }, first);
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`exportId=${first}`));
+  await expect(
+    page.getByText("Consultando estado…", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Descargar CSV" })).toHaveCount(
+    0,
+  );
+  await page.goForward();
+  await expect(page).toHaveURL(new RegExp(`exportId=${second}`));
+  await expect(
+    page.getByRole("button", { name: "Descargar CSV" }),
+  ).toBeEnabled();
+  await expect
+    .poll(() => page.evaluate(() => window.auditControl.slowExportFinished))
+    .toBe(true);
+  await page.getByRole("button", { name: "Descargar CSV" }).click();
+  await expect
+    .poll(() => page.evaluate(() => window.auditControl.downloads))
+    .toEqual([second]);
+  await page.evaluate((id) => {
+    window.auditControl.slowDownloadId = id;
+  }, second);
+  const files: string[] = [];
+  page.on("download", (file) => files.push(file.suggestedFilename()));
+  await page.getByRole("button", { name: "Descargar CSV" }).click();
+  await setId("missing-reference");
+  await expect(
+    page.getByText("Exportación no disponible", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Descargar CSV" })).toHaveCount(
+    0,
+  );
+  await expect
+    .poll(() => page.evaluate(() => window.auditControl.slowDownloadFinished))
+    .toBe(true);
+  expect(files).toEqual([]);
+  expect(await page.evaluate(() => window.auditControl.requests.length)).toBe(
+    2,
+  );
+});
+
+test("MK-014 regression: mismatched export response cannot be displayed or downloaded", async ({
+  page,
+}) => {
+  await mount(page, "/precios/auditoria/exportar/csv");
+  await page.evaluate(() => {
+    window.auditControl.phase = "COMPLETED";
+    window.auditControl.returnedJobId = "different-job";
+  });
+  await page.getByRole("button", { name: "Solicitar CSV" }).click();
+  await expect(page.getByRole("alert")).toContainText("trabajo distinto");
+  await expect(page.getByRole("button", { name: "Descargar CSV" })).toHaveCount(
+    0,
+  );
+  expect(await page.evaluate(() => window.auditControl.downloads)).toEqual([]);
+});
+
+test("MK-014 strict dates: impossible calendar dates and invalid time/zone never query from direct URLs", async ({
+  page,
+}) => {
+  const invalid = [
+    "2026-02-29T12:00:00Z",
+    "2026-02-30T12:00:00Z",
+    "2026-04-31T12:00:00-05:00",
+    "1900-02-29T12:00:00Z",
+    "2026-00-10T12:00:00Z",
+    "2026-13-01T12:00:00Z",
+    "2026-10-00T12:00:00Z",
+    "2026-10-32T12:00:00Z",
+    "2026-10-17T24:00:00Z",
+    "2026-10-17T12:60:00Z",
+    "2026-10-17T12:00:60Z",
+    "2026-10-17T12:00:00+24:00",
+    "2026-10-17T12:00:00-05:60",
+    "2026-10-17T12:00:00",
+    "2026-2-1T12:00:00Z",
+  ];
+  for (const date of invalid)
+    expect(isValidAuditInstant(date), date).toBe(false);
+  for (const date of [
+    "2000-02-29T12:00:00Z",
+    "2024-02-29T00:00:00-05:00",
+    "2026-10-17T12:00:30.123Z",
+  ])
+    expect(isValidAuditInstant(date), date).toBe(true);
+  expect(fromLocal("2026-02-30T07:00")).toBe("");
+  for (const [route, field, date] of [
+    ["/precios/auditoria", "desde", invalid[1]!],
+    ["/precios/auditoria/exportar/csv", "hasta", invalid[0]!],
+    ["/precios/auditoria/exportar/pdf", "desde", invalid[2]!],
+  ]) {
+    await mount(page, route + "?" + new URLSearchParams({ [field!]: date! }));
+    await expect(
+      page.getByText("Revisa las fechas", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole("table")).toHaveCount(0);
+    expect(await page.evaluate(() => window.auditControl.queries)).toEqual([]);
+    expect(await page.evaluate(() => window.auditControl.requests)).toEqual([]);
+    if (route!.includes("exportar"))
+      await expect(
+        page.getByRole("button", { name: /Solicitar (CSV|PDF)/ }),
+      ).toBeDisabled();
+  }
 });

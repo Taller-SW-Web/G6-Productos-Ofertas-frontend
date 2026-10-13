@@ -1,12 +1,13 @@
 # MK-014 — Historial de auditoría de precios / issue #16
 
-Fecha de entrega local: **2026-10-13**, America/Bogota; preflight iniciado el 12. Owner: Leonardo Vera Rodríguez. Rama comprobada: **vera**, base **`fdbacbae347b346bb492c27b3f4fab3c81be77da`**, igual a `origin/master` después de fetch. Git inicial limpio. Se respeta la instrucción del owner de trabajar en vera: no se crea otra rama, no se hace commit/push ni se publica/actualiza PR o issue. HEAD permanece en esa base; los cambios quedan locales para revisión.
+Actualizado **2026-10-13**, America/Bogota. Owner: Leonardo Vera Rodríguez. La entrega inicial está publicada en **vera@`6903d9ddd39be8a671a5909dd790a90614ca7161`**, [PR #26](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/26), abierta hacia `master`; base original `fdbacbae347b346bb492c27b3f4fab3c81be77da`. Su [CI](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/38353389421) concluyó **success**, con **156 pruebas aprobadas** y [artefacto de evidencias](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/38353389421/artifacts/11791379951), no expirado al verificarlo. Esto sustituye la afirmación anterior de cambios solamente locales y CI no ejecutado. El preflight de correcciones P1/P2 encontró Git limpio, `HEAD = origin/vera = 6903d9d`. El owner autoriza ahora commit, push a vera y actualización de la PR; prohíbe merge y cierre de #16.
 
 ## Fuentes, alcance y clasificación
 
 - Frontend: AGENTS.md completo, README, package/lock/configuración, árbol real, `docs/GUIA_IMPLEMENTACION_FRONTEND_REACT.md`, `docs/COMPONENTES_FOUNDATION.md`, theme/shared, registries de rutas/navegación y puertos/runtimes existentes.
 - [Issue #16](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/issues/16), sin comentarios adicionales.
 - Docs oficial `master@78a923bbc6bada31b39b3d386331f90a4f812b31`, comprobado con ls-remote y árbol remoto: `requisitos/specs/SPEC-014-historial-auditoria-precios.md`, `requisitos/hu/HU-014-historial-auditoria-precios.md`, `requisitos/flujos/FLOW-014-historial-auditoria-precios.md`, `ux/wireframes/flows/WF-014-historial-auditoria-precios.md` (0.7).
+- Revisión P1/P2: Docs `master@942bf7322eb388fe5b0fcc9c5a565152e1099139`, comparado por árbol/blob contra la referencia inicial: SPEC/HU/FLOW/WF-014, MK-014, DESIGN/UX y contratos HTTP siguen idénticos. No se atribuyen contratos nuevos a los cambios de otros MK.
 - `ux/mockups/MK-014/{component-spec,plan,tasks}.md` 1.0.0, **En revisión**; `prototipo/mk_014_s01.html` a `mk_014_s05.html`. `validation-report.md`: **NO ENCONTRADO**. No se atribuye aprobación a los HTML.
 - `ux/mockups/{DESIGN.md,ux/propuesta-ux.md,ux/ux-decisions.md,ux/ux-guidelines.md}`: DESIGN **1.1.0**, UX **2.0**. Los cuatro blobs son idénticos a la revisión `be5c2db` ya consultada para Foundation/Pricing; se conserva el theme existente. La referencia 1.0.0 en Component Spec no sustituye DESIGN vigente.
 - `contratos/http/openapi.yaml` 0.5.0: GET de listado/detalle estable, seis filtros y aliases pagina/tamanio, modelos de registro/página/solicitud/trabajo; exportación/seguimiento **provisional-internal**. `contratos/http/catalogo-errores.md`: 404 específico, exceso de exportación, sesión/permiso diferenciados.
@@ -91,6 +92,8 @@ No se modifican código de Pricing/Promotions/Taxonomía, theme/shared, main, Ap
 
 ## Quality gates ejecutados
 
+La tabla siguiente conserva la ejecución de la entrega inicial publicada en 6903d9d. Las correcciones P1/P2 y sus comprobaciones posteriores se registran por separado al final.
+
 | Check | Resultado real |
 |---|---|
 | Baseline `npm ci` | PASS: Node v22.21.0/npm 10.9.4, 191 packages, 0 vulnerabilidades. |
@@ -105,7 +108,7 @@ No se modifican código de Pricing/Promotions/Taxonomía, theme/shared, main, Ap
 | Smoke `node scripts/verify-production.mjs mock` | PASS: **40 vistas**, tablas/diálogos/formularios presentes y controles DEV ignorados. |
 | `git diff --check` | PASS. |
 | Visual 1440×900 | Cinco capturas, geometría sin overflow horizontal; modal 640 px, scroll/teclado/foco y lectura de datos largos comprobados; inspección visual del conjunto y PDF. |
-| CI remoto / PR publicada | **NO EJECUTADO / NO PUBLICADA**, por instrucción de no commit/push. El workflow existente recogerá la suite ampliada cuando el owner publique. |
+| CI remoto / PR publicada — entrega inicial | **PASS / PUBLICADA**: vera@6903d9d, [run 38353389421](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/38353389421), job validate/115150648806: typecheck/build/lint, 156 PASS (5.1 min), smoke mock 40/API 36 y carga de evidencias. PR #26 abierta, sin merge. |
 
 La primera suite ampliada mostró cinco fallos exclusivamente por conteo lateral 10 frente a 11; se actualizó esa expectativa en Taxonomía y se repitió la suite completa con éxito. Durante desarrollo, la prueba de refresco detectó reaplicación sin nueva consulta y se corrigió; el caso PDF ajustó el orden del propio test. No se ocultan fallas de funciones ajenas. Las herramientas históricas de screenshot no demuestran aprobación UX.
 
@@ -120,6 +123,48 @@ La primera suite ampliada mostró cinco fallos exclusivamente por conteo lateral
 - [ ] API/provider/auth/grants reales: pendientes. Exportaciones/seguimiento provisional-internal.
 - [ ] Q-014-01: moneda/unidad histórica y formatos monetarios definitivos pendientes.
 - [ ] CA backend: publicación postcommit, deduplicación message_id, persistencia append-only, retención/archivo/checksum: NO VERIFICADOS por UI.
-- [ ] Revisión técnica/funcional/UX independiente, aprobación de documentos y CI remoto: pendientes.
+- [x] CI remoto de la entrega inicial verificado y enlazado, sin confundirlo con aprobación UX/API.
+- [ ] Revisión técnica/funcional/UX independiente y aprobación de documentos: pendientes.
 
-Estado: **MOCK_INTEGRATED / MOCK_ONLY**; interfaz provisional con S01–S05 implementadas, **MOCK_REPLACEABLE comprobado**, sin API_INTEGRATED ni VALIDATED. No se cierra #16 mientras existan estos pendientes. Cambios locales únicamente, listos para revisión del owner antes de su commit/push.
+Estado: **MOCK_INTEGRATED / MOCK_ONLY**; interfaz provisional con S01–S05 implementadas, **MOCK_REPLACEABLE comprobado**, sin API_INTEGRATED ni VALIDATED. PR #26 publicada en vera y pendiente de auditoría final; no se fusiona ni se cierra #16 mientras existan estos pendientes.
+
+## Correcciones de auditoría P1/P2 — 2026-10-13
+
+| Hallazgo | Cambio y regresión |
+|---|---|
+| P1.1: denegación de detalle retenida | `AuditHistoryPage.tsx` vuelve a consultar al regresar de detalle y conserva la ocultación hasta una respuesta autorizada nueva. Ofrece reintento sin recargar la app. `AuditDetailPage.tsx` elimina la denegación al recuperar una lectura autorizada; `useAuditHistoryContext.ts` permite retirar ese mensaje. Prueba de denegación, retorno aún denegado, recuperación con lectura lenta, mismo contexto y apertura posterior. |
+| P1.2: canal_origen abierto | `auditPresentation.ts` conserva literalmente todo identificador sin etiqueta conocida, incluidos nombres que coinciden con propiedades de Object. La prueba del adapter alternativo exige `Origen: UNRECOGNIZED`; se mantienen aliases conocidos y no se infieren permisos/canales. |
+| P1.3: trabajo de otra referencia | `useAuditExport.ts` asocia trabajo, errores y estados a repository/ID/formato/filtros; invalida al renderizar una referencia nueva, cancela operaciones anteriores y valida ID/formato de la respuesta y descarga. Pruebas con dos jobs, quitar ID, Atrás/Adelante, GET tardío, ID inexistente, descarga tardía cancelada y respuesta con ID diferente; solo dos POST solicitados. Se conserva el bloqueo de doble envío hasta comprometer la referencia en URL, también ante resultado incierto. |
+| P1.4: publicación/documentación | README e informe enlazan SHA inicial publicado, PR #26, CI de 156 casos y artefacto. Se incorpora trazabilidad S01–S05 y resultados posteriores; el título/descripcion del PR se actualizan al publicar. |
+| P2.5: fechas inexistentes | `auditPresentation.ts` valida estructura completa, calendario gregoriano/bisiestos, horas/minutos/segundos y zona antes de Date.parse. URLs de listado/CSV/PDF con febrero inexistente y abril 31 no consultan ni solicitan; casos de fecha, hora o zona fuera de rango y bisiestos 1900/2000/2024 cubiertos. Conversiones local/legible reutilizan la misma validación. |
+
+Las demoras/contadores/ID de respuesta alternativo viven únicamente en `tests/adapters/alternateAuditRepository.ts` y su harness. El puerto productivo, selector global, mocks originales, endpoints, permisos y moneda permanecen desacoplados. No se modifica navegación compartida ni otros dominios; Q-014-01/exportaciones provisionales permanecen bloqueados.
+
+### Evidencia visual por pantalla
+
+| Pantalla | Composición/resultado | Evidencia versionada |
+|---|---|---|
+| MK-014-S01 | Listado, filtros, paginación y acceso read-only | [1440 px](evidencias/mk-014-s01-1440.png) |
+| MK-014-S02 | Modal 640 px, quince campos, teclado y retorno | [1440 px](evidencias/mk-014-s02-1440.png) |
+| MK-014-S03 | No encontrado, sin asiento inventado, retorno contextual | [1440 px](evidencias/mk-014-s03-1440.png) |
+| MK-014-S04 | CSV recibido/generado y recurso de muestra | [1440 px](evidencias/mk-014-s04-1440.png) |
+| MK-014-S05 | PDF recibido/generado y recurso de muestra | [1440 px](evidencias/mk-014-s05-1440.png) |
+
+Las pruebas vuelven a capturar las cinco vistas en `test-results/` para el artefacto de CI. Las imágenes versionadas registran la composición revisada; no equivalen a aprobación humana ni archivo de backend.
+
+### Validaciones locales de las correcciones P1/P2
+
+| Comando/comprobación | Resultado |
+|---|---|
+| `npm run typecheck` | PASS |
+| `npm run lint` | PASS sin errores/warnings |
+| `VITE_DATA_MODE=mock npm run build` | PASS, 7334 módulos, 5.53 s de Vite |
+| `VITE_DATA_MODE=api npm run build` | PASS, 7334 módulos, 3.40 s de Vite |
+| `CI=true npm test -- tests/price-audit.spec.ts` | **22 PASS, 50.7 s** |
+| `CI=true npm test` | **160 PASS, 5.7 min**, suite completa con todos los módulos |
+| `node scripts/verify-production.mjs mock http://127.0.0.1:5184` | **40 vistas PASS**, producción sin controles DEV ni errores |
+| `node scripts/verify-production.mjs api http://127.0.0.1:5184` | **36 vistas PASS**, providers ausentes explícitos y cero carga de mocks/bundles |
+| `git diff --check` | PASS |
+| Visual 1440 px | Cinco capturas nuevas inspeccionadas; geometría/modal/teclado y estados cubiertos. Evidencias anteriores de Pricing conservadas byte a byte desde HEAD. |
+
+Durante la primera ejecución focalizada, 21 casos pasaron y se detectó doble POST al liberar el bloqueo antes de comprometer el ID en navegación. Se corrigió el bloqueo, se repitieron los 22 casos y después toda la suite con éxito. No se reducen assertions de otros módulos. El CI inicial de 156 casos se mantiene como evidencia histórica separada; la comprobación remota de las correcciones se registra después de publicar su SHA.

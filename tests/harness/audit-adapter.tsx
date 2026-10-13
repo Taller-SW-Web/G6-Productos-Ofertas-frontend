@@ -27,6 +27,7 @@ const control: AlternateAuditControl = {
   queries: [],
   requests: [],
   reads: [],
+  downloads: [],
   total: Number(params.get("total") ?? 1),
   phase: "PROCESSING",
   fileAvailable: true,

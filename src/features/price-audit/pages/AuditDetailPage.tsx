@@ -39,6 +39,7 @@ export function AuditDetailPage() {
       ["session", "forbidden"].includes(state.error.kind)
     )
       denyAccess(state.error.message);
+    else if (state.status === "success") denyAccess(undefined);
   }, [state, denyAccess]);
   const back = () => {
     const openedFromTable = location.state?.auditOpener === auditId;

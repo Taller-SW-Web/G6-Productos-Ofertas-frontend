@@ -58,11 +58,7 @@ export function writeAuditQuery(
 }
 export function validateAuditFilters(filters: AuditFilters) {
   for (const field of ["desde", "hasta"] as const) {
-    if (
-      filters[field] &&
-      (!/T.*(?:Z|[+-]\d{2}:\d{2})$/.test(filters[field]) ||
-        !Number.isFinite(Date.parse(filters[field])))
-    )
+    if (filters[field] && !isValidAuditInstant(filters[field]))
       return "Indica fechas válidas con zona horaria.";
   }
   if (
@@ -73,18 +69,52 @@ export function validateAuditFilters(filters: AuditFilters) {
     return "La fecha desde debe ser anterior o igual a la fecha hasta.";
   return undefined;
 }
+export function isValidAuditInstant(value: string) {
+  const parts =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|([+-])(\d{2}):(\d{2}))$/.exec(
+      value,
+    );
+  if (!parts) return false;
+  const [
+    ,
+    year,
+    month,
+    day,
+    hour,
+    minute,
+    second,
+    zone,
+    ,
+    zoneHour,
+    zoneMinute,
+  ] = parts;
+  const y = Number(year),
+    m = Number(month),
+    d = Number(day);
+  const leap = y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return (
+    m >= 1 &&
+    m <= 12 &&
+    d >= 1 &&
+    d <= days[m - 1]! &&
+    Number(hour) <= 23 &&
+    Number(minute) <= 59 &&
+    Number(second) <= 59 &&
+    (zone === "Z" || (Number(zoneHour) <= 23 && Number(zoneMinute) <= 59)) &&
+    Number.isFinite(Date.parse(value))
+  );
+}
 export function toLocal(instant: string) {
-  if (!instant || !Number.isFinite(Date.parse(instant))) return "";
+  if (!isValidAuditInstant(instant)) return "";
   return new Date(Date.parse(instant) - 5 * 60 * 60 * 1000)
     .toISOString()
     .slice(0, 16);
 }
 export function fromLocal(local: string) {
   if (!local) return "";
-  const instant = new Date(
-    `${local.length === 16 ? `${local}:00` : local}-05:00`,
-  );
-  return Number.isFinite(instant.getTime()) ? instant.toISOString() : "";
+  const value = `${local.length === 16 ? `${local}:00` : local}-05:00`;
+  return isValidAuditInstant(value) ? new Date(value).toISOString() : "";
 }
 export function decimal(value: string) {
   const [integer, fraction = ""] = value.split(".");
@@ -115,17 +145,14 @@ export const typeLabel: Record<AuditEntry["priceType"], string> = {
   OFERTA: "Oferta",
 };
 export function originLabel(origin: string) {
-  return (
-    (
-      {
-        BACKOFFICE: "Gestión interna",
-        BULK_IMPORT: "Carga masiva",
-        API: "Integración externa",
-      } as Record<string, string>
-    )[origin] ?? "Origen no identificado"
-  );
+  const labels: Record<string, string> = {
+    BACKOFFICE: "Gestión interna",
+    BULK_IMPORT: "Carga masiva",
+    API: "Integración externa",
+  };
+  return Object.hasOwn(labels, origin) ? labels[origin]! : origin;
 }
 export function dateLabel(instant: string) {
-  if (!Number.isFinite(Date.parse(instant))) return "Fecha no válida";
+  if (!isValidAuditInstant(instant)) return "Fecha no válida";
   return `${new Intl.DateTimeFormat("es-PE", { timeZone: "America/Bogota", dateStyle: "short", timeStyle: "medium" }).format(new Date(instant))} · UTC−5`;
 }

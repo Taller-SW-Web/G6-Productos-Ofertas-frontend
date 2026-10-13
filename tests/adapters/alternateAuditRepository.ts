@@ -12,6 +12,7 @@ export interface AlternateAuditControl {
   queries: AuditQuery[];
   requests: AuditExportInput[];
   reads: string[];
+  downloads: string[];
   total: number;
   serverTotal?: number;
   afterAcceptedTotal?: number;
@@ -25,6 +26,11 @@ export interface AlternateAuditControl {
   fileAvailable: boolean;
   slowSku?: string;
   slowFinished?: boolean;
+  slowExportId?: string;
+  slowExportFinished?: boolean;
+  slowDownloadId?: string;
+  slowDownloadFinished?: boolean;
+  returnedJobId?: string;
 }
 export const alternateAuditId = "audit-coffee-908";
 export const alternateAuditEntry: AuditEntry = {
@@ -116,11 +122,16 @@ export function createAlternateAuditRepository(
     async getExport(id, signal) {
       signal.throwIfAborted();
       control.reads.push(id);
+      if (control.slowExportId === id) {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        control.slowExportFinished = true;
+      }
       fail(control.readFailure);
       const job = jobs.get(id);
       return job
         ? {
             ...job,
+            id: control.returnedJobId ?? job.id,
             status: control.phase,
             completedAt:
               control.phase === "COMPLETED" ? "2026-10-17T12:01:00Z" : null,
@@ -130,6 +141,11 @@ export function createAlternateAuditRepository(
     },
     async download(id, signal) {
       signal.throwIfAborted();
+      control.downloads.push(id);
+      if (control.slowDownloadId === id) {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        control.slowDownloadFinished = true;
+      }
       fail(control.downloadFailure);
       if (
         !jobs.has(id) ||

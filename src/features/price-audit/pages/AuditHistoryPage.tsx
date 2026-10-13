@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { Button, Stack, Text } from "@mantine/core";
-import { Link, Outlet, useSearchParams } from "react-router-dom";
+import { Link, Outlet, useLocation, useSearchParams } from "react-router-dom";
 import { FeedbackAlert, PageHeader } from "../../../components/shared";
 import { useAuditRuntime } from "../services/AuditRuntimeContext";
 import {
@@ -19,6 +19,7 @@ import type { AuditHistoryContext } from "../hooks/useAuditHistoryContext";
 
 export function AuditHistoryPage() {
   const [params, setParams] = useSearchParams();
+  const { pathname } = useLocation();
   const query = useMemo(() => readAuditQuery(params), [params]);
   const key = JSON.stringify(query);
   const { repository } = useAuditRuntime();
@@ -29,10 +30,18 @@ export function AuditHistoryPage() {
     (signal: AbortSignal) =>
       inputError
         ? Promise.reject(new Error(inputError))
-        : repository.list(query, signal),
-    [repository, query, inputError],
+        : repository.list(query, signal).then((result) => {
+            if (
+              !signal.aborted &&
+              pathname.replace(/\/$/, "") === "/precios/auditoria"
+            )
+              setDenied(undefined);
+            return result;
+          }),
+    [repository, query, inputError, pathname],
   );
-  const state = useAuditRead(`${key}:${params}`, read, revision);
+  // A return from detail requires a fresh authorized read before restoring data.
+  const state = useAuditRead(`${pathname}:${key}:${params}`, read, revision);
   const clear = () =>
     setParams(
       writeAuditQuery({ ...emptyFilters, page: 1, size: query.size }, params),
@@ -100,6 +109,12 @@ export function AuditHistoryPage() {
         ) : accessError ? (
           <FeedbackAlert semantic="error" title="Acceso no disponible">
             {accessError}
+            <Button
+              variant="outline"
+              onClick={() => setRevision((value) => value + 1)}
+            >
+              Volver a consultar
+            </Button>
           </FeedbackAlert>
         ) : state.status === "loading" ? (
           <>
