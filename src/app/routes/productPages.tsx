@@ -1,4 +1,25 @@
 import { lazy } from "react";
+export const AuditLayout = lazy(() =>
+  import("../../features/price-audit/components/AuditLayout").then(
+    (module) => ({ default: module.AuditLayout }),
+  ),
+);
+export const AuditHistoryPage = lazy(() =>
+  import("../../features/price-audit/pages/AuditHistoryPage").then(
+    (module) => ({ default: module.AuditHistoryPage }),
+  ),
+);
+export const AuditDetailPage = lazy(() =>
+  import("../../features/price-audit/pages/AuditDetailPage").then((module) => ({
+    default: module.AuditDetailPage,
+  })),
+);
+export const AuditExportPage = lazy(() =>
+  import("../../features/price-audit/pages/AuditExportPage").then((module) => ({
+    default: module.AuditExportPage,
+  })),
+);
+
 export const RecommendationsPage = lazy(() =>
   import("../../features/promotions/pages/RecommendationsPage").then(
     (module) => ({ default: module.RecommendationsPage }),

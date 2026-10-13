@@ -191,6 +191,29 @@ try {
       assert.equal(await page.getByRole("alert").count(), 0);
     }
   }
+  // MK-014: additive coverage; API uses an explicit unavailable port, never fixtures.
+  for (const path of [
+    "/precios/auditoria",
+    "/precios/auditoria/asientos/aud-014-mod-01",
+    "/precios/auditoria/asientos/no-existe",
+    "/precios/auditoria/exportar/csv",
+    "/precios/auditoria/exportar/pdf",
+  ]) {
+    await page.goto(baseURL + path + "?modoRevision=1&caso=cargando");
+    if (mode === "api") {
+      const alert = page.getByRole("alert").first();
+      await alert.waitFor();
+      assert.match(await alert.innerText(), /adapter API de auditoría de precios no está configurado/);
+      assert.equal(await page.getByRole("table", { includeHidden: true }).count(), 0);
+      assert.equal(await page.getByText("Datos de demostración", { exact: true }).count(), 0);
+    } else {
+      if (path.includes("/asientos/")) await page.getByRole("dialog").waitFor();
+      else if (path.endsWith("/auditoria")) await page.getByRole("table").waitFor();
+      else await page.getByRole("button", { name: /Solicitar (CSV|PDF)/ }).waitFor();
+      assert.equal(await page.getByRole("combobox", { name: "Caso de demostración de auditoría" }).count(), 0);
+    }
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  }
   if (mode === "api")
     assert.equal(
       requests.some((url) =>
@@ -198,16 +221,16 @@ try {
         // Taxonomía ni en URLs de DEV (/features/taxonomy/) ni en bundles
         // compilados de dist/assets/ (chunks derivados de las páginas y el
         // servicio de taxonomía).
-        /createDemoPricingRuntime|mock[A-Z]|\/prices-|\/catalogChoices-|\/promotionServices-|\/PromotionDataNotice-|\/(?:Coupon|Campaign|Recommendation)[^/]*Page-|\/features\/taxonomy\/|\/assets\/[^/]*(?:Category(?:Tree|Create|Edit|Detail|Deactivate)|Characteristic|ProductType|Brand|Seo(?:List|Config)|SEO|taxonomyServices)[^/]*\.(?:js|css)/.test(
+        /createMockAuditRuntime|reviewRepository|audit-demo\.(csv|pdf)|createDemoPricingRuntime|mock[A-Z]|\/prices-|\/catalogChoices-|\/promotionServices-|\/PromotionDataNotice-|\/(?:Coupon|Campaign|Recommendation)[^/]*Page-|\/features\/taxonomy\/|\/assets\/[^/]*(?:Category(?:Tree|Create|Edit|Detail|Deactivate)|Characteristic|ProductType|Brand|Seo(?:List|Config)|SEO|taxonomyServices)[^/]*\.(?:js|css)/.test(
           url,
         ),
       ),
       false,
     );
   assert.deepEqual(errors, []);
-  const totalViews = 4 + 16 + catalogPaths.length + taxonomyPaths.length + (mode === "mock" ? 4 : 0);
+  const totalViews = 4 + 16 + catalogPaths.length + taxonomyPaths.length + (mode === "mock" ? 4 : 0) + 5;
   console.log(
-    `PASS producción ${mode}: ${totalViews} vistas de Catálogo, Promotions, Pricing S01 y Taxonomía, 1440 px, sin errores; ${mode === "api" ? "providers ausentes explícitos, reintento y persistencia del error de Pricing, taxonomía bloqueada y cero carga de mocks/bundles" : "módulos presentes, tablas comerciales verificadas y controles de revisión ausentes"}.`,
+    `PASS producción ${mode}: ${totalViews} vistas de Catálogo, Promotions, Pricing S01, Auditoría S01–S05 y Taxonomía, 1440 px, sin errores; ${mode === "api" ? "providers ausentes explícitos, reintento y persistencia del error de Pricing, taxonomía bloqueada y cero carga de mocks/bundles" : "módulos presentes, tablas comerciales verificadas y controles de revisión ausentes"}.`,
   );
 } finally {
   await browser.close();

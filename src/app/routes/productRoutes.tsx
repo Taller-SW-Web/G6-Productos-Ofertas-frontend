@@ -1,5 +1,9 @@
 import type { RouteObject } from "react-router-dom";
 import {
+  AuditLayout,
+  AuditHistoryPage,
+  AuditDetailPage,
+  AuditExportPage,
   BrandDetailPage,
   BrandFormPage,
   BrandListPage,
@@ -69,6 +73,21 @@ export const productRoutes: RouteObject[] = [
   { path: "/productos/:productId/variantes/:variantId", element: <VariantDetailPage /> },
   { path: "/productos/:productId/variantes/:variantId/editar", element: <VariantEditPage /> },
   { path: "/productos/:productId/variantes/:variantId/preparacion", element: <VariantPreparationPage /> },
+  {
+    path: "/precios/auditoria",
+    element: <AuditLayout />,
+    children: [
+      {
+        element: <AuditHistoryPage />,
+        children: [
+          { index: true, element: <></> },
+          { path: "asientos/:auditId", element: <AuditDetailPage /> },
+        ],
+      },
+      { path: "exportar/csv", element: <AuditExportPage format="CSV" /> },
+      { path: "exportar/pdf", element: <AuditExportPage format="PDF" /> },
+    ],
+  },
   { path: "/precios", element: <CurrentPricePage /> },
   { path: "/precios/editar", element: <EditPricePage /> },
   { path: "/precios/programaciones", element: <PriceSchedulesPage /> },
