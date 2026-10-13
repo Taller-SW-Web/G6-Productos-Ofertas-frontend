@@ -199,7 +199,7 @@ export function VariantListPage() {
               SKU Base: <strong>{product?.skuBase}</strong>
             </Text>
             <Text size="xs" c="dimmed">
-              Precio Base: <strong>S/. {product?.priceInitial?.toFixed(2) ?? "0.00"}</strong>
+              Precio inicial de Catálogo: <strong>{product?.priceInitial === undefined ? "No disponible" : `S/. ${product.priceInitial.toFixed(2)}`}</strong>. Precio vigente: consultar Pricing.
             </Text>
             <Badge
               size="sm"

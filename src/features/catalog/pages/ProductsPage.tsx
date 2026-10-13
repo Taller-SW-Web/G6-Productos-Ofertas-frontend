@@ -17,12 +17,13 @@ import {
   readPositiveInteger,
 } from "../services/catalogPresentation";
 import type { CatalogQuery, ProductView } from "../services/catalogRepository";
-import { initialCategories, initialProductTypes } from "../mocks/taxonomyFixtures";
+import { useTaxonomyFilters } from "../hooks/useTaxonomyFilters";
 
 export function ProductsPage() {
   const [params, setParams] = useSearchParams();
   const location = useLocation();
   const [revision, setRevision] = useState(0);
+  const taxonomy = useTaxonomyFilters(revision);
 
   const query: CatalogQuery = {
     q: params.get("q") || undefined,
@@ -105,7 +106,7 @@ export function ProductsPage() {
     {
       key: "name",
       header: "PRODUCTO",
-      width: 320,
+      width: 280,
       render: (row) => (
         <Group gap="sm" wrap="nowrap">
           <Avatar
@@ -196,7 +197,7 @@ export function ProductsPage() {
     {
       key: "actions",
       header: "ACCIONES",
-      width: 130,
+      width: 160,
       align: "right",
       render: (row) => (
         <Button
@@ -205,6 +206,7 @@ export function ProductsPage() {
           variant="outline"
           size="xs"
           leftSection={<IconEye size={14} />}
+          styles={{ label: { whiteSpace: "nowrap" } }}
         >
           Ver detalle
         </Button>
@@ -255,10 +257,16 @@ export function ProductsPage() {
         }
       />
 
+      {taxonomy.loading && <Text size="sm">Cargando filtros de Taxonomía...</Text>}
+      {taxonomy.error && <FeedbackAlert semantic="error" title="Error al cargar filtros"
+        actions={<Button variant="outline" onClick={handleRetry}>Reintentar filtros</Button>}>
+        {taxonomy.error}
+      </FeedbackAlert>}
       <ProductFilters
+        loading={taxonomy.loading}
         query={query}
-        categories={initialCategories}
-        productTypes={initialProductTypes}
+        categories={taxonomy.categories}
+        productTypes={taxonomy.productTypes}
         total={state.data?.total || 0}
         shownCount={state.data?.items.length || 0}
         onChange={updateQuery}

@@ -31,6 +31,10 @@ export interface AttributeSchema {
   unidad?: string;
   opciones?: AttributeSchemaOption[];
   esIdentificadora?: boolean;
+  // Presentation metadata supplied by the provider, not invented HTTP fields.
+  maxLength?: number;
+  minimum?: number;
+  maximum?: number;
 }
 
 export interface TaxonomyRepository {

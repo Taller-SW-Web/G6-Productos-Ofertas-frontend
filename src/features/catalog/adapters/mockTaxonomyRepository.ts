@@ -28,7 +28,11 @@ export class MockTaxonomyRepository implements TaxonomyRepository {
   async getAttributeSchema(
     typeId: string,
   ): Promise<AttributeSchema[]> {
-    return attributeSchemasByType[typeId] ? [...attributeSchemasByType[typeId]] : [];
+    return (attributeSchemasByType[typeId] ?? []).map(schema => ({
+      ...schema,
+      // SPEC-009 initial configurable limit; only this demo provider supplies the default.
+      maxLength: schema.tipo === "TEXTO" ? 100 : schema.maxLength,
+    }));
   }
 }
 

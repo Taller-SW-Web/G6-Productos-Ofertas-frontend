@@ -18,6 +18,7 @@ export interface ProductAttributeValue {
   nombre: string;
   tipo: "TEXTO" | "NUMERO" | "LISTA";
   valor: string | number;
+  valorId?: string;
   unidad?: string;
 }
 

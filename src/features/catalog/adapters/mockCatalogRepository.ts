@@ -38,6 +38,16 @@ export class MockCatalogRepository implements CatalogRepository {
     this.variants = JSON.parse(JSON.stringify(initialVariants));
   }
 
+  // Test/demo input representing a confirmed asynchronous result; never an HTTP endpoint.
+  receiveVariantInventoryResult(productId: string, variantId: string, status: "COMPLETED" | "REJECTED", manualRetryAllowed = false) {
+    const variant = this.variants.find(v => v.productId === productId && v.variantId === variantId);
+    if (!variant) throw new CatalogError("not_found", "Variante no encontrada.");
+    if (variant.inventoryPreparationStatus === "COMPLETED") return;
+    variant.inventoryPreparationStatus = status;
+    variant.inventoryStatus = status;
+    variant.inventoryManualRetryAllowed = status === "REJECTED" && manualRetryAllowed;
+  }
+
   async list(
     query: CatalogQuery,
     scenario?: string,
@@ -587,7 +597,7 @@ export class MockCatalogRepository implements CatalogRepository {
     if (!product) throw new CatalogError("not_found", "Producto no encontrado.");
 
     if (payload.dependencia === "PRICING") {
-      if (product.preparation.pricing.status === "COMPLETED") {
+      if (product.preparation.pricing.status === "COMPLETED" || !product.preparation.pricing.manualRetryAllowed) {
         throw new CatalogError(
           "prep_not_retryable",
           "HTTP 409: La inicialización de Pricing ya se encuentra completada.",
@@ -595,10 +605,6 @@ export class MockCatalogRepository implements CatalogRepository {
       }
       product.preparation.pricing.status = "PENDING";
       product.preparation.pricing.manualRetryAllowed = false;
-      // Simulate completion in session
-      setTimeout(() => {
-        product.preparation.pricing.status = "COMPLETED";
-      }, 500);
     } else if (payload.dependencia === "INVENTARIO") {
       if (product.hasVariants) {
         throw new CatalogError(
@@ -606,7 +612,7 @@ export class MockCatalogRepository implements CatalogRepository {
           "HTTP 409: El producto con variantes no admite reintento de inventario en el padre.",
         );
       }
-      if (product.preparation.inventario?.status === "COMPLETED") {
+      if (!product.preparation.inventario || product.preparation.inventario.status === "COMPLETED" || !product.preparation.inventario.manualRetryAllowed) {
         throw new CatalogError(
           "prep_not_retryable",
           "HTTP 409: El inventario simple ya está completado.",
@@ -615,11 +621,6 @@ export class MockCatalogRepository implements CatalogRepository {
       if (product.preparation.inventario) {
         product.preparation.inventario.status = "PENDING";
         product.preparation.inventario.manualRetryAllowed = false;
-        setTimeout(() => {
-          if (product.preparation.inventario) {
-            product.preparation.inventario.status = "COMPLETED";
-          }
-        }, 500);
       }
     }
 
@@ -857,7 +858,11 @@ export class MockCatalogRepository implements CatalogRepository {
     // Identifying combination uniqueness check within product (CA-03)
     const getCombinationKey = (attrs: ProductAttributeValue[]) =>
       attrs
-        .map((a) => `${a.caracteristicaId || a.nombre}:${String(a.valor).trim().toUpperCase()}`)
+        .map((a) => {
+          const schema = attributeSchemasByType[parent.typeId]?.find(s => s.caracteristicaId === a.caracteristicaId);
+          const valueId = a.valorId ?? schema?.opciones?.find(o => o.valor === String(a.valor))?.id;
+          return `${a.caracteristicaId}:${valueId ?? String(a.valor).trim().toUpperCase()}`;
+        })
         .sort()
         .join("|");
 
@@ -990,6 +995,11 @@ export class MockCatalogRepository implements CatalogRepository {
       }
     }
 
+    // Validate the proposal before mutating any field.
+    const proposedProfile = payload.perfilFisico ?? payload.physicalProfile;
+    if (proposedProfile !== undefined && !hasValidPhysicalValues(proposedProfile)) {
+      throw new CatalogError("invalid_physical", "Todos los valores del perfil físico suministrados deben ser mayores que cero.");
+    }
     // Retain immutable identity: variantId, sku, identifyingAttributes are immutable
     current.nonIdentifyingAttributes =
       payload.atributosNoIdentificadores || payload.nonIdentifyingAttributes || [];
@@ -1194,6 +1204,7 @@ export class MockCatalogRepository implements CatalogRepository {
 
     // HTTP 202 Accepted indicates admission, remains PENDING without manual retry allowed
     variant.inventoryPreparationStatus = "PENDING";
+    variant.inventoryStatus = "PENDING";
     variant.inventoryManualRetryAllowed = false;
 
     return {

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { evidencePath } from "./support/evidence";
 
 async function noPageOverflow(page: Page) {
   expect(
@@ -6,6 +7,20 @@ async function noPageOverflow(page: Page) {
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   ).toBe(true);
+}
+
+async function fillComplementary(page: Page) {
+  await page.getByRole("textbox", { name: "Material principal", exact: true }).fill("Algodón");
+  if (await page.getByRole("combobox", { name: "Tipo de corte", exact: true }).inputValue() === "Regular Fit") return;
+  await page.getByRole("combobox", { name: "Tipo de corte", exact: true }).click();
+  await page.getByRole("option", { name: "Regular Fit", exact: true }).click();
+}
+async function fillAttributes(page: Page, color: string, size: string) {
+  await page.getByRole("combobox", { name: "Color principal", exact: true }).click();
+  await page.getByRole("option", { name: color, exact: true }).click();
+  await page.getByRole("combobox", { name: "Talla", exact: true }).click();
+  await page.getByRole("option", { name: size, exact: true }).click();
+  await fillComplementary(page);
 }
 
 test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
@@ -24,7 +39,7 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
 
     // Verify context card shows parent info and base price
     await expect(page.getByText("SKU Base: CAM-OXF")).toBeVisible();
-    await expect(page.getByText(/Precio Base: S\/\.\s*129\.90/)).toBeVisible();
+    await expect(page.getByText(/Precio inicial de Catálogo: S\/\.\s*129\.90/)).toBeVisible();
 
     // Verify initial variant items
     await expect(page.getByRole("link", { name: "CAM-OXF-BLA-M" })).toBeVisible();
@@ -40,7 +55,7 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
     await expect(page.getByRole("link", { name: "CAM-OXF-NEG-S" })).toHaveCount(0);
 
     // Capture visual evidence S01
-    await page.screenshot({ path: "docs/evidencias/mk004-s01-variantes-1440.png" });
+    await page.screenshot({ path: evidencePath("mk004-s01-variantes-1440.png") });
     await noPageOverflow(page);
 
     // 2. Verify simple product compatibility check (CA-01)
@@ -67,11 +82,7 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
     await page.getByPlaceholder("Ej. PROD-OXF-AZUL-M (Opcional)").fill(customSku);
 
     // Fill identifying attributes (Color and Talla)
-    const attrInputs = page.getByPlaceholder("Valor (ej. M, Azul Marino)");
-    await attrInputs.first().fill("Rojo Carmesí");
-    if ((await attrInputs.count()) > 1) {
-      await attrInputs.nth(1).fill("XL");
-    }
+    await fillAttributes(page, "Rojo Carmesí", "XL");
 
     // Fill mandatory image URL per SPEC-004 / VarianteCreateRequest
     await page
@@ -85,7 +96,7 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
     await page.getByRole("textbox", { name: "Alto (cm)" }).fill("3");
 
     // Capture visual evidence S02 Alta
-    await page.screenshot({ path: "docs/evidencias/mk004-s02-crear-1440.png" });
+    await page.screenshot({ path: evidencePath("mk004-s02-crear-1440.png") });
     await noPageOverflow(page);
 
     // Submit form: should create in BORRADOR and immediately navigate to S04 (Preparación)
@@ -116,12 +127,12 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
     await expect(page.getByText("35 cm")).toBeVisible();
 
     // Verify price inheritance alert
-    await expect(page.getByText("Precio Base Heredado")).toBeVisible();
-    await expect(page.getByText(/Precio del producto padre:/)).toBeVisible();
+    await expect(page.getByText("Precio inicial de Catálogo")).toBeVisible();
+    await expect(page.getByText(/Precio inicial registrado del padre:/)).toBeVisible();
     await expect(page.getByText(/129\.90/)).toBeVisible();
 
     // Capture visual evidence S03 Detalle
-    await page.screenshot({ path: "docs/evidencias/mk004-s03-detalle-1440.png" });
+    await page.screenshot({ path: evidencePath("mk004-s03-detalle-1440.png") });
     await noPageOverflow(page);
   });
 
@@ -145,10 +156,11 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
     await page.getByRole("textbox", { name: "Peso (kg)" }).fill("0.29");
 
     // Capture visual evidence S02 Edición
-    await page.screenshot({ path: "docs/evidencias/mk004-s02-editar-1440.png" });
+    await page.screenshot({ path: evidencePath("mk004-s02-editar-1440.png") });
     await noPageOverflow(page);
 
     // Save changes and verify return to S03
+    await fillComplementary(page);
     await page.getByRole("button", { name: "Guardar Cambios" }).first().click();
     await expect(page).toHaveURL(/\/productos\/PROD-OXF-001\/variantes\/VAR-OXF-BLA-M$/);
     await expect(page.getByText("0.29 kg")).toBeVisible();
@@ -167,7 +179,7 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
     await expect(page.getByText("El SKU se encuentra registrado y validado")).toBeVisible();
 
     // Capture visual evidence S04
-    await page.screenshot({ path: "docs/evidencias/mk004-s04-preparacion-1440.png" });
+    await page.screenshot({ path: evidencePath("mk004-s04-preparacion-1440.png") });
     await noPageOverflow(page);
   });
 
@@ -187,7 +199,7 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
     ).toBeVisible();
 
     // Capture visual evidence S05 Desactivar
-    await page.screenshot({ path: "docs/evidencias/mk004-s05-desactivar-1440.png" });
+    await page.screenshot({ path: evidencePath("mk004-s05-desactivar-1440.png") });
     await noPageOverflow(page);
 
     // Confirm deactivation
@@ -218,7 +230,7 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
     await expect(page.getByText("Reactivar esta variante no reactiva automáticamente al producto padre")).toBeVisible();
 
     // Capture visual evidence S06 Reactivar
-    await page.screenshot({ path: "docs/evidencias/mk004-s06-reactivar-1440.png" });
+    await page.screenshot({ path: evidencePath("mk004-s06-reactivar-1440.png") });
     await noPageOverflow(page);
 
     // Confirm reactivation
@@ -235,11 +247,7 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
     await page.goto("/productos/PROD-OXF-001/variantes/nueva");
     await expect(page.getByRole("heading", { name: "Nueva Variante (SKU)" })).toBeVisible();
     // Leave SKU blank to verify automatic generation
-    const attrInputs = page.getByPlaceholder("Valor (ej. M, Azul Marino)");
-    await attrInputs.first().fill("Negro Ónix");
-    if ((await attrInputs.count()) > 1) {
-      await attrInputs.nth(1).fill("L");
-    }
+    await fillAttributes(page, "Negro Ónix", "L");
 
     await page
       .getByPlaceholder("https://ejemplo.com/imagenes/variante-azul.jpg")
@@ -263,11 +271,7 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
     await page.goto(
       "/productos/PROD-OXF-001/variantes/nueva?modoRevision=1&escenario=create-duplicate-combination",
     );
-    const attrInputs = page.getByPlaceholder("Valor (ej. M, Azul Marino)");
-    await attrInputs.first().fill("Blanco");
-    if ((await attrInputs.count()) > 1) {
-      await attrInputs.nth(1).fill("M");
-    }
+    await fillAttributes(page, "Blanco", "M");
     await page
       .getByPlaceholder("https://ejemplo.com/imagenes/variante-azul.jpg")
       .fill("https://ejemplo.com/imagenes/camisa-blanca.jpg");
@@ -282,11 +286,7 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
     page,
   }) => {
     await page.goto("/productos/PROD-OXF-001/variantes/nueva");
-    const attrInputs = page.getByPlaceholder("Valor (ej. M, Azul Marino)");
-    await attrInputs.first().fill("Rojo");
-    if ((await attrInputs.count()) > 1) {
-      await attrInputs.nth(1).fill("M");
-    }
+    await fillAttributes(page, "Rojo Carmesí", "M");
     await page.getByPlaceholder("https://ejemplo.com/imagenes/variante-azul.jpg").fill("https://ejemplo.com/foto.jpg");
     await page.getByRole("textbox", { name: "Peso (kg)" }).fill("0");
     await page.getByRole("button", { name: "Guardar Variante" }).first().click();
@@ -335,6 +335,7 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
     await page.getByRole("textbox", { name: "Largo (cm)" }).fill("38");
     await page.getByRole("textbox", { name: "Ancho (cm)" }).fill("28");
     await page.getByRole("textbox", { name: "Alto (cm)" }).fill("4");
+    await fillComplementary(page);
     await page.getByRole("button", { name: "Guardar Cambios" }).first().click();
 
     // Check detail: new dimensions are displayed accurately

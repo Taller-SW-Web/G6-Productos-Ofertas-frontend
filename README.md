@@ -26,6 +26,30 @@ El modo `mock` funciona sin Backend, Docs ni credenciales. Solo el servidor de d
 
 ## Selección de adapters y prueba de sustitución
 
+Para MK-003/MK-004, `createCatalogServices(mode, dependencies)` compone los puertos de
+Catálogo y Taxonomía. Las factories `apiCatalog`/`apiTaxonomy` son síncronas y devuelven
+repositorios inicializados; si necesitan carga asíncrona, hacer `await` antes de
+inyectarlos. En la raíz, envolver la aplicación con `CatalogServicesContext.Provider`
+con ese resultado, dentro del `DataModeContext` existente. Las páginas y hooks no cambian.
+La inyección explícita tiene prioridad sobre la caché del runtime predeterminado.
+Sin provider API, cada puerto falla explícitamente y no carga mocks.
+
+`tests/harness/catalog-adapter.html` usa las mismas páginas con otro producto,
+otros IDs, atributos LISTA/NUMERO/TEXTO y filtros externos en modo API. Ejecutar
+`npm test -- tests/catalog-adapters.spec.ts tests/catalog-injection.spec.ts` prueba
+sustitución, permisos de reintento y fallos del esquema; no acredita HTTP real.
+El harness es de pruebas y no forma parte del build comercial.
+
+El formulario de variantes usa IDs de características/opciones, no nombres editables.
+El adapter de Taxonomía debe aportar rol identificador y límite configurado de texto;
+su ausencia bloquea el guardado. Los límites numéricos solo se aplican si el esquema
+los define. El OpenAPI consultado y el servicio de López aún no publican todos esos
+metadatos: ver [auditoría MK-003/MK-004](docs/AUDITORIA_CATALOGO_MK003_MK004.md).
+`taxonomyFixtures.ts` conserva exclusivamente la demostración anterior de Catálogo;
+no es una segunda autoridad contractual ni debe utilizarse para completar un provider
+real. La conexión definitiva con Taxonomía requiere mapear sus IDs y cerrar los
+metadatos pendientes, sin copiar el módulo ni modificar sus servicios.
+
 `VITE_DATA_MODE=mock|api` es la única configuración global, leída una vez en `src/main.tsx` y distribuida mediante `DataModeContext`. `src/features/pricing/services/pricingService.ts` compone el adapter de Pricing con ese modo: `mock` crea una instancia propia del repositorio de memoria, reloj de exposición y herramientas aisladas de desarrollo. `api` usa un factory inyectado compatible; mientras no se implemente y configure, muestra **«adapter API de Pricing no está configurado»**. Un fallo de API se propaga como error; no hay fallback al mock. Cambiar la variable requiere reiniciar Vite/reconstruir producción.
 
 `src/app/config/dataMode.ts` valida la configuración tanto en Vite como al iniciar la app; no selecciona un segundo adapter. En modo `api`, Cupones/Promociones/Recomendaciones permanecen deshabilitados porque sus providers HTTP todavía no existen: la barrera común del shell evita cargar sus adapters mock. Sus 19 pantallas funcionan en la demostración explícita. Un error de catálogo en Pricing ofrece **Volver a cargar productos y SKU**, reutilizando la misma instancia del adapter y conservando la aplicación y URL.

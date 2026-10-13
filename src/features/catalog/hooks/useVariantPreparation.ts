@@ -31,6 +31,7 @@ export function useVariantPreparation(
 
   const [response, setResponse] = useState<{
     key: string;
+    repository: typeof catalogService;
     product: ProductDetailView | null;
     variant: VariantDetailView | null;
     preparation: VariantPreparation | null;
@@ -57,7 +58,7 @@ export function useVariantPreparation(
       .then(([prod, v]) => {
         if (!controller.signal.aborted) {
           if (!prod || !v) {
-            setResponse({
+            setResponse({ repository: catalogService,
               key,
               product: null,
               variant: null,
@@ -81,7 +82,7 @@ export function useVariantPreparation(
             lastCheckedAt: new Date().toISOString(),
           };
 
-          setResponse({
+          setResponse({ repository: catalogService,
             key,
             product: prod,
             variant: v,
@@ -92,7 +93,7 @@ export function useVariantPreparation(
       })
       .catch((err) => {
         if (!controller.signal.aborted) {
-          setResponse({
+          setResponse({ repository: catalogService,
             key,
             product: null,
             variant: null,
@@ -131,7 +132,7 @@ export function useVariantPreparation(
     }
   }, [productId, variantId, scenario, retrying, catalogService]);
 
-  const isCurrent = response?.key === key;
+  const isCurrent = response?.key === key && response?.repository === catalogService;
   const preparation = isCurrent ? response.preparation : null;
   const canRetry = Boolean(
     preparation?.inventario?.manualRetryAllowed &&

@@ -41,7 +41,7 @@ export function VariantCreatePage() {
   }, [productId, scenario, catalogService]);
 
   const form = useVariantForm({
-    parentProduct: parentProduct as ProductDetailView,
+    parentProduct,
     scenario,
     onSuccess: (created) => {
       // Per SPEC-004 / FLOW-004: Created variant in BORRADOR navigates to S04 preparation
@@ -118,6 +118,7 @@ export function VariantCreatePage() {
               <Button
                 type="submit"
                 loading={form.submitting}
+                disabled={form.schemaLoading || Boolean(form.schemaError)}
                 leftSection={<IconCheck size={16} />}
               >
                 Guardar Variante
@@ -145,7 +146,7 @@ export function VariantCreatePage() {
             >
               Cancelar
             </Button>
-            <Button type="submit" loading={form.submitting}>
+            <Button type="submit" loading={form.submitting} disabled={form.schemaLoading || Boolean(form.schemaError)}>
               Guardar Variante
             </Button>
           </Group>

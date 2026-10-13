@@ -18,6 +18,7 @@ export function useProductDetail(
   const key = JSON.stringify([id, scenario, revision]);
   const [response, setResponse] = useState<{
     key: string;
+    repository: typeof catalogService;
     state: ProductDetailState;
   }>();
 
@@ -29,12 +30,12 @@ export function useProductDetail(
       .then((product) => {
         if (!controller.signal.aborted) {
           if (!product) {
-            setResponse({
+            setResponse({ repository: catalogService,
               key,
               state: { status: "not_found", error: "Producto no encontrado." },
             });
           } else {
-            setResponse({
+            setResponse({ repository: catalogService,
               key,
               state: { status: "success", product },
             });
@@ -45,28 +46,28 @@ export function useProductDetail(
         if (controller.signal.aborted) return;
         if (err instanceof CatalogError) {
           if (err.kind === "forbidden") {
-            setResponse({
+            setResponse({ repository: catalogService,
               key,
               state: { status: "forbidden", error: err.message },
             });
             return;
           }
           if (err.kind === "session") {
-            setResponse({
+            setResponse({ repository: catalogService,
               key,
               state: { status: "session", error: err.message },
             });
             return;
           }
           if (err.kind === "not_found") {
-            setResponse({
+            setResponse({ repository: catalogService,
               key,
               state: { status: "not_found", error: err.message },
             });
             return;
           }
         }
-        setResponse({
+        setResponse({ repository: catalogService,
           key,
           state: {
             status: "error",
@@ -81,7 +82,7 @@ export function useProductDetail(
     return () => controller.abort();
   }, [id, key, scenario, catalogService]);
 
-  return response?.key === key
+  return response?.key === key && response?.repository === catalogService
     ? response.state
     : { status: "loading" };
 }

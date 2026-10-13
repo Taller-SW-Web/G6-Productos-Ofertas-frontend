@@ -7,6 +7,7 @@ import {
   Group,
   NumberInput,
   Paper,
+  Select,
   Stack,
   Text,
   TextInput,
@@ -119,220 +120,60 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
             </Alert>
           )}
 
-          {/* Atributos Identificadores */}
-          <Box>
-            <Group justify="space-between" mb="xs">
-              <div>
-                <Text size="sm" fw={600}>
-                  Atributos Identificadores *
-                </Text>
-                <Text size="xs" c="dimmed">
-                  Identidad única de la variante (ej. Color, Talla). En edición permanecen inmutables.
-                </Text>
-              </div>
-              {!isEdit && (
-                <Button
-                  variant="subtle"
-                  size="xs"
-                  leftSection={<IconPlus size={14} />}
-                  onClick={addIdentifyingAttribute}
-                  disabled={schemaLoading}
-                >
-                  Agregar atributo
-                </Button>
-              )}
-            </Group>
-
-            {errors.identifyingAttributes && (
-              <Alert icon={<IconAlertCircle size={14} />} color="red" variant="light" mb="sm">
-                <Text size="xs">{errors.identifyingAttributes}</Text>
-              </Alert>
-            )}
-
-            {isEdit ? (
-              <Group gap="xs">
-                {formData.identifyingAttributes.map((attr, idx) => (
-                  <Badge key={idx} size="lg" variant="filled" color="dark">
-                    {attr.nombre}: {attr.valor} {attr.unidad ? `(${attr.unidad})` : ""}
-                  </Badge>
-                ))}
+          {errors.attributes && <Alert color="danger">{errors.attributes}</Alert>}
+          {([true, false] as const).map(identity => {
+            const entries = identity ? formData.identifyingAttributes : formData.nonIdentifyingAttributes;
+            const update = identity ? updateIdentifyingAttribute : updateNonIdentifyingAttribute;
+            const remove = identity ? removeIdentifyingAttribute : removeNonIdentifyingAttribute;
+            const available = attributeSchemas.filter(s => s.esIdentificadora === identity);
+            const locked = identity && isEdit;
+            return <Box key={String(identity)}>
+              <Group justify="space-between" mb="sm">
+                <Text fw={600}>{identity ? "Atributos identificadores" : "Atributos complementarios"}</Text>
+                {!locked && <Button variant="subtle" size="xs" leftSection={<IconPlus size={14} />}
+                  onClick={identity ? addIdentifyingAttribute : addNonIdentifyingAttribute}
+                  disabled={schemaLoading || Boolean(schemaError) || available.every(s =>
+                    entries.some(a => a.caracteristicaId === s.caracteristicaId))}>
+                  {identity ? "Agregar atributo" : "Agregar complementario"}
+                </Button>}
               </Group>
-            ) : (
-              <Stack gap="md">
-                {formData.identifyingAttributes.map((attr, idx) => {
-                  const schema = attributeSchemas.find(
-                    (s) => s.caracteristicaId === attr.caracteristicaId,
-                  );
-
-                  return (
-                    <Box key={attr.key || idx} p="xs" style={{ border: "1px solid #e9ecef", borderRadius: 6 }}>
-                      <Grid align="flex-end" gap="xs">
-                        <Grid.Col span={{ base: 12, md: 5 }}>
-                          <TextInput
-                            label={idx === 0 ? "Característica (Taxonomía)" : undefined}
-                            placeholder="Nombre (ej. Talla, Color)"
-                            value={attr.nombre}
-                            onChange={(e) =>
-                              updateIdentifyingAttribute(idx, "nombre", e.currentTarget.value)
-                            }
-                            error={errors[`id_attr_${idx}_nombre`]}
-                            size="sm"
-                          />
-                        </Grid.Col>
-                        <Grid.Col span={{ base: 10, md: 5 }}>
-                          <TextInput
-                            label={idx === 0 ? "Valor *" : undefined}
-                            placeholder="Valor (ej. M, Azul Marino)"
-                            value={attr.valor}
-                            onChange={(e) =>
-                              updateIdentifyingAttribute(idx, "valor", e.currentTarget.value)
-                            }
-                            error={errors[`id_attr_${idx}_valor`]}
-                            size="sm"
-                          />
-                        </Grid.Col>
-                        <Grid.Col span={{ base: 2, md: 2 }}>
-                          <Button
-                            color="red"
-                            variant="subtle"
-                            size="sm"
-                            disabled={formData.identifyingAttributes.length <= 1}
-                            onClick={() => removeIdentifyingAttribute(idx)}
-                          >
-                            <IconTrash size={16} />
-                          </Button>
-                        </Grid.Col>
-                      </Grid>
-
-                      {/* Display stable taxonomy options for LISTA */}
-                      {schema?.opciones && schema.opciones.length > 0 && (
-                        <Group gap={6} mt="xs">
-                          <Text size="xs" c="dimmed">
-                            Opciones válidas ({schema.caracteristicaId}):
-                          </Text>
-                          {schema.opciones.map((opt) => (
-                            <Badge
-                              key={opt.id}
-                              size="xs"
-                              variant={
-                                attr.valor === opt.valor || attr.valor === opt.id
-                                  ? "filled"
-                                  : "outline"
-                              }
-                              style={{ cursor: "pointer" }}
-                              onClick={() =>
-                                updateIdentifyingAttribute(idx, "valor", opt.valor)
-                              }
-                            >
-                              {opt.valor} ({opt.id})
-                            </Badge>
-                          ))}
-                        </Group>
-                      )}
-                    </Box>
-                  );
+              {errors.identifyingAttributes && identity && <Alert color="danger">{errors.identifyingAttributes}</Alert>}
+              <Stack gap="sm">
+                {entries.map((attr, idx) => {
+                  const schema = available.find(s => s.caracteristicaId === attr.caracteristicaId);
+                  const error = errors[`${identity ? "id" : "non"}_attr_${idx}_valor`];
+                  return <Paper key={attr.key} p="sm" withBorder>
+                    <Group align="flex-start" wrap="nowrap">
+                      <Select label="Característica (Taxonomía)" value={attr.caracteristicaId}
+                        data={available.filter(s => s.caracteristicaId === attr.caracteristicaId ||
+                          !entries.some(a => a.caracteristicaId === s.caracteristicaId))
+                          .map(s => ({ value: s.caracteristicaId, label: s.nombre }))}
+                        disabled={locked || Boolean(attr.obligatorio) || schemaLoading || Boolean(schemaError)}
+                        onChange={value => { if (value) update(idx, "caracteristicaId", value); }}
+                        style={{ flex: 1 }} />
+                      {locked ? <Text pt="lg">{attr.nombre}: {attr.valor}</Text> :
+                        schema?.tipo === "LISTA" ?
+                          <Select label={attr.nombre} required={schema.obligatorio}
+                            data={(schema.opciones ?? []).map(o => ({ value: o.id, label: o.valor }))}
+                            value={attr.valor || null} onChange={value => update(idx, "valor", value ?? "")}
+                            error={error} disabled={schemaLoading || Boolean(schemaError)} style={{ flex: 1 }} /> :
+                        schema?.tipo === "NUMERO" ?
+                          <NumberInput label={attr.nombre} required={schema.obligatorio} clampBehavior="none"
+                            value={attr.valor} onChange={value => update(idx, "valor", String(value))}
+                            min={schema.minimum} max={schema.maximum} description={schema.unidad}
+                            error={error} style={{ flex: 1 }} /> :
+                          <TextInput label={attr.nombre} required={schema?.obligatorio} maxLength={schema?.maxLength}
+                            value={attr.valor} onChange={e => update(idx, "valor", e.currentTarget.value)}
+                            error={error} disabled={!schema || schemaLoading || Boolean(schemaError)} style={{ flex: 1 }} />}
+                      {!locked && <Button variant="subtle" color="danger" mt="lg"
+                        aria-label={`Quitar ${attr.nombre}`} disabled={Boolean(attr.obligatorio)}
+                        onClick={() => remove(idx)}><IconTrash size={16} /></Button>}
+                    </Group>
+                  </Paper>;
                 })}
               </Stack>
-            )}
-          </Box>
-
-          {/* Atributos No Identificadores */}
-          <Box>
-            <Group justify="space-between" mb="xs">
-              <div>
-                <Text size="sm" fw={600}>
-                  Atributos Complementarios (No identificadores)
-                </Text>
-                <Text size="xs" c="dimmed">
-                  Información adicional técnica o comercial autorizada por Taxonomía.
-                </Text>
-              </div>
-              <Button
-                variant="subtle"
-                size="xs"
-                leftSection={<IconPlus size={14} />}
-                onClick={addNonIdentifyingAttribute}
-              >
-                Agregar complementario
-              </Button>
-            </Group>
-
-            {formData.nonIdentifyingAttributes.length === 0 ? (
-              <Text size="xs" c="dimmed" fs="italic">
-                Sin atributos complementarios adicionales.
-              </Text>
-            ) : (
-              <Stack gap="xs">
-                {formData.nonIdentifyingAttributes.map((attr, idx) => {
-                  const schema = attributeSchemas.find(
-                    (s) => s.caracteristicaId === attr.caracteristicaId,
-                  );
-
-                  return (
-                    <Box key={attr.key || idx} p="xs" style={{ border: "1px solid #f1f3f5", borderRadius: 6 }}>
-                      <Grid align="flex-end" gap="xs">
-                        <Grid.Col span={{ base: 12, md: 5 }}>
-                          <TextInput
-                            placeholder="Nombre (ej. Material forro)"
-                            value={attr.nombre}
-                            onChange={(e) =>
-                              updateNonIdentifyingAttribute(idx, "nombre", e.currentTarget.value)
-                            }
-                            size="sm"
-                          />
-                        </Grid.Col>
-                        <Grid.Col span={{ base: 10, md: 5 }}>
-                          <TextInput
-                            placeholder="Valor (ej. 100% Algodón)"
-                            value={attr.valor}
-                            onChange={(e) =>
-                              updateNonIdentifyingAttribute(idx, "valor", e.currentTarget.value)
-                            }
-                            size="sm"
-                          />
-                        </Grid.Col>
-                        <Grid.Col span={{ base: 2, md: 2 }}>
-                          <Button
-                            color="gray"
-                            variant="subtle"
-                            size="sm"
-                            onClick={() => removeNonIdentifyingAttribute(idx)}
-                          >
-                            <IconTrash size={16} />
-                          </Button>
-                        </Grid.Col>
-                      </Grid>
-
-                      {schema?.opciones && schema.opciones.length > 0 && (
-                        <Group gap={6} mt="xs">
-                          <Text size="xs" c="dimmed">
-                            Opciones ({schema.caracteristicaId}):
-                          </Text>
-                          {schema.opciones.map((opt) => (
-                            <Badge
-                              key={opt.id}
-                              size="xs"
-                              variant={
-                                attr.valor === opt.valor || attr.valor === opt.id
-                                  ? "filled"
-                                  : "outline"
-                              }
-                              style={{ cursor: "pointer" }}
-                              onClick={() =>
-                                updateNonIdentifyingAttribute(idx, "valor", opt.valor)
-                              }
-                            >
-                              {opt.valor}
-                            </Badge>
-                          ))}
-                        </Group>
-                      )}
-                    </Box>
-                  );
-                })}
-              </Stack>
-            )}
-          </Box>
+            </Box>;
+          })}
         </Stack>
       </SectionCard>
 
@@ -440,14 +281,14 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
       {/* CARD 4: Herencia de Precio Base */}
       <Alert
         icon={<IconCoins size={18} />}
-        title="Herencia de Precio Base"
+        title="Precio inicial de Catálogo"
         color="blue"
         variant="light"
       >
         <Stack gap="xs">
           <Text size="xs">
-            Las variantes <strong>heredan el precio base</strong> configurado en el producto padre (S/.{" "}
-            {parentProduct.priceInitial?.toFixed(2) ?? "0.00"}).
+            Precio inicial registrado del padre: {parentProduct.priceInitial === undefined ? "No disponible" :
+              `S/. ${parentProduct.priceInitial.toFixed(2)}`}. El precio vigente debe consultarse en Pricing.
           </Text>
           <Text size="xs" c="dimmed">
             No se define un precio propio en el Catálogo para la variante. Las sobreescrituras de precio

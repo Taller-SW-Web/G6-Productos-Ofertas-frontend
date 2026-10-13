@@ -30,6 +30,7 @@ export function useProductList(
 
   const [response, setResponse] = useState<{
     key: string;
+    repository: typeof catalogService;
     state: ProductListState;
   }>();
 
@@ -44,28 +45,28 @@ export function useProductList(
       )
       .then((data) => {
         if (!controller.signal.aborted) {
-          setResponse({ key, state: { status: "success", data } });
+          setResponse({ repository: catalogService, key, state: { status: "success", data } });
         }
       })
       .catch((err) => {
         if (controller.signal.aborted) return;
         if (err instanceof CatalogError) {
           if (err.kind === "forbidden") {
-            setResponse({
+            setResponse({ repository: catalogService,
               key,
               state: { status: "forbidden", error: err.message },
             });
             return;
           }
           if (err.kind === "session") {
-            setResponse({
+            setResponse({ repository: catalogService,
               key,
               state: { status: "session", error: err.message },
             });
             return;
           }
         }
-        setResponse({
+        setResponse({ repository: catalogService,
           key,
           state: {
             status: "error",
@@ -80,7 +81,7 @@ export function useProductList(
     return () => controller.abort();
   }, [key, q, categoryId, typeId, saleModel, status, page, pageSize, scenario, catalogService]);
 
-  return response?.key === key
+  return response?.key === key && response?.repository === catalogService
     ? response.state
     : { status: "loading" };
 }

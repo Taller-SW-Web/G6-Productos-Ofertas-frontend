@@ -49,7 +49,6 @@ export const productRoutes: RouteObject[] = [
   { path: "/productos/:productId/variantes/:variantId", element: <VariantDetailPage /> },
   { path: "/productos/:productId/variantes/:variantId/editar", element: <VariantEditPage /> },
   { path: "/productos/:productId/variantes/:variantId/preparacion", element: <VariantPreparationPage /> },
-  { path: "/MK-004", element: <VariantListPage /> },
   { path: "/precios", element: <CurrentPricePage /> },
   { path: "/precios/editar", element: <EditPricePage /> },
   { path: "/precios/programaciones", element: <PriceSchedulesPage /> },

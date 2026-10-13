@@ -311,7 +311,7 @@ export function ProductPreparationPage() {
 
                   <Button
                     component={Link}
-                    to="/MK-004"
+                    to={`/productos/${productId}/variantes`}
                     size="xs"
                     variant="outline"
                     rightSection={<IconExternalLink size={14} />}

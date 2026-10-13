@@ -7,6 +7,7 @@ import type {
 } from "../services/taxonomyRepository";
 
 interface ProductFiltersProps {
+  loading?: boolean;
   query: CatalogQuery;
   categories: TaxonomyCategory[];
   productTypes: TaxonomyProductType[];
@@ -17,6 +18,7 @@ interface ProductFiltersProps {
 }
 
 export function ProductFilters({
+  loading,
   query,
   categories,
   productTypes,
@@ -83,6 +85,7 @@ export function ProductFilters({
         </div>
 
         <Select
+          disabled={loading}
           label="Categoría"
           data={categoryOptions}
           value={query.categoryId || "all"}
@@ -91,6 +94,7 @@ export function ProductFilters({
 
         <Select
           label="Tipo"
+          disabled={loading}
           data={typeOptions}
           value={query.typeId || "all"}
           onChange={(val) => onChange({ typeId: val || "all", page: 1 })}
@@ -113,7 +117,8 @@ export function ProductFilters({
         <Group gap="sm">
           <Select
             size="xs"
-            w={160}
+            w={220}
+            aria-label="Estado del producto"
             data={statusOptions}
             value={query.status || "all"}
             onChange={(val) =>

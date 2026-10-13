@@ -24,6 +24,7 @@ export function useVariantDetail(
 
   const [response, setResponse] = useState<{
     key: string;
+    repository: typeof catalogService;
     product: ProductDetailView | null;
     variant: VariantDetailView | null;
     error: string | null;
@@ -45,14 +46,14 @@ export function useVariantDetail(
       .then(([p, v]) => {
         if (!controller.signal.aborted) {
           if (!p || !v) {
-            setResponse({
+            setResponse({ repository: catalogService,
               key,
               product: null,
               variant: null,
               error: "La variante o el producto padre no fueron encontrados.",
             });
           } else {
-            setResponse({
+            setResponse({ repository: catalogService,
               key,
               product: p,
               variant: v,
@@ -63,7 +64,7 @@ export function useVariantDetail(
       })
       .catch((err) => {
         if (!controller.signal.aborted) {
-          setResponse({
+          setResponse({ repository: catalogService,
             key,
             product: null,
             variant: null,
@@ -77,7 +78,7 @@ export function useVariantDetail(
     };
   }, [productId, variantId, scenario, revision, key, catalogService]);
 
-  const isCurrent = response?.key === key;
+  const isCurrent = response?.key === key && response?.repository === catalogService;
 
   return {
     product: isCurrent ? response.product : null,

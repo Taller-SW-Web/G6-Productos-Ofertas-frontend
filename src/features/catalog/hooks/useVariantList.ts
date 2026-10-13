@@ -29,7 +29,7 @@ export function useVariantList({
   scenario,
 }: UseVariantListOptions = {}): UseVariantListResult {
   const { catalog: catalogService } = useCatalogServices();
-  const targetProductId = productId || "PROD-OXF-001";
+  const targetProductId = productId;
   const [revision, setRevision] = useState<number>(0);
   const queryStatus = query?.status;
   const queryPage = query?.page;
@@ -46,6 +46,7 @@ export function useVariantList({
 
   const [response, setResponse] = useState<{
     key: string;
+    repository: typeof catalogService;
     product: ProductDetailView | null;
     variants: VariantDetailView[];
     total: number;
@@ -59,6 +60,7 @@ export function useVariantList({
 
   useEffect(() => {
     const controller = new AbortController();
+    if (!targetProductId) return;
 
     Promise.all([
       catalogService.getById(targetProductId, scenario, controller.signal),
@@ -72,7 +74,7 @@ export function useVariantList({
       .then(([p, pageResult]) => {
         if (!controller.signal.aborted) {
           if (!p) {
-            setResponse({
+            setResponse({ repository: catalogService,
               key,
               product: null,
               variants: [],
@@ -83,7 +85,7 @@ export function useVariantList({
             return;
           }
           if (!p.hasVariants) {
-            setResponse({
+            setResponse({ repository: catalogService,
               key,
               product: p,
               variants: [],
@@ -92,7 +94,7 @@ export function useVariantList({
               isSimpleProduct: true,
             });
           } else {
-            setResponse({
+            setResponse({ repository: catalogService,
               key,
               product: p,
               variants: pageResult.items,
@@ -106,7 +108,7 @@ export function useVariantList({
       .catch((err) => {
         if (!controller.signal.aborted) {
           if (err instanceof CatalogError && err.kind === "product_not_variants") {
-            setResponse({
+            setResponse({ repository: catalogService,
               key,
               product: null,
               variants: [],
@@ -115,7 +117,7 @@ export function useVariantList({
               isSimpleProduct: true,
             });
           } else {
-            setResponse({
+            setResponse({ repository: catalogService,
               key,
               product: null,
               variants: [],
@@ -132,14 +134,14 @@ export function useVariantList({
     };
   }, [key, targetProductId, queryStatus, queryPage, queryPageSize, scenario, revision, catalogService]);
 
-  const isCurrent = response?.key === key;
+  const isCurrent = response?.key === key && response?.repository === catalogService;
 
   return {
     product: isCurrent ? response.product : null,
     variants: isCurrent ? response.variants : [],
     total: isCurrent ? response.total : 0,
-    loading: !isCurrent,
-    error: isCurrent ? response.error : null,
+    loading: Boolean(targetProductId) && !isCurrent,
+    error: !targetProductId ? "Seleccione un producto padre." : isCurrent ? response.error : null,
     isSimpleProduct: isCurrent ? response.isSimpleProduct : false,
     reload,
   };

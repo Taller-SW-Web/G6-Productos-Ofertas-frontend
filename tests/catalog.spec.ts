@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { evidencePath } from "./support/evidence";
 
 async function noPageOverflow(page: Page) {
   expect(
@@ -307,7 +308,7 @@ test.describe("MK-003 Gestión de productos (CRUD principal)", () => {
     await page.goto("/productos");
     await page.waitForLoadState("networkidle");
     await page.screenshot({
-      path: "docs/evidencias/mk003-s01-productos-1440.png",
+      path: evidencePath("mk003-s01-productos-1440.png"),
       fullPage: true,
     });
     await noPageOverflow(page);
@@ -316,7 +317,7 @@ test.describe("MK-003 Gestión de productos (CRUD principal)", () => {
     await page.goto("/productos/nuevo");
     await page.waitForLoadState("networkidle");
     await page.screenshot({
-      path: "docs/evidencias/mk003-s02-crear-1440.png",
+      path: evidencePath("mk003-s02-crear-1440.png"),
       fullPage: true,
     });
     await noPageOverflow(page);
@@ -325,7 +326,7 @@ test.describe("MK-003 Gestión de productos (CRUD principal)", () => {
     await page.goto("/productos/PROD-MOCH-001/editar");
     await page.waitForLoadState("networkidle");
     await page.screenshot({
-      path: "docs/evidencias/mk003-s03-editar-1440.png",
+      path: evidencePath("mk003-s03-editar-1440.png"),
       fullPage: true,
     });
     await noPageOverflow(page);
@@ -334,7 +335,7 @@ test.describe("MK-003 Gestión de productos (CRUD principal)", () => {
     await page.goto("/productos/PROD-OXF-001");
     await page.waitForLoadState("networkidle");
     await page.screenshot({
-      path: "docs/evidencias/mk003-s04-detalle-1440.png",
+      path: evidencePath("mk003-s04-detalle-1440.png"),
       fullPage: true,
     });
     await noPageOverflow(page);
@@ -343,14 +344,14 @@ test.describe("MK-003 Gestión de productos (CRUD principal)", () => {
     await page.goto("/productos/PROD-MOCH-001?dialog=activar");
     await page.waitForSelector("role=dialog");
     await page.screenshot({
-      path: "docs/evidencias/mk003-s05-activar-1440.png",
+      path: evidencePath("mk003-s05-activar-1440.png"),
     });
 
     // S06 Preparación
     await page.goto("/productos/PROD-MOCH-001/preparacion");
     await page.waitForLoadState("networkidle");
     await page.screenshot({
-      path: "docs/evidencias/mk003-s06-preparacion-1440.png",
+      path: evidencePath("mk003-s06-preparacion-1440.png"),
       fullPage: true,
     });
     await noPageOverflow(page);
@@ -359,7 +360,7 @@ test.describe("MK-003 Gestión de productos (CRUD principal)", () => {
     await page.goto("/productos/PROD-OXF-001?dialog=desactivar");
     await page.waitForSelector("role=dialog");
     await page.screenshot({
-      path: "docs/evidencias/mk003-s07-desactivar-1440.png",
+      path: evidencePath("mk003-s07-desactivar-1440.png"),
     });
   });
 });

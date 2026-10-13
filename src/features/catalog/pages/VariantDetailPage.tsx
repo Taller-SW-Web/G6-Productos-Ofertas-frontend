@@ -379,17 +379,16 @@ export function VariantDetailPage() {
               {/* Price Inheritance Card */}
               <Alert
                 icon={<IconCoins size={18} />}
-                title="Precio Base Heredado"
+                title="Precio inicial de Catálogo"
                 color="blue"
                 variant="light"
               >
                 <Text size="xs">
-                  Precio del producto padre:{" "}
-                  <strong>S/. {product.priceInitial?.toFixed(2) ?? "0.00"}</strong>
+                  Precio inicial registrado del padre:{" "}
+                  <strong>{product.priceInitial === undefined ? "No disponible" : `S/. ${product.priceInitial.toFixed(2)}`}</strong>
                 </Text>
                 <Text size="xs" c="dimmed" mt={2}>
-                  Este SKU no define precio propio en el Catálogo; hereda el valor del padre según las
-                  reglas de negocio de SPEC-004.
+                  El precio vigente y los overrides por SKU pertenecen a Pricing. El importe inicial de Catálogo no acredita el precio actual.
                 </Text>
               </Alert>
             </Stack>

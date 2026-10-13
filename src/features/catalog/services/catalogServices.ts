@@ -10,8 +10,9 @@ export interface CatalogServices {
 }
 
 export interface CatalogRuntimeDependencies {
-  apiCatalog?: () => Promise<CatalogRepository> | CatalogRepository;
-  apiTaxonomy?: () => Promise<TaxonomyRepository> | TaxonomyRepository;
+  // Initialize asynchronous HTTP factories before injecting their repositories.
+  apiCatalog?: () => CatalogRepository;
+  apiTaxonomy?: () => TaxonomyRepository;
 }
 
 let sharedMockServices: CatalogServices | null = null;
@@ -102,14 +103,18 @@ export function createCatalogServices(
   }
 
   // mode === "api"
-  return {
+  const services = {
     catalog: dependencies.apiCatalog
-      ? (dependencies.apiCatalog() as CatalogRepository)
+      ? dependencies.apiCatalog()
       : createUnavailableApiCatalogRepository(),
     taxonomy: dependencies.apiTaxonomy
-      ? (dependencies.apiTaxonomy() as TaxonomyRepository)
+      ? dependencies.apiTaxonomy()
       : createUnavailableApiTaxonomyRepository(),
   };
+  if ("then" in services.catalog || "then" in services.taxonomy) {
+    throw new Error("Inicializa los adaptadores asíncronos con await antes de inyectarlos en Catálogo.");
+  }
+  return services;
 }
 
 const serviceInstances = new Map<DataMode, CatalogServices>();
@@ -118,6 +123,10 @@ export function getCatalogServices(
   mode: DataMode,
   dependencies: CatalogRuntimeDependencies = {},
 ): CatalogServices {
+  // Explicit injection always takes precedence over the default runtime cache.
+  if (dependencies.apiCatalog || dependencies.apiTaxonomy) {
+    return createCatalogServices(mode, dependencies);
+  }
   let services = serviceInstances.get(mode);
   if (!services) {
     services = createCatalogServices(mode, dependencies);

@@ -97,6 +97,7 @@ function VariantEditContent({
               <Button
                 type="submit"
                 loading={form.submitting}
+                disabled={form.schemaLoading || Boolean(form.schemaError)}
                 leftSection={<IconCheck size={16} />}
               >
                 Guardar Cambios
