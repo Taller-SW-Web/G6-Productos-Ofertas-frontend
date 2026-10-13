@@ -17,10 +17,10 @@ import { DataModeContext } from "../../src/app/config/DataModeContext";
 import { CatalogServicesContext } from "../../src/features/catalog/services/CatalogServicesContext";
 import { createCatalogServices } from "../../src/features/catalog/services/catalogServices";
 import { createUnavailableApiCatalogRepository } from "../../src/features/catalog/adapters/unavailableApiCatalogRepository";
-import type { ProductDetailView, ProductUpdatePayload, VariantCreatePayload } from "../../src/features/catalog/services/catalogRepository";
+import type { ProductCreatePayload, ProductDetailView, ProductUpdatePayload, VariantCreatePayload } from "../../src/features/catalog/services/catalogRepository";
 import type { TaxonomyRepository } from "../../src/features/catalog/services/taxonomyRepository";
 
-declare global { interface Window { catalogPayload?: VariantCreatePayload; productPayload?: ProductUpdatePayload; schemaReady?: boolean } }
+declare global { interface Window { catalogPayload?: VariantCreatePayload; productPayload?: ProductUpdatePayload; createdProductPayload?: ProductCreatePayload; schemaReady?: boolean; renamedListOption?: boolean } }
 const params = new URLSearchParams(location.search);
 const product: ProductDetailView = {
   id: "external-product", name: "Producto del adapter alternativo", skuBase: "EXTERNAL",
@@ -31,6 +31,14 @@ const product: ProductDetailView = {
   preparation: { productId: "external-product", hasVariants: true,
     pricing: { status: "PENDING", manualRetryAllowed: false }, inventario: null, variantes: [] },
 };
+if (params.has("lista-edit")) product.attributes = [{
+  caracteristicaId: "external-list", nombre: "Opción externa", tipo: "LISTA",
+  valorId: params.has("lista-missing-id") ? undefined : "external-value", valor: "Etiqueta anterior",
+}];
+if (params.has("publication")) {
+  product.hasVariants = false;
+  product.publishedCommercially = params.get("publication") === "unknown" ? undefined : params.get("publication") === "true";
+}
 const catalog = {
   ...createUnavailableApiCatalogRepository(),
   list: async () => ({ items: [product], total: 1, page: 1, pageSize: 10 }),
@@ -45,6 +53,10 @@ const catalog = {
   update: async (_id: string, payload: ProductUpdatePayload) => {
     window.productPayload = payload;
     throw new Error("Guardado recibido");
+  },
+  create: async (payload: ProductCreatePayload): Promise<never> => {
+    window.createdProductPayload = payload;
+    throw new Error("Alta recibida");
   },
   createVariant: async (_id: string, payload: VariantCreatePayload): Promise<never> => {
     window.catalogPayload = payload;
@@ -63,7 +75,7 @@ const taxonomy: TaxonomyRepository = {
     if (params.has("schema-empty")) return [];
     return [
       { caracteristicaId: "external-list", nombre: "Opción externa", tipo: "LISTA", obligatorio: true,
-        esIdentificadora: true, opciones: [{ id: "external-value", valor: "Etiqueta vigente" }] },
+        esIdentificadora: true, opciones: [{ id: "external-value", valor: window.renamedListOption ? "Etiqueta renombrada" : "Etiqueta vigente" }] },
       { caracteristicaId: "external-number", nombre: "Temperatura", tipo: "NUMERO", obligatorio: true,
         esIdentificadora: false, minimum: -20, maximum: 20, unidad: "°C" },
       { caracteristicaId: "external-text", nombre: "Descripción técnica", tipo: "TEXTO", obligatorio: true,

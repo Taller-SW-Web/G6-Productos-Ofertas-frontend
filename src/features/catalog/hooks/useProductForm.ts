@@ -63,7 +63,7 @@ export function useProductForm({
     if (initialProduct) {
       const attrs: Record<string, string | number> = {};
       initialProduct.attributes.forEach((a) => {
-        attrs[a.caracteristicaId] = a.valor;
+        attrs[a.caracteristicaId] = a.tipo === "LISTA" ? a.valorId ?? "" : a.valor;
       });
       return {
         nombre: initialProduct.name,
@@ -149,7 +149,20 @@ export function useProductForm({
     taxonomyService
       .getAttributeSchema(formData.tipoProductoId)
       .then((schemas) => {
-        if (active) setSchemaResult({ typeId: formData.tipoProductoId, service: taxonomyService, attributes: schemas });
+        if (!active) return;
+        setSchemaResult({ typeId: formData.tipoProductoId, service: taxonomyService, attributes: schemas });
+        // Historical mocks sometimes stored an option ID in valor. Accept it only
+        // when the confirmed provider lists that exact ID; never infer from labels.
+        if (initialProduct) setFormData((previous) => {
+          const atributos = { ...previous.atributos };
+          initialProduct.attributes.forEach((attribute) => {
+            if (attribute.tipo !== "LISTA" || attribute.valorId !== undefined || atributos[attribute.caracteristicaId] !== "") return;
+            const option = schemas.find((schema) => schema.caracteristicaId === attribute.caracteristicaId)
+              ?.opciones?.find((item) => item.id === attribute.valor);
+            if (option) atributos[attribute.caracteristicaId] = option.id;
+          });
+          return { ...previous, atributos };
+        });
       })
       .catch(() => {
         if (active) setSchemaResult({ typeId: formData.tipoProductoId, service: taxonomyService, error: "No se pudo confirmar el esquema de Taxonomía. Tus atributos se conservan; reintenta antes de guardar." });
@@ -157,7 +170,7 @@ export function useProductForm({
     return () => {
       active = false;
     };
-  }, [formData.tipoProductoId, taxonomyService, schemaAttempt]);
+  }, [formData.tipoProductoId, taxonomyService, schemaAttempt, initialProduct]);
 
   const currentSchema = schemaResult?.typeId === formData.tipoProductoId && schemaResult.service === taxonomyService
     ? schemaResult : null;
@@ -169,6 +182,8 @@ export function useProductForm({
 
   const updateField = useCallback(
     <K extends keyof ProductFormData>(field: K, value: ProductFormData[K]) => {
+      // Q-06 is still open: no ordinary edit may propose a type correction.
+      if (isEdit && field === "tipoProductoId") return;
       setFormData((prev) => ({ ...prev, [field]: value }));
       setIsDirty(true);
       setErrors((prev) => {
@@ -177,7 +192,7 @@ export function useProductForm({
         return next;
       });
     },
-    [],
+    [isEdit],
   );
 
   const updateAttribute = useCallback(
@@ -237,6 +252,17 @@ export function useProductForm({
       }
     }
 
+    attributeSchema.filter((schema) => schema.tipo === "LISTA").forEach((schema) => {
+      const valueId = formData.atributos[schema.caracteristicaId];
+      const previous = initialProduct?.attributes.find((attribute) => attribute.caracteristicaId === schema.caracteristicaId);
+      const needsConfirmation = previous?.tipo === "LISTA" && previous.valorId === undefined;
+      if ((valueId !== undefined && valueId !== "") || needsConfirmation) {
+        if (!schema.opciones?.some((option) => option.id === valueId)) {
+          newErrors[`attr_${schema.caracteristicaId}`] = "Selecciona una opción vigente de Taxonomía para confirmar su identificador.";
+        }
+      }
+    });
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -259,11 +285,13 @@ export function useProductForm({
     attributeSchema.forEach((schema) => {
       const val = formData.atributos[schema.caracteristicaId];
       if (val !== undefined && val !== "") {
+        const option = schema.tipo === "LISTA" ? schema.opciones?.find((item) => item.id === val) : undefined;
         formattedAttributes.push({
           caracteristicaId: schema.caracteristicaId,
           nombre: schema.nombre,
           tipo: schema.tipo,
-          valor: schema.tipo === "NUMERO" ? Number(val) : val,
+          valor: option ? option.valor : schema.tipo === "NUMERO" ? Number(val) : val,
+          ...(option ? { valorId: option.id } : {}),
           unidad: schema.unidad,
         });
       }
@@ -303,7 +331,6 @@ export function useProductForm({
           descripcion: formData.descripcion,
           categoriaId: formData.categoriaId,
           marcaId: formData.marcaId,
-          tipoProductoId: formData.tipoProductoId,
           atributos: formattedAttributes,
           imagenes: images,
           perfilFisico: physicalProfile,

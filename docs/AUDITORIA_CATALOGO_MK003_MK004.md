@@ -4,6 +4,56 @@ Rama `poma`, PR #25 en borrador. Estado: `MOCK_INTEGRATED`; `BLOCKED_CONTRACT` p
 activar Taxonomía compartida y HTTP real. Esta sección sustituye las conclusiones de
 publicación/conflictos y los resultados de la auditoría histórica incluida abajo.
 
+## Revisión final acotada: valorId de LISTA y precondiciones Q-06
+
+Base local limpia `aa68005d2a0b51f7447bf4eb4e5c17468863ded2`, rama `poma`.
+En esta revisión no se integra master ni se rehacen las correcciones anteriores.
+Fuentes: SPEC-010 y `ux/mockups/MK-003/component-spec.md` en Docs
+`942bf7322eb388fe5b0fcc9c5a565152e1099139`; modelos/puertos reales y README de Frontend.
+Component Spec establece que Q-06 continúa abierta: el request de edición no publica
+`tipoProductoId`; las precondiciones conocidas no autorizan enviar ese campo.
+
+Archivos y cambios:
+
+- `src/features/catalog/hooks/useProductForm.ts`: LISTA inicializa la selección desde
+  `valorId`; el estado conserva el ID y el payload separa `valorId` de `valor`, usando
+  la etiqueta actual del esquema. Los mocks históricos que guardaban un ID en `valor`
+  se recuperan únicamente si Taxonomía confirma ese ID exacto. No se infieren IDs por
+  etiqueta; un valor antiguo sin ID confirmado exige selección explícita antes de guardar.
+  Mientras Q-06 permanezca abierta, se rechaza el cambio de tipo en el hook y se omite
+  `tipoProductoId` del payload de edición. El alta conserva su tipo obligatorio.
+- `src/features/catalog/components/ProductFormFields.tsx`: la precondición de ausencia
+  de publicación exige `publishedCommercially === false`; true/undefined no demuestran
+  elegibilidad. Se distingue la elegibilidad funcional del bloqueo contractual Q-06;
+  el control sigue deshabilitado en edición. Se muestra el error de ID LISTA no confirmado.
+- `tests/harness/catalog-adapter.tsx`: escenarios de etiqueta anterior/renombrada,
+  publicación true/false/undefined y captura del payload de alta, con las mismas páginas.
+- `tests/catalog-final-review.spec.ts`: seis regresiones. Renombrar una opción mantiene
+  su ID y selección al volver a abrir el producto; crear/editar envía ID y etiqueta por
+  separado. Un dato histórico sin ID no se interpreta por nombre. Los tres estados de
+  publicación distinguen precondiciones y nunca envían el campo bloqueado por Q-06.
+- Este informe, `PR_CATALOGO_MK003_MK004.md` y evidencias `lista-q06-final/`: resultados
+  y captura nueva de la selección renombrada. Ninguna otra funcionalidad se modifica.
+
+| Validación de esta revisión final | Resultado |
+| --- | --- |
+| Regresiones focalizadas finales | 6/6 PASS, 10.8 s en última ejecución con captura corregida |
+| npm run typecheck | PASS, exit 0 |
+| npm run lint | PASS, exit 0, incluida repetición final |
+| VITE_DATA_MODE=mock npm run build | PASS, exit 0 |
+| VITE_DATA_MODE=api npm run build | PASS, exit 0 |
+| npx playwright test --workers=4 --reporter=line | 205/205 PASS, 4.2 min, exit 0 |
+| git diff --check | PASS |
+| Visual 1440 px | Captura nueva de LISTA renombrada inspeccionada; selección vigente y bloqueo Q-06 visibles |
+
+Las primeras ejecuciones focalizadas detectaron selectores que omitían el asterisco
+literal de la etiqueta y una reapertura que cargaba el entrypoint comercial en lugar
+del harness API. Se ajustaron solo los tests y se repitieron los seis casos con éxito.
+El CRUD previo pasó sus once casos en la ejecución focalizada inicial.
+Los logs conservan resultados iniciales y finales, sin declarar PASS a esas fallas.
+Q-06, mapeo/roles de Taxonomía e integración HTTP permanecen pendientes. No se modifica
+Docs/Backend, no se hace merge de PR #25 y no se cierran issues.
+
 ## Resincronización posterior: master incorpora MK-014
 
 Tras publicar `0e668fdfceff5ac7d0262e9e0b1197c4fecc13e3`, su

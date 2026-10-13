@@ -76,12 +76,13 @@ export function ProductFormFields({
 
   // SPEC-010 condition Q-06 for type correction in edit mode:
   // Eligible ONLY IF product is BORRADOR, has NO variants, and has NO commercial publications
+  // Q-06 remains open: eligibility alone does not publish a PATCH field.
   const isTypeCorrectionEligible =
     isEdit &&
     initialProduct &&
     initialProduct.status === "BORRADOR" &&
     !initialProduct.hasVariants &&
-    !initialProduct.publishedCommercially;
+    initialProduct.publishedCommercially === false;
 
   const volume = calculateVolumeCm3(
     formData.largoCm,
@@ -143,13 +144,13 @@ export function ProductFormFields({
                 value={formData.tipoProductoId}
                 onChange={(val) => updateField("tipoProductoId", val || "")}
                 error={errors.tipoProductoId}
-                disabled={isEdit && !isTypeCorrectionEligible}
+                disabled={isEdit}
               />
               {isEdit && (
                 <Text size="xs" c="dimmed" mt={4}>
                   {isTypeCorrectionEligible
-                    ? "Corrección de tipo elegible bajo SPEC-010 (borrador sin variantes ni publicación)."
-                    : "El tipo define el esquema de atributos y no es modificable en productos activos o con variantes."}
+                    ? "Precondiciones verificadas: borrador sin variantes ni publicación. Corrección de tipo bloqueada hasta resolver Q-06."
+                    : "No se cumplen o no se conocen las precondiciones de corrección. Cambio de tipo bloqueado; Q-06 sigue pendiente."}
                 </Text>
               )}
             </div>
@@ -412,6 +413,7 @@ export function ProductFormFields({
                         label={label}
                         placeholder="Selecciona una opción"
                         data={opts}
+                        error={errors[`attr_${schema.caracteristicaId}`]}
                         value={currentValue ? String(currentValue) : null}
                         onChange={(val) =>
                           updateAttribute(schema.caracteristicaId, val || "")
