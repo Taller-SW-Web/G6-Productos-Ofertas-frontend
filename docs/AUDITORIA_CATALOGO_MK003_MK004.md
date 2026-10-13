@@ -4,6 +4,44 @@ Rama `poma`, PR #25 en borrador. Estado: `MOCK_INTEGRATED`; `BLOCKED_CONTRACT` p
 activar Taxonomía compartida y HTTP real. Esta sección sustituye las conclusiones de
 publicación/conflictos y los resultados de la auditoría histórica incluida abajo.
 
+## Resincronización posterior: master incorpora MK-014
+
+Tras publicar `0e668fdfceff5ac7d0262e9e0b1197c4fecc13e3`, su
+[CI terminó correctamente](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/38442138042).
+Una comprobación nueva encontró que master avanzó a
+`2fbc0d68da664b1fd7fad06ab51688c8cf7e5af9` mediante PR #26 de Vera (MK-014).
+Esto volvió a producir conflictos en PR #25: la sincronización previa era correcta
+para su base `fdbacba`, pero ya no bastaba contra la nueva base.
+
+Merge aditivo nuevo: `6e3c66a50834c28f59f7c6615e2764eafdb61ca4`. Se resolvieron
+`productRoutes.tsx`, `verify-production.mjs`, `integration.spec.ts` y
+`taxonomy-ui.spec.ts`, conservando ambos conjuntos de rutas y todas las verificaciones.
+El menú contiene ahora 12 destinos (7 comerciales + 5 Taxonomía). El smoke conserva
+Catálogo y añade las cinco vistas de Auditoría de precios. README conserva ambos
+alcances y corrige la descripción antigua de capturas compartidas.
+
+No se modificó ninguna implementación de MK-014, Taxonomía, Pricing ni Promociones
+respecto de la nueva base; las siete correcciones de Catálogo permanecen.
+Docs sigue en `942bf7322eb388fe5b0fcc9c5a565152e1099139`.
+Se leyó también `docs/VALIDACION_MK014.md` incorporado desde master.
+El comentario a López permanece sin respuesta confirmatoria; no se inventa el mapeo.
+
+| Validación contra la nueva base | Resultado |
+| --- | --- |
+| Suite completa con MK-014 y regresiones | 199/199 PASS, 5.0 min, exit 0 |
+| mock: typecheck / lint / build | PASS, exit 0. Primer build rechazado por sandbox (EPERM al resolver audit-demo.csv); repetición fuera del sandbox PASS, sin cambios de código |
+| api: typecheck / lint / build | PASS, exit 0, ejecución fuera del sandbox |
+| Producción mock a 1440 px | 48 vistas PASS, sin errores de runtime ni overflow |
+| Producción api a 1440 px | 44 vistas PASS, sin errores de runtime/overflow y sin descarga de mocks |
+
+Logs nuevos: `evidencias/catalog-audit/resync-master-2fbc0d6/`.
+Incluyen la suite íntegra, gates mock/API, el fallo sandbox y su repetición exitosa,
+smokes y cinco capturas MK-014 generadas con el menú integrado. S01 fue inspeccionada
+visualmente; las cinco vistas incluyen geometría, foco de modal y descargas verificadas
+por la suite. `git diff --check`: PASS; cero commits detrás del master nuevo.
+Los resultados de 177 pruebas y smokes 43/39 incluidos abajo son históricos de la
+base anterior; no se atribuyen a la nueva integración.
+
 ## Fuentes y sincronización
 
 - Git inicial limpio en `79dc879b64f1c3638351d9bfebd3ef0f1dc4a6b1`.
