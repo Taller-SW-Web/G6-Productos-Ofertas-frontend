@@ -167,3 +167,10 @@ Los cambios se publican en poma y se propone PR hacia master, sin merge.
 La base consultada de master tras fetch es `fdbacba`, que incluye Taxonomía.
 Esta entrega no fusiona ni sustituye los archivos de López en poma.
 La revisión conjunta contra esa base sigue siendo necesaria antes de merge.
+
+PR creada: [#25](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/25),
+borrador abierto poma → master. Correcciones de código en `0a59f075fa7eb18482c965dbaaa0aed1e5b7f139`.
+GitHub muestra que la comparación no se puede fusionar automáticamente con master:
+pendiente reconciliar los archivos compartidos con la integración de Taxonomía.
+No se ejecutó merge. El conector devolvió 403 al crear; la API oficial con la
+autenticación existente de Git sí permitió crear el PR.
