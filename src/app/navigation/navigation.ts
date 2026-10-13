@@ -1,5 +1,6 @@
 import {
   IconCalculator,
+  IconHistory,
   IconCategory,
   IconUpload,
   IconComponents,
@@ -53,6 +54,12 @@ export const productNavigation: NavigationItem[] = [
     icon: IconUpload,
     group: "Precios",
     matchPaths: ["/precios/importaciones"],
+  },
+  {
+    to: "/precios/auditoria",
+    label: "Historial de precios",
+    icon: IconHistory,
+    group: "Precios",
   },
 ];
 export const taxonomyNavigation: NavigationItem[] = [

@@ -69,7 +69,7 @@ for (const module of taxonomySections) {
       const navigation = page.getByRole("navigation", {
         name: "Navegación de la aplicación",
       });
-      await expect(navigation.getByRole("link")).toHaveCount(10);
+      await expect(navigation.getByRole("link")).toHaveCount(11);
       await expect(
         navigation.getByText("TAXONOMÍA", { exact: true }),
       ).toBeVisible();
