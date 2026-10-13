@@ -139,11 +139,11 @@ test("MK-008: deactivation moves from pending verification to confirmed", async 
   await page.getByRole("button", { name: "Solicitar desactivación" }).click();
   await page.getByRole("button", { name: "Solicitar baja" }).click();
   await expect(
-    page.getByRole("alert").filter({ hasText: "Verificando baja" }),
+    page.getByRole("status").filter({ hasText: "Verificando baja" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Consultar estado" }).click();
   await expect(
-    page.getByRole("alert").filter({ hasText: "Baja confirmada" }),
+    page.getByRole("status").filter({ hasText: "Baja confirmada" }),
   ).toBeVisible();
   await expect(
     page.getByText("quedó Inactiva sin eliminar el registro", {
@@ -193,13 +193,15 @@ test("MK-009: a free value accepts 202 and confirms its deactivation on poll", a
 }) => {
   await page.goto("/caracteristicas/color/valores");
   await page.getByRole("button", { name: "Solicitar baja de Negro" }).click();
-  await expect(page.getByRole("alert")).toContainText(
-    "Solicitud de baja admitida (202 Accepted)",
-  );
+  await expect(
+    page.getByRole("status").filter({
+      hasText: "Solicitud de baja admitida (202 Accepted)",
+    }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Consultar estado" }).click();
-  await expect(page.getByRole("alert")).toContainText(
-    "Baja de valor confirmada",
-  );
+  await expect(
+    page.getByRole("status").filter({ hasText: "Baja de valor confirmada" }),
+  ).toBeVisible();
   await expect(page.locator("tbody tr", { hasText: "Negro" })).toContainText(
     "Inactivo",
   );
@@ -240,13 +242,13 @@ test("MK-010: required disassociation polls 202 and confirms on consult", async 
     page.getByRole("dialog", { name: "Desasociar característica" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Continuar" }).click();
-  await expect(page.getByRole("alert")).toContainText(
-    "Desasociación admitida",
-  );
+  await expect(
+    page.getByRole("status").filter({ hasText: "Desasociación admitida" }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Consultar estado" }).click();
-  await expect(page.getByRole("alert")).toContainText(
-    "Desasociación confirmada",
-  );
+  await expect(
+    page.getByRole("status").filter({ hasText: "Desasociación confirmada" }),
+  ).toBeVisible();
   await expect(page.locator("tbody tr", { hasText: "Talla" })).toHaveCount(0);
 });
 
@@ -270,13 +272,15 @@ test("MK-010: deactivation accepts 202 and completes on poll", async ({
   await page.goto("/tipos-producto/ropa");
   await page.getByRole("button", { name: "Desactivar tipo" }).click();
   await page.getByRole("button", { name: "Continuar" }).click();
-  await expect(page.getByRole("alert")).toContainText(
-    "Solicitud de desactivación admitida",
-  );
+  await expect(
+    page.getByRole("status").filter({
+      hasText: "Solicitud de desactivación admitida",
+    }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Consultar estado" }).click();
-  await expect(page.getByRole("alert")).toContainText(
-    "Tipo de producto desactivado",
-  );
+  await expect(
+    page.getByRole("status").filter({ hasText: "Tipo de producto desactivado" }),
+  ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Desactivar tipo" }),
   ).toHaveCount(0);
