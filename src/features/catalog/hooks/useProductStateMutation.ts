@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { ProductDetailView } from "../services/catalogRepository";
 import { CatalogError } from "../services/catalogRepository";
-import { catalogService } from "../services/catalogService";
+import { useCatalogServices } from "./useCatalogServices";
 
 export interface UseProductStateMutationResult {
   submitting: boolean;
@@ -16,6 +16,7 @@ export interface UseProductStateMutationResult {
 }
 
 export function useProductStateMutation(): UseProductStateMutationResult {
+  const { catalog: catalogService } = useCatalogServices();
   const [submitting, setSubmitting] = useState(false);
   const [reconciling, setReconciling] = useState(false);
   const [error, setError] = useState<string>();

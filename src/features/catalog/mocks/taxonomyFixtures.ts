@@ -27,10 +27,37 @@ export const initialProductTypes: TaxonomyProductType[] = [
 export const attributeSchemasByType: Record<string, AttributeSchema[]> = {
   "TIP-CAMISA": [
     {
+      caracteristicaId: "CAR-COLOR",
+      nombre: "Color principal",
+      tipo: "LISTA",
+      obligatorio: true,
+      esIdentificadora: true,
+      opciones: [
+        { id: "COL-BLA", valor: "Blanco" },
+        { id: "COL-AZU", valor: "Azul Índigo" },
+        { id: "COL-NEG", valor: "Negro Ónix" },
+        { id: "COL-ROJ", valor: "Rojo Carmesí" },
+      ],
+    },
+    {
+      caracteristicaId: "CAR-TALLA",
+      nombre: "Talla",
+      tipo: "LISTA",
+      obligatorio: true,
+      esIdentificadora: true,
+      opciones: [
+        { id: "TAL-S", valor: "S" },
+        { id: "TAL-M", valor: "M" },
+        { id: "TAL-L", valor: "L" },
+        { id: "TAL-XL", valor: "XL" },
+      ],
+    },
+    {
       caracteristicaId: "CAR-MAT",
       nombre: "Material principal",
       tipo: "TEXTO",
       obligatorio: true,
+      esIdentificadora: false,
     },
     {
       caracteristicaId: "CAR-CUELLO",
@@ -38,12 +65,14 @@ export const attributeSchemasByType: Record<string, AttributeSchema[]> = {
       tipo: "NUMERO",
       obligatorio: false,
       unidad: "cm",
+      esIdentificadora: false,
     },
     {
       caracteristicaId: "CAR-CORTE",
       nombre: "Tipo de corte",
       tipo: "LISTA",
       obligatorio: true,
+      esIdentificadora: false,
       opciones: [
         { id: "VAL-REG", valor: "Regular Fit" },
         { id: "VAL-SLIM", valor: "Slim Fit" },
@@ -78,10 +107,37 @@ export const attributeSchemasByType: Record<string, AttributeSchema[]> = {
   ],
   "TIP-ZAPATILLA": [
     {
+      caracteristicaId: "CAR-COLOR",
+      nombre: "Color principal",
+      tipo: "LISTA",
+      obligatorio: true,
+      esIdentificadora: true,
+      opciones: [
+        { id: "COL-NEG", valor: "Negro Ónix" },
+        { id: "COL-GRI", valor: "Gris Grafito" },
+        { id: "COL-AZU", valor: "Azul Marino" },
+      ],
+    },
+    {
+      caracteristicaId: "CAR-TALLA",
+      nombre: "Talla",
+      tipo: "LISTA",
+      obligatorio: true,
+      esIdentificadora: true,
+      opciones: [
+        { id: "TAL-39", valor: "39" },
+        { id: "TAL-40", valor: "40" },
+        { id: "TAL-41", valor: "41" },
+        { id: "TAL-42", valor: "42" },
+        { id: "TAL-43", valor: "43" },
+      ],
+    },
+    {
       caracteristicaId: "CAR-SUELA",
       nombre: "Material de suela",
       tipo: "TEXTO",
       obligatorio: true,
+      esIdentificadora: false,
     },
     {
       caracteristicaId: "CAR-DROP",

@@ -1,31 +1,30 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import type {
   ProductDetailView,
   ProductAttributeValue,
   VariantCreatePayload,
   VariantDetailView,
-  VariantPhysicalProfile,
   VariantUpdatePayload,
 } from "../services/catalogRepository";
 import { CatalogError } from "../services/catalogRepository";
-import { catalogService } from "../services/catalogService";
+import { useCatalogServices } from "./useCatalogServices";
+import { normalizePhysicalProfile, calculateVolumeCm3 } from "../services/catalogPresentation";
+import type { AttributeSchema } from "../services/taxonomyRepository";
 
-export interface IdentifyingAttributeEntry {
-  id: string;
+export interface FormAttributeEntry {
+  key: string;
+  caracteristicaId: string;
   nombre: string;
+  tipo: "TEXTO" | "NUMERO" | "LISTA";
   valor: string;
-}
-
-export interface NonIdentifyingAttributeEntry {
-  id: string;
-  nombre: string;
-  valor: string;
+  unidad?: string;
+  obligatorio?: boolean;
 }
 
 export interface VariantFormData {
   sku: string;
-  identifyingAttributes: IdentifyingAttributeEntry[];
-  nonIdentifyingAttributes: NonIdentifyingAttributeEntry[];
+  identifyingAttributes: FormAttributeEntry[];
+  nonIdentifyingAttributes: FormAttributeEntry[];
   imageUrl: string;
   pesoKg?: number;
   largoCm?: number;
@@ -47,20 +46,33 @@ export function useVariantForm({
   onSuccess,
 }: UseVariantFormOptions) {
   const isEdit = Boolean(initialVariant);
+  const { catalog: catalogService, taxonomy: taxonomyService } = useCatalogServices();
+
+  const [attributeSchemas, setAttributeSchemas] = useState<AttributeSchema[]>([]);
+  const [schemaLoading, setSchemaLoading] = useState<boolean>(true);
+  const [schemaError, setSchemaError] = useState<string | null>(null);
 
   const [formData, setFormData] = useState<VariantFormData>(() => {
     if (initialVariant) {
       return {
         sku: initialVariant.sku,
         identifyingAttributes: initialVariant.identifyingAttributes.map((a, idx) => ({
-          id: a.caracteristicaId || `id_${idx}`,
+          key: `id_${a.caracteristicaId || idx}`,
+          caracteristicaId: a.caracteristicaId || `CAR-${idx}`,
           nombre: a.nombre,
+          tipo: a.tipo || "TEXTO",
           valor: String(a.valor),
+          unidad: a.unidad,
+          obligatorio: true,
         })),
         nonIdentifyingAttributes: initialVariant.nonIdentifyingAttributes.map((a, idx) => ({
-          id: a.caracteristicaId || `non_id_${idx}`,
+          key: `non_${a.caracteristicaId || idx}`,
+          caracteristicaId: a.caracteristicaId || `CAR-NON-${idx}`,
           nombre: a.nombre,
+          tipo: a.tipo || "TEXTO",
           valor: String(a.valor),
+          unidad: a.unidad,
+          obligatorio: false,
         })),
         imageUrl: initialVariant.imageUrl || "",
         pesoKg: initialVariant.physicalProfile?.pesoKg,
@@ -70,11 +82,17 @@ export function useVariantForm({
       };
     }
 
-    // Default for creation: one initial identifying attribute row (e.g. Talla)
     return {
       sku: "",
       identifyingAttributes: [
-        { id: "ATTR-TALLA", nombre: "Talla", valor: "" },
+        {
+          key: "init_id_0",
+          caracteristicaId: "CAR-COLOR",
+          nombre: "Color principal",
+          tipo: "LISTA",
+          valor: "",
+          obligatorio: true,
+        },
       ],
       nonIdentifyingAttributes: [],
       imageUrl: "",
@@ -84,6 +102,62 @@ export function useVariantForm({
       altoCm: undefined,
     };
   });
+
+  // Load attribute schema from taxonomy
+  useEffect(() => {
+    if (!parentProduct?.typeId) {
+      setSchemaLoading(false);
+      return;
+    }
+
+    let active = true;
+    taxonomyService
+      .getAttributeSchema(parentProduct.typeId)
+      .then((schemas) => {
+        if (!active) return;
+        setAttributeSchemas(schemas);
+        setSchemaLoading(false);
+
+        // If in create mode, populate identifying schemas preserving any user-typed values
+        if (!initialVariant) {
+          const identifying = schemas.filter((s) => s.esIdentificadora === true);
+          if (identifying.length > 0) {
+            setFormData((prev) => {
+              const existingMap = new Map<string, string>();
+              prev.identifyingAttributes.forEach((a, idx) => {
+                if (a.valor) {
+                  existingMap.set(a.caracteristicaId, a.valor);
+                  existingMap.set(String(idx), a.valor);
+                }
+              });
+              return {
+                ...prev,
+                identifyingAttributes: identifying.map((s, idx) => ({
+                  key: `schema_id_${s.caracteristicaId || idx}`,
+                  caracteristicaId: s.caracteristicaId,
+                  nombre: s.nombre,
+                  tipo: s.tipo,
+                  valor: existingMap.get(s.caracteristicaId) ?? existingMap.get(String(idx)) ?? "",
+                  unidad: s.unidad,
+                  obligatorio: s.obligatorio,
+                })),
+              };
+            });
+          }
+        }
+      })
+      .catch((err) => {
+        if (!active) return;
+        setSchemaError(
+          err instanceof Error ? err.message : "Error al cargar características de taxonomía.",
+        );
+        setSchemaLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [parentProduct?.typeId, taxonomyService, initialVariant]);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [generalError, setGeneralError] = useState<string | null>(null);
@@ -104,17 +178,40 @@ export function useVariantForm({
     [],
   );
 
-  // Identifying attributes manipulation (only in create mode)
+  // Identifying attributes manipulation
   const addIdentifyingAttribute = useCallback(() => {
+    // Find an identifying or unselected schema
+    const available = attributeSchemas.find(
+      (s) =>
+        s.esIdentificadora === true &&
+        !formData.identifyingAttributes.some((a) => a.caracteristicaId === s.caracteristicaId),
+    );
+
+    const newEntry: FormAttributeEntry = available
+      ? {
+          key: `row_${Date.now()}`,
+          caracteristicaId: available.caracteristicaId,
+          nombre: available.nombre,
+          tipo: available.tipo,
+          valor: "",
+          unidad: available.unidad,
+          obligatorio: available.obligatorio,
+        }
+      : {
+          key: `row_${Date.now()}`,
+          caracteristicaId: `CAR-CUSTOM-${Date.now().toString().slice(-4)}`,
+          nombre: "",
+          tipo: "TEXTO",
+          valor: "",
+          obligatorio: true,
+        };
+
     setFormData((prev) => ({
       ...prev,
-      identifyingAttributes: [
-        ...prev.identifyingAttributes,
-        { id: `ATTR-CUSTOM-${Date.now()}`, nombre: "", valor: "" },
-      ],
+      identifyingAttributes: [...prev.identifyingAttributes, newEntry],
     }));
     setIsDirty(true);
-  }, []);
+  }, [attributeSchemas, formData.identifyingAttributes]);
 
   const removeIdentifyingAttribute = useCallback((index: number) => {
     setFormData((prev) => ({
@@ -125,11 +222,24 @@ export function useVariantForm({
   }, []);
 
   const updateIdentifyingAttribute = useCallback(
-    (index: number, key: "nombre" | "valor", value: string) => {
+    (index: number, key: "nombre" | "valor" | "caracteristicaId", value: string) => {
       setFormData((prev) => {
         const updated = [...prev.identifyingAttributes];
         if (updated[index]) {
-          updated[index] = { ...updated[index], [key]: value };
+          if (key === "caracteristicaId") {
+            const schema = attributeSchemas.find((s) => s.caracteristicaId === value);
+            updated[index] = {
+              ...updated[index],
+              caracteristicaId: value,
+              nombre: schema?.nombre || updated[index].nombre,
+              tipo: schema?.tipo || updated[index].tipo,
+              unidad: schema?.unidad,
+              obligatorio: schema?.obligatorio,
+              valor: "",
+            };
+          } else {
+            updated[index] = { ...updated[index], [key]: value };
+          }
         }
         return { ...prev, identifyingAttributes: updated };
       });
@@ -137,24 +247,47 @@ export function useVariantForm({
       setErrors((prev) => {
         const next = { ...prev };
         delete next[`id_attr_${index}_${key}`];
+        delete next[`id_attr_${index}_valor`];
         delete next["identifyingAttributes"];
         return next;
       });
     },
-    [],
+    [attributeSchemas],
   );
 
   // Non-identifying attributes manipulation
   const addNonIdentifyingAttribute = useCallback(() => {
+    const available = attributeSchemas.find(
+      (s) =>
+        s.esIdentificadora !== true &&
+        !formData.nonIdentifyingAttributes.some((a) => a.caracteristicaId === s.caracteristicaId),
+    );
+
+    const newEntry: FormAttributeEntry = available
+      ? {
+          key: `non_${Date.now()}`,
+          caracteristicaId: available.caracteristicaId,
+          nombre: available.nombre,
+          tipo: available.tipo,
+          valor: "",
+          unidad: available.unidad,
+          obligatorio: available.obligatorio,
+        }
+      : {
+          key: `non_${Date.now()}`,
+          caracteristicaId: `CAR-NON-${Date.now().toString().slice(-4)}`,
+          nombre: "",
+          tipo: "TEXTO",
+          valor: "",
+          obligatorio: false,
+        };
+
     setFormData((prev) => ({
       ...prev,
-      nonIdentifyingAttributes: [
-        ...prev.nonIdentifyingAttributes,
-        { id: `ATTR-NON-${Date.now()}`, nombre: "", valor: "" },
-      ],
+      nonIdentifyingAttributes: [...prev.nonIdentifyingAttributes, newEntry],
     }));
     setIsDirty(true);
-  }, []);
+  }, [attributeSchemas, formData.nonIdentifyingAttributes]);
 
   const removeNonIdentifyingAttribute = useCallback((index: number) => {
     setFormData((prev) => ({
@@ -165,24 +298,37 @@ export function useVariantForm({
   }, []);
 
   const updateNonIdentifyingAttribute = useCallback(
-    (index: number, key: "nombre" | "valor", value: string) => {
+    (index: number, key: "nombre" | "valor" | "caracteristicaId", value: string) => {
       setFormData((prev) => {
         const updated = [...prev.nonIdentifyingAttributes];
         if (updated[index]) {
-          updated[index] = { ...updated[index], [key]: value };
+          if (key === "caracteristicaId") {
+            const schema = attributeSchemas.find((s) => s.caracteristicaId === value);
+            updated[index] = {
+              ...updated[index],
+              caracteristicaId: value,
+              nombre: schema?.nombre || updated[index].nombre,
+              tipo: schema?.tipo || updated[index].tipo,
+              unidad: schema?.unidad,
+              valor: "",
+            };
+          } else {
+            updated[index] = { ...updated[index], [key]: value };
+          }
         }
         return { ...prev, nonIdentifyingAttributes: updated };
       });
       setIsDirty(true);
     },
-    [],
+    [attributeSchemas],
   );
 
   // Derived volume in cm3
-  const derivedVolumeCm3 =
-    formData.largoCm && formData.anchoCm && formData.altoCm
-      ? Number((formData.largoCm * formData.anchoCm * formData.altoCm).toFixed(2))
-      : null;
+  const derivedVolumeCm3 = calculateVolumeCm3(
+    formData.largoCm,
+    formData.anchoCm,
+    formData.altoCm,
+  );
 
   // Validation
   const validate = (): boolean => {
@@ -197,13 +343,23 @@ export function useVariantForm({
             newErrors[`id_attr_${idx}_nombre`] = "El nombre del atributo es obligatorio.";
           }
           if (!attr.valor.trim()) {
-            newErrors[`id_attr_${idx}_valor`] = "El valor del atributo es obligatorio.";
+            newErrors[`id_attr_${idx}_valor`] = `El valor de "${attr.nombre || `Atributo #${idx + 1}`}" es obligatorio.`;
+          } else {
+            if (attr.tipo === "NUMERO") {
+              const n = Number(attr.valor);
+              if (Number.isNaN(n) || n <= 0) {
+                newErrors[`id_attr_${idx}_valor`] = `El valor de "${attr.nombre}" debe ser un número mayor que cero.`;
+              }
+            }
           }
         });
       }
     }
 
-    if (formData.imageUrl.trim()) {
+    // Required image URL on creation per SPEC-004 / VarianteCreateRequest
+    if (!isEdit && !formData.imageUrl.trim()) {
+      newErrors.imageUrl = "La URL de imagen es obligatoria para la variante (VarianteCreateRequest).";
+    } else if (formData.imageUrl.trim()) {
       try {
         const url = new URL(formData.imageUrl.trim());
         if (!["http:", "https:"].includes(url.protocol)) {
@@ -240,32 +396,31 @@ export function useVariantForm({
     setSubmitting(true);
     setGeneralError(null);
 
-    const hasAnyPhysical =
-      formData.pesoKg !== undefined ||
-      formData.largoCm !== undefined ||
-      formData.anchoCm !== undefined ||
-      formData.altoCm !== undefined;
-
-    const physicalProfile: VariantPhysicalProfile | null = hasAnyPhysical
-      ? {
-          pesoKg: formData.pesoKg,
-          largoCm: formData.largoCm,
-          anchoCm: formData.anchoCm,
-          altoCm: formData.altoCm,
-          volumenCm3: derivedVolumeCm3 ?? undefined,
-        }
-      : null;
+    const physicalProfile = normalizePhysicalProfile({
+      pesoKg: formData.pesoKg,
+      largoCm: formData.largoCm,
+      anchoCm: formData.anchoCm,
+      altoCm: formData.altoCm,
+    });
 
     try {
       if (isEdit && initialVariant) {
         const nonIdAttrs: ProductAttributeValue[] = formData.nonIdentifyingAttributes
           .filter((a) => a.nombre.trim() && a.valor.trim())
-          .map((a) => ({
-            caracteristicaId: a.id,
-            nombre: a.nombre.trim(),
-            tipo: "TEXTO",
-            valor: a.valor.trim(),
-          }));
+          .map((a) => {
+            let valor: string | number = a.valor.trim();
+            if (a.tipo === "NUMERO") {
+              const num = Number(valor);
+              if (!Number.isNaN(num)) valor = num;
+            }
+            return {
+              caracteristicaId: a.caracteristicaId,
+              nombre: a.nombre.trim(),
+              tipo: a.tipo,
+              valor,
+              unidad: a.unidad,
+            };
+          });
 
         const payload: VariantUpdatePayload = {
           nonIdentifyingAttributes: nonIdAttrs,
@@ -283,21 +438,37 @@ export function useVariantForm({
         setIsDirty(false);
         onSuccess?.(updated);
       } else {
-        const idAttrs: ProductAttributeValue[] = formData.identifyingAttributes.map((a) => ({
-          caracteristicaId: a.id,
-          nombre: a.nombre.trim(),
-          tipo: "TEXTO",
-          valor: a.valor.trim(),
-        }));
+        const idAttrs: ProductAttributeValue[] = formData.identifyingAttributes.map((a) => {
+          let valor: string | number = a.valor.trim();
+          if (a.tipo === "NUMERO") {
+            const num = Number(valor);
+            if (!Number.isNaN(num)) valor = num;
+          }
+          return {
+            caracteristicaId: a.caracteristicaId,
+            nombre: a.nombre.trim(),
+            tipo: a.tipo,
+            valor,
+            unidad: a.unidad,
+          };
+        });
 
         const nonIdAttrs: ProductAttributeValue[] = formData.nonIdentifyingAttributes
           .filter((a) => a.nombre.trim() && a.valor.trim())
-          .map((a) => ({
-            caracteristicaId: a.id,
-            nombre: a.nombre.trim(),
-            tipo: "TEXTO",
-            valor: a.valor.trim(),
-          }));
+          .map((a) => {
+            let valor: string | number = a.valor.trim();
+            if (a.tipo === "NUMERO") {
+              const num = Number(valor);
+              if (!Number.isNaN(num)) valor = num;
+            }
+            return {
+              caracteristicaId: a.caracteristicaId,
+              nombre: a.nombre.trim(),
+              tipo: a.tipo,
+              valor,
+              unidad: a.unidad,
+            };
+          });
 
         const payload: VariantCreatePayload = {
           sku: formData.sku.trim() || undefined,
@@ -346,6 +517,9 @@ export function useVariantForm({
 
   return {
     formData,
+    attributeSchemas,
+    schemaLoading,
+    schemaError,
     updateField,
     addIdentifyingAttribute,
     removeIdentifyingAttribute,

@@ -28,9 +28,19 @@ interface VariantFormFieldsProps {
   parentProduct: ProductDetailView;
 }
 
+function parseNumericValue(val: string | number | undefined): number | undefined {
+  if (val === undefined || val === "") return undefined;
+  if (typeof val === "number") return Number.isNaN(val) ? undefined : val;
+  const parsed = parseFloat(String(val).trim());
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
 export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProps) {
   const {
     formData,
+    attributeSchemas,
+    schemaLoading,
+    schemaError,
     updateField,
     addIdentifyingAttribute,
     removeIdentifyingAttribute,
@@ -95,14 +105,20 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
 
       {/* CARD 2: Atributos Identificadores y No Identificadores */}
       <SectionCard
-        title="2. Atributos de la Variante"
+        title="2. Atributos de la Variante (Taxonomía)"
         description={
           isEdit
-            ? "Los atributos identificadores son inmutables. Puede modificar atributos complementarios."
-            : "Debe definir al menos un atributo identificador (ej. Talla, Color) que distinga este SKU de otros."
+            ? "Los atributos identificadores son inmutables para preservar la identidad del SKU. Puede modificar atributos complementarios autorizados."
+            : "Define los atributos identificadores que distinguen este SKU según el esquema oficial de Taxonomía."
         }
       >
         <Stack gap="lg">
+          {schemaError && (
+            <Alert icon={<IconAlertCircle size={14} />} color="red" variant="light">
+              <Text size="xs">Error al cargar esquema de taxonomía: {schemaError}</Text>
+            </Alert>
+          )}
+
           {/* Atributos Identificadores */}
           <Box>
             <Group justify="space-between" mb="xs">
@@ -111,7 +127,7 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
                   Atributos Identificadores *
                 </Text>
                 <Text size="xs" c="dimmed">
-                  Definen la combinación única que distingue a este SKU.
+                  Identidad única de la variante (ej. Color, Talla). En edición permanecen inmutables.
                 </Text>
               </div>
               {!isEdit && (
@@ -120,6 +136,7 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
                   size="xs"
                   leftSection={<IconPlus size={14} />}
                   onClick={addIdentifyingAttribute}
+                  disabled={schemaLoading}
                 >
                   Agregar atributo
                 </Button>
@@ -136,49 +153,85 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
               <Group gap="xs">
                 {formData.identifyingAttributes.map((attr, idx) => (
                   <Badge key={idx} size="lg" variant="filled" color="dark">
-                    {attr.nombre}: {attr.valor}
+                    {attr.nombre}: {attr.valor} {attr.unidad ? `(${attr.unidad})` : ""}
                   </Badge>
                 ))}
               </Group>
             ) : (
-              <Stack gap="xs">
-                {formData.identifyingAttributes.map((attr, idx) => (
-                  <Grid key={idx} align="flex-end" gap="xs">
-                    <Grid.Col span={{ base: 5, md: 5 }}>
-                      <TextInput
-                        placeholder="Nombre (ej. Talla, Color)"
-                        value={attr.nombre}
-                        onChange={(e) =>
-                          updateIdentifyingAttribute(idx, "nombre", e.currentTarget.value)
-                        }
-                        error={errors[`id_attr_${idx}_nombre`]}
-                        size="sm"
-                      />
-                    </Grid.Col>
-                    <Grid.Col span={{ base: 5, md: 5 }}>
-                      <TextInput
-                        placeholder="Valor (ej. M, Azul Marino)"
-                        value={attr.valor}
-                        onChange={(e) =>
-                          updateIdentifyingAttribute(idx, "valor", e.currentTarget.value)
-                        }
-                        error={errors[`id_attr_${idx}_valor`]}
-                        size="sm"
-                      />
-                    </Grid.Col>
-                    <Grid.Col span={{ base: 2, md: 2 }}>
-                      <Button
-                        color="red"
-                        variant="subtle"
-                        size="sm"
-                        disabled={formData.identifyingAttributes.length <= 1}
-                        onClick={() => removeIdentifyingAttribute(idx)}
-                      >
-                        <IconTrash size={16} />
-                      </Button>
-                    </Grid.Col>
-                  </Grid>
-                ))}
+              <Stack gap="md">
+                {formData.identifyingAttributes.map((attr, idx) => {
+                  const schema = attributeSchemas.find(
+                    (s) => s.caracteristicaId === attr.caracteristicaId,
+                  );
+
+                  return (
+                    <Box key={attr.key || idx} p="xs" style={{ border: "1px solid #e9ecef", borderRadius: 6 }}>
+                      <Grid align="flex-end" gap="xs">
+                        <Grid.Col span={{ base: 12, md: 5 }}>
+                          <TextInput
+                            label={idx === 0 ? "Característica (Taxonomía)" : undefined}
+                            placeholder="Nombre (ej. Talla, Color)"
+                            value={attr.nombre}
+                            onChange={(e) =>
+                              updateIdentifyingAttribute(idx, "nombre", e.currentTarget.value)
+                            }
+                            error={errors[`id_attr_${idx}_nombre`]}
+                            size="sm"
+                          />
+                        </Grid.Col>
+                        <Grid.Col span={{ base: 10, md: 5 }}>
+                          <TextInput
+                            label={idx === 0 ? "Valor *" : undefined}
+                            placeholder="Valor (ej. M, Azul Marino)"
+                            value={attr.valor}
+                            onChange={(e) =>
+                              updateIdentifyingAttribute(idx, "valor", e.currentTarget.value)
+                            }
+                            error={errors[`id_attr_${idx}_valor`]}
+                            size="sm"
+                          />
+                        </Grid.Col>
+                        <Grid.Col span={{ base: 2, md: 2 }}>
+                          <Button
+                            color="red"
+                            variant="subtle"
+                            size="sm"
+                            disabled={formData.identifyingAttributes.length <= 1}
+                            onClick={() => removeIdentifyingAttribute(idx)}
+                          >
+                            <IconTrash size={16} />
+                          </Button>
+                        </Grid.Col>
+                      </Grid>
+
+                      {/* Display stable taxonomy options for LISTA */}
+                      {schema?.opciones && schema.opciones.length > 0 && (
+                        <Group gap={6} mt="xs">
+                          <Text size="xs" c="dimmed">
+                            Opciones válidas ({schema.caracteristicaId}):
+                          </Text>
+                          {schema.opciones.map((opt) => (
+                            <Badge
+                              key={opt.id}
+                              size="xs"
+                              variant={
+                                attr.valor === opt.valor || attr.valor === opt.id
+                                  ? "filled"
+                                  : "outline"
+                              }
+                              style={{ cursor: "pointer" }}
+                              onClick={() =>
+                                updateIdentifyingAttribute(idx, "valor", opt.valor)
+                              }
+                            >
+                              {opt.valor} ({opt.id})
+                            </Badge>
+                          ))}
+                        </Group>
+                      )}
+                    </Box>
+                  );
+                })}
               </Stack>
             )}
           </Box>
@@ -191,7 +244,7 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
                   Atributos Complementarios (No identificadores)
                 </Text>
                 <Text size="xs" c="dimmed">
-                  Información adicional específica de esta variante (ej. Forro, Acabado).
+                  Información adicional técnica o comercial autorizada por Taxonomía.
                 </Text>
               </div>
               <Button
@@ -210,40 +263,73 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
               </Text>
             ) : (
               <Stack gap="xs">
-                {formData.nonIdentifyingAttributes.map((attr, idx) => (
-                  <Grid key={idx} align="flex-end" gap="xs">
-                    <Grid.Col span={{ base: 5, md: 5 }}>
-                      <TextInput
-                        placeholder="Nombre (ej. Material forro)"
-                        value={attr.nombre}
-                        onChange={(e) =>
-                          updateNonIdentifyingAttribute(idx, "nombre", e.currentTarget.value)
-                        }
-                        size="sm"
-                      />
-                    </Grid.Col>
-                    <Grid.Col span={{ base: 5, md: 5 }}>
-                      <TextInput
-                        placeholder="Valor (ej. 100% Algodón)"
-                        value={attr.valor}
-                        onChange={(e) =>
-                          updateNonIdentifyingAttribute(idx, "valor", e.currentTarget.value)
-                        }
-                        size="sm"
-                      />
-                    </Grid.Col>
-                    <Grid.Col span={{ base: 2, md: 2 }}>
-                      <Button
-                        color="gray"
-                        variant="subtle"
-                        size="sm"
-                        onClick={() => removeNonIdentifyingAttribute(idx)}
-                      >
-                        <IconTrash size={16} />
-                      </Button>
-                    </Grid.Col>
-                  </Grid>
-                ))}
+                {formData.nonIdentifyingAttributes.map((attr, idx) => {
+                  const schema = attributeSchemas.find(
+                    (s) => s.caracteristicaId === attr.caracteristicaId,
+                  );
+
+                  return (
+                    <Box key={attr.key || idx} p="xs" style={{ border: "1px solid #f1f3f5", borderRadius: 6 }}>
+                      <Grid align="flex-end" gap="xs">
+                        <Grid.Col span={{ base: 12, md: 5 }}>
+                          <TextInput
+                            placeholder="Nombre (ej. Material forro)"
+                            value={attr.nombre}
+                            onChange={(e) =>
+                              updateNonIdentifyingAttribute(idx, "nombre", e.currentTarget.value)
+                            }
+                            size="sm"
+                          />
+                        </Grid.Col>
+                        <Grid.Col span={{ base: 10, md: 5 }}>
+                          <TextInput
+                            placeholder="Valor (ej. 100% Algodón)"
+                            value={attr.valor}
+                            onChange={(e) =>
+                              updateNonIdentifyingAttribute(idx, "valor", e.currentTarget.value)
+                            }
+                            size="sm"
+                          />
+                        </Grid.Col>
+                        <Grid.Col span={{ base: 2, md: 2 }}>
+                          <Button
+                            color="gray"
+                            variant="subtle"
+                            size="sm"
+                            onClick={() => removeNonIdentifyingAttribute(idx)}
+                          >
+                            <IconTrash size={16} />
+                          </Button>
+                        </Grid.Col>
+                      </Grid>
+
+                      {schema?.opciones && schema.opciones.length > 0 && (
+                        <Group gap={6} mt="xs">
+                          <Text size="xs" c="dimmed">
+                            Opciones ({schema.caracteristicaId}):
+                          </Text>
+                          {schema.opciones.map((opt) => (
+                            <Badge
+                              key={opt.id}
+                              size="xs"
+                              variant={
+                                attr.valor === opt.valor || attr.valor === opt.id
+                                  ? "filled"
+                                  : "outline"
+                              }
+                              style={{ cursor: "pointer" }}
+                              onClick={() =>
+                                updateNonIdentifyingAttribute(idx, "valor", opt.valor)
+                              }
+                            >
+                              {opt.valor}
+                            </Badge>
+                          ))}
+                        </Group>
+                      )}
+                    </Box>
+                  );
+                })}
               </Stack>
             )}
           </Box>
@@ -257,13 +343,18 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
       >
         <Stack gap="md">
           <TextInput
-            label="URL de Imagen de la Variante"
+            label={`URL de Imagen de la Variante ${isEdit ? "" : "*"}`}
             placeholder="https://ejemplo.com/imagenes/variante-azul.jpg"
-            description="URL pública de la imagen específica de esta variante."
+            description={
+              isEdit
+                ? "URL de la imagen de la variante."
+                : "Obligatoria al crear variante (VarianteCreateRequest) y para su activación comercial."
+            }
             leftSection={<IconPhoto size={16} />}
             value={formData.imageUrl}
             onChange={(e) => updateField("imageUrl", e.currentTarget.value)}
             error={errors.imageUrl}
+            required={!isEdit}
           />
 
           <div>
@@ -278,12 +369,12 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
                 <NumberInput
                   label="Peso (kg)"
                   placeholder="0.00"
-                  min={0.01}
+                  clampBehavior="none"
                   step={0.05}
                   decimalScale={2}
-                  value={formData.pesoKg}
+                  value={formData.pesoKg ?? ""}
                   onChange={(val) =>
-                    updateField("pesoKg", typeof val === "number" ? val : undefined)
+                    updateField("pesoKg", parseNumericValue(val))
                   }
                   error={errors.pesoKg}
                 />
@@ -292,12 +383,12 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
                 <NumberInput
                   label="Largo (cm)"
                   placeholder="0.0"
-                  min={0.1}
+                  clampBehavior="none"
                   step={1}
                   decimalScale={1}
-                  value={formData.largoCm}
+                  value={formData.largoCm ?? ""}
                   onChange={(val) =>
-                    updateField("largoCm", typeof val === "number" ? val : undefined)
+                    updateField("largoCm", parseNumericValue(val))
                   }
                   error={errors.largoCm}
                 />
@@ -306,12 +397,12 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
                 <NumberInput
                   label="Ancho (cm)"
                   placeholder="0.0"
-                  min={0.1}
+                  clampBehavior="none"
                   step={1}
                   decimalScale={1}
-                  value={formData.anchoCm}
+                  value={formData.anchoCm ?? ""}
                   onChange={(val) =>
-                    updateField("anchoCm", typeof val === "number" ? val : undefined)
+                    updateField("anchoCm", parseNumericValue(val))
                   }
                   error={errors.anchoCm}
                 />
@@ -320,12 +411,12 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
                 <NumberInput
                   label="Alto (cm)"
                   placeholder="0.0"
-                  min={0.1}
+                  clampBehavior="none"
                   step={1}
                   decimalScale={1}
-                  value={formData.altoCm}
+                  value={formData.altoCm ?? ""}
                   onChange={(val) =>
-                    updateField("altoCm", typeof val === "number" ? val : undefined)
+                    updateField("altoCm", parseNumericValue(val))
                   }
                   error={errors.altoCm}
                 />

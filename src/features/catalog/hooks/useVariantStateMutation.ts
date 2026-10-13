@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import type { VariantMutationResult } from "../services/catalogRepository";
 import { CatalogError } from "../services/catalogRepository";
-import { catalogService } from "../services/catalogService";
+import { useCatalogServices } from "./useCatalogServices";
 
 export interface UseVariantStateMutationResult {
   loading: boolean;
@@ -26,6 +26,7 @@ export interface UseVariantStateMutationResult {
 }
 
 export function useVariantStateMutation(): UseVariantStateMutationResult {
+  const { catalog: catalogService } = useCatalogServices();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<VariantMutationResult | null>(null);
@@ -53,7 +54,7 @@ export function useVariantStateMutation(): UseVariantStateMutationResult {
         setLoading(false);
       }
     },
-    [],
+    [catalogService],
   );
 
   const deactivate = useCallback(
@@ -75,7 +76,7 @@ export function useVariantStateMutation(): UseVariantStateMutationResult {
         setLoading(false);
       }
     },
-    [],
+    [catalogService],
   );
 
   const reactivate = useCallback(
@@ -97,7 +98,7 @@ export function useVariantStateMutation(): UseVariantStateMutationResult {
         setLoading(false);
       }
     },
-    [],
+    [catalogService],
   );
 
   return {

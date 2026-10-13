@@ -19,6 +19,11 @@ import type {
 import { CatalogError } from "../services/catalogRepository";
 import { initialProducts, initialVariants } from "../mocks/catalogFixtures";
 import { initialCategories, initialBrands, initialProductTypes, attributeSchemasByType } from "../mocks/taxonomyFixtures";
+import {
+  normalizePhysicalProfile,
+  isPhysicalProfileComplete,
+  hasValidPhysicalValues,
+} from "../services/catalogPresentation";
 
 export class MockCatalogRepository implements CatalogRepository {
   private products: ProductDetailView[] = [];
@@ -146,8 +151,31 @@ export class MockCatalogRepository implements CatalogRepository {
     const found = this.products.find((p) => p.id === id);
     if (!found) return null;
 
-    // Apply scenario overrides for preparation or status
     const cloned: ProductDetailView = JSON.parse(JSON.stringify(found));
+
+    // Authoritative variant synchronization for parent product
+    if (cloned.hasVariants) {
+      const vars = this.variants.filter((v) => v.productId === id);
+      cloned.variants = vars.map((v) => ({
+        variantId: v.variantId,
+        sku: v.sku,
+        attributesSummary: v.identifyingAttributes
+          .map((a) => `${a.nombre}: ${a.valor}`)
+          .join(" · "),
+        status: v.status,
+        preparationStatus: v.inventoryPreparationStatus,
+        manualRetryAllowed: v.inventoryManualRetryAllowed,
+      }));
+      cloned.preparation.variantes = vars.map((v) => ({
+        variantId: v.variantId,
+        sku: v.sku,
+        inventario: {
+          status: v.inventoryPreparationStatus,
+          manualRetryAllowed: v.inventoryManualRetryAllowed,
+          code: v.inventoryPreparationCode,
+        },
+      }));
+    }
 
     if (scenario === "prep-partial") {
       cloned.preparationSummary = "PARTIAL";
@@ -242,13 +270,7 @@ export class MockCatalogRepository implements CatalogRepository {
 
     // Physical profile validation for simple products: if values supplied, must be > 0
     if (!payload.tieneVariantes && payload.perfilFisico) {
-      const p = payload.perfilFisico;
-      if (
-        (p.pesoKg !== undefined && p.pesoKg <= 0) ||
-        (p.largoCm !== undefined && p.largoCm <= 0) ||
-        (p.anchoCm !== undefined && p.anchoCm <= 0) ||
-        (p.altoCm !== undefined && p.altoCm <= 0)
-      ) {
+      if (!hasValidPhysicalValues(payload.perfilFisico)) {
         throw new CatalogError(
           "invalid_physical",
           "Todos los valores del perfil físico suministrados deben ser mayores que cero.",
@@ -281,19 +303,21 @@ export class MockCatalogRepository implements CatalogRepository {
       publishedCommercially: false,
       images: payload.imagenes || [],
       attributes: payload.atributos || [],
-      physicalProfile: payload.tieneVariantes ? null : payload.perfilFisico || null,
+      physicalProfile: payload.tieneVariantes
+        ? null
+        : normalizePhysicalProfile(payload.perfilFisico),
       preparation: {
         productId: newId,
         hasVariants: payload.tieneVariantes,
         pricing: {
-          status: "COMPLETED",
+          status: "PENDING",
           manualRetryAllowed: false,
           code: null,
         },
         inventario: payload.tieneVariantes
           ? null
           : {
-              status: "COMPLETED",
+              status: "PENDING",
               manualRetryAllowed: false,
               code: null,
             },
@@ -356,8 +380,7 @@ export class MockCatalogRepository implements CatalogRepository {
         );
       }
       if (!current.hasVariants) {
-        const pf = payload.perfilFisico;
-        if (!pf || !pf.pesoKg || !pf.largoCm || !pf.anchoCm || !pf.altoCm) {
+        if (!isPhysicalProfileComplete(payload.perfilFisico)) {
           throw new CatalogError(
             "active_rejected",
             "Un producto simple activo requiere las 4 medidas físicas completas (peso, largo, ancho, alto).",
@@ -395,7 +418,13 @@ export class MockCatalogRepository implements CatalogRepository {
       current.imageUrl = payload.imagenes[0]?.url || undefined;
     }
     if (!current.hasVariants && payload.perfilFisico !== undefined) {
-      current.physicalProfile = payload.perfilFisico;
+      if (!hasValidPhysicalValues(payload.perfilFisico)) {
+        throw new CatalogError(
+          "invalid_physical",
+          "Todos los valores del perfil físico suministrados deben ser mayores que cero.",
+        );
+      }
+      current.physicalProfile = normalizePhysicalProfile(payload.perfilFisico);
     }
 
     current.catalogVersion += 1;
@@ -444,8 +473,7 @@ export class MockCatalogRepository implements CatalogRepository {
           "La inicialización de Inventario del SKU simple debe estar completada.",
         );
       }
-      const pf = product.physicalProfile;
-      if (!pf || !pf.pesoKg || !pf.largoCm || !pf.anchoCm || !pf.altoCm) {
+      if (!isPhysicalProfileComplete(product.physicalProfile)) {
         throw new CatalogError(
           "validation",
           "El producto simple requiere peso, largo, ancho y alto positivos antes de activar.",
@@ -453,7 +481,8 @@ export class MockCatalogRepository implements CatalogRepository {
       }
     } else {
       // 3. Variant parent needs at least one active variant and all active variants prepared
-      const activeVariants = product.variants.filter((v) => v.status === "ACTIVA");
+      const vars = this.variants.filter((v) => v.productId === id);
+      const activeVariants = vars.filter((v) => v.status === "ACTIVA");
       if (activeVariants.length === 0) {
         throw new CatalogError(
           "validation",
@@ -461,7 +490,7 @@ export class MockCatalogRepository implements CatalogRepository {
         );
       }
       const allActivePrepared = activeVariants.every(
-        (v) => v.preparationStatus === "COMPLETED",
+        (v) => v.inventoryPreparationStatus === "COMPLETED",
       );
       if (!allActivePrepared) {
         throw new CatalogError(
@@ -802,23 +831,11 @@ export class MockCatalogRepository implements CatalogRepository {
 
     // Physical profile validation: in draft, if supplied, values must be > 0
     const pf = payload.perfilFisico || payload.physicalProfile;
-    if (pf) {
-      if (pf.pesoKg !== undefined && pf.pesoKg <= 0) {
-        throw new CatalogError("invalid_physical", "El peso debe ser mayor que cero.");
-      }
-      const largo = pf.largoCm ?? pf.dimensionesCm?.largo;
-      const ancho = pf.anchoCm ?? pf.dimensionesCm?.ancho;
-      const alto = pf.altoCm ?? pf.dimensionesCm?.alto;
-      if (
-        (largo !== undefined && largo <= 0) ||
-        (ancho !== undefined && ancho <= 0) ||
-        (alto !== undefined && alto <= 0)
-      ) {
-        throw new CatalogError(
-          "invalid_physical",
-          "Las dimensiones físicas suministradas deben ser mayores que cero.",
-        );
-      }
+    if (pf && !hasValidPhysicalValues(pf)) {
+      throw new CatalogError(
+        "invalid_physical",
+        "Todos los valores del perfil físico suministrados deben ser mayores que cero.",
+      );
     }
 
     // SKU determination (optional on create, generated by catalog if omitted)
@@ -860,7 +877,7 @@ export class MockCatalogRepository implements CatalogRepository {
 
     const newVariantId = `VAR-${Date.now().toString().slice(-4)}`;
     const nonIdAttrs = payload.atributosNoIdentificadores || payload.nonIdentifyingAttributes || [];
-    const physProf = payload.perfilFisico || payload.physicalProfile || null;
+    const physProf = normalizePhysicalProfile(payload.perfilFisico || payload.physicalProfile);
 
     const newVariant: VariantDetailView = {
       variantId: newVariantId,
@@ -964,21 +981,8 @@ export class MockCatalogRepository implements CatalogRepository {
           "Una variante activa no puede quedar sin imagen de publicación (CA-11).",
         );
       }
-      const pf = payload.perfilFisico || payload.physicalProfile || current.physicalProfile;
-      const largo = pf?.largoCm ?? pf?.dimensionesCm?.largo;
-      const ancho = pf?.anchoCm ?? pf?.dimensionesCm?.ancho;
-      const alto = pf?.altoCm ?? pf?.dimensionesCm?.alto;
-      if (
-        !pf ||
-        !pf.pesoKg ||
-        pf.pesoKg <= 0 ||
-        !largo ||
-        largo <= 0 ||
-        !ancho ||
-        ancho <= 0 ||
-        !alto ||
-        alto <= 0
-      ) {
+      const pf = normalizePhysicalProfile(payload.perfilFisico ?? payload.physicalProfile ?? current.physicalProfile);
+      if (!isPhysicalProfileComplete(pf)) {
         throw new CatalogError(
           "active_rejected",
           "Una variante activa exige las 4 medidas físicas completas (peso, largo, ancho y alto) mayores a cero (CA-11).",
@@ -993,7 +997,14 @@ export class MockCatalogRepository implements CatalogRepository {
     current.imageUrl = newImg;
     current.images = newImg ? [newImg] : [];
     if (payload.perfilFisico !== undefined || payload.physicalProfile !== undefined) {
-      current.physicalProfile = payload.perfilFisico ?? payload.physicalProfile ?? null;
+      const rawPf = payload.perfilFisico ?? payload.physicalProfile;
+      if (!hasValidPhysicalValues(rawPf)) {
+        throw new CatalogError(
+          "invalid_physical",
+          "Todos los valores del perfil físico suministrados deben ser mayores que cero.",
+        );
+      }
+      current.physicalProfile = normalizePhysicalProfile(rawPf);
     }
     current.catalogVersion += (payload.catalogVersion ? 1 : 1);
 
@@ -1027,18 +1038,7 @@ export class MockCatalogRepository implements CatalogRepository {
     if (!variant.imageUrl?.trim()) {
       throw new CatalogError("activation_rejected", "Se requiere una imagen válida.");
     }
-    const pf = variant.physicalProfile;
-    if (
-      !pf ||
-      !pf.pesoKg ||
-      pf.pesoKg <= 0 ||
-      !pf.dimensionesCm?.largo ||
-      pf.dimensionesCm.largo <= 0 ||
-      !pf.dimensionesCm?.ancho ||
-      pf.dimensionesCm.ancho <= 0 ||
-      !pf.dimensionesCm?.alto ||
-      pf.dimensionesCm.alto <= 0
-    ) {
+    if (!isPhysicalProfileComplete(variant.physicalProfile)) {
       throw new CatalogError(
         "activation_rejected",
         "Activar exige las cuatro medidas físicas completas mayores a cero (CA-07).",
@@ -1135,18 +1135,10 @@ export class MockCatalogRepository implements CatalogRepository {
     if (!parent) throw new CatalogError("not_found", "Producto padre no encontrado.");
 
     // Revalidate conditions (CA-13)
-    const pf = variant.physicalProfile;
-    if (
-      !pf ||
-      !pf.pesoKg ||
-      pf.pesoKg <= 0 ||
-      !pf.dimensionesCm?.largo ||
-      pf.dimensionesCm.largo <= 0 ||
-      !pf.dimensionesCm?.ancho ||
-      pf.dimensionesCm.ancho <= 0 ||
-      !pf.dimensionesCm?.alto ||
-      pf.dimensionesCm.alto <= 0
-    ) {
+    if (!variant.imageUrl?.trim()) {
+      throw new CatalogError("activation_rejected", "Se requiere una imagen válida (CA-13).");
+    }
+    if (!isPhysicalProfileComplete(variant.physicalProfile)) {
       throw new CatalogError(
         "activation_rejected",
         "Reactivar exige las cuatro medidas físicas completas (peso, largo, ancho, alto) mayores que cero (CA-13).",
@@ -1200,13 +1192,9 @@ export class MockCatalogRepository implements CatalogRepository {
       );
     }
 
+    // HTTP 202 Accepted indicates admission, remains PENDING without manual retry allowed
     variant.inventoryPreparationStatus = "PENDING";
     variant.inventoryManualRetryAllowed = false;
-
-    // Simulate completion in session
-    setTimeout(() => {
-      variant.inventoryPreparationStatus = "COMPLETED";
-    }, 500);
 
     return {
       accepted: true,

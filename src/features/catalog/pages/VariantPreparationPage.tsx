@@ -23,7 +23,7 @@ import {
 } from "@tabler/icons-react";
 import { FeedbackAlert, PageHeader, SectionCard } from "../../../components/shared";
 import { useVariantPreparation } from "../hooks/useVariantPreparation";
-import { formatIdentifyingAttributes } from "../services/catalogPresentation";
+import { formatIdentifyingAttributes, isPhysicalProfileComplete } from "../services/catalogPresentation";
 
 export function VariantPreparationPage() {
   const { productId, variantId } = useParams<{ productId: string; variantId: string }>();
@@ -82,12 +82,7 @@ export function VariantPreparationPage() {
         ? "red"
         : "yellow";
 
-  const hasCompletePhysical = Boolean(
-    variant?.physicalProfile?.pesoKg &&
-      variant?.physicalProfile?.largoCm &&
-      variant?.physicalProfile?.anchoCm &&
-      variant?.physicalProfile?.altoCm,
-  );
+  const hasCompletePhysical = isPhysicalProfileComplete(variant?.physicalProfile);
 
   return (
     <Box p="lg">

@@ -7,14 +7,13 @@ import type {
   ProductUpdatePayload,
 } from "../services/catalogRepository";
 import { CatalogError } from "../services/catalogRepository";
-import { catalogService } from "../services/catalogService";
 import type {
   AttributeSchema,
   TaxonomyBrand,
   TaxonomyCategory,
   TaxonomyProductType,
 } from "../services/taxonomyRepository";
-import { taxonomyService } from "../services/taxonomyService";
+import { useCatalogServices } from "./useCatalogServices";
 
 export interface ProductFormData {
   nombre: string;
@@ -45,6 +44,7 @@ export function useProductForm({
   onSuccess,
 }: UseProductFormOptions) {
   const isEdit = Boolean(initialProduct);
+  const { catalog: catalogService, taxonomy: taxonomyService } = useCatalogServices();
 
   const [categories, setCategories] = useState<TaxonomyCategory[]>([]);
   const [brands, setBrands] = useState<TaxonomyBrand[]>([]);
@@ -134,7 +134,7 @@ export function useProductForm({
     return () => {
       active = false;
     };
-  }, [initialProduct]);
+  }, [initialProduct, taxonomyService]);
 
   // Load attribute schema when type changes
   useEffect(() => {
@@ -151,7 +151,7 @@ export function useProductForm({
     return () => {
       active = false;
     };
-  }, [formData.tipoProductoId]);
+  }, [formData.tipoProductoId, taxonomyService]);
 
   const updateField = useCallback(
     <K extends keyof ProductFormData>(field: K, value: ProductFormData[K]) => {

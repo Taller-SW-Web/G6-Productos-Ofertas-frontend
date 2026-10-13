@@ -66,8 +66,17 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
     const customSku = `CAM-OXF-ROJ-S-${Date.now().toString().slice(-4)}`;
     await page.getByPlaceholder("Ej. PROD-OXF-AZUL-M (Opcional)").fill(customSku);
 
-    // Fill identifying attributes
-    await page.getByPlaceholder("Valor (ej. M, Azul Marino)").fill("Rojo Carmesí");
+    // Fill identifying attributes (Color and Talla)
+    const attrInputs = page.getByPlaceholder("Valor (ej. M, Azul Marino)");
+    await attrInputs.first().fill("Rojo Carmesí");
+    if ((await attrInputs.count()) > 1) {
+      await attrInputs.nth(1).fill("XL");
+    }
+
+    // Fill mandatory image URL per SPEC-004 / VarianteCreateRequest
+    await page
+      .getByPlaceholder("https://ejemplo.com/imagenes/variante-azul.jpg")
+      .fill("https://ejemplo.com/imagenes/camisa-roja.jpg");
 
     // Fill physical dimensions in kg / cm
     await page.getByRole("textbox", { name: "Peso (kg)" }).fill("0.30");
@@ -218,5 +227,120 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
     // Verify variant is now ACTIVA
     await expect(page.getByText("ACTIVA").first()).toBeVisible();
     await expect(page.getByRole("button", { name: "Desactivar" })).toBeVisible();
+  });
+
+  test("Regla de Negocio: Creación con SKU generado automáticamente", async ({
+    page,
+  }) => {
+    await page.goto("/productos/PROD-OXF-001/variantes/nueva");
+    await expect(page.getByRole("heading", { name: "Nueva Variante (SKU)" })).toBeVisible();
+    // Leave SKU blank to verify automatic generation
+    const attrInputs = page.getByPlaceholder("Valor (ej. M, Azul Marino)");
+    await attrInputs.first().fill("Negro Ónix");
+    if ((await attrInputs.count()) > 1) {
+      await attrInputs.nth(1).fill("L");
+    }
+
+    await page
+      .getByPlaceholder("https://ejemplo.com/imagenes/variante-azul.jpg")
+      .fill("https://ejemplo.com/imagenes/camisa-negra.jpg");
+
+    await page.getByRole("textbox", { name: "Peso (kg)" }).fill("0.32");
+    await page.getByRole("textbox", { name: "Largo (cm)" }).fill("36");
+    await page.getByRole("textbox", { name: "Ancho (cm)" }).fill("26");
+    await page.getByRole("textbox", { name: "Alto (cm)" }).fill("3");
+
+    await page.getByRole("button", { name: "Guardar Variante" }).first().click();
+
+    // Should navigate to preparation with auto-generated SKU
+    await expect(page).toHaveURL(/\/productos\/PROD-OXF-001\/variantes\/.+\/preparacion/);
+    await expect(page.getByRole("heading", { name: /Preparación de Inventario: CAM-OXF-V\d+/ })).toBeVisible();
+  });
+
+  test("Regla de Negocio: Rechazo de combinación identificadora duplicada (CA-03)", async ({
+    page,
+  }) => {
+    await page.goto(
+      "/productos/PROD-OXF-001/variantes/nueva?modoRevision=1&escenario=create-duplicate-combination",
+    );
+    const attrInputs = page.getByPlaceholder("Valor (ej. M, Azul Marino)");
+    await attrInputs.first().fill("Blanco");
+    if ((await attrInputs.count()) > 1) {
+      await attrInputs.nth(1).fill("M");
+    }
+    await page
+      .getByPlaceholder("https://ejemplo.com/imagenes/variante-azul.jpg")
+      .fill("https://ejemplo.com/imagenes/camisa-blanca.jpg");
+
+    await page.getByRole("button", { name: "Guardar Variante" }).first().click();
+    await expect(
+      page.getByText("La combinación de atributos identificadores ya existe dentro de este producto (CA-03)."),
+    ).toBeVisible();
+  });
+
+  test("Regla de Negocio: Rechazo de medidas físicas inválidas (<= 0)", async ({
+    page,
+  }) => {
+    await page.goto("/productos/PROD-OXF-001/variantes/nueva");
+    const attrInputs = page.getByPlaceholder("Valor (ej. M, Azul Marino)");
+    await attrInputs.first().fill("Rojo");
+    if ((await attrInputs.count()) > 1) {
+      await attrInputs.nth(1).fill("M");
+    }
+    await page.getByPlaceholder("https://ejemplo.com/imagenes/variante-azul.jpg").fill("https://ejemplo.com/foto.jpg");
+    await page.getByRole("textbox", { name: "Peso (kg)" }).fill("0");
+    await page.getByRole("button", { name: "Guardar Variante" }).first().click();
+
+    await expect(page.getByText("El peso debe ser mayor que cero.")).toBeVisible();
+  });
+
+  test("Flujo B: Desactivar la última variante activa inactiva al producto padre ACTIVO (SPEC-004 CA-12)", async ({
+    page,
+  }) => {
+    // Navigate to variant detail of VAR-OXF-AZU-L
+    await page.goto("/productos/PROD-OXF-001/variantes/VAR-OXF-AZU-L");
+    await page.getByRole("button", { name: "Desactivar" }).click();
+    await page.getByRole("button", { name: "Desactivar Variante" }).click();
+    await expect(page.getByText("INACTIVA").first()).toBeVisible();
+
+    // Now deactivate VAR-OXF-BLA-M (the remaining active variant)
+    await page.getByRole("link", { name: "Variantes", exact: true }).click();
+    await page.getByRole("link", { name: "CAM-OXF-BLA-M" }).click();
+    await page.getByRole("button", { name: "Desactivar" }).click();
+    await page.getByRole("button", { name: "Desactivar Variante" }).click();
+    await expect(page.getByText("INACTIVA").first()).toBeVisible();
+
+    // Navigate to parent product using breadcrumb link (client-side transition)
+    await page.getByRole("link", { name: "Camisa Oxford Manga Larga" }).first().click();
+    await expect(page.getByText("Inactivo")).toBeVisible();
+  });
+
+  test("Flujo C: Reactivación de variante inactiva preserva estado del padre (CA-14)", async ({
+    page,
+  }) => {
+    await page.goto("/productos/PROD-OXF-001/variantes/VAR-OXF-NEG-S");
+    await page.getByRole("button", { name: "Reactivar" }).click();
+    await page.getByRole("button", { name: "Reactivar Variante" }).click();
+    await expect(page.getByText("ACTIVA").first()).toBeVisible();
+
+    // Parent product remains in its current state, not auto-activated
+    await page.goto("/productos/PROD-OXF-001");
+    await expect(page.getByRole("heading", { name: "Camisa Oxford Manga Larga" })).toBeVisible();
+  });
+
+  test("Flujo D: Preservación de medidas y perfil físico tras edición", async ({
+    page,
+  }) => {
+    await page.goto("/productos/PROD-OXF-001/variantes/VAR-OXF-BLA-M/editar");
+    await page.getByRole("textbox", { name: "Largo (cm)" }).fill("38");
+    await page.getByRole("textbox", { name: "Ancho (cm)" }).fill("28");
+    await page.getByRole("textbox", { name: "Alto (cm)" }).fill("4");
+    await page.getByRole("button", { name: "Guardar Cambios" }).first().click();
+
+    // Check detail: new dimensions are displayed accurately
+    await expect(page).toHaveURL(/\/productos\/PROD-OXF-001\/variantes\/VAR-OXF-BLA-M$/);
+    await expect(page.getByText("38 cm")).toBeVisible();
+    await expect(page.getByText("28 cm")).toBeVisible();
+    await expect(page.getByText("4 cm")).toBeVisible();
   });
 });

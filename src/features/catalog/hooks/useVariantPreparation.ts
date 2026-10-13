@@ -5,7 +5,7 @@ import type {
   VariantPreparation,
 } from "../services/catalogRepository";
 import { CatalogError } from "../services/catalogRepository";
-import { catalogService } from "../services/catalogService";
+import { useCatalogServices } from "./useCatalogServices";
 
 export interface UseVariantPreparationResult {
   product: ProductDetailView | null;
@@ -25,6 +25,7 @@ export function useVariantPreparation(
   variantId: string | undefined,
   scenario?: string,
 ): UseVariantPreparationResult {
+  const { catalog: catalogService } = useCatalogServices();
   const [revision, setRevision] = useState<number>(0);
   const key = JSON.stringify([productId, variantId, scenario, revision]);
 
@@ -71,12 +72,12 @@ export function useVariantPreparation(
             variantId: v.variantId,
             sku: v.sku,
             inventario: {
-              status: v.inventoryStatus,
-              manualRetryAllowed: v.inventoryStatus === "REJECTED",
-              code: null,
+              status: v.inventoryPreparationStatus ?? v.inventoryStatus,
+              manualRetryAllowed: v.inventoryManualRetryAllowed ?? false,
+              code: v.inventoryPreparationCode ?? null,
             },
-            inventoryStatus: v.inventoryStatus,
-            manualRetryAllowed: v.inventoryStatus === "REJECTED",
+            inventoryStatus: v.inventoryPreparationStatus ?? v.inventoryStatus,
+            manualRetryAllowed: v.inventoryManualRetryAllowed ?? false,
             lastCheckedAt: new Date().toISOString(),
           };
 
@@ -104,7 +105,7 @@ export function useVariantPreparation(
     return () => {
       controller.abort();
     };
-  }, [productId, variantId, scenario, revision, key]);
+  }, [productId, variantId, scenario, revision, key, catalogService]);
 
   const retry = useCallback(async () => {
     if (!productId || !variantId || retrying) return;
@@ -128,12 +129,13 @@ export function useVariantPreparation(
     } finally {
       setRetrying(false);
     }
-  }, [productId, variantId, scenario, retrying]);
+  }, [productId, variantId, scenario, retrying, catalogService]);
 
   const isCurrent = response?.key === key;
   const preparation = isCurrent ? response.preparation : null;
   const canRetry = Boolean(
-    preparation?.manualRetryAllowed && preparation.inventoryStatus !== "COMPLETED",
+    preparation?.inventario?.manualRetryAllowed &&
+      preparation.inventario.status !== "COMPLETED",
   );
 
   return {

@@ -30,6 +30,7 @@ export interface AttributeSchema {
   obligatorio: boolean;
   unidad?: string;
   opciones?: AttributeSchemaOption[];
+  esIdentificadora?: boolean;
 }
 
 export interface TaxonomyRepository {

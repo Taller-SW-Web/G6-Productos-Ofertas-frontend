@@ -5,7 +5,7 @@ import type {
   VariantQuery,
 } from "../services/catalogRepository";
 import { CatalogError } from "../services/catalogRepository";
-import { catalogService } from "../services/catalogService";
+import { useCatalogServices } from "./useCatalogServices";
 
 export interface UseVariantListOptions {
   productId?: string;
@@ -28,6 +28,7 @@ export function useVariantList({
   query,
   scenario,
 }: UseVariantListOptions = {}): UseVariantListResult {
+  const { catalog: catalogService } = useCatalogServices();
   const targetProductId = productId || "PROD-OXF-001";
   const [revision, setRevision] = useState<number>(0);
   const queryStatus = query?.status;
@@ -129,7 +130,7 @@ export function useVariantList({
     return () => {
       controller.abort();
     };
-  }, [key, targetProductId, queryStatus, queryPage, queryPageSize, scenario, revision]);
+  }, [key, targetProductId, queryStatus, queryPage, queryPageSize, scenario, revision, catalogService]);
 
   const isCurrent = response?.key === key;
 

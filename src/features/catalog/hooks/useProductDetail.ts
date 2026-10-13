@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ProductDetailView } from "../services/catalogRepository";
 import { CatalogError } from "../services/catalogRepository";
-import { catalogService } from "../services/catalogService";
+import { useCatalogServices } from "./useCatalogServices";
 
 export interface ProductDetailState {
   status: "loading" | "success" | "error" | "not_found" | "forbidden" | "session";
@@ -14,6 +14,7 @@ export function useProductDetail(
   scenario?: string,
   revision = 0,
 ): ProductDetailState {
+  const { catalog: catalogService } = useCatalogServices();
   const key = JSON.stringify([id, scenario, revision]);
   const [response, setResponse] = useState<{
     key: string;
@@ -78,7 +79,7 @@ export function useProductDetail(
       });
 
     return () => controller.abort();
-  }, [id, key, scenario]);
+  }, [id, key, scenario, catalogService]);
 
   return response?.key === key
     ? response.state

@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import type { ProductPreparationView } from "../services/catalogRepository";
 import { CatalogError } from "../services/catalogRepository";
-import { catalogService } from "../services/catalogService";
+import { useCatalogServices } from "./useCatalogServices";
 
 export interface ProductPreparationState {
   status: "loading" | "success" | "error";
@@ -17,6 +17,7 @@ export function useProductPreparation(
   scenario?: string,
   revision = 0,
 ) {
+  const { catalog: catalogService } = useCatalogServices();
   const [state, setState] = useState<ProductPreparationState>({
     status: "loading",
     retrying: false,
@@ -46,7 +47,7 @@ export function useProductPreparation(
       });
 
     return () => controller.abort();
-  }, [productId, scenario]);
+  }, [productId, scenario, catalogService]);
 
   useEffect(() => {
     const cancel = load();

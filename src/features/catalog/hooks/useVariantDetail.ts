@@ -3,7 +3,7 @@ import type {
   ProductDetailView,
   VariantDetailView,
 } from "../services/catalogRepository";
-import { catalogService } from "../services/catalogService";
+import { useCatalogServices } from "./useCatalogServices";
 
 export interface UseVariantDetailResult {
   product: ProductDetailView | null;
@@ -18,6 +18,7 @@ export function useVariantDetail(
   variantId: string | undefined,
   scenario?: string,
 ): UseVariantDetailResult {
+  const { catalog: catalogService } = useCatalogServices();
   const [revision, setRevision] = useState<number>(0);
   const key = JSON.stringify([productId, variantId, scenario, revision]);
 
@@ -74,7 +75,7 @@ export function useVariantDetail(
     return () => {
       controller.abort();
     };
-  }, [productId, variantId, scenario, revision, key]);
+  }, [productId, variantId, scenario, revision, key, catalogService]);
 
   const isCurrent = response?.key === key;
 

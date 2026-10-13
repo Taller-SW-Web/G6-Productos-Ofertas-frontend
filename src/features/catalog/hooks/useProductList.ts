@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { CatalogPageResult, CatalogQuery } from "../services/catalogRepository";
 import { CatalogError } from "../services/catalogRepository";
-import { catalogService } from "../services/catalogService";
+import { useCatalogServices } from "./useCatalogServices";
 
 export interface ProductListState {
   status: "loading" | "success" | "error" | "forbidden" | "session";
@@ -14,6 +14,7 @@ export function useProductList(
   scenario?: string,
   revision = 0,
 ): ProductListState {
+  const { catalog: catalogService } = useCatalogServices();
   const { q, categoryId, typeId, saleModel, status, page, pageSize } = query;
   const key = JSON.stringify([
     q,
@@ -77,7 +78,7 @@ export function useProductList(
       });
 
     return () => controller.abort();
-  }, [key, q, categoryId, typeId, saleModel, status, page, pageSize, scenario]);
+  }, [key, q, categoryId, typeId, saleModel, status, page, pageSize, scenario, catalogService]);
 
   return response?.key === key
     ? response.state

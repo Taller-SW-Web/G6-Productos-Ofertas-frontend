@@ -1,16 +1,20 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Box, Button, Group, Stack, Text } from "@mantine/core";
 import { IconArrowLeft, IconCheck } from "@tabler/icons-react";
 import { FeedbackAlert, PageHeader } from "../../../components/shared";
-import { catalogService } from "../services/catalogService";
-import type { ProductDetailView } from "../services/catalogRepository";
 import { useVariantForm } from "../hooks/useVariantForm";
 import { VariantFormFields } from "../components/VariantFormFields";
+import { useCatalogServices } from "../hooks/useCatalogServices";
+import type { ProductDetailView } from "../services/catalogRepository";
+import { readCatalogScenario } from "../services/catalogPresentation";
 
 export function VariantCreatePage() {
   const { productId } = useParams<{ productId: string }>();
+  const [searchParams] = useSearchParams();
+  const scenario = readCatalogScenario(searchParams);
   const navigate = useNavigate();
+  const { catalog: catalogService } = useCatalogServices();
 
   const [parentProduct, setParentProduct] = useState<ProductDetailView | null>(null);
   const [loading, setLoading] = useState(true);
@@ -20,7 +24,7 @@ export function VariantCreatePage() {
     if (!productId) return;
     let active = true;
     catalogService
-      .getById(productId)
+      .getById(productId, scenario)
       .then((p) => {
         if (!active) return;
         setParentProduct(p);
@@ -34,10 +38,11 @@ export function VariantCreatePage() {
     return () => {
       active = false;
     };
-  }, [productId]);
+  }, [productId, scenario, catalogService]);
 
   const form = useVariantForm({
     parentProduct: parentProduct as ProductDetailView,
+    scenario,
     onSuccess: (created) => {
       // Per SPEC-004 / FLOW-004: Created variant in BORRADOR navigates to S04 preparation
       navigate(`/productos/${productId}/variantes/${created.variantId}/preparacion`);

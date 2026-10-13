@@ -162,6 +162,7 @@ export class CatalogError extends Error {
       | "activation_rejected"
       | "prep_not_retryable"
       | "unknown"
+      | "server"
       | "forbidden"
       | "session",
     message: string,
