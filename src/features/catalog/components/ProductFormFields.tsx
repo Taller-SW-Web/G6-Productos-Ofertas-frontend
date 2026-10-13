@@ -36,6 +36,7 @@ interface ProductFormFieldsProps {
   brands: TaxonomyBrand[];
   productTypes: TaxonomyProductType[];
   attributeSchema: AttributeSchema[];
+  schemaConfirmed: boolean;
   isEdit?: boolean;
   initialProduct?: ProductDetailView;
 }
@@ -56,6 +57,7 @@ export function ProductFormFields({
   brands,
   productTypes,
   attributeSchema,
+  schemaConfirmed,
   isEdit = false,
   initialProduct,
 }: ProductFormFieldsProps) {
@@ -348,10 +350,12 @@ export function ProductFormFields({
 
           <div>
             <Text size="sm" fw={600} mb="xs">
-              Características técnicas del tipo ({attributeSchema.length})
+              Características técnicas del tipo {schemaConfirmed ? `(${attributeSchema.length})` : "(sin confirmar)"}
             </Text>
 
-            {attributeSchema.length === 0 ? (
+            {!schemaConfirmed ? (
+              <Text size="sm" c="dimmed">Las características no están disponibles hasta confirmar el esquema.</Text>
+            ) : attributeSchema.length === 0 ? (
               <Text size="sm" c="dimmed">
                 Este tipo de producto no tiene características asociadas en Taxonomía.
               </Text>

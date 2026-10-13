@@ -69,7 +69,10 @@ for (const module of taxonomySections) {
       const navigation = page.getByRole("navigation", {
         name: "Navegación de la aplicación",
       });
-      await expect(navigation.getByRole("link")).toHaveCount(10);
+      // Six existing commercial destinations plus the five Taxonomy sections.
+      await expect(navigation.getByRole("link")).toHaveCount(11);
+      await expect(navigation.getByRole("link", { name: "Gestión de productos", exact: true })).toHaveAttribute("href", "/productos");
+      await expect(navigation.getByRole("link", { name: "Importar precios", exact: true })).toHaveAttribute("href", "/precios/importar");
       await expect(
         navigation.getByText("TAXONOMÍA", { exact: true }),
       ).toBeVisible();

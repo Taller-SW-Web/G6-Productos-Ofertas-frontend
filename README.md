@@ -40,6 +40,15 @@ otros IDs, atributos LISTA/NUMERO/TEXTO y filtros externos en modo API. Ejecutar
 sustitución, permisos de reintento y fallos del esquema; no acredita HTTP real.
 El harness es de pruebas y no forma parte del build comercial.
 
+El bridge `createTaxonomyServicesAdapter(services, metadata?)` consume los servicios
+oficiales incorporados desde la rama de López. Se inyecta como
+`createCatalogServices(mode, { taxonomy: bridge })` en ambos modos, conservando IDs,
+opciones activas y límites publicados. No crea fixtures ni endpoints. No se activa
+sobre los productos históricos hasta confirmar su migración de IDs y los roles
+identificadores: ver [coordinación con Taxonomía](docs/COORDINACION_TAXONOMIA_CATALOGO.md).
+`tests/catalog-regressions.spec.ts` comprueba ese bridge, guardados sin esquema,
+conservación de atributos, atomicidad, IDs con reloj congelado y navegación entre padres.
+
 El formulario de variantes usa IDs de características/opciones, no nombres editables.
 El adapter de Taxonomía debe aportar rol identificador y límite configurado de texto;
 su ausencia bloquea el guardado. Los límites numéricos solo se aplican si el esquema

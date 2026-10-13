@@ -10,6 +10,8 @@ export interface CatalogServices {
 }
 
 export interface CatalogRuntimeDependencies {
+  // Allows the official Taxonomy service bridge in either mode without changing pages.
+  taxonomy?: TaxonomyRepository;
   // Initialize asynchronous HTTP factories before injecting their repositories.
   apiCatalog?: () => CatalogRepository;
   apiTaxonomy?: () => TaxonomyRepository;
@@ -99,7 +101,7 @@ export function createCatalogServices(
         taxonomy: createLazyTaxonomyProxy(),
       };
     }
-    return sharedMockServices;
+    return dependencies.taxonomy ? { ...sharedMockServices, taxonomy: dependencies.taxonomy } : sharedMockServices;
   }
 
   // mode === "api"
@@ -107,9 +109,9 @@ export function createCatalogServices(
     catalog: dependencies.apiCatalog
       ? dependencies.apiCatalog()
       : createUnavailableApiCatalogRepository(),
-    taxonomy: dependencies.apiTaxonomy
+    taxonomy: dependencies.taxonomy ?? (dependencies.apiTaxonomy
       ? dependencies.apiTaxonomy()
-      : createUnavailableApiTaxonomyRepository(),
+      : createUnavailableApiTaxonomyRepository()),
   };
   if ("then" in services.catalog || "then" in services.taxonomy) {
     throw new Error("Inicializa los adaptadores asíncronos con await antes de inyectarlos en Catálogo.");
@@ -124,7 +126,7 @@ export function getCatalogServices(
   dependencies: CatalogRuntimeDependencies = {},
 ): CatalogServices {
   // Explicit injection always takes precedence over the default runtime cache.
-  if (dependencies.apiCatalog || dependencies.apiTaxonomy) {
+  if (dependencies.taxonomy || dependencies.apiCatalog || dependencies.apiTaxonomy) {
     return createCatalogServices(mode, dependencies);
   }
   let services = serviceInstances.get(mode);

@@ -292,7 +292,7 @@ export class MockCatalogRepository implements CatalogRepository {
     const brand = initialBrands.find((b) => b.id === payload.marcaId);
     const pType = initialProductTypes.find((t) => t.id === payload.tipoProductoId);
 
-    const newId = `PROD-${Date.now().toString().slice(-4)}`;
+    const newId = `PROD-${crypto.randomUUID()}`;
     const newProduct: ProductDetailView = {
       id: newId,
       name: payload.nombre.trim(),
@@ -370,8 +370,10 @@ export class MockCatalogRepository implements CatalogRepository {
     const idx = this.products.findIndex((p) => p.id === id);
     if (idx === -1) throw new CatalogError("not_found", "Producto no encontrado.");
 
-    const current = this.products[idx];
-    if (!current) throw new CatalogError("not_found", "Producto no encontrado.");
+    const persisted = this.products[idx];
+    if (!persisted) throw new CatalogError("not_found", "Producto no encontrado.");
+    // Failed validations must never mutate the persisted product.
+    const current: ProductDetailView = structuredClone(persisted);
 
     // Version conflict validation
     if (payload.catalogVersion !== undefined && payload.catalogVersion !== current.catalogVersion) {
@@ -422,9 +424,9 @@ export class MockCatalogRepository implements CatalogRepository {
       current.typeName = newType?.nombre || current.typeName;
     }
 
-    if (payload.atributos) current.attributes = payload.atributos;
+    if (payload.atributos) current.attributes = structuredClone(payload.atributos);
     if (payload.imagenes) {
-      current.images = payload.imagenes;
+      current.images = structuredClone(payload.imagenes);
       current.imageUrl = payload.imagenes[0]?.url || undefined;
     }
     if (!current.hasVariants && payload.perfilFisico !== undefined) {
@@ -438,6 +440,7 @@ export class MockCatalogRepository implements CatalogRepository {
     }
 
     current.catalogVersion += 1;
+    this.products[idx] = current;
 
     return JSON.parse(JSON.stringify(current));
   }
@@ -880,7 +883,7 @@ export class MockCatalogRepository implements CatalogRepository {
       );
     }
 
-    const newVariantId = `VAR-${Date.now().toString().slice(-4)}`;
+    const newVariantId = `VAR-${crypto.randomUUID()}`;
     const nonIdAttrs = payload.atributosNoIdentificadores || payload.nonIdentifyingAttributes || [];
     const physProf = normalizePhysicalProfile(payload.perfilFisico || payload.physicalProfile);
 

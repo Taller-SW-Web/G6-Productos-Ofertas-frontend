@@ -20,7 +20,7 @@ import {
   IconScale,
   IconTrash,
 } from "@tabler/icons-react";
-import { SectionCard } from "../../../components/shared";
+import { SectionCard, StatusBadge } from "../../../components/shared";
 import type { ProductDetailView } from "../services/catalogRepository";
 import type { useVariantForm } from "../hooks/useVariantForm";
 
@@ -73,12 +73,12 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
                 </Text>
               </div>
               <Group gap="xs">
-                <Badge variant="outline" size="sm">
+                <Badge variant="outline" color="gray" size="sm">
                   SKU Base: {parentProduct.skuBase}
                 </Badge>
-                <Badge variant="light" color="blue" size="sm">
+                <StatusBadge semantic="neutral">
                   {parentProduct.hasVariants ? "Con variantes" : "Simple"}
-                </Badge>
+                </StatusBadge>
               </Group>
             </Group>
           </Paper>

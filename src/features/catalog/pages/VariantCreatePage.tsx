@@ -11,13 +11,17 @@ import { readCatalogScenario } from "../services/catalogPresentation";
 
 export function VariantCreatePage() {
   const { productId } = useParams<{ productId: string }>();
+  return <VariantCreateForProduct key={productId} productId={productId} />;
+}
+
+function VariantCreateForProduct({ productId }: { productId?: string }) {
   const [searchParams] = useSearchParams();
   const scenario = readCatalogScenario(searchParams);
   const navigate = useNavigate();
   const { catalog: catalogService } = useCatalogServices();
 
   const [parentProduct, setParentProduct] = useState<ProductDetailView | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(Boolean(productId));
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {

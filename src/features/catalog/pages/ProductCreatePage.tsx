@@ -29,6 +29,11 @@ export function ProductCreatePage() {
     brands,
     productTypes,
     attributeSchema,
+    schemaLoading,
+    schemaError,
+    schemaConfirmed,
+    loadingMasters,
+    retrySchema,
     handleSubmit,
   } = useProductForm({
     scenario,
@@ -67,6 +72,8 @@ export function ProductCreatePage() {
         </FeedbackAlert>
       )}
 
+      {schemaLoading && <FeedbackAlert semantic="info" title="Cargando esquema">Confirmando las características de Taxonomía…</FeedbackAlert>}
+      {schemaError && <FeedbackAlert semantic="error" title="Esquema no disponible">{schemaError}<Button onClick={retrySchema} variant="subtle">Reintentar esquema</Button></FeedbackAlert>}
       <form noValidate onSubmit={handleSubmit}>
         <Stack gap="xl">
           <ProductFormFields
@@ -78,6 +85,7 @@ export function ProductCreatePage() {
             brands={brands}
             productTypes={productTypes}
             attributeSchema={attributeSchema}
+            schemaConfirmed={schemaConfirmed}
             isEdit={false}
           />
 
@@ -86,6 +94,7 @@ export function ProductCreatePage() {
               type="submit"
               color="orange"
               loading={submitting}
+              disabled={!schemaConfirmed || loadingMasters}
               leftSection={<IconDeviceFloppy size={16} />}
             >
               Guardar borrador

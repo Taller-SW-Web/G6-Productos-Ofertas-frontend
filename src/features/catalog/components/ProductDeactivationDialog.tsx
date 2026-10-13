@@ -68,7 +68,7 @@ export function ProductDeactivationDialog({
             <Text size="xs" c="dimmed">
               SKU Base: <strong>{product.skuBase}</strong>
             </Text>
-            <Badge size="xs" variant="outline">
+            <Badge size="xs" variant="outline" color="gray">
               {product.hasVariants ? "Con variantes" : "Simple"}
             </Badge>
           </Group>

@@ -49,7 +49,13 @@ export function useProductForm({
   const [categories, setCategories] = useState<TaxonomyCategory[]>([]);
   const [brands, setBrands] = useState<TaxonomyBrand[]>([]);
   const [productTypes, setProductTypes] = useState<TaxonomyProductType[]>([]);
-  const [attributeSchema, setAttributeSchema] = useState<AttributeSchema[]>([]);
+  const [schemaResult, setSchemaResult] = useState<{
+    typeId: string;
+    service: typeof taxonomyService;
+    attributes?: AttributeSchema[];
+    error?: string;
+  } | null>(null);
+  const [schemaAttempt, setSchemaAttempt] = useState(0);
   const [loadingMasters, setLoadingMasters] = useState(true);
 
   // Form fields state
@@ -143,15 +149,23 @@ export function useProductForm({
     taxonomyService
       .getAttributeSchema(formData.tipoProductoId)
       .then((schemas) => {
-        if (active) setAttributeSchema(schemas);
+        if (active) setSchemaResult({ typeId: formData.tipoProductoId, service: taxonomyService, attributes: schemas });
       })
       .catch(() => {
-        if (active) setAttributeSchema([]);
+        if (active) setSchemaResult({ typeId: formData.tipoProductoId, service: taxonomyService, error: "No se pudo confirmar el esquema de Taxonomía. Tus atributos se conservan; reintenta antes de guardar." });
       });
     return () => {
       active = false;
     };
-  }, [formData.tipoProductoId, taxonomyService]);
+  }, [formData.tipoProductoId, taxonomyService, schemaAttempt]);
+
+  const currentSchema = schemaResult?.typeId === formData.tipoProductoId && schemaResult.service === taxonomyService
+    ? schemaResult : null;
+  const attributeSchema = currentSchema?.attributes ?? [];
+  const schemaError = currentSchema?.error ?? null;
+  const schemaLoading = !currentSchema;
+  const schemaConfirmed = currentSchema?.attributes !== undefined;
+  const retrySchema = () => { setSchemaResult(null); setSchemaAttempt((attempt) => attempt + 1); };
 
   const updateField = useCallback(
     <K extends keyof ProductFormData>(field: K, value: ProductFormData[K]) => {
@@ -230,6 +244,10 @@ export function useProductForm({
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (submitting) return;
+    if (!schemaConfirmed || loadingMasters) {
+      setGeneralError(schemaError ?? "Espera a que se confirme el esquema de Taxonomía antes de guardar.");
+      return;
+    }
 
     if (!validate()) return;
 
@@ -248,6 +266,13 @@ export function useProductForm({
           valor: schema.tipo === "NUMERO" ? Number(val) : val,
           unidad: schema.unidad,
         });
+      }
+    });
+    // Preserve historical attributes not represented by the confirmed schema.
+    // An empty valid schema does not authorize deleting existing product data.
+    initialProduct?.attributes.forEach((attribute) => {
+      if (!attributeSchema.some((schema) => schema.caracteristicaId === attribute.caracteristicaId)) {
+        formattedAttributes.push({ ...attribute });
       }
     });
 
@@ -349,6 +374,10 @@ export function useProductForm({
     brands,
     productTypes,
     attributeSchema,
+    schemaLoading,
+    schemaError,
+    schemaConfirmed,
+    retrySchema,
     loadingMasters,
     handleSubmit,
     isEdit,

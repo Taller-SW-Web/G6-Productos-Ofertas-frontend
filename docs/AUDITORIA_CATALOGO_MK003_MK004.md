@@ -1,4 +1,100 @@
-# Auditoría MK-003 / MK-004 — correcciones de integración
+# Auditoría vigente MK-003 / MK-004 — revisión del 13 de octubre de 2026
+
+Rama `poma`, PR #25 en borrador. Estado: `MOCK_INTEGRATED`; `BLOCKED_CONTRACT` para
+activar Taxonomía compartida y HTTP real. Esta sección sustituye las conclusiones de
+publicación/conflictos y los resultados de la auditoría histórica incluida abajo.
+
+## Fuentes y sincronización
+
+- Git inicial limpio en `79dc879b64f1c3638351d9bfebd3ef0f1dc4a6b1`.
+- Docs remotos consultados en `master@942bf7322eb388fe5b0fcc9c5a565152e1099139`:
+  SPEC-003/004/009/010, HU/FLOW/WF-003/004, DESIGN, propuesta/decisiones/guías UX,
+  component-spec/plan/tasks y prototipos MK-003 S01–S07 y MK-004 S01–S06,
+  `contratos/http/openapi.yaml` y `catalogo-errores.md`.
+  `validation-report.md`: NO ENCONTRADO en ambos MK; no se acredita aprobación UX.
+- Frontend: AGENTS, README, puertos reales de Catálogo y servicios de Taxonomía
+  incorporados por PR #24 (`lopez`, autor `VicuzS`). Docs/Backend solo lectura.
+- Se integraron los 13 commits de `origin/master@fdbacbae347b346bb492c27b3f4fab3c81be77da`
+  mediante merge local `6267499`. Conflictos resueltos aditivamente en
+  `productRoutes.tsx` e `integration.spec.ts`; las rutas y navegación de los demás
+  módulos se conservaron. `git rev-list --count HEAD..origin/master`: 0.
+  La implementación `src/features/taxonomy/` coincide con master; no se reescribió.
+
+## Correcciones nuevas y archivos
+
+1. `useProductForm.ts`: resultado de esquema ligado al tipo/provider actual;
+   diferencia pendiente/error/éxito, incluido vacío válido. La guarda de submit y
+   los botones impiden escribir sin confirmación. Reintento explícito; edición
+   preserva atributos históricos fuera del esquema confirmado.
+   `ProductCreatePage.tsx`, `ProductEditPage.tsx`, `ProductFormFields.tsx` muestran
+   los estados y evitan presentar un error como “sin características”.
+2. `mockCatalogRepository.ts`: update trabaja sobre copia independiente y publica
+   el producto/version solo tras validar; imágenes y atributos se copian.
+   Altas de producto/variante usan `crypto.randomUUID()` en lugar del reloj truncado.
+3. `VariantCreatePage.tsx`: identidad de ruta controla el montaje del formulario y
+   la consulta del padre. Cambio de productId descarta producto, campos y errores
+   anteriores; las respuestas del montaje anterior quedan invalidadas.
+4. `taxonomyServicesAdapter.ts` consume los servicios oficiales de López, sin
+   fixtures adicionales, preservando IDs, obligatoriedad/unidad y valores LISTA
+   activos. Límite TEXTO de configuración oficial. Tipo desconocido falla.
+   `catalogServices.ts` permite inyectar el bridge en mock/API sin cambiar páginas.
+   Roles identificadores y límites NUMERO requieren metadata explícita del owner;
+   no se deducen por nombre ni por obligatoriedad.
+5. `VariantFormFields.tsx` usa StatusBadge neutro para el modelo de venta; SKU Base
+   y badges de modelo de los diálogos de producto usan gris. Colores de errores,
+   advertencias y estados técnicos se conservan por significado, no por categoría.
+6. `tests/catalog-regressions.spec.ts` y harness: regresiones de guardado pendiente/
+   fallido (incluido submit programático), esquema vacío válido, atributos históricos,
+   update atómico con recuperación posterior, 100 productos y 100 variantes con reloj
+   congelado, bridge oficial y navegación client-side con carga/error del nuevo padre.
+7. `pricing-audit.spec.ts` y `pricing-workflows.spec.ts`: evidencePath por prueba;
+   se elimina la escritura concurrente en PNG versionados sin reducir las aserciones.
+   `taxonomy-ui.spec.ts` comprueba los 11 enlaces reales y conserva verificaciones de
+   destino activo, rutas, formularios y geometría. `verify-production.mjs` amplía el
+   smoke existente con Catálogo, preservando verificaciones de los demás módulos.
+8. README y `COORDINACION_TAXONOMIA_CATALOGO.md`: composición, propuesta y decisiones
+   que requieren revisión de López. Las evidencias nuevas viven en
+   `evidencias/catalog-audit/revision-2026-10-13/`.
+
+## Validaciones reales de esta revisión
+
+| Comprobación | Resultado |
+| --- | --- |
+| Nuevas regresiones aisladas | 6/6 PASS |
+| Primera suite tras integrar | 172/177; cinco fallos por expectativa antigua de 10 enlaces en Taxonomía |
+| Suite repetida tras corregir esa expectativa | 177/177 PASS, 3.5 min |
+| Suite completa del código final, después del ajuste visual de esquema | 177/177 PASS, 3.6 min, exit 0; ver suite-final.txt |
+| mock: npm run typecheck / npm run lint / npm run build | PASS, exit 0; repetidos después del ajuste final |
+| api: npm run typecheck / npm run lint / npm run build | PASS, exit 0; repetidos después del ajuste final, ver gates-api-final.txt |
+| node scripts/verify-production.mjs mock | PASS: 43 vistas, 1440×900, sin errores de runtime/overflow |
+| node scripts/verify-production.mjs api | PASS: 39 vistas, 1440×900; providers ausentes explícitos y cero descarga de mocks; repetido sobre el build final |
+| git diff --check | PASS |
+
+Las suites completas incluyen productos/variantes, Pricing S01–S06,
+Cupones/Promociones/Recomendaciones, Foundation, navegación y Taxonomía MK-008–MK-012.
+La suite final queda registrada íntegramente en `suite-final.txt`; los smokes y gates
+API se registran junto a ella. Capturas nuevas inspeccionadas: modelo neutro y edición
+con esquema fallido; el botón queda bloqueado y los campos existentes se conservan.
+No se atribuye una aprobación UX humana ni integración HTTP a esas comprobaciones.
+
+## Integración y pendientes
+
+`MOCK_INTEGRATED`. Bridge probado, activación compartida predeterminada
+`BLOCKED_CONTRACT`: IDs históricos de Catálogo incompatibles con los de Taxonomía,
+roles identificadores no publicados y límites NUMERO sin confirmación. Se solicita
+coordinación a López en PR #25; no se presenta la solicitud como aprobación.
+Ver el documento de coordinación para fuente, propuesta y owner de cada decisión.
+Los fixtures históricos siguen aislados; no se copian los nuevos datos oficiales.
+
+Las APIs reales, contratos de otros providers y revisión independiente permanecen
+pendientes. No se modifica Docs/Backend ni se cierran issues. Integrar master **en poma**
+no equivale a fusionar PR #25 **hacia master**; ese merge no se ejecuta.
+
+---
+
+## Auditoría histórica del 12 de octubre (referencia, sustituida por la revisión superior)
+
+### Correcciones de integración anteriores
 
 Fecha de trabajo: 12 de octubre de 2026 (America/Lima). Rama: `poma`.
 Estado: MOCK_INTEGRATED; no se implementó ni verificó un adapter HTTP.
