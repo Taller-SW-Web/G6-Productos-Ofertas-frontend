@@ -1,8 +1,13 @@
-import { useContext, type ReactNode } from "react";
+import { lazy, Suspense, useContext, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { FeedbackAlert } from "../../components/shared";
-import { TaxonomyDataNotice } from "../../features/taxonomy/components/TaxonomyDataNotice";
 import { DataModeContext } from "./DataModeContext";
+
+const TaxonomyDataNotice = lazy(() =>
+  import("../../features/taxonomy/components/TaxonomyDataNotice").then(
+    (module) => ({ default: module.TaxonomyDataNotice }),
+  ),
+);
 
 const taxonomyPaths = [
   "/categorias",
@@ -36,7 +41,9 @@ export function TaxonomyModeGate({ children }: { children: ReactNode }) {
     );
   return (
     <>
-      <TaxonomyDataNotice />
+      <Suspense fallback={null}>
+        <TaxonomyDataNotice />
+      </Suspense>
       {children}
     </>
   );
