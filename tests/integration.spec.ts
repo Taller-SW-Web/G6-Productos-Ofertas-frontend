@@ -131,7 +131,7 @@ for (const module of modules) {
       const navigation = page.getByRole("navigation", {
         name: "Navegación de la aplicación",
       });
-      await expect(navigation.getByRole("link")).toHaveCount(11);
+      await expect(navigation.getByRole("link")).toHaveCount(12);
       await expect(
         navigation.getByText("PROMOCIONES", { exact: true }),
       ).toBeVisible();
@@ -174,4 +174,23 @@ test("Integrated sidebar: all modules remain reachable after form returns", asyn
     await expect(page).toHaveURL(new RegExp(`${path}$`));
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   }
+});
+
+test("N03: Catálogo y Taxonomía en modo API operan fail-closed y nunca recurren a mocks", async () => {
+  const { getCatalogServices } = await import(
+    "../src/features/catalog/services/catalogServices"
+  );
+
+  const apiServices = getCatalogServices("api");
+  await expect(apiServices.catalog.list({ page: 1, pageSize: 10 })).rejects.toThrow(
+    /adapter API de Catálogo no está configurado/,
+  );
+  await expect(apiServices.taxonomy.getCategories()).rejects.toThrow(
+    /adapter API de Taxonomía no está configurado/,
+  );
+
+  // In mock mode, shared services load successfully
+  const mockServices = getCatalogServices("mock");
+  const categories = await mockServices.taxonomy.getCategories();
+  expect(categories.length).toBeGreaterThan(0);
 });

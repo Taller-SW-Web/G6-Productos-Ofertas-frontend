@@ -109,6 +109,28 @@ try {
       true,
     );
   }
+  const catalogPaths = [
+    "/productos", "/productos/nuevo", "/productos/PROD-OXF-001",
+    "/productos/PROD-OXF-001/editar", "/productos/PROD-OXF-001/preparacion",
+    "/productos/PROD-OXF-001/variantes", "/productos/PROD-OXF-001/variantes/nueva",
+    "/productos/PROD-OXF-001/variantes/VAR-OXF-BLA-M/preparacion",
+  ];
+  for (const path of catalogPaths) {
+    await page.goto(baseURL + path);
+    if (mode === "api") {
+      await page.getByRole("alert").first().waitFor();
+      assert.equal(await page.getByRole("table").count(), 0);
+      for (const save of await page.getByRole("button", { name: /Guardar/ }).all()) {
+        assert.equal(await save.isDisabled(), true, path);
+      }
+    } else {
+      await page.getByRole("heading", { level: 1 }).waitFor();
+      assert.doesNotMatch(await page.getByRole("heading", { level: 1 }).innerText(), /no encontrado|no disponible/i, path);
+      if (/\/nuevo$|\/editar$|\/nueva$/.test(path)) await page.locator("main form").waitFor();
+      if (path === "/productos" || path.endsWith("/variantes")) await page.getByRole("table").waitFor();
+    }
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  }
   // Taxonomía (MK-008 a MK-012), estrictamente ADITIVO sobre los loops anteriores:
   // las secciones y rutas internas representativas no alteran ningún check previo.
   // En modo mock cada ruta debe estar operativa y con aviso de demostración; en
@@ -206,9 +228,9 @@ try {
       false,
     );
   assert.deepEqual(errors, []);
-  const totalViews = 4 + 16 + taxonomyPaths.length + (mode === "mock" ? 4 : 0) + 5;
+  const totalViews = 4 + 16 + catalogPaths.length + taxonomyPaths.length + (mode === "mock" ? 4 : 0) + 5;
   console.log(
-    `PASS producción ${mode}: ${totalViews} vistas de Promotions, Pricing S01, Auditoría S01–S05 y Taxonomía, 1440 px, sin errores; ${mode === "api" ? "providers ausentes explícitos, reintento y persistencia del error de Pricing, taxonomía bloqueada y cero carga de mocks/bundles" : "módulos presentes, tablas comerciales verificadas y controles de revisión ausentes"}.`,
+    `PASS producción ${mode}: ${totalViews} vistas de Catálogo, Promotions, Pricing S01, Auditoría S01–S05 y Taxonomía, 1440 px, sin errores; ${mode === "api" ? "providers ausentes explícitos, reintento y persistencia del error de Pricing, taxonomía bloqueada y cero carga de mocks/bundles" : "módulos presentes, tablas comerciales verificadas y controles de revisión ausentes"}.`,
   );
 } finally {
   await browser.close();

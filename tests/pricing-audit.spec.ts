@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { evidencePath } from "./support/evidence";
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { createMockPricingRepository } from "../src/features/pricing/adapters/mockPricingRepository";
@@ -30,7 +31,7 @@ async function snapshot(page: Page, file: string) {
     ),
   ).toBe(true);
   await page.screenshot({
-    path: "docs/evidencias/" + file,
+    path: evidencePath(file),
     fullPage: true,
     animations: "disabled",
   });

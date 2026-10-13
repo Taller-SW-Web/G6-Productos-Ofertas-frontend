@@ -90,6 +90,56 @@ export const CurrentPricePage = lazy(() =>
     default: module.CurrentPricePage,
   })),
 );
+export const ProductsPage = lazy(() =>
+  import("../../features/catalog/pages/ProductsPage").then((module) => ({
+    default: module.ProductsPage,
+  })),
+);
+export const ProductCreatePage = lazy(() =>
+  import("../../features/catalog/pages/ProductCreatePage").then((module) => ({
+    default: module.ProductCreatePage,
+  })),
+);
+export const ProductEditPage = lazy(() =>
+  import("../../features/catalog/pages/ProductEditPage").then((module) => ({
+    default: module.ProductEditPage,
+  })),
+);
+export const ProductDetailPage = lazy(() =>
+  import("../../features/catalog/pages/ProductDetailPage").then((module) => ({
+    default: module.ProductDetailPage,
+  })),
+);
+export const ProductPreparationPage = lazy(() =>
+  import("../../features/catalog/pages/ProductPreparationPage").then((module) => ({
+    default: module.ProductPreparationPage,
+  })),
+);
+export const VariantListPage = lazy(() =>
+  import("../../features/catalog/pages/VariantListPage").then((module) => ({
+    default: module.VariantListPage,
+  })),
+);
+export const VariantCreatePage = lazy(() =>
+  import("../../features/catalog/pages/VariantCreatePage").then((module) => ({
+    default: module.VariantCreatePage,
+  })),
+);
+export const VariantEditPage = lazy(() =>
+  import("../../features/catalog/pages/VariantEditPage").then((module) => ({
+    default: module.VariantEditPage,
+  })),
+);
+export const VariantDetailPage = lazy(() =>
+  import("../../features/catalog/pages/VariantDetailPage").then((module) => ({
+    default: module.VariantDetailPage,
+  })),
+);
+export const VariantPreparationPage = lazy(() =>
+  import("../../features/catalog/pages/VariantPreparationPage").then((module) => ({
+    default: module.VariantPreparationPage,
+  })),
+);
 export const EditPricePage = lazy(() =>
   import("../../features/pricing/pages/EditPricePage").then((module) => ({
     default: module.EditPricePage,

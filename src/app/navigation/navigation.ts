@@ -14,6 +14,7 @@ import {
   IconTicket,
   IconDiscount2,
   IconArrowsShuffle,
+  IconPackage,
   type TablerIcon,
 } from "@tabler/icons-react";
 export interface NavigationItem {
@@ -24,6 +25,13 @@ export interface NavigationItem {
   matchPaths?: readonly string[];
 }
 export const productNavigation: NavigationItem[] = [
+  {
+    to: "/productos",
+    label: "Gestión de productos",
+    icon: IconPackage,
+    group: "Catálogo",
+    matchPaths: ["/productos", "/MK-004"],
+  },
   {
     to: "/recomendaciones",
     label: "Venta cruzada y upselling",
