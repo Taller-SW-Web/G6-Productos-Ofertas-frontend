@@ -1,3 +1,32 @@
+### Revisión final: valorId de LISTA y precondiciones Q-06
+
+Código verificado: `68a01ab20d90488a5da4efd87d684c5b29e8fcb3`. Esta última revisión se limita a los dos puntos solicitados; no integra master ni rehace los módulos anteriores.
+
+- **LISTA:** edición conserva `valorId`; alta y edición envían el ID estable separado de `valor`, que toma la etiqueta vigente de Taxonomía. La regresión renombra la opción manteniendo su ID, vuelve a abrir el mismo producto y comprueba selección y payload. Los datos antiguos sin ID no se interpretan por etiqueta; se exige confirmación, salvo que el esquema confirme que el valor antiguo ya era un ID exacto.
+- **Tipo de producto:** ausencia de publicación exige `publishedCommercially === false`. `true` y `undefined` no acreditan elegibilidad. Q-06 continúa abierta: el control permanece bloqueado, el hook rechaza proponer otro tipo y el payload de edición omite `tipoProductoId`. El alta mantiene su tipo obligatorio.
+
+| Validación final | Resultado |
+| --- | --- |
+| Seis regresiones nuevas | **6/6 PASS**, 10.8 s en última ejecución |
+| Playwright completo | **205/205 PASS**, 4.2 min |
+| npm run typecheck | PASS |
+| npm run lint, incluida repetición final | PASS |
+| Build mock / build api | PASS, exit 0 |
+| Evidencia desktop | Captura nueva de LISTA renombrada a 1440 px, inspeccionada |
+| git diff --check / git diff --cached --check | PASS |
+
+Los primeros fallos focalizados correspondían a selectores de tests y a volver a abrir el entrypoint comercial en lugar del harness inyectado; se corrigieron los tests y se repitieron con éxito. Se conservan los logs iniciales y finales.
+
+[Evidencias finales y logs](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/tree/68a01ab20d90488a5da4efd87d684c5b29e8fcb3/docs/evidencias/catalog-audit/lista-q06-final) · [Auditoría final](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/blob/68a01ab20d90488a5da4efd87d684c5b29e8fcb3/docs/AUDITORIA_CATALOGO_MK003_MK004.md).
+
+Refs #5 y #6. **Mantener el PR en borrador; no hacer merge ni cerrar issues.** Q-06 y mapeo/roles de Taxonomía continúan pendientes; no se atribuye integración HTTP real.
+
+---
+
+### Entrega integrada anterior (evidencia histórica de aa68005)
+
+Los 199 casos y smokes 48/44 de la sección siguiente corresponden a la integración anterior. La validación vigente de las dos mejoras es la tabla superior.
+
 La edición de productos podía borrar atributos cuando fallaba Taxonomía; el mock podía conservar una actualización parcial tras rechazar el perfil físico y las altas reutilizaban IDs derivados del reloj. Esta entrega bloquea el guardado sin esquema confirmado, preserva atributos históricos, publica actualizaciones solo después de validarlas y genera UUID. También invalida el formulario SKU al cambiar de producto.
 
 Refs #5 y #6. **PR en borrador; no hacer merge ni cerrar issues.** Rama `poma` → `master`.
