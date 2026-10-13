@@ -7,3 +7,5 @@ test-results/
 playwright-report/
 *.tsbuildinfo
 *.log
+MK-003/
+MK-004/

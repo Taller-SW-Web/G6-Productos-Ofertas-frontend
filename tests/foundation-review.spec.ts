@@ -1,3 +1,4 @@
+import { evidencePath } from "./support/evidence";
 import { test, expect } from "@playwright/test";
 import { longTableRow } from "../src/features/foundation/mocks/tableCases";
 
@@ -85,7 +86,7 @@ test("FND-05: long content scrolls inside the table and preserves identifiers an
     element.scrollLeft = 0;
   });
   await page.screenshot({
-    path: "docs/evidencias/fnd-05-table-1440.png",
+    path: evidencePath("fnd-05-table-1440.png"),
     fullPage: true,
   });
 });

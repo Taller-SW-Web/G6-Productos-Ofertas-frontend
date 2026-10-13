@@ -5,8 +5,15 @@ import {
   StatusBadge,
 } from "../../../components/shared";
 import type { PriceView } from "../services/pricingRepository";
-import { priceOriginLabel } from "../services/pricePresentation";
-export function PriceSummary({ price }: { price: PriceView }) {
+import { priceOriginLabel, formatMoney } from "../services/pricePresentation";
+import { displayInstant, priceTimeZone } from "../services/pricingValidation";
+export function PriceSummary({
+  price,
+  historical = false,
+}: {
+  price: PriceView;
+  historical?: boolean;
+}) {
   return (
     <SectionCard
       title={price.name}
@@ -23,13 +30,19 @@ export function PriceSummary({ price }: { price: PriceView }) {
       {price.sku && <Text size="sm">SKU: {price.sku}</Text>}
       <SimpleGrid cols={3} spacing="lg">
         <MetricCard
-          label="Precio regular vigente"
-          value={price.regular}
+          label={
+            historical ? "Precio regular en fecha" : "Precio regular vigente"
+          }
+          value={formatMoney(price.regular, price.currency)}
           description={price.currency}
         />
         <MetricCard
-          label="Precio de oferta actual"
-          value={price.offer ?? "Sin oferta"}
+          label={historical ? "Oferta en fecha" : "Precio de oferta actual"}
+          value={
+            price.offer === null
+              ? "Sin oferta"
+              : formatMoney(price.offer, price.currency)
+          }
           description={
             price.offer
               ? "Importe de la consulta de Pricing"
@@ -43,8 +56,11 @@ export function PriceSummary({ price }: { price: PriceView }) {
         />
       </SimpleGrid>
       <Text size="sm">
-        Vigencia de la lectura: {price.validFrom} —{" "}
-        {price.validUntil ?? "Sin fin especificado"}
+        Vigencia de la lectura: {displayInstant(price.validFrom)} —{" "}
+        {price.validUntil
+          ? displayInstant(price.validUntil)
+          : "Sin fin especificado"}{" "}
+        · {priceTimeZone}
       </Text>
     </SectionCard>
   );

@@ -1,36 +1,45 @@
 import { Box, NavLink, Stack, Text } from "@mantine/core";
 import { Link, useLocation } from "react-router-dom";
-import { bulkNavigation, productNavigation } from "./navigation";
-
-function isItemActive(itemPath: string, currentPath: string): boolean {
-  if (itemPath === currentPath) return true;
-  if (itemPath === "/carga-masiva") {
-    // Active for upload, review, and progress tracking, but not for /carga-masiva/descargas
-    return (
-      currentPath === "/carga-masiva" ||
-      currentPath === "/carga-masiva/revisar" ||
-      currentPath.startsWith("/carga-masiva/importaciones")
-    );
-  }
-  return itemPath !== "/" && currentPath.startsWith(`${itemPath}/`);
-}
+import { productNavigation, taxonomyNavigation } from "./navigation";
 
 export function ApplicationNavigation() {
   const { pathname } = useLocation();
+  const activeDestination = productNavigation
+    .flatMap((item) =>
+      [item.to, ...(item.matchPaths ?? [])].map((prefix) => ({
+        to: item.to,
+        prefix,
+      })),
+    )
+    .filter(
+      (item) =>
+        pathname === item.prefix || pathname.startsWith(`${item.prefix}/`),
+    )
+    .sort((a, b) => b.prefix.length - a.prefix.length)[0]?.to;
+  const groups = [
+    ...Array.from(
+      new Set(productNavigation.map((item) => item.group ?? "Navegación")),
+    ).map((label) => ({
+      label,
+      items: productNavigation.filter(
+        (item) => (item.group ?? "Navegación") === label,
+      ),
+    })),
+    { label: "Taxonomía", items: taxonomyNavigation },
+  ];
   return (
     <Box component="nav" aria-label="Navegación de la aplicación">
       <Stack gap="lg">
-        {[
-          { label: "Catálogo y Carga", items: bulkNavigation },
-          { label: "Precios", items: productNavigation },
-        ].map((group) => (
+        {groups.map((group) => (
           <Box key={group.label}>
             <Text size="xs" fw={600} c="dimmed" mb="sm">
               {group.label.toLocaleUpperCase("es")}
             </Text>
             <Stack gap="xs">
               {group.items.map(({ to, label, icon: Icon }) => {
-                const active = isItemActive(to, pathname);
+                const active = productNavigation.some((item) => item.to === to)
+                  ? activeDestination === to
+                  : pathname === to || pathname.startsWith(`${to}/`);
                 return (
                   <NavLink
                     key={to}

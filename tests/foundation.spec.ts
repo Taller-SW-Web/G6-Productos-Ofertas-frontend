@@ -1,3 +1,4 @@
+import { evidencePath } from "./support/evidence";
 import { test, expect } from "@playwright/test";
 
 test("filters reset pagination, details preserve context and stale loading cannot replace results", async ({
@@ -172,7 +173,7 @@ test("desktop geometry, fonts, tokens, focus and screenshots", async ({
           document.fonts.check("400 16px Inter"),
       ),
     ).toBe(true);
-    await page.screenshot({ path: `docs/evidencias/${image}`, fullPage: true });
+    await page.screenshot({ path: evidencePath(`${image}`), fullPage: true });
   }
   const primary = page.getByRole("button", { name: "Abrir confirmación" });
   await expect(primary).toHaveCSS("background-color", "rgb(247, 103, 7)");
@@ -188,7 +189,7 @@ test("desktop geometry, fonts, tokens, focus and screenshots", async ({
   await primary.click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.getByRole("dialog")).toHaveCSS("opacity", "1");
-  await page.screenshot({ path: "docs/evidencias/confirmacion-1440.png" });
+  await page.screenshot({ path: evidencePath("confirmacion-1440.png") });
   expect(errors).toEqual([]);
 });
 
