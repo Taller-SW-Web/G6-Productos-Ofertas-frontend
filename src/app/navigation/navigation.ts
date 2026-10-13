@@ -1,10 +1,15 @@
 import {
   IconCalculator,
+  IconCategory,
   IconUpload,
   IconComponents,
   IconForms,
   IconLayoutList,
   IconMessageCircle,
+  IconTag,
+  IconPackages,
+  IconBrandApple,
+  IconSeo,
   IconTicket,
   IconDiscount2,
   IconArrowsShuffle,
@@ -57,6 +62,13 @@ export const productNavigation: NavigationItem[] = [
     group: "Precios",
     matchPaths: ["/precios/importaciones"],
   },
+];
+export const taxonomyNavigation: NavigationItem[] = [
+  { to: "/categorias", label: "Categorías", icon: IconCategory },
+  { to: "/caracteristicas", label: "Características", icon: IconTag },
+  { to: "/tipos-producto", label: "Tipos de producto", icon: IconPackages },
+  { to: "/marcas", label: "Marcas", icon: IconBrandApple },
+  { to: "/seo", label: "SEO", icon: IconSeo },
 ];
 export const demoNavigation: NavigationItem[] = [
   {
