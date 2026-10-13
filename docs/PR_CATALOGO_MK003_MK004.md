@@ -1,38 +1,38 @@
-MK-003/MK-004 ya podían navegar con mocks, pero la composición aceptaba Promises sin resolver y conservaba providers anteriores; además los atributos SKU permitían IDs/nombres libres y los filtros de productos leían fixtures directamente. Esta entrega corrige esos límites para sustituir los puertos en la raíz sin reescribir páginas ni hooks.
+La edición de productos podía borrar atributos cuando fallaba Taxonomía; el mock podía conservar una actualización parcial tras rechazar el perfil físico y las altas reutilizaban IDs derivados del reloj. Esta entrega bloquea el guardado sin esquema confirmado, preserva atributos históricos, publica actualizaciones solo después de validarlas y genera UUID. También invalida el formulario SKU al cambiar de producto.
 
-Refs #5 y #6. Rama `poma` → `master`. Commit de código auditado: `0a59f075fa7eb18482c965dbaaa0aed1e5b7f139`.
-Docs: `master@78a923bbc6bada31b39b3d386331f90a4f812b31`, DESIGN 1.1.0; SPEC-003/004/009/010, HU/FLOW/WF-003/004 y OpenAPI.
+Refs #5 y #6. **PR en borrador; no hacer merge ni cerrar issues.** Rama `poma` → `master`.
+Código validado: `5523d0e1e3020ed4024dbf3313dbcaace84c59e2`.
+Integración aditiva de los 13 commits de master mediante `6267499`, base `fdbacbae347b346bb492c27b3f4fab3c81be77da` (incluido PR #24 de López). Cero commits detrás de esa base; se conservan rutas y navegación de Taxonomía, Pricing, Cupones, Promociones y Recomendaciones.
 
-Cambios de esta auditoría:
-- Factories síncronas con repositorios inicializados, rechazo de Promises, prioridad de inyección sobre caché y CatalogServicesContext. DataModeContext obligatorio; API sin provider falla sin mock fallback. Eliminadas fachadas sin consumidores.
-- Formulario de variantes por esquema autorizado: LISTA conserva valorId, NUMERO usa límites y admite negativos cuando corresponda, TEXTO respeta límite configurado. Obligatorios/roles, esquema fallido y SKU/identificadores inmutables.
-- Filtros mediante Taxonomía y observaciones de lectura ligadas al provider actual.
-- Reintentos simples verifican manualRetryAllowed en ambas dependencias; 409 cuando no es admisible; 202 permanece PENDING. Helper mínimo de confirmación exclusivamente mock.
-- Precio inicial de Catálogo separado del vigente de Pricing, sin cero inventado. Eliminados /MK-004 y fallback ficticio; navegación contextual.
-- Pruebas con los mismos formularios y otro adapter en modo API, ciclo BORRADOR/PENDING/COMPLETED/ACTIVA, IDs/tipos y errores. Capturas 1440 px nuevas; se restauraron las imágenes de Pricing regeneradas por su suite.
+### Cambios
+- Esquema de producto distingue pendiente, error y vacío confirmado. Guarda de submit y botones bloqueados, reintento explícito y conservación de atributos históricos. Un error no se muestra como esquema vacío.
+- Update mock sobre candidato independiente; ninguna validación fallida altera campos/version persistidos.
+- UUID para productos/variantes; regresión de 100 altas de cada entidad con el reloj congelado.
+- Montaje del formulario de variante ligado al productId: navegación client-side descarta campos, padre y errores anteriores; respuestas antiguas se invalidan.
+- Bridge tipado con los servicios oficiales de Taxonomía: conserva IDs, obligatoriedad, unidad y valores LISTA activos; usa maxTexto del provider. Sin fixtures nuevos ni endpoints inventados. Inyección en mock/API sin modificar páginas.
+- Badge neutro para el modelo de venta y SKU Base; revisión de badges de los diálogos de producto.
+- Capturas de Pricing aisladas por prueba mediante evidencePath; se evita la escritura concurrente sin reducir comprobaciones. Tests de Taxonomía adaptados al menú aditivo de 11 destinos.
+- Se conservan las correcciones anteriores: composición síncrona e inyección explícita, API sin fallback mock, atributos SKU por esquema, reintentos autorizados y precio inicial separado de Pricing.
 
-Validación del código final:
+### Validación real
 | Gate | Resultado |
-|---|---|
-| npm run typecheck | PASS |
-| npm run lint | PASS |
-| VITE_DATA_MODE=mock npm run build | PASS |
-| VITE_DATA_MODE=api npm run build | PASS |
-| npm test -- --workers=2 | 144 PASS / 1 FAIL de 145 (4.3 min) |
-| Repetición aislada de Pricing: npm test -- tests/pricing-workflows.spec.ts --workers=1 --grep 'six direct views' | 1/1 PASS |
-| MK-003 / MK-004 / adapters e inyección | 32/32 PASS |
-| Desktop 1440 px | Capturas, inspección y comprobaciones sin overflow |
+| --- | --- |
+| Nuevas regresiones aisladas | 6/6 PASS |
+| Suite completa final: npx playwright test --workers=4 --reporter=line | **177/177 PASS, 3.6 min** |
+| VITE_DATA_MODE=mock: typecheck, lint, build | PASS, exit 0 |
+| VITE_DATA_MODE=api: typecheck, lint, build | PASS, exit 0 |
+| Producción mock, node scripts/verify-production.mjs mock | PASS: 43 vistas, 1440×900 |
+| Producción api, node scripts/verify-production.mjs api | PASS: 39 vistas, 1440×900; providers ausentes explícitos, sin descarga de mocks |
 | git diff --check | PASS |
 
-La única falla de la corrida final completa fue `UNKNOWN open docs/evidencias/mk-013-s03-1440.png`: las pruebas existentes de Pricing escriben el mismo archivo en paralelo en Windows. La repetición aislada pasó sin modificar Pricing. No se declara PASS para la corrida paralela completa. Cupones, Promociones, Recomendaciones y los casos funcionales restantes de Pricing fueron ejecutados satisfactoriamente.
+La primera suite tras integrar dio 172/177 por cinco expectativas antiguas de 10 enlaces en Taxonomía. Se corrigieron conservando los 11 destinos; dos ejecuciones completas posteriores dieron 177/177. El fallo previo por PNG compartido de Pricing no reaparece.
 
-Estado: **MOCK_INTEGRATED**, sustitución probada con adapter alternativo; no API HTTP real.
-BLOCKED_CONTRACT: EsquemaTipoProducto/AsociacionTipoCaracteristica no publica rol identificador ni límites numéricos por característica; el límite configurado de texto requiere mapping desde configuración del provider. El formulario bloquea ausencia de rol/límite de texto. López ya tiene PR #24 fusionado, pero no se copió ni modificó su implementación; conexión definitiva de sus IDs/esquema y revisión conjunta siguen pendientes. No se inventaron endpoints ni DTOs.
+### Evidencias
+- [Auditoría actualizada](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/blob/5523d0e1e3020ed4024dbf3313dbcaace84c59e2/docs/AUDITORIA_CATALOGO_MK003_MK004.md).
+- [Suite, gates API, smokes y capturas nuevas](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/tree/5523d0e1e3020ed4024dbf3313dbcaace84c59e2/docs/evidencias/catalog-audit/revision-2026-10-13).
+- [Propuesta de coordinación con López](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/blob/5523d0e1e3020ed4024dbf3313dbcaace84c59e2/docs/COORDINACION_TAXONOMIA_CATALOGO.md).
 
-Reporte detallado: [docs/AUDITORIA_CATALOGO_MK003_MK004.md](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/blob/poma/docs/AUDITORIA_CATALOGO_MK003_MK004.md).
-Evidencias y logs: [docs/evidencias/catalog-audit](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/tree/poma/docs/evidencias/catalog-audit).
+### Pendiente contractual
+**MOCK_INTEGRATED; no HTTP real.** El bridge oficial está probado, pero no se activa sobre los productos históricos hasta que López confirme migración/mapa de IDs y roles identificadores por tipo/característica, separados de obligatoriedad. Límites NUMERO no se inventan. Sin roles confirmados, SKU permanece bloqueado al consumir ese origen. Solicitud de coordinación no equivale a acuerdo aprobado.
 
-Esta PR incluye la implementación previa de la rama poma además de las correcciones del commit final. Requiere revisión técnica/UX y conciliación con master, que incorpora Taxonomía; no cerrar los issues ni fusionar hasta completar esa revisión.
-
-Publicada como PR borrador #25. GitHub indica conflictos con master; su conciliación
-queda explícitamente pendiente. No se fusionó la PR.
+Fuentes: Docs `master@942bf7322eb388fe5b0fcc9c5a565152e1099139`, SPEC-003/004/009/010, HU/FLOW/WF-003/004, DESIGN/UX, componentes/prototipos y OpenAPI; servicios de Taxonomía incorporados desde PR #24. Docs/Backend sin modificaciones. Revisión UX/técnica independiente pendiente.
