@@ -492,6 +492,27 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
     await expect(newUploadBtn).toBeVisible();
   });
 
+  // H13: XLSX batch remains in PROCESSING even after demo simulation timeout (no fake COMPLETED transition)
+  test("H13: XLSX batch remains in PROCESSING state after simulation delay", async () => {
+    const { getGenuineMinimalXlsxArrayBuffer } = await import("./fixtures/genuineXlsxFixture");
+    const buffer = getGenuineMinimalXlsxArrayBuffer();
+    const file = new File([buffer], "catalogo_unconfirmed.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+
+    const batch = await mockBulkRepository.createImport(file);
+    expect(batch.status).toBe("QUEUED");
+    expect(batch.total_rows).toBeUndefined();
+
+    // Wait past the simulated completion delay (2400ms + buffer)
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+
+    const check = await mockBulkRepository.getImport(batch.batch_id);
+    expect(check?.status).toBe("PROCESSING");
+    expect(check?.total_rows).toBeUndefined();
+    expect(check?.completed_rows).toBe(0);
+  });
+
   // H11 & H12: S03 states - Queued, Processing with rows and domain breakdown
   test("H11 & H12: S03 shows queued and processing states with domain breakdown", async ({ page }) => {
     // 1. Queued state
@@ -563,5 +584,45 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
     await page.goto("/carga-masiva/descargas");
     const downloadsLink = nav.getByRole("link", { name: "Descargas y exportación" });
     await expect(downloadsLink).toHaveAttribute("data-active", "true");
+  });
+
+  // Verificación visual de las cinco pantallas MK-001 a 1440 x 900 y evidencia
+  test("Desktop 1440x900 visual captures and horizontal scroll check for S01-S05", async ({ page }) => {
+    // S01: Carga de archivo
+    await page.goto("/carga-masiva");
+    await expect(page.getByRole("heading", { name: "Carga masiva de productos" })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= 1440)).toBe(true);
+    await page.screenshot({ path: "test-results/evidence/bulk-s01-1440.png", fullPage: true });
+
+    // S02: Revisión preliminar
+    const fileInput = page.locator('input[type="file"]');
+    await fileInput.setInputFiles({
+      name: "catalogo_visual.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from("sku,nombre\nSKU-001,Producto 1\nSKU-002,Producto 2\n"),
+    });
+    await page.getByRole("button", { name: "Continuar a revisión", exact: true }).click();
+    await expect(page).toHaveURL("/carga-masiva/revisar");
+    await expect(page.getByRole("heading", { name: "Revisión de archivo" })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= 1440)).toBe(true);
+    await page.screenshot({ path: "test-results/evidence/bulk-s02-1440.png", fullPage: true });
+
+    // S03: Seguimiento del lote
+    await page.goto("/carga-masiva/importaciones/batch-processing");
+    await expect(page.getByRole("heading", { name: "Seguimiento de importación" })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= 1440)).toBe(true);
+    await page.screenshot({ path: "test-results/evidence/bulk-s03-1440.png", fullPage: true });
+
+    // S04: Resultado y observaciones
+    await page.goto("/carga-masiva/importaciones/batch-partial/resultado");
+    await expect(page.getByRole("heading", { name: "Resultado de importación" })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= 1440)).toBe(true);
+    await page.screenshot({ path: "test-results/evidence/bulk-s04-1440.png", fullPage: true });
+
+    // S05: Descargas y exportación
+    await page.goto("/carga-masiva/descargas");
+    await expect(page.getByRole("heading", { name: "Descargas y exportación masiva" })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= 1440)).toBe(true);
+    await page.screenshot({ path: "test-results/evidence/bulk-s05-1440.png", fullPage: true });
   });
 });
