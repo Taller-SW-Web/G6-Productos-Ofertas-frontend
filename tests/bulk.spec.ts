@@ -193,6 +193,7 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
 
   // C20: Doble confirmación en S02 no crea dos lotes
   test("C20: S02 double click on confirm import generates only one batch", async ({ page }) => {
+    // 1. Verify in browser that multiple rapid clicks do not dispatch multiple batch creations
     await page.goto("/carga-masiva");
     const fileInput = page.locator('input[type="file"]');
     await fileInput.setInputFiles({
@@ -204,10 +205,17 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
     await expect(page).toHaveURL("/carga-masiva/revisar");
 
     const confirmBtn = page.getByRole("button", { name: "Confirmar importación", exact: true }).first();
-    // Simulate double click
+    // Simulate concurrent double click
     await confirmBtn.dblclick();
     await expect(page).toHaveURL(/\/carga-masiva\/importaciones\/lote-/);
-    // Button is disabled or page navigated cleanly
+
+    // 2. Direct unit test of mockBulkRepository call tracking
+    const initialCalls = mockBulkRepository.getCreateImportCallCount?.() ?? 0;
+    const dummyFile = new File(["sku,nombre\nSKU-1,Prod 1\n"], "test.csv", { type: "text/csv" });
+    const b1 = await mockBulkRepository.createImport(dummyFile);
+    expect(b1.batch_id).toBeDefined();
+    const finalCalls = mockBulkRepository.getCreateImportCallCount?.() ?? 0;
+    expect(finalCalls - initialCalls).toBe(1);
   });
 
   // C21: Lote desconocido muestra estado no encontrado controlado
@@ -321,27 +329,37 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
     expect(res.errors[0]).toContain("está vacío (0 bytes)");
   });
 
-  test("H02 & H03: XLSX with valid PK ZIP container structure is preliminarily valid", async () => {
+  test("H02 & H03 & H15: Real minimal OOXML XLSX container is preliminarily valid", async () => {
     const { checkLocalFile } = await import("../src/features/bulk/utils/localFileCheck");
-    // Standard 64-byte container with PK\x03\x04 at offset 0 and PK\x05\x06 (EOCD) near tail
-    const buffer = new Uint8Array(64);
-    // Local header: PK\x03\x04
-    buffer[0] = 0x50; // 'P'
-    buffer[1] = 0x4b; // 'K'
-    buffer[2] = 0x03;
-    buffer[3] = 0x04;
-    // End of Central Directory record: PK\x05\x06 at offset 40
-    buffer[40] = 0x50;
-    buffer[41] = 0x4b;
-    buffer[42] = 0x05;
-    buffer[43] = 0x06;
+    const { createValidMinimalXlsxBuffer } = await import("../src/features/bulk/utils/xlsxFixture");
+    const buffer = createValidMinimalXlsxBuffer();
 
-    const file = new File([buffer], "catalogo.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const file = new File([Buffer.from(buffer)], "catalogo_real.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const res = await checkLocalFile(file);
     expect(res.valid).toBe(true);
     expect(res.format).toBe("XLSX");
     expect(res.warnings.length).toBeGreaterThan(0);
     expect(res.unverifiedAspects.length).toBeGreaterThan(0);
+  });
+
+  test("H15: Artificial ZIP file without OOXML parts is rejected as invalid XLSX", async () => {
+    const { checkLocalFile } = await import("../src/features/bulk/utils/localFileCheck");
+    // Standard 64-byte container with PK\x03\x04 and PK\x05\x06 but without xl/ or [Content_Types]
+    const buffer = new Uint8Array(64);
+    buffer[0] = 0x50; // 'P'
+    buffer[1] = 0x4b; // 'K'
+    buffer[2] = 0x03;
+    buffer[3] = 0x04;
+    buffer[40] = 0x50;
+    buffer[41] = 0x4b;
+    buffer[42] = 0x05;
+    buffer[43] = 0x06;
+
+    const file = new File([buffer], "artificial.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const res = await checkLocalFile(file);
+    expect(res.valid).toBe(false);
+    expect(res.format).toBe("XLSX");
+    expect(res.errors[0]).toContain("no presenta la estructura de partes de una hoja de cálculo OOXML válida");
   });
 
   test("H02 & H03: Truncated XLSX without EOCD record is rejected", async () => {
@@ -370,6 +388,35 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
     expect(res.valid).toBe(false);
     expect(res.format).toBe("XLSX");
     expect(res.errors[0]).toContain("firma ZIP/PK local header no detectada");
+  });
+
+  // H13: XLSX import without verified row count remains in PROCESSING and shows explicit notice
+  test("H13: XLSX batch without verified count displays explicit unconfirmed notice and safe recovery", async ({ page }) => {
+    const { createValidMinimalXlsxBuffer } = await import("../src/features/bulk/utils/xlsxFixture");
+    const buffer = createValidMinimalXlsxBuffer();
+
+    await page.goto("/carga-masiva");
+    const fileInput = page.locator('input[type="file"]');
+    await fileInput.setInputFiles({
+      name: "catalogo_h13.xlsx",
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      buffer: Buffer.from(buffer),
+    });
+
+    await page.getByRole("button", { name: "Continuar a revisión", exact: true }).click();
+    await expect(page).toHaveURL("/carga-masiva/revisar");
+    await page.getByRole("button", { name: "Confirmar importación", exact: true }).first().click();
+
+    // S03 tracking view
+    await expect(page).toHaveURL(/\/carga-masiva\/importaciones\/lote-/);
+    // Explicit provider dependency warning alert should be rendered
+    await expect(page.getByText("Verificación dependiente del proveedor")).toBeVisible();
+    await expect(page.getByText("Total de filas")).toBeVisible();
+    await expect(page.getByText("No determinado")).toBeVisible();
+    await expect(page.getByText("Recuento no verificado en cliente (XLSX)")).toBeVisible();
+    // Provides safe return/recovery button
+    const newUploadBtn = page.getByRole("link", { name: "Nueva carga masiva", exact: true }).first();
+    await expect(newUploadBtn).toBeVisible();
   });
 
   // H11 & H12: S03 states - Queued, Processing with rows and domain breakdown

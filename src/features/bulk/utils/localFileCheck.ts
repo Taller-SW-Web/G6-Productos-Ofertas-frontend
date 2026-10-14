@@ -107,6 +107,29 @@ export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> 
           unverifiedAspects: [],
         };
       }
+
+      // 3. Inspect container entries: a valid OOXML spreadsheet package contains recognizable paths (e.g. xl/ or [Content_Types])
+      const fullBuffer = await file.slice(0, Math.min(fileSize, 8192)).arrayBuffer();
+      const textDecoder = new TextDecoder("utf-8", { fatal: false });
+      const sampleText = textDecoder.decode(fullBuffer);
+      const hasOoxmlMarker =
+        sampleText.includes("xl/") ||
+        sampleText.includes("[Content_Types].xml") ||
+        sampleText.includes("workbook.xml");
+
+      if (!hasOoxmlMarker) {
+        return {
+          valid: false,
+          format: "XLSX",
+          fileName,
+          fileSize,
+          warnings: [],
+          errors: [
+            "El archivo contiene firmas ZIP pero no presenta la estructura de partes de una hoja de cálculo OOXML válida (xl/ o [Content_Types].xml no detectados).",
+          ],
+          unverifiedAspects: [],
+        };
+      }
     } catch {
       return {
         valid: false,
