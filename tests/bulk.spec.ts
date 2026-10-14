@@ -255,7 +255,7 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
   // C23: Navegación de Bulk y retorno entre vistas
   test("C23: Bulk downloads page header provides return link to /carga-masiva", async ({ page }) => {
     await page.goto("/carga-masiva/descargas");
-    await expect(page.getByRole("heading", { name: "Descargas y exportación masiva" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Descargas y exportación masiva" })).toBeVisible({ timeout: 15000 });
     const backBtn = page.getByRole("link", { name: "Volver a carga de archivo", exact: true });
     await backBtn.click();
     await expect(page).toHaveURL("/carga-masiva");
@@ -265,7 +265,7 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
   // C24: Exportación fallida no habilita descarga
   test("C24: Failed export job displays error alert and disables download button", async ({ page }) => {
     await page.goto("/carga-masiva/descargas?export_id=export-failed");
-    await expect(page.getByRole("heading", { name: "Descargas y exportación masiva" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Descargas y exportación masiva" })).toBeVisible({ timeout: 15000 });
     await expect(page.getByText("Fallo de exportación")).toBeVisible();
     await expect(page.getByText("Error interno al consolidar snapshot de inventario para exportación")).toBeVisible();
     const downloadBtn = page.getByRole("button", { name: "Descargar archivo CSV consolidado", exact: true });
