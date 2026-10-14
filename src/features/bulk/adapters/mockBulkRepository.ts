@@ -29,6 +29,7 @@ const activeTimers: Set<ReturnType<typeof setTimeout>> = new Set();
 
 let batchSequence = 1000;
 let exportSequence = 1000;
+let createImportCallCount = 0;
 
 function deepCloneBatch(batch: BulkImportBatch): BulkImportBatch {
   return JSON.parse(JSON.stringify(batch)) as BulkImportBatch;
@@ -178,6 +179,7 @@ export const mockBulkRepository: BulkRepository & {
   advanceMockExport?: (exportId: string) => Promise<BulkExportJob | null>;
   resetMockState?: () => void;
   clearMockTimers?: () => void;
+  getCreateImportCallCount?: () => number;
 } = {
   async getTemplate(
     format: BulkExportFormat,
@@ -202,6 +204,7 @@ export const mockBulkRepository: BulkRepository & {
     scenario?: string,
     signal?: AbortSignal,
   ): Promise<BulkImportBatch> {
+    createImportCallCount++;
     signal?.throwIfAborted();
 
     const lowerName = file.name.toLowerCase();
@@ -518,6 +521,10 @@ export const mockBulkRepository: BulkRepository & {
     return deepCloneExport(job);
   },
 
+  getCreateImportCallCount() {
+    return createImportCallCount;
+  },
+
   clearMockTimers() {
     for (const t of activeTimers) {
       clearTimeout(t);
@@ -534,5 +541,6 @@ export const mockBulkRepository: BulkRepository & {
     dynamicExports.clear();
     batchSequence = 1000;
     exportSequence = 1000;
+    createImportCallCount = 0;
   },
 };

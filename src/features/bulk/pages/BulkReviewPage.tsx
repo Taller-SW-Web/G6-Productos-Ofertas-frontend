@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button, Group, Stack } from "@mantine/core";
 import {
@@ -16,6 +17,7 @@ import { bulkService } from "../services/bulkService";
 
 export function BulkReviewPage() {
   const navigate = useNavigate();
+  const isSubmittingRef = useRef(false);
   const {
     selectedFile,
     fileCheck,
@@ -58,15 +60,16 @@ export function BulkReviewPage() {
   }
 
   const handleConfirmImport = async () => {
-    if (submitting) return;
+    if (submitting || isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
     setSubmitting(true);
     setSubmissionError(null);
     try {
       const batch = await bulkService.createImport(selectedFile);
-      setSubmitting(false);
       // Navigate to tracking screen S03
       navigate(`/carga-masiva/importaciones/${batch.batch_id}`);
     } catch (err: unknown) {
+      isSubmittingRef.current = false;
       setSubmitting(false);
       const message =
         err instanceof Error
