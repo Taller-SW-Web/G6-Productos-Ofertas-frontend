@@ -53,6 +53,12 @@ import {
   RecommendationsPage,
   SeoConfigPage,
   SeoListPage,
+  BulkLayout,
+  BulkUploadPage,
+  BulkReviewPage,
+  BulkProgressPage,
+  BulkResultPage,
+  BulkDownloadsPage,
 } from "./productPages";
 export const productRoutes: RouteObject[] = [
   { path: "/productos", element: <ProductsPage /> },
@@ -197,5 +203,17 @@ export const productRoutes: RouteObject[] = [
   {
     path: "/cupones/:couponId/limites",
     element: <CouponDetailPage limitsOnly />,
+  },
+  // MK-001: Carga y exportación masiva
+  {
+    path: "/carga-masiva",
+    element: <BulkLayout />,
+    children: [
+      { index: true, element: <BulkUploadPage /> },
+      { path: "revisar", element: <BulkReviewPage /> },
+      { path: "importaciones/:batchId", element: <BulkProgressPage /> },
+      { path: "importaciones/:batchId/resultado", element: <BulkResultPage /> },
+      { path: "descargas", element: <BulkDownloadsPage /> },
+    ],
   },
 ];

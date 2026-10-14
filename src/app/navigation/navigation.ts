@@ -15,6 +15,7 @@ import {
   IconDiscount2,
   IconArrowsShuffle,
   IconPackage,
+  IconFileSpreadsheet,
   type TablerIcon,
 } from "@tabler/icons-react";
 export interface NavigationItem {
@@ -24,6 +25,27 @@ export interface NavigationItem {
   group?: string;
   matchPaths?: readonly string[];
 }
+
+export const bulkNavigation: NavigationItem[] = [
+  {
+    to: "/carga-masiva",
+    label: "Carga masiva",
+    icon: IconUpload,
+    group: "Catálogo",
+    matchPaths: [
+      "/carga-masiva",
+      "/carga-masiva/revisar",
+      "/carga-masiva/importaciones",
+    ],
+  },
+  {
+    to: "/carga-masiva/descargas",
+    label: "Descargas y exportación",
+    icon: IconFileSpreadsheet,
+    group: "Catálogo",
+    matchPaths: ["/carga-masiva/descargas"],
+  },
+];
 export const productNavigation: NavigationItem[] = [
   {
     to: "/productos",

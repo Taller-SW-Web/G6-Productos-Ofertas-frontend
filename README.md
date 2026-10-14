@@ -92,6 +92,18 @@ Las correcciones P1/P2 están publicadas en **`3b1d705522ff2bdbd0a7b5240afaff517
 
 Fuentes MK-014: revisión inicial Docs `78a923bbc6bada31b39b3d386331f90a4f812b31`; auditada nuevamente en `master@942bf7322eb388fe5b0fcc9c5a565152e1099139`, sin cambios de blobs en las fuentes de MK-014, UX y contratos. `component-spec/plan/tasks` 1.0.0 En revisión, sin validation-report oficial. DESIGN 1.1.0 y UX 2.0 tienen los mismos blobs que la revisión base del theme. Se corrigen en React los importes S/ inventados, el código técnico del 404, los badges decorativos y las promesas de firmas del HTML, siguiendo SPEC/UX/DESIGN. La revisión técnica/funcional/UX independiente permanece pendiente; se usa `Refs #16`, sin cerrar el issue.
 
+**MK-001 / issue #3** cubre la carga y exportación masiva de productos (Castilla), abarcando cinco pantallas sobre la navegación transversal:
+
+| Ruta MK-001 | Alcance |
+|---|---|
+| `/carga-masiva` | S01: Selección de archivo, validación estructural preliminar (CSV/XLSX), desglose de aspectos no verificados y prevención de continuación sin archivo |
+| `/carga-masiva/revisar` | S02: Revisión preliminar de metadatos, aviso explícito de validación local no comercial y protección estricta contra doble envío simultáneo |
+| `/carga-masiva/importaciones/:batchId` | S03: Seguimiento de importación en estados `QUEUED` / `PROCESSING`, desglose de filas por dominio si está disponible y aviso explícito en XLSX |
+| `/carga-masiva/importaciones/:batchId/resultado` | S04: Resultado terminal de importación, descarga de reporte de errores, reanudación controlada cuando `needs_reconciliation` y estado terminal |
+| `/carga-masiva/descargas` | S05: Descargas de plantillas de muestra CSV y solicitud/descarga de exportación masiva consolidada |
+
+**Limitaciones contractuales y de simulación XLSX:** La importación y descarga XLSX completas requieren integración con el servicio backend (`bulk-svc`). En el navegador, la validación XLSX es una revisión preliminar de contenedor (verificación del directorio central ZIP y entradas canónicas OOXML como `[Content_Types].xml` y `xl/`) sin descomprimir hojas completas ni emitir veredictos comerciales. Los lotes XLSX cuyo recuento de filas es desconocido para el cliente se mantienen en estado `PROCESSING` con aviso de verificación pendiente, sin fingir transiciones terminales `COMPLETED` ni inventar resultados de filas.
+
 | Ruta | Alcance |
 |---|---|
 | `/precios` | S01: selección producto/SKU, consulta local, herencia/override, fallback global y estados |
