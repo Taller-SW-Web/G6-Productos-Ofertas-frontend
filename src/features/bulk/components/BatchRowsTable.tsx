@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Stack, Text } from "@mantine/core";
 import { EntityTable, StatusBadge, type TableColumn, type TableState } from "../../../components/shared";
 import type { BulkDomain, BulkImportRow, BulkRowStatus } from "../types/bulk";
@@ -14,33 +14,84 @@ function renderDomainStep(row: BulkImportRow, domain: BulkDomain) {
   const isApplied = row.applied_domains?.includes(domain);
   const isFailed = row.failed_domain === domain;
 
+  let badge: ReactNode;
   if (isFailed || step?.status === "FAILED") {
-    return <StatusBadge semantic="error">Rechazado</StatusBadge>;
+    badge = (
+      <StatusBadge semantic="error">
+        <span style={{ whiteSpace: "nowrap" }}>Rechazado</span>
+      </StatusBadge>
+    );
+  } else if (isApplied || step?.status === "COMPLETED") {
+    badge = (
+      <StatusBadge semantic="success">
+        <span style={{ whiteSpace: "nowrap" }}>Aplicado</span>
+      </StatusBadge>
+    );
+  } else if (step?.status === "PROCESSING") {
+    badge = (
+      <StatusBadge semantic="warning">
+        <span style={{ whiteSpace: "nowrap" }}>En proceso</span>
+      </StatusBadge>
+    );
+  } else if (step?.status === "PENDING") {
+    badge = (
+      <StatusBadge semantic="neutral">
+        <span style={{ whiteSpace: "nowrap" }}>Pendiente</span>
+      </StatusBadge>
+    );
+  } else {
+    return (
+      <Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>
+        No informado
+      </Text>
+    );
   }
-  if (isApplied || step?.status === "COMPLETED") {
-    return <StatusBadge semantic="success">Aplicado</StatusBadge>;
-  }
-  if (step?.status === "PROCESSING") {
-    return <StatusBadge semantic="warning">En proceso</StatusBadge>;
-  }
-  if (step?.status === "PENDING") {
-    return <StatusBadge semantic="neutral">Pendiente</StatusBadge>;
-  }
-  return <Text size="xs" c="dimmed">No informado</Text>;
+
+  return (
+    <div style={{ whiteSpace: "nowrap", display: "inline-flex" }}>
+      {badge}
+    </div>
+  );
 }
 
 function renderRowStatus(status: BulkRowStatus) {
+  let badge: ReactNode;
   switch (status) {
     case "COMPLETED":
-      return <StatusBadge semantic="success">Completado</StatusBadge>;
+      badge = (
+        <StatusBadge semantic="success">
+          <span style={{ whiteSpace: "nowrap" }}>Completado</span>
+        </StatusBadge>
+      );
+      break;
     case "FAILED":
-      return <StatusBadge semantic="error">Rechazado</StatusBadge>;
+      badge = (
+        <StatusBadge semantic="error">
+          <span style={{ whiteSpace: "nowrap" }}>Rechazado</span>
+        </StatusBadge>
+      );
+      break;
     case "PROCESSING":
-      return <StatusBadge semantic="warning">En proceso</StatusBadge>;
+      badge = (
+        <StatusBadge semantic="warning">
+          <span style={{ whiteSpace: "nowrap" }}>En proceso</span>
+        </StatusBadge>
+      );
+      break;
     case "PENDING":
     default:
-      return <StatusBadge semantic="neutral">Pendiente</StatusBadge>;
+      badge = (
+        <StatusBadge semantic="neutral">
+          <span style={{ whiteSpace: "nowrap" }}>Pendiente</span>
+        </StatusBadge>
+      );
+      break;
   }
+  return (
+    <div style={{ whiteSpace: "nowrap", display: "inline-flex" }}>
+      {badge}
+    </div>
+  );
 }
 
 export function BatchRowsTable({
@@ -65,10 +116,10 @@ export function BatchRowsTable({
     {
       key: "sku",
       header: "SKU / Producto",
-      width: 240,
+      width: 220,
       render: (row) => (
         <Stack gap={2}>
-          <Text size="sm" fw={600}>
+          <Text size="sm" fw={600} style={{ wordBreak: "break-all" }}>
             {row.sku ?? "SKU no asignado"}
           </Text>
           {row.nombre && (
@@ -82,54 +133,57 @@ export function BatchRowsTable({
     {
       key: "status",
       header: "Estado",
-      width: 130,
+      width: 140,
       render: (row) => renderRowStatus(row.status),
     },
     {
       key: "catalogo",
       header: "Catálogo",
-      width: 110,
+      width: 125,
       render: (row) => renderDomainStep(row, "CATALOGO"),
     },
     {
       key: "pricing",
       header: "Precios",
-      width: 110,
+      width: 125,
       render: (row) => renderDomainStep(row, "PRICING"),
     },
     {
       key: "inventario",
       header: "Inventario",
-      width: 110,
+      width: 125,
       render: (row) => renderDomainStep(row, "INVENTARIO"),
     },
     {
       key: "reconciliation",
       header: "Reconciliación",
-      width: 140,
-      render: (row) =>
-        row.needs_reconciliation ? (
-          <StatusBadge semantic="warning" size="sm">
-            Reconciliable
-          </StatusBadge>
-        ) : (
-          <Text size="xs" c="dimmed">
-            No requerida
-          </Text>
-        ),
+      width: 145,
+      render: (row) => (
+        <div style={{ whiteSpace: "nowrap", display: "inline-flex" }}>
+          {row.needs_reconciliation ? (
+            <StatusBadge semantic="warning" size="sm">
+              <span style={{ whiteSpace: "nowrap" }}>Reconciliable</span>
+            </StatusBadge>
+          ) : (
+            <Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>
+              No requerida
+            </Text>
+          )}
+        </div>
+      ),
     },
     {
       key: "detail",
       header: "Detalle / Motivo",
-      width: 280,
+      width: 320,
       render: (row) => (
-        <Stack gap={2}>
+        <Stack gap={2} style={{ minWidth: 260 }}>
           {row.code && (
-            <Text size="xs" fw={600} c="dimmed">
+            <Text size="xs" fw={700} c="dimmed" style={{ fontVariantNumeric: "tabular-nums" }}>
               Código: {row.code}
             </Text>
           )}
-          <Text size="xs">
+          <Text size="xs" style={{ wordBreak: "break-word" }}>
             {row.detail ?? "Sin observaciones adicionales"}
           </Text>
         </Stack>
@@ -149,6 +203,7 @@ export function BatchRowsTable({
       rows={paginatedRows}
       rowKey={(row) => `row-${row.row_id}`}
       state={state}
+      minWidth={1270}
       empty={{
         title: "Sin filas de detalle",
         description:

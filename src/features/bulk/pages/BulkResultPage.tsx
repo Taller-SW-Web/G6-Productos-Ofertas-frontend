@@ -175,7 +175,6 @@ export function BulkResultPage() {
               }
               refreshing={loading}
               resuming={resuming}
-              showNewUploadLink
             />
 
             <BatchRowsTable

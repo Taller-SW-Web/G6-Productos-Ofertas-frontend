@@ -103,7 +103,6 @@ export function BulkProgressPage() {
               onRefresh={refreshBatch}
               refreshing={loading}
               showDetailsLink={isTerminal}
-              showNewUploadLink
             />
             {batch.rows && batch.rows.length > 0 && (
               <BatchRowsTable

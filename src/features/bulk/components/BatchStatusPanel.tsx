@@ -1,5 +1,5 @@
 import { Button, Group, SimpleGrid, Stack, Text } from "@mantine/core";
-import { IconRefresh, IconArrowRight, IconRotateClockwise, IconUpload } from "@tabler/icons-react";
+import { IconRefresh, IconArrowRight, IconRotateClockwise } from "@tabler/icons-react";
 import { Link } from "react-router-dom";
 import {
   FeedbackAlert,
@@ -7,7 +7,6 @@ import {
   SectionCard,
   StatusBadge,
 } from "../../../components/shared";
-import { useBulkUploadContext } from "../context/BulkUploadContext";
 import type { BulkImportBatch } from "../types/bulk";
 
 export interface BatchStatusPanelProps {
@@ -17,7 +16,6 @@ export interface BatchStatusPanelProps {
   refreshing?: boolean;
   resuming?: boolean;
   showDetailsLink?: boolean;
-  showNewUploadLink?: boolean;
 }
 
 export function BatchStatusPanel({
@@ -27,9 +25,7 @@ export function BatchStatusPanel({
   refreshing = false,
   resuming = false,
   showDetailsLink = false,
-  showNewUploadLink = false,
 }: BatchStatusPanelProps) {
-  const { clearSelection } = useBulkUploadContext();
   const isTerminal =
     batch.status === "COMPLETED" || batch.status === "FAILED_GENERAL";
   const isPartial = batch.status === "COMPLETED" && batch.failed_rows > 0;
@@ -219,40 +215,31 @@ export function BatchStatusPanel({
         )}
 
         {/* Action buttons */}
-        <Group justify="flex-end" gap="sm">
-          {onResume && isTerminal && batch.needs_reconciliation && (
-            <Button
-              variant="outline"
-              leftSection={<IconRotateClockwise size={18} stroke={2} aria-hidden="true" />}
-              onClick={onResume}
-              loading={resuming}
-            >
-              Reanudar lote
-            </Button>
-          )}
+        {((onResume && isTerminal && batch.needs_reconciliation) ||
+          (showDetailsLink && isTerminal)) && (
+          <Group justify="flex-end" gap="sm">
+            {onResume && isTerminal && batch.needs_reconciliation && (
+              <Button
+                variant="outline"
+                leftSection={<IconRotateClockwise size={18} stroke={2} aria-hidden="true" />}
+                onClick={onResume}
+                loading={resuming}
+              >
+                Reanudar lote
+              </Button>
+            )}
 
-          {showDetailsLink && isTerminal && (
-            <Button
-              component={Link}
-              to={`/carga-masiva/importaciones/${batch.batch_id}/resultado`}
-              rightSection={<IconArrowRight size={18} stroke={2} aria-hidden="true" />}
-            >
-              Ver resultado final
-            </Button>
-          )}
-
-          {showNewUploadLink && (
-            <Button
-              component={Link}
-              to="/carga-masiva"
-              variant="light"
-              leftSection={<IconUpload size={18} stroke={2} aria-hidden="true" />}
-              onClick={clearSelection}
-            >
-              Nueva carga masiva
-            </Button>
-          )}
-        </Group>
+            {showDetailsLink && isTerminal && (
+              <Button
+                component={Link}
+                to={`/carga-masiva/importaciones/${batch.batch_id}/resultado`}
+                rightSection={<IconArrowRight size={18} stroke={2} aria-hidden="true" />}
+              >
+                Ver resultado final
+              </Button>
+            )}
+          </Group>
+        )}
       </Stack>
     </SectionCard>
   );
