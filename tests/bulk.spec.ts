@@ -203,6 +203,7 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
     });
     await page.getByRole("button", { name: "Continuar a revisión", exact: true }).click();
     await expect(page).toHaveURL("/carga-masiva/revisar");
+    await expect(page.getByRole("heading", { name: "Revisión de archivo" })).toBeVisible();
 
     // Install spy directly on bulkService in the browser runtime
     await page.evaluate(() => {
@@ -365,40 +366,64 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
     expect(res.unverifiedAspects.length).toBeGreaterThan(0);
   });
 
-  test("H15: ZIP file without OOXML entries is rejected as invalid XLSX", async () => {
-    const { checkLocalFile } = await import("../src/features/bulk/utils/localFileCheck");
-    // Standard valid ZIP containing only a text file 'nota.txt' (no [Content_Types].xml or xl/)
-    // Local header (30B) + name (8B) + data (4B) + CD (46B) + name (8B) + EOCD (22B) = 118 bytes
-    const textData = Buffer.from("test");
-    const fileName = Buffer.from("nota.txt");
-    const localHeader = Buffer.alloc(30);
-    localHeader.writeUInt32LE(0x04034b50, 0); // PK\x03\x04
-    localHeader.writeUInt16LE(20, 4);
-    localHeader.writeUInt16LE(fileName.length, 26);
-    localHeader.writeUInt32LE(textData.length, 18);
-    localHeader.writeUInt32LE(textData.length, 22);
+  function buildTestZip(
+    entries: Array<{ name: string; content?: string }>,
+    options?: { cdEntriesCountOverride?: number; truncateCdBytes?: number },
+  ): ArrayBuffer {
+    const localParts: Buffer[] = [];
+    const cdParts: Buffer[] = [];
+    let currentOffset = 0;
 
-    const cdHeader = Buffer.alloc(46);
-    cdHeader.writeUInt32LE(0x02014b50, 0); // PK\x01\x02
-    cdHeader.writeUInt16LE(20, 4);
-    cdHeader.writeUInt16LE(20, 6);
-    cdHeader.writeUInt16LE(fileName.length, 28);
-    cdHeader.writeUInt32LE(textData.length, 20);
-    cdHeader.writeUInt32LE(textData.length, 24);
-    cdHeader.writeUInt32LE(0, 42); // offset 0
+    for (const entry of entries) {
+      const nameBuf = Buffer.from(entry.name, "utf-8");
+      const dataBuf = Buffer.from(entry.content ?? "test", "utf-8");
 
-    const cdStart = 30 + fileName.length + textData.length;
-    const cdSize = 46 + fileName.length;
+      const localHeader = Buffer.alloc(30);
+      localHeader.writeUInt32LE(0x04034b50, 0); // PK\x03\x04
+      localHeader.writeUInt16LE(20, 4);
+      localHeader.writeUInt16LE(nameBuf.length, 26);
+      localHeader.writeUInt32LE(dataBuf.length, 18);
+      localHeader.writeUInt32LE(dataBuf.length, 22);
+
+      localParts.push(localHeader, nameBuf, dataBuf);
+
+      const cdHeader = Buffer.alloc(46);
+      cdHeader.writeUInt32LE(0x02014b50, 0); // PK\x01\x02
+      cdHeader.writeUInt16LE(20, 4);
+      cdHeader.writeUInt16LE(20, 6);
+      cdHeader.writeUInt16LE(nameBuf.length, 28);
+      cdHeader.writeUInt32LE(dataBuf.length, 20);
+      cdHeader.writeUInt32LE(dataBuf.length, 24);
+      cdHeader.writeUInt32LE(currentOffset, 42);
+
+      cdParts.push(cdHeader, nameBuf);
+
+      currentOffset += 30 + nameBuf.length + dataBuf.length;
+    }
+
+    const localBuffer = Buffer.concat(localParts);
+    let cdBuffer = Buffer.concat(cdParts);
+    if (options?.truncateCdBytes) {
+      cdBuffer = cdBuffer.subarray(0, cdBuffer.length - options.truncateCdBytes);
+    }
 
     const eocd = Buffer.alloc(22);
     eocd.writeUInt32LE(0x06054b50, 0); // PK\x05\x06
-    eocd.writeUInt16LE(1, 8); // entries
-    eocd.writeUInt16LE(1, 10);
-    eocd.writeUInt32LE(cdSize, 12);
-    eocd.writeUInt32LE(cdStart, 16);
+    const count = options?.cdEntriesCountOverride ?? entries.length;
+    eocd.writeUInt16LE(count, 8);
+    eocd.writeUInt16LE(count, 10);
+    eocd.writeUInt32LE(cdBuffer.length, 12);
+    eocd.writeUInt32LE(localBuffer.length, 16);
 
-    const zipBuffer = Buffer.concat([localHeader, fileName, textData, cdHeader, fileName, eocd]);
+    const finalBuf = Buffer.concat([localBuffer, cdBuffer, eocd]);
+    const ab = new ArrayBuffer(finalBuf.byteLength);
+    new Uint8Array(ab).set(finalBuf);
+    return ab;
+  }
 
+  test("H15: ZIP file without OOXML entries is rejected as invalid XLSX", async () => {
+    const { checkLocalFile } = await import("../src/features/bulk/utils/localFileCheck");
+    const zipBuffer = buildTestZip([{ name: "nota.txt" }]);
     const file = new File([zipBuffer], "notas.xlsx", {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
@@ -406,6 +431,57 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
     expect(res.valid).toBe(false);
     expect(res.format).toBe("XLSX");
     expect(res.errors[0]).toContain("no presenta las entradas canónicas de una hoja de cálculo OOXML");
+  });
+
+  test("H18: ZIP with only [Content_Types].xml (missing xl/workbook.xml) is rejected", async () => {
+    const { checkLocalFile } = await import("../src/features/bulk/utils/localFileCheck");
+    const zip = buildTestZip([{ name: "[Content_Types].xml" }]);
+    const file = new File([zip], "solo_content_types.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const res = await checkLocalFile(file);
+    expect(res.valid).toBe(false);
+    expect(res.format).toBe("XLSX");
+    expect(res.errors[0]).toContain("se requieren [Content_Types].xml y xl/workbook.xml");
+  });
+
+  test("H18: ZIP with only xl/archivo.txt (arbitrary xl/ path) is rejected", async () => {
+    const { checkLocalFile } = await import("../src/features/bulk/utils/localFileCheck");
+    const zip = buildTestZip([{ name: "xl/archivo.txt" }]);
+    const file = new File([zip], "solo_xl_archivo.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const res = await checkLocalFile(file);
+    expect(res.valid).toBe(false);
+    expect(res.format).toBe("XLSX");
+    expect(res.errors[0]).toContain("se requieren [Content_Types].xml y xl/workbook.xml");
+  });
+
+  test("H18: Incoherent or truncated central directory is rejected", async () => {
+    const { checkLocalFile } = await import("../src/features/bulk/utils/localFileCheck");
+    // Declares 2 entries in EOCD but only 1 entry is actually present in Central Directory
+    const zip = buildTestZip([{ name: "[Content_Types].xml" }], { cdEntriesCountOverride: 2 });
+    const file = new File([zip], "directorio_incompleto.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const res = await checkLocalFile(file);
+    expect(res.valid).toBe(false);
+    expect(res.format).toBe("XLSX");
+    expect(res.errors[0]).toContain("directorio central del contenedor ZIP está incompleto o es incoherente");
+  });
+
+  test("H17: Production bundle does not leak window.__bulkService", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const distAssetsDir = path.resolve(process.cwd(), "dist/assets");
+    if (fs.existsSync(distAssetsDir)) {
+      const files = fs.readdirSync(distAssetsDir).filter((f) => f.endsWith(".js"));
+      for (const file of files) {
+        const content = fs.readFileSync(path.join(distAssetsDir, file), "utf-8");
+        expect(content).not.toContain(".__bulkService=");
+        expect(content).not.toContain("window.__bulkService");
+      }
+    }
   });
 
   test("H15: Forged/fake ZIP signatures with corrupt internal directory are rejected", async () => {

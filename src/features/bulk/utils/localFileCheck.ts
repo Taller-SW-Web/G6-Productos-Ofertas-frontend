@@ -163,12 +163,7 @@ export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> 
         ptr += 46 + fileNameLength + extraFieldLength + fileCommentLength;
       }
 
-      const hasContentTypes = entryNames.some((n) => n === "[Content_Types].xml");
-      const hasWorkbook = entryNames.some(
-        (n) => n.startsWith("xl/") || n.includes("workbook.xml"),
-      );
-
-      if (!hasContentTypes && !hasWorkbook) {
+      if (entryNames.length !== cdEntriesCount || ptr !== cdBytes.length) {
         return {
           valid: false,
           format: "XLSX",
@@ -176,7 +171,24 @@ export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> 
           fileSize,
           warnings: [],
           errors: [
-            "El contenedor ZIP no presenta las entradas canónicas de una hoja de cálculo OOXML (faltan [Content_Types].xml o xl/workbook.xml en el directorio central).",
+            "El directorio central del contenedor ZIP está incompleto o es incoherente con las entradas declaradas.",
+          ],
+          unverifiedAspects: [],
+        };
+      }
+
+      const hasContentTypes = entryNames.includes("[Content_Types].xml");
+      const hasWorkbook = entryNames.includes("xl/workbook.xml");
+
+      if (!hasContentTypes || !hasWorkbook) {
+        return {
+          valid: false,
+          format: "XLSX",
+          fileName,
+          fileSize,
+          warnings: [],
+          errors: [
+            "El contenedor ZIP no presenta las entradas canónicas de una hoja de cálculo OOXML (se requieren [Content_Types].xml y xl/workbook.xml en el directorio central).",
           ],
           unverifiedAspects: [],
         };

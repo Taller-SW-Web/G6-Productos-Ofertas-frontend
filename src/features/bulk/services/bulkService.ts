@@ -5,7 +5,9 @@ import type { BulkRepository } from "./bulkRepository";
 // HTTP integration will replace this mock adapter without modifying UI components.
 export const bulkService: BulkRepository = mockBulkRepository;
 
-// Expose on window for test observation in Playwright/E2E if running in browser
-if (typeof window !== "undefined") {
+// Expose on window for test observation in development / test environments only.
+// In production builds, import.meta.env.DEV is replaced with false and eliminated.
+if (typeof window !== "undefined" && import.meta.env.DEV) {
   (window as unknown as { __bulkService?: BulkRepository }).__bulkService = bulkService;
 }
+
