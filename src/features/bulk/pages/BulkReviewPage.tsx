@@ -58,6 +58,7 @@ export function BulkReviewPage() {
   }
 
   const handleConfirmImport = async () => {
+    if (submitting) return;
     setSubmitting(true);
     setSubmissionError(null);
     try {

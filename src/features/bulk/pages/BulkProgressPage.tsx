@@ -12,7 +12,8 @@ import { useBulkBatch } from "../hooks/useBulkFlow";
 
 export function BulkProgressPage() {
   const { batchId } = useParams<{ batchId: string }>();
-  const { batch, loading, error, refreshBatch } = useBulkBatch(batchId);
+  const { batch, loading, error, isNotFound, isStale, refreshBatch } =
+    useBulkBatch(batchId);
   const { clearSelection } = useBulkUploadContext();
 
   const isTerminal =
@@ -70,13 +71,18 @@ export function BulkProgressPage() {
             }
           >
             {error}
+            {isStale && (
+              <Text size="xs" mt="xs" c="dimmed">
+                Nota: Se muestra la última información confirmada del lote antes de producirse el error de conexión.
+              </Text>
+            )}
           </FeedbackAlert>
         )}
 
-        {!loading && !batch && !error && (
+        {isNotFound && !batch && (
           <EmptyState
             title="Lote no encontrado"
-            description="El identificador de lote indicado no existe o no pudo ser recuperado."
+            description={`No se encontró el lote con identificador ${batchId ?? "especificado"}.`}
             action={
               <Button
                 component={Link}

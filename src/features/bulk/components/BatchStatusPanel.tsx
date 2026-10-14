@@ -7,6 +7,7 @@ import {
   SectionCard,
   StatusBadge,
 } from "../../../components/shared";
+import { useBulkUploadContext } from "../context/BulkUploadContext";
 import type { BulkImportBatch } from "../types/bulk";
 
 export interface BatchStatusPanelProps {
@@ -28,6 +29,7 @@ export function BatchStatusPanel({
   showDetailsLink = false,
   showNewUploadLink = false,
 }: BatchStatusPanelProps) {
+  const { clearSelection } = useBulkUploadContext();
   const isTerminal =
     batch.status === "COMPLETED" || batch.status === "FAILED_GENERAL";
   const isPartial = batch.status === "COMPLETED" && batch.failed_rows > 0;
@@ -156,6 +158,32 @@ export function BatchStatusPanel({
           </FeedbackAlert>
         )}
 
+        {/* Breakdown by domain when rows are available */}
+        {batch.rows && batch.rows.length > 0 && (
+          <Stack gap="xs">
+            <Text size="sm" fw={600}>
+              Desglose de filas por dominio
+            </Text>
+            <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="sm">
+              <MetricCard
+                label="Catálogo"
+                value={`${batch.rows.filter((r) => r.applied_domains.includes("CATALOGO") || r.steps.some((s) => s.domain === "CATALOGO" && s.status === "COMPLETED")).length} / ${batch.rows.length}`}
+                description="Filas con borrador creado"
+              />
+              <MetricCard
+                label="Precios (Pricing)"
+                value={`${batch.rows.filter((r) => r.applied_domains.includes("PRICING") || r.steps.some((s) => s.domain === "PRICING" && s.status === "COMPLETED")).length} / ${batch.rows.length}`}
+                description="Filas con precio base registrado"
+              />
+              <MetricCard
+                label="Inventario"
+                value={`${batch.rows.filter((r) => r.applied_domains.includes("INVENTARIO") || r.steps.some((s) => s.domain === "INVENTARIO" && s.status === "COMPLETED")).length} / ${batch.rows.length}`}
+                description="Filas con SKU inicializado"
+              />
+            </SimpleGrid>
+          </Stack>
+        )}
+
         {/* Action buttons */}
         <Group justify="flex-end" gap="sm">
           {onResume && batch.needs_reconciliation && (
@@ -185,6 +213,7 @@ export function BatchStatusPanel({
               to="/carga-masiva"
               variant="light"
               leftSection={<IconUpload size={18} stroke={2} aria-hidden="true" />}
+              onClick={clearSelection}
             >
               Nueva carga masiva
             </Button>

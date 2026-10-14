@@ -10,6 +10,7 @@ import { triggerDownload } from "../utils/downloadAsset";
 type BatchQueryState =
   | { status: "loading" }
   | { status: "success"; batch: BulkImportBatch }
+  | { status: "not_found" }
   | { status: "error"; message: string };
 
 export function useBulkBatch(batchId: string | undefined) {
@@ -42,10 +43,7 @@ export function useBulkBatch(batchId: string | undefined) {
         } else {
           setResponse({
             key: requestKey,
-            state: {
-              status: "error",
-              message: `No se encontró el lote con identificador ${batchId}`,
-            },
+            state: { status: "not_found" },
           });
         }
       },
@@ -133,15 +131,19 @@ export function useBulkBatch(batchId: string | undefined) {
         : null;
 
   const loading = !isCurrent || response?.state.status === "loading";
+  const isNotFound = isCurrent && response?.state.status === "not_found";
   const error =
     isCurrent && response?.state.status === "error"
       ? response.state.message
       : null;
+  const isStale = Boolean(error && currentBatch);
 
   return {
     batch: currentBatch,
     loading,
     error,
+    isNotFound,
+    isStale,
     resuming,
     downloadingReport,
     refreshBatch,

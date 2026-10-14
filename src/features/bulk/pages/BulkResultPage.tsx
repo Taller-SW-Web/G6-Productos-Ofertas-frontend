@@ -28,12 +28,17 @@ export function BulkResultPage() {
     batch,
     loading,
     error,
+    isNotFound,
+    isStale,
     resuming,
     downloadingReport,
     refreshBatch,
     resumeBatch,
     downloadReport,
   } = useBulkBatch(batchId);
+
+  const isTerminal =
+    batch?.status === "COMPLETED" || batch?.status === "FAILED_GENERAL";
 
   const handleConfirmResume = async () => {
     try {
@@ -70,7 +75,7 @@ export function BulkResultPage() {
             >
               Nueva carga masiva
             </Button>
-            {batch && batch.failed_rows > 0 && (
+            {batch && isTerminal && batch.failed_rows > 0 && Boolean(batch.rows && batch.rows.some((r) => r.status === "FAILED")) && (
               <Button
                 variant="outline"
                 leftSection={<IconDownload size={18} stroke={2} aria-hidden="true" />}
@@ -115,10 +120,15 @@ export function BulkResultPage() {
             }
           >
             {error}
+            {isStale && (
+              <Text size="xs" mt="xs" c="dimmed">
+                Nota: Se muestra la última información confirmada del lote antes de producirse el error de conexión.
+              </Text>
+            )}
           </FeedbackAlert>
         )}
 
-        {!loading && !batch && !error && (
+        {isNotFound && !batch && (
           <EmptyState
             title="Lote no encontrado"
             description="No se encontró información para el identificador de lote especificado."
@@ -134,7 +144,26 @@ export function BulkResultPage() {
           />
         )}
 
-        {batch && (
+        {batch && !isTerminal && (
+          <FeedbackAlert
+            semantic="warning"
+            title="Lote en procesamiento"
+            actions={
+              <Button
+                component={Link}
+                to={`/carga-masiva/importaciones/${batch.batch_id}`}
+                size="xs"
+                variant="outline"
+              >
+                Ir al seguimiento del lote
+              </Button>
+            }
+          >
+            El lote {batch.batch_id} aún se encuentra en estado {batch.status}. Los resultados finales consolidados se presentarán únicamente cuando el procesamiento concluya.
+          </FeedbackAlert>
+        )}
+
+        {batch && isTerminal && (
           <>
             <BatchStatusPanel
               batch={batch}
