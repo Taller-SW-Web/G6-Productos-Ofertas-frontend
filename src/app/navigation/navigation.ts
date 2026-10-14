@@ -27,11 +27,23 @@ export interface NavigationItem {
 }
 
 export const bulkNavigation: NavigationItem[] = [
-  { to: "/carga-masiva", label: "Carga masiva", icon: IconUpload },
+  {
+    to: "/carga-masiva",
+    label: "Carga masiva",
+    icon: IconUpload,
+    group: "Catálogo",
+    matchPaths: [
+      "/carga-masiva",
+      "/carga-masiva/revisar",
+      "/carga-masiva/importaciones",
+    ],
+  },
   {
     to: "/carga-masiva/descargas",
     label: "Descargas y exportación",
     icon: IconFileSpreadsheet,
+    group: "Catálogo",
+    matchPaths: ["/carga-masiva/descargas"],
   },
 ];
 export const productNavigation: NavigationItem[] = [

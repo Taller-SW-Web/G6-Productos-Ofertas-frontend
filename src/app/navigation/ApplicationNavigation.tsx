@@ -1,10 +1,15 @@
 import { Box, NavLink, Stack, Text } from "@mantine/core";
 import { Link, useLocation } from "react-router-dom";
-import { productNavigation, taxonomyNavigation } from "./navigation";
+import {
+  bulkNavigation,
+  productNavigation,
+  taxonomyNavigation,
+} from "./navigation";
 
 export function ApplicationNavigation() {
   const { pathname } = useLocation();
-  const activeDestination = productNavigation
+  const allCommercialNav = [...productNavigation, ...bulkNavigation];
+  const activeDestination = allCommercialNav
     .flatMap((item) =>
       [item.to, ...(item.matchPaths ?? [])].map((prefix) => ({
         to: item.to,
@@ -18,10 +23,10 @@ export function ApplicationNavigation() {
     .sort((a, b) => b.prefix.length - a.prefix.length)[0]?.to;
   const groups = [
     ...Array.from(
-      new Set(productNavigation.map((item) => item.group ?? "Navegación")),
+      new Set(allCommercialNav.map((item) => item.group ?? "Navegación")),
     ).map((label) => ({
       label,
-      items: productNavigation.filter(
+      items: allCommercialNav.filter(
         (item) => (item.group ?? "Navegación") === label,
       ),
     })),
@@ -37,7 +42,7 @@ export function ApplicationNavigation() {
             </Text>
             <Stack gap="xs">
               {group.items.map(({ to, label, icon: Icon }) => {
-                const active = productNavigation.some((item) => item.to === to)
+                const active = allCommercialNav.some((item) => item.to === to)
                   ? activeDestination === to
                   : pathname === to || pathname.startsWith(`${to}/`);
                 return (
