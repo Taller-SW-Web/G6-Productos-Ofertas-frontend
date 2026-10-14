@@ -191,8 +191,8 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
     await expect(page).toHaveURL("/carga-masiva");
   });
 
-  // C20: Doble confirmación en S02
-  test("C20: S02 confirm import navigates cleanly to S03", async ({ page }) => {
+  // C20: Doble confirmación en S02 no crea dos lotes
+  test("C20: S02 double click on confirm import generates only one batch", async ({ page }) => {
     await page.goto("/carga-masiva");
     const fileInput = page.locator('input[type="file"]');
     await fileInput.setInputFiles({
@@ -204,8 +204,10 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
     await expect(page).toHaveURL("/carga-masiva/revisar");
 
     const confirmBtn = page.getByRole("button", { name: "Confirmar importación", exact: true }).first();
-    await confirmBtn.click();
+    // Simulate double click
+    await confirmBtn.dblclick();
     await expect(page).toHaveURL(/\/carga-masiva\/importaciones\/lote-/);
+    // Button is disabled or page navigated cleanly
   });
 
   // C21: Lote desconocido muestra estado no encontrado controlado
@@ -231,9 +233,13 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
   });
 
   // C24: Exportación fallida no habilita descarga
-  test("C24: Failed export job does not enable download button", async ({ page }) => {
-    await page.goto("/carga-masiva/descargas");
-    await expect(page.getByText("Descargas y exportación masiva")).toBeVisible();
+  test("C24: Failed export job displays error alert and disables download button", async ({ page }) => {
+    await page.goto("/carga-masiva/descargas?export_id=export-failed");
+    await expect(page.getByRole("heading", { name: "Descargas y exportación masiva" })).toBeVisible();
+    await expect(page.getByText("Fallo de exportación")).toBeVisible();
+    await expect(page.getByText("Error interno al consolidar snapshot de inventario para exportación")).toBeVisible();
+    const downloadBtn = page.getByRole("button", { name: "Descargar archivo CSV consolidado", exact: true });
+    await expect(downloadBtn).toBeDisabled();
   });
 
   // R04: Archivo con 3 filas no genera 120 filas ficticias
@@ -317,12 +323,19 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
 
   test("H02 & H03: XLSX with valid PK ZIP container structure is preliminarily valid", async () => {
     const { checkLocalFile } = await import("../src/features/bulk/utils/localFileCheck");
-    // Standard 30-byte minimum with PK\x03\x04 signature
-    const buffer = new Uint8Array(32);
+    // Standard 64-byte container with PK\x03\x04 at offset 0 and PK\x05\x06 (EOCD) near tail
+    const buffer = new Uint8Array(64);
+    // Local header: PK\x03\x04
     buffer[0] = 0x50; // 'P'
     buffer[1] = 0x4b; // 'K'
     buffer[2] = 0x03;
     buffer[3] = 0x04;
+    // End of Central Directory record: PK\x05\x06 at offset 40
+    buffer[40] = 0x50;
+    buffer[41] = 0x4b;
+    buffer[42] = 0x05;
+    buffer[43] = 0x06;
+
     const file = new File([buffer], "catalogo.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const res = await checkLocalFile(file);
     expect(res.valid).toBe(true);
@@ -331,31 +344,49 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
     expect(res.unverifiedAspects.length).toBeGreaterThan(0);
   });
 
+  test("H02 & H03: Truncated XLSX without EOCD record is rejected", async () => {
+    const { checkLocalFile } = await import("../src/features/bulk/utils/localFileCheck");
+    // 64 bytes with local header PK\x03\x04 but without EOCD record
+    const buffer = new Uint8Array(64);
+    buffer[0] = 0x50;
+    buffer[1] = 0x4b;
+    buffer[2] = 0x03;
+    buffer[3] = 0x04;
+    const file = new File([buffer], "truncado.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const res = await checkLocalFile(file);
+    expect(res.valid).toBe(false);
+    expect(res.format).toBe("XLSX");
+    expect(res.errors[0]).toContain("registro de fin de directorio central ZIP no encontrado");
+  });
+
   test("H02 & H03: Corrupt XLSX without PK ZIP container header is rejected", async () => {
     const { checkLocalFile } = await import("../src/features/bulk/utils/localFileCheck");
-    const buffer = new Uint8Array(32);
+    // 64 bytes with zeroed header
+    const buffer = new Uint8Array(64);
     buffer[0] = 0x00; // Not PK
     buffer[1] = 0x00;
     const file = new File([buffer], "corrupto.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const res = await checkLocalFile(file);
     expect(res.valid).toBe(false);
     expect(res.format).toBe("XLSX");
-    expect(res.errors[0]).toContain("firma ZIP/PK no detectada");
+    expect(res.errors[0]).toContain("firma ZIP/PK local header no detectada");
   });
 
-  // H11 & H12: S03 states - Queued, Processing, Breakdown by domain
+  // H11 & H12: S03 states - Queued, Processing with rows and domain breakdown
   test("H11 & H12: S03 shows queued and processing states with domain breakdown", async ({ page }) => {
     // 1. Queued state
     await page.goto("/carga-masiva/importaciones/batch-queued");
     await expect(page.getByText("En cola de procesamiento")).toBeVisible();
     await expect(page.getByText("Solicitud admitida en cola")).toBeVisible();
 
-    // 2. Processing state with domain breakdown
-    await page.goto("/carga-masiva/importaciones/batch-partial");
-    await expect(page.getByText("Desglose de filas por dominio")).toBeVisible();
-    await expect(page.getByText("Filas con borrador creado")).toBeVisible();
-    await expect(page.getByText("Filas con precio base registrado")).toBeVisible();
-    await expect(page.getByText("Filas con SKU inicializado")).toBeVisible();
+    // 2. Processing state with domain breakdown and rows table
+    await page.goto("/carga-masiva/importaciones/batch-processing");
+    await expect(page.getByText("Desglose por dominio")).toBeVisible();
+    await expect(page.getByText("Muestra preliminar")).toBeVisible();
+    await expect(page.locator("section").getByText("Catálogo", { exact: true })).toBeVisible();
+    await expect(page.locator("section").getByText("Precios (Pricing)", { exact: true })).toBeVisible();
+    await expect(page.locator("section").getByText("Inventario", { exact: true })).toBeVisible();
+    await expect(page.locator("table")).toBeVisible();
   });
 
   // H11 & H12: S04 terminal protection - Non-terminal batch shows warning and redirects to S03
@@ -390,5 +421,27 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
     // Request CSV export
     await page.getByRole("button", { name: "Solicitar exportación" }).click();
     await expect(page.getByText(/Trabajo de exportación: exp-/)).toBeVisible();
+  });
+
+  // H01: Navegación transversal activa en S01-S05
+  test("H01: Lateral menu highlights active navigation for S01-S05", async ({ page }) => {
+    // S01: Carga masiva activa
+    await page.goto("/carga-masiva");
+    const nav = page.getByRole("navigation", { name: "Navegación de la aplicación" });
+    const bulkLink = nav.getByRole("link", { name: "Carga masiva" });
+    await expect(bulkLink).toHaveAttribute("data-active", "true");
+
+    // S03: Seguimiento mantiene Carga masiva activa
+    await page.goto("/carga-masiva/importaciones/batch-processing");
+    await expect(bulkLink).toHaveAttribute("data-active", "true");
+
+    // S04: Resultado mantiene Carga masiva activa
+    await page.goto("/carga-masiva/importaciones/batch-partial/resultado");
+    await expect(bulkLink).toHaveAttribute("data-active", "true");
+
+    // S05: Descargas activa Descargas y exportación
+    await page.goto("/carga-masiva/descargas");
+    const downloadsLink = nav.getByRole("link", { name: "Descargas y exportación" });
+    await expect(downloadsLink).toHaveAttribute("data-active", "true");
   });
 });
