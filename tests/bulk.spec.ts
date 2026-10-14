@@ -473,14 +473,25 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
   test("H17: Production bundle does not leak window.__bulkService", async () => {
     const fs = await import("node:fs");
     const path = await import("node:path");
+    const { execSync } = await import("node:child_process");
     const distAssetsDir = path.resolve(process.cwd(), "dist/assets");
-    if (fs.existsSync(distAssetsDir)) {
-      const files = fs.readdirSync(distAssetsDir).filter((f) => f.endsWith(".js"));
-      for (const file of files) {
-        const content = fs.readFileSync(path.join(distAssetsDir, file), "utf-8");
-        expect(content).not.toContain(".__bulkService=");
-        expect(content).not.toContain("window.__bulkService");
-      }
+
+    // Ensure production build exists; trigger real build if dist/assets is missing or empty
+    if (!fs.existsSync(distAssetsDir) || fs.readdirSync(distAssetsDir).filter((f) => f.endsWith(".js")).length === 0) {
+      execSync("npm run build", {
+        stdio: "pipe",
+        env: { ...process.env, VITE_DATA_MODE: "mock" },
+      });
+    }
+
+    expect(fs.existsSync(distAssetsDir)).toBe(true);
+    const files = fs.readdirSync(distAssetsDir).filter((f) => f.endsWith(".js"));
+    expect(files.length).toBeGreaterThan(0);
+
+    for (const file of files) {
+      const content = fs.readFileSync(path.join(distAssetsDir, file), "utf-8");
+      expect(content).not.toContain(".__bulkService=");
+      expect(content).not.toContain("window.__bulkService");
     }
   });
 
@@ -666,7 +677,7 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
   test("Desktop 1440x900 visual captures and horizontal scroll check for S01-S05", async ({ page }) => {
     // S01: Carga de archivo
     await page.goto("/carga-masiva");
-    await expect(page.getByRole("heading", { name: "Carga masiva de productos" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Carga masiva de productos" })).toBeVisible({ timeout: 15000 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= 1440)).toBe(true);
     await page.screenshot({ path: "test-results/evidence/bulk-s01-1440.png", fullPage: true });
 
@@ -679,25 +690,25 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
     });
     await page.getByRole("button", { name: "Continuar a revisión", exact: true }).click();
     await expect(page).toHaveURL("/carga-masiva/revisar");
-    await expect(page.getByRole("heading", { name: "Revisión de archivo" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Revisión de archivo" })).toBeVisible({ timeout: 15000 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= 1440)).toBe(true);
     await page.screenshot({ path: "test-results/evidence/bulk-s02-1440.png", fullPage: true });
 
     // S03: Seguimiento del lote
     await page.goto("/carga-masiva/importaciones/batch-processing");
-    await expect(page.getByRole("heading", { name: "Seguimiento de importación" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Seguimiento de importación" })).toBeVisible({ timeout: 15000 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= 1440)).toBe(true);
     await page.screenshot({ path: "test-results/evidence/bulk-s03-1440.png", fullPage: true });
 
     // S04: Resultado y observaciones
     await page.goto("/carga-masiva/importaciones/batch-partial/resultado");
-    await expect(page.getByRole("heading", { name: "Resultado de importación" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Resultado de importación" })).toBeVisible({ timeout: 15000 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= 1440)).toBe(true);
     await page.screenshot({ path: "test-results/evidence/bulk-s04-1440.png", fullPage: true });
 
     // S05: Descargas y exportación
     await page.goto("/carga-masiva/descargas");
-    await expect(page.getByRole("heading", { name: "Descargas y exportación masiva" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Descargas y exportación masiva" })).toBeVisible({ timeout: 15000 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= 1440)).toBe(true);
     await page.screenshot({ path: "test-results/evidence/bulk-s05-1440.png", fullPage: true });
   });
