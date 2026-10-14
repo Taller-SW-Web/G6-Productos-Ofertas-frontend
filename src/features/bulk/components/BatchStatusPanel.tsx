@@ -152,13 +152,22 @@ export function BatchStatusPanel({
           </FeedbackAlert>
         )}
 
-        {isProcessing && (
+        {(isProcessing || isQueued) && (batch.total_rows === null || batch.total_rows === undefined) && (!batch.rows || batch.rows.length === 0) && (
+          <FeedbackAlert
+            semantic="warning"
+            title="Lote en procesamiento — Verificación dependiente del proveedor"
+          >
+            El archivo XLSX fue recibido y admitido en cola, pero la demostración local no puede verificar su contenido interno ni confirmar su resultado final sin la integración real con el servicio bulk-svc. El estado permanece en procesamiento para no generar resultados ficticios. Puede iniciar una nueva carga o volver a la selección de archivos.
+          </FeedbackAlert>
+        )}
+
+        {isProcessing && typeof batch.total_rows === "number" && (
           <FeedbackAlert semantic="info" title="Lote en procesamiento asíncrono">
             El servicio se encuentra procesando las filas en Catálogo, Precios e Inventario. Pulse &quot;Actualizar estado&quot; para comprobar el avance.
           </FeedbackAlert>
         )}
 
-        {isQueued && (
+        {isQueued && typeof batch.total_rows === "number" && (
           <FeedbackAlert semantic="info" title="Solicitud admitida en cola">
             La importación ha sido admitida por el proveedor (202 Accepted) y está a la espera de un hilo de procesamiento.
           </FeedbackAlert>
