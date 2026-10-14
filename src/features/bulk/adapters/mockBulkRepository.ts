@@ -4,7 +4,6 @@ import {
   generateFailedRowsCsv,
   mockBatches,
   mockExports,
-  sampleCompletedRows,
 } from "../mocks/bulkFixtures";
 import type {
   BulkExportFormat,
@@ -62,11 +61,8 @@ function scheduleImportSimulation(batchId: string) {
       batch.failed_rows = 0;
       batch.needs_reconciliation = false;
       batch.updated_at = new Date().toISOString();
-      if (!batch.rows || batch.rows.length === 0) {
-        batch.rows = sampleCompletedRows.slice(
-          0,
-          Math.min(batch.total_rows, sampleCompletedRows.length),
-        );
+      if (!batch.rows) {
+        batch.rows = [];
       }
     }
   }, DEMO_CONFIG.COMPLETION_DELAY_MS);
@@ -227,7 +223,7 @@ export const mockBulkRepository: BulkRepository & {
     }
 
     // Determine observed row count for CSV without inventing fake numbers
-    let estimatedRows = 120;
+    let estimatedRows = 0;
     if (lowerName.endsWith(".csv")) {
       try {
         const text = await file.text();
@@ -236,10 +232,15 @@ export const mockBulkRepository: BulkRepository & {
           .filter((l) => l.trim().length > 0);
         if (lines.length > 1) {
           estimatedRows = lines.length - 1;
+        } else if (lines.length === 1) {
+          estimatedRows = 0;
         }
       } catch {
-        // Retain standard default
+        estimatedRows = 0;
       }
+    } else if (lowerName.endsWith(".xlsx")) {
+      // In demo mode, XLSX row count cannot be verified on the client
+      estimatedRows = 0;
     }
 
     batchSequence++;

@@ -37,6 +37,52 @@ export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> 
   }
 
   if (isXlsx) {
+    if (fileSize < 30) {
+      return {
+        valid: false,
+        format: "XLSX",
+        fileName,
+        fileSize,
+        warnings: [],
+        errors: [
+          "El archivo XLSX tiene un tamaño insuficiente para ser un contenedor de hoja de cálculo válido.",
+        ],
+        unverifiedAspects: [],
+      };
+    }
+
+    try {
+      const slice = await file.slice(0, 4).arrayBuffer();
+      const bytes = new Uint8Array(slice);
+      // Valid ZIP (PK) header signature is 0x50, 0x4B, 0x03, 0x04 or 0x50, 0x4B, 0x05, 0x06 / 0x07, 0x08
+      const isZip = bytes[0] === 0x50 && bytes[1] === 0x4b;
+      if (!isZip) {
+        return {
+          valid: false,
+          format: "XLSX",
+          fileName,
+          fileSize,
+          warnings: [],
+          errors: [
+            "El archivo XLSX está corrupto o no tiene una estructura de contenedor válida (firma ZIP/PK no detectada).",
+          ],
+          unverifiedAspects: [],
+        };
+      }
+    } catch {
+      return {
+        valid: false,
+        format: "XLSX",
+        fileName,
+        fileSize,
+        warnings: [],
+        errors: [
+          "No se pudo leer la estructura del archivo XLSX.",
+        ],
+        unverifiedAspects: [],
+      };
+    }
+
     return {
       valid: true,
       format: "XLSX",
