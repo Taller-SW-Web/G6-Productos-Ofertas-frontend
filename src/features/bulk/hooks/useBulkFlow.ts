@@ -152,13 +152,29 @@ export function useBulkBatch(batchId: string | undefined) {
   };
 }
 
-export function useBulkDownloads() {
+export function useBulkDownloads(initialExportId?: string) {
   const [exportJob, setExportJob] = useState<BulkExportJob | null>(null);
   const [submittingExport, setSubmittingExport] = useState(false);
   const [refreshingJob, setRefreshingJob] = useState(false);
   const [downloadingExport, setDownloadingExport] = useState(false);
   const [downloadingTemplate, setDownloadingTemplate] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!initialExportId) return;
+    const controller = new AbortController();
+    void bulkService.getExport(initialExportId, controller.signal).then(
+      (job) => {
+        if (!controller.signal.aborted && job) {
+          setExportJob(job);
+        }
+      },
+      () => {
+        // ignore initial query errors
+      },
+    );
+    return () => controller.abort();
+  }, [initialExportId]);
 
   const requestExport = useCallback(async (format: BulkExportFormat) => {
     setSubmittingExport(true);

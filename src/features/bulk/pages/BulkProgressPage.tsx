@@ -6,6 +6,7 @@ import {
   FeedbackAlert,
   PageHeader,
 } from "../../../components/shared";
+import { BatchRowsTable } from "../components/BatchRowsTable";
 import { BatchStatusPanel } from "../components/BatchStatusPanel";
 import { useBulkUploadContext } from "../context/BulkUploadContext";
 import { useBulkBatch } from "../hooks/useBulkFlow";
@@ -96,13 +97,21 @@ export function BulkProgressPage() {
         )}
 
         {batch && (
-          <BatchStatusPanel
-            batch={batch}
-            onRefresh={refreshBatch}
-            refreshing={loading}
-            showDetailsLink={isTerminal}
-            showNewUploadLink
-          />
+          <>
+            <BatchStatusPanel
+              batch={batch}
+              onRefresh={refreshBatch}
+              refreshing={loading}
+              showDetailsLink={isTerminal}
+              showNewUploadLink
+            />
+            {batch.rows && batch.rows.length > 0 && (
+              <BatchRowsTable
+                rows={batch.rows}
+                caption={`Progreso por fila del lote ${batch.batch_id}`}
+              />
+            )}
+          </>
         )}
       </Stack>
     </>

@@ -3,7 +3,7 @@ import {
   IconArrowLeft,
   IconDownload,
 } from "@tabler/icons-react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   FeedbackAlert,
   PageHeader,
@@ -13,6 +13,9 @@ import { ExportJobPanel } from "../components/ExportJobPanel";
 import { useBulkDownloads } from "../hooks/useBulkFlow";
 
 export function BulkDownloadsPage() {
+  const [searchParams] = useSearchParams();
+  const initialExportId = searchParams.get("export_id") ?? undefined;
+
   const {
     exportJob,
     submittingExport,
@@ -24,7 +27,7 @@ export function BulkDownloadsPage() {
     refreshJob,
     downloadExportFile,
     downloadTemplate,
-  } = useBulkDownloads();
+  } = useBulkDownloads(initialExportId);
 
   return (
     <>

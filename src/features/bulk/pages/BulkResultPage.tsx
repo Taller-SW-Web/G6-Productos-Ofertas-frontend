@@ -85,7 +85,7 @@ export function BulkResultPage() {
                 Descargar reporte de errores
               </Button>
             )}
-            {batch && batch.needs_reconciliation && (
+            {batch && isTerminal && batch.needs_reconciliation && (
               <Button
                 leftSection={
                   <IconRotateClockwise size={18} stroke={2} aria-hidden="true" />

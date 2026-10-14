@@ -386,6 +386,7 @@ export const mockBatches: Record<string, BulkImportBatch> = {
     updated_at: "2026-10-10T12:02:30Z",
     file_name: "catalogo_primavera_2026.csv",
     file_size: 48290,
+    rows: samplePartialRows,
   },
   "batch-completed": {
     batch_id: "batch-completed",

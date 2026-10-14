@@ -96,15 +96,21 @@ export function BatchStatusPanel({
         <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
           <MetricCard
             label="Total de filas"
-            value={batch.total_rows}
-            description="Filas declaradas en el lote"
+            value={typeof batch.total_rows === "number" ? batch.total_rows : "No determinado"}
+            description={
+              typeof batch.total_rows === "number"
+                ? "Filas declaradas en el lote"
+                : "Recuento no verificado en cliente (XLSX)"
+            }
           />
           <MetricCard
             label="Filas completadas exitosamente"
             value={batch.completed_rows}
             description={
               isProcessing
-                ? `${concludedCount} de ${batch.total_rows} filas concluidas`
+                ? typeof batch.total_rows === "number"
+                  ? `${concludedCount} de ${batch.total_rows} filas concluidas`
+                  : `${concludedCount} filas procesadas hasta el momento`
                 : "Aplicadas en todos los dominios"
             }
           />
@@ -122,7 +128,7 @@ export function BatchStatusPanel({
         {/* Feedback Alert according to batch state */}
         {isSuccess && (
           <FeedbackAlert semantic="success" title="Importación completada satisfactoriamente">
-            Todas las {batch.total_rows} filas del catálogo fueron inicializadas correctamente en Catálogo, Precios e Inventario.
+            Todas las {batch.total_rows ?? batch.completed_rows} filas del catálogo fueron inicializadas correctamente en Catálogo, Precios e Inventario.
           </FeedbackAlert>
         )}
 
@@ -161,24 +167,43 @@ export function BatchStatusPanel({
         {/* Breakdown by domain when rows are available */}
         {batch.rows && batch.rows.length > 0 && (
           <Stack gap="xs">
-            <Text size="sm" fw={600}>
-              Desglose de filas por dominio
-            </Text>
+            <Group justify="space-between" align="baseline">
+              <Text size="sm" fw={600}>
+                Desglose por dominio
+              </Text>
+              {typeof batch.total_rows === "number" && batch.rows.length < batch.total_rows && (
+                <Text size="xs" c="dimmed">
+                  Muestra preliminar: {batch.rows.length} de {batch.total_rows} filas totales
+                </Text>
+              )}
+            </Group>
             <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="sm">
               <MetricCard
                 label="Catálogo"
                 value={`${batch.rows.filter((r) => r.applied_domains.includes("CATALOGO") || r.steps.some((s) => s.domain === "CATALOGO" && s.status === "COMPLETED")).length} / ${batch.rows.length}`}
-                description="Filas con borrador creado"
+                description={
+                  typeof batch.total_rows === "number" && batch.rows.length < batch.total_rows
+                    ? "Filas confirmadas en muestra"
+                    : "Filas con borrador creado"
+                }
               />
               <MetricCard
                 label="Precios (Pricing)"
                 value={`${batch.rows.filter((r) => r.applied_domains.includes("PRICING") || r.steps.some((s) => s.domain === "PRICING" && s.status === "COMPLETED")).length} / ${batch.rows.length}`}
-                description="Filas con precio base registrado"
+                description={
+                  typeof batch.total_rows === "number" && batch.rows.length < batch.total_rows
+                    ? "Filas confirmadas en muestra"
+                    : "Filas con precio base registrado"
+                }
               />
               <MetricCard
                 label="Inventario"
                 value={`${batch.rows.filter((r) => r.applied_domains.includes("INVENTARIO") || r.steps.some((s) => s.domain === "INVENTARIO" && s.status === "COMPLETED")).length} / ${batch.rows.length}`}
-                description="Filas con SKU inicializado"
+                description={
+                  typeof batch.total_rows === "number" && batch.rows.length < batch.total_rows
+                    ? "Filas confirmadas en muestra"
+                    : "Filas con SKU inicializado"
+                }
               />
             </SimpleGrid>
           </Stack>
@@ -186,7 +211,7 @@ export function BatchStatusPanel({
 
         {/* Action buttons */}
         <Group justify="flex-end" gap="sm">
-          {onResume && batch.needs_reconciliation && (
+          {onResume && isTerminal && batch.needs_reconciliation && (
             <Button
               variant="outline"
               leftSection={<IconRotateClockwise size={18} stroke={2} aria-hidden="true" />}
