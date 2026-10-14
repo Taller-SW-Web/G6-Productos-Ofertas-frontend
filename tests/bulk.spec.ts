@@ -350,12 +350,14 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
     expect(res.errors[0]).toContain("está vacío (0 bytes)");
   });
 
-  test("H02 & H03 & H15: Real minimal OOXML XLSX container is preliminarily valid", async () => {
+  test("H02 & H03 & H15: Genuine minimal OOXML XLSX workbook is preliminarily valid", async () => {
     const { checkLocalFile } = await import("../src/features/bulk/utils/localFileCheck");
-    const { createValidMinimalXlsxBuffer } = await import("../src/features/bulk/utils/xlsxFixture");
-    const buffer = createValidMinimalXlsxBuffer();
+    const { getGenuineMinimalXlsxArrayBuffer } = await import("./fixtures/genuineXlsxFixture");
+    const buffer = getGenuineMinimalXlsxArrayBuffer();
 
-    const file = new File([Buffer.from(buffer)], "catalogo_real.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const file = new File([buffer], "catalogo_genuino.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
     const res = await checkLocalFile(file);
     expect(res.valid).toBe(true);
     expect(res.format).toBe("XLSX");
@@ -363,24 +365,70 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
     expect(res.unverifiedAspects.length).toBeGreaterThan(0);
   });
 
-  test("H15: Artificial ZIP file without OOXML parts is rejected as invalid XLSX", async () => {
+  test("H15: ZIP file without OOXML entries is rejected as invalid XLSX", async () => {
     const { checkLocalFile } = await import("../src/features/bulk/utils/localFileCheck");
-    // Standard 64-byte container with PK\x03\x04 and PK\x05\x06 but without xl/ or [Content_Types]
+    // Standard valid ZIP containing only a text file 'nota.txt' (no [Content_Types].xml or xl/)
+    // Local header (30B) + name (8B) + data (4B) + CD (46B) + name (8B) + EOCD (22B) = 118 bytes
+    const textData = Buffer.from("test");
+    const fileName = Buffer.from("nota.txt");
+    const localHeader = Buffer.alloc(30);
+    localHeader.writeUInt32LE(0x04034b50, 0); // PK\x03\x04
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(fileName.length, 26);
+    localHeader.writeUInt32LE(textData.length, 18);
+    localHeader.writeUInt32LE(textData.length, 22);
+
+    const cdHeader = Buffer.alloc(46);
+    cdHeader.writeUInt32LE(0x02014b50, 0); // PK\x01\x02
+    cdHeader.writeUInt16LE(20, 4);
+    cdHeader.writeUInt16LE(20, 6);
+    cdHeader.writeUInt16LE(fileName.length, 28);
+    cdHeader.writeUInt32LE(textData.length, 20);
+    cdHeader.writeUInt32LE(textData.length, 24);
+    cdHeader.writeUInt32LE(0, 42); // offset 0
+
+    const cdStart = 30 + fileName.length + textData.length;
+    const cdSize = 46 + fileName.length;
+
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50, 0); // PK\x05\x06
+    eocd.writeUInt16LE(1, 8); // entries
+    eocd.writeUInt16LE(1, 10);
+    eocd.writeUInt32LE(cdSize, 12);
+    eocd.writeUInt32LE(cdStart, 16);
+
+    const zipBuffer = Buffer.concat([localHeader, fileName, textData, cdHeader, fileName, eocd]);
+
+    const file = new File([zipBuffer], "notas.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const res = await checkLocalFile(file);
+    expect(res.valid).toBe(false);
+    expect(res.format).toBe("XLSX");
+    expect(res.errors[0]).toContain("no presenta las entradas canónicas de una hoja de cálculo OOXML");
+  });
+
+  test("H15: Forged/fake ZIP signatures with corrupt internal directory are rejected", async () => {
+    const { checkLocalFile } = await import("../src/features/bulk/utils/localFileCheck");
+    // 64 bytes with forged PK\x03\x04 and PK\x05\x06 signatures but corrupt directory offsets
     const buffer = new Uint8Array(64);
     buffer[0] = 0x50; // 'P'
     buffer[1] = 0x4b; // 'K'
     buffer[2] = 0x03;
     buffer[3] = 0x04;
-    buffer[40] = 0x50;
-    buffer[41] = 0x4b;
-    buffer[42] = 0x05;
-    buffer[43] = 0x06;
+    // Forged EOCD signature at tail
+    buffer[42] = 0x50;
+    buffer[43] = 0x4b;
+    buffer[44] = 0x05;
+    buffer[45] = 0x06;
 
-    const file = new File([buffer], "artificial.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const file = new File([Buffer.from(buffer)], "falsificado.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
     const res = await checkLocalFile(file);
     expect(res.valid).toBe(false);
     expect(res.format).toBe("XLSX");
-    expect(res.errors[0]).toContain("no presenta la estructura de partes de una hoja de cálculo OOXML válida");
+    expect(res.errors.length).toBeGreaterThan(0);
   });
 
   test("H02 & H03: Truncated XLSX without EOCD record is rejected", async () => {
@@ -391,7 +439,9 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
     buffer[1] = 0x4b;
     buffer[2] = 0x03;
     buffer[3] = 0x04;
-    const file = new File([buffer], "truncado.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const file = new File([Buffer.from(buffer)], "truncado.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
     const res = await checkLocalFile(file);
     expect(res.valid).toBe(false);
     expect(res.format).toBe("XLSX");
@@ -404,7 +454,9 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
     const buffer = new Uint8Array(64);
     buffer[0] = 0x00; // Not PK
     buffer[1] = 0x00;
-    const file = new File([buffer], "corrupto.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const file = new File([Buffer.from(buffer)], "corrupto.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
     const res = await checkLocalFile(file);
     expect(res.valid).toBe(false);
     expect(res.format).toBe("XLSX");
@@ -413,8 +465,8 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
 
   // H13: XLSX import without verified row count remains in PROCESSING and shows explicit notice
   test("H13: XLSX batch without verified count displays explicit unconfirmed notice and safe recovery", async ({ page }) => {
-    const { createValidMinimalXlsxBuffer } = await import("../src/features/bulk/utils/xlsxFixture");
-    const buffer = createValidMinimalXlsxBuffer();
+    const { getGenuineMinimalXlsxBuffer } = await import("./fixtures/genuineXlsxFixture");
+    const buffer = getGenuineMinimalXlsxBuffer();
 
     await page.goto("/carga-masiva");
     const fileInput = page.locator('input[type="file"]');

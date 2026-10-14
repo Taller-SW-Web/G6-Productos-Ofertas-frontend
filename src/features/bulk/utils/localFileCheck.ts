@@ -76,25 +76,26 @@ export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> 
         };
       }
 
-      // 2. Read the tail of the file (up to 1024 bytes) to verify presence of ZIP End of Central Directory record (0x50, 0x4B, 0x05, 0x06)
+      // 2. Read the tail of the file to locate and parse the ZIP End of Central Directory (EOCD) record
       const tailSize = Math.min(fileSize, 1024);
       const tailSlice = await file.slice(fileSize - tailSize, fileSize).arrayBuffer();
       const tailBytes = new Uint8Array(tailSlice);
-      let hasEocd = false;
+      let eocdOffsetInTail = -1;
 
-      for (let i = 0; i < tailBytes.length - 3; i++) {
+      // Scan backwards for EOCD signature PK\x05\x06 (0x06054b50)
+      for (let i = tailBytes.length - 22; i >= 0; i--) {
         if (
           tailBytes[i] === 0x50 &&
           tailBytes[i + 1] === 0x4b &&
           tailBytes[i + 2] === 0x05 &&
           tailBytes[i + 3] === 0x06
         ) {
-          hasEocd = true;
+          eocdOffsetInTail = i;
           break;
         }
       }
 
-      if (!hasEocd) {
+      if (eocdOffsetInTail === -1) {
         return {
           valid: false,
           format: "XLSX",
@@ -108,16 +109,17 @@ export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> 
         };
       }
 
-      // 3. Inspect container entries: a valid OOXML spreadsheet package contains recognizable paths (e.g. xl/ or [Content_Types])
-      const fullBuffer = await file.slice(0, Math.min(fileSize, 8192)).arrayBuffer();
-      const textDecoder = new TextDecoder("utf-8", { fatal: false });
-      const sampleText = textDecoder.decode(fullBuffer);
-      const hasOoxmlMarker =
-        sampleText.includes("xl/") ||
-        sampleText.includes("[Content_Types].xml") ||
-        sampleText.includes("workbook.xml");
+      const eocdView = new DataView(tailBytes.buffer, tailBytes.byteOffset + eocdOffsetInTail);
+      const cdEntriesCount = eocdView.getUint16(8, true);
+      const cdSize = eocdView.getUint32(12, true);
+      const cdStartOffset = eocdView.getUint32(16, true);
 
-      if (!hasOoxmlMarker) {
+      // Verify basic mathematical coherence of ZIP directory
+      if (
+        cdEntriesCount === 0 ||
+        cdStartOffset + cdSize > fileSize ||
+        cdStartOffset < 30
+      ) {
         return {
           valid: false,
           format: "XLSX",
@@ -125,7 +127,56 @@ export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> 
           fileSize,
           warnings: [],
           errors: [
-            "El archivo contiene firmas ZIP pero no presenta la estructura de partes de una hoja de cálculo OOXML válida (xl/ o [Content_Types].xml no detectados).",
+            "El directorio central del contenedor ZIP contiene valores inconsistentes o corruptos.",
+          ],
+          unverifiedAspects: [],
+        };
+      }
+
+      // 3. Read the Central Directory to inspect genuine entry names inside the archive
+      const cdSlice = await file.slice(cdStartOffset, cdStartOffset + cdSize).arrayBuffer();
+      const cdBytes = new Uint8Array(cdSlice);
+      const cdView = new DataView(cdBytes.buffer, cdBytes.byteOffset);
+      const entryNames: string[] = [];
+
+      let ptr = 0;
+      const textDecoder = new TextDecoder("utf-8", { fatal: false });
+
+      while (ptr + 46 <= cdBytes.length) {
+        if (
+          cdBytes[ptr] !== 0x50 ||
+          cdBytes[ptr + 1] !== 0x4b ||
+          cdBytes[ptr + 2] !== 0x01 ||
+          cdBytes[ptr + 3] !== 0x02
+        ) {
+          break;
+        }
+        const fileNameLength = cdView.getUint16(ptr + 28, true);
+        const extraFieldLength = cdView.getUint16(ptr + 30, true);
+        const fileCommentLength = cdView.getUint16(ptr + 32, true);
+
+        if (ptr + 46 + fileNameLength <= cdBytes.length) {
+          const nameBytes = cdBytes.slice(ptr + 46, ptr + 46 + fileNameLength);
+          entryNames.push(textDecoder.decode(nameBytes));
+        }
+
+        ptr += 46 + fileNameLength + extraFieldLength + fileCommentLength;
+      }
+
+      const hasContentTypes = entryNames.some((n) => n === "[Content_Types].xml");
+      const hasWorkbook = entryNames.some(
+        (n) => n.startsWith("xl/") || n.includes("workbook.xml"),
+      );
+
+      if (!hasContentTypes && !hasWorkbook) {
+        return {
+          valid: false,
+          format: "XLSX",
+          fileName,
+          fileSize,
+          warnings: [],
+          errors: [
+            "El contenedor ZIP no presenta las entradas canónicas de una hoja de cálculo OOXML (faltan [Content_Types].xml o xl/workbook.xml en el directorio central).",
           ],
           unverifiedAspects: [],
         };
