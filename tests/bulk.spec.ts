@@ -204,18 +204,39 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
     await page.getByRole("button", { name: "Continuar a revisión", exact: true }).click();
     await expect(page).toHaveURL("/carga-masiva/revisar");
 
-    const confirmBtn = page.getByRole("button", { name: "Confirmar importación", exact: true }).first();
-    // Simulate concurrent double click
-    await confirmBtn.dblclick();
+    // Install spy directly on bulkService in the browser runtime
+    await page.evaluate(() => {
+      const win = window as unknown as {
+        __bulkService?: { createImport: (...args: unknown[]) => unknown };
+        __createImportCalls?: number;
+      };
+      win.__createImportCalls = 0;
+      if (win.__bulkService) {
+        const original = win.__bulkService.createImport.bind(win.__bulkService);
+        win.__bulkService.createImport = async (...args: unknown[]) => {
+          win.__createImportCalls = (win.__createImportCalls ?? 0) + 1;
+          return original(...args);
+        };
+      }
+    });
+
+    // Locate the two confirmation buttons present on S02 (header and bottom)
+    const headerConfirmBtn = page.getByRole("button", { name: "Confirmar importación", exact: true }).first();
+    const bottomConfirmBtn = page.getByRole("button", { name: "Confirmar importación", exact: true }).nth(1);
+
+    // Simulate concurrent rapid attempts on confirmation buttons
+    await Promise.all([
+      headerConfirmBtn.dispatchEvent("click"),
+      bottomConfirmBtn.dispatchEvent("click"),
+    ]);
     await expect(page).toHaveURL(/\/carga-masiva\/importaciones\/lote-/);
 
-    // 2. Direct unit test of mockBulkRepository call tracking
-    const initialCalls = mockBulkRepository.getCreateImportCallCount?.() ?? 0;
-    const dummyFile = new File(["sku,nombre\nSKU-1,Prod 1\n"], "test.csv", { type: "text/csv" });
-    const b1 = await mockBulkRepository.createImport(dummyFile);
-    expect(b1.batch_id).toBeDefined();
-    const finalCalls = mockBulkRepository.getCreateImportCallCount?.() ?? 0;
-    expect(finalCalls - initialCalls).toBe(1);
+    // Assert that bulkService.createImport was called exactly once in the browser
+    const browserCalls = await page.evaluate(() => {
+      const win = window as unknown as { __createImportCalls?: number };
+      return win.__createImportCalls ?? 0;
+    });
+    expect(browserCalls).toBe(1);
   });
 
   // C21: Lote desconocido muestra estado no encontrado controlado

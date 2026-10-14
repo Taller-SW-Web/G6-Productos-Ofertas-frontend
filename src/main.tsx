@@ -14,6 +14,7 @@ import { createPricingRuntime } from "./features/pricing/services/pricingService
 import { PricingProvider } from "./features/pricing/components/PricingProvider";
 import { resolveDataMode } from "./app/config/dataMode";
 import { DataModeContext } from "./app/config/DataModeContext";
+import "./features/bulk/services/bulkService";
 
 const root = createRoot(document.getElementById("root")!);
 async function start() {
