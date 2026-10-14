@@ -471,18 +471,17 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
   });
 
   test("H17: Production bundle does not leak window.__bulkService", async () => {
+    test.setTimeout(60000);
     const fs = await import("node:fs");
     const path = await import("node:path");
     const { execSync } = await import("node:child_process");
     const distAssetsDir = path.resolve(process.cwd(), "dist/assets");
 
-    // Ensure production build exists; trigger real build if dist/assets is missing or empty
-    if (!fs.existsSync(distAssetsDir) || fs.readdirSync(distAssetsDir).filter((f) => f.endsWith(".js")).length === 0) {
-      execSync("npm run build", {
-        stdio: "pipe",
-        env: { ...process.env, VITE_DATA_MODE: "mock" },
-      });
-    }
+    // Ensure production build is freshly built and up-to-date, never inspecting a stale build
+    execSync("npm run build", {
+      stdio: "pipe",
+      env: { ...process.env, VITE_DATA_MODE: "mock" },
+    });
 
     expect(fs.existsSync(distAssetsDir)).toBe(true);
     const files = fs.readdirSync(distAssetsDir).filter((f) => f.endsWith(".js"));
