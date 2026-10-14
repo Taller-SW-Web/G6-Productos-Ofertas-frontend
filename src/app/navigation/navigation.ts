@@ -55,6 +55,13 @@ export const productNavigation: NavigationItem[] = [
     matchPaths: ["/productos", "/MK-004"],
   },
   {
+    to: "/combos",
+    label: "Combos de productos",
+    icon: IconPackages,
+    group: "Catálogo",
+    matchPaths: ["/combos"],
+  },
+  {
     to: "/recomendaciones",
     label: "Venta cruzada y upselling",
     icon: IconArrowsShuffle,

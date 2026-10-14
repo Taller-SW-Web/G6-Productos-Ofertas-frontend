@@ -309,3 +309,24 @@ export const BulkDownloadsPage = lazy(() =>
   })),
 );
 
+export const CombosListPage = lazy(() =>
+  import("../../features/combos/pages/CombosListPage").then((module) => ({
+    default: module.CombosListPage,
+  })),
+);
+export const ComboFormPage = lazy(() =>
+  import("../../features/combos/pages/ComboFormPage").then((module) => ({
+    default: module.ComboFormPage,
+  })),
+);
+export const ComboDetailPage = lazy(() =>
+  import("../../features/combos/pages/ComboDetailPage").then((module) => ({
+    default: module.ComboDetailPage,
+  })),
+);
+export const ComboUnavailablePage = lazy(() =>
+  import("../../features/combos/pages/ComboUnavailablePage").then((module) => ({
+    default: module.ComboUnavailablePage,
+  })),
+);
+
