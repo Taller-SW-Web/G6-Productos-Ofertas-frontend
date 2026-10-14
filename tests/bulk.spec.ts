@@ -342,4 +342,53 @@ test.describe("MK-001 — Carga y exportación masiva de productos (Regresión C
     expect(res.format).toBe("XLSX");
     expect(res.errors[0]).toContain("firma ZIP/PK no detectada");
   });
+
+  // H11 & H12: S03 states - Queued, Processing, Breakdown by domain
+  test("H11 & H12: S03 shows queued and processing states with domain breakdown", async ({ page }) => {
+    // 1. Queued state
+    await page.goto("/carga-masiva/importaciones/batch-queued");
+    await expect(page.getByText("En cola de procesamiento")).toBeVisible();
+    await expect(page.getByText("Solicitud admitida en cola")).toBeVisible();
+
+    // 2. Processing state with domain breakdown
+    await page.goto("/carga-masiva/importaciones/batch-partial");
+    await expect(page.getByText("Desglose de filas por dominio")).toBeVisible();
+    await expect(page.getByText("Filas con borrador creado")).toBeVisible();
+    await expect(page.getByText("Filas con precio base registrado")).toBeVisible();
+    await expect(page.getByText("Filas con SKU inicializado")).toBeVisible();
+  });
+
+  // H11 & H12: S04 terminal protection - Non-terminal batch shows warning and redirects to S03
+  test("H11 & H12: S04 non-terminal batch displays warning and does not render table", async ({ page }) => {
+    await page.goto("/carga-masiva/importaciones/batch-processing/resultado");
+    await expect(page.getByText("Lote en procesamiento")).toBeVisible();
+    await expect(page.getByText("Los resultados finales consolidados se presentarán únicamente cuando el procesamiento concluya")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Ir al seguimiento del lote" })).toBeVisible();
+    // The table of rows should not be rendered
+    await expect(page.locator("table")).toHaveCount(0);
+  });
+
+  // H11 & H12: S04 terminal batch with errors provides download error report
+  test("H11 & H12: S04 completed with observations shows download error report and resume button", async ({ page }) => {
+    await page.goto("/carga-masiva/importaciones/batch-partial/resultado");
+    await expect(page.getByText("Completado con observaciones")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Descargar reporte de errores" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Reanudar operaciones pendientes" })).toBeVisible();
+    // Table is visible
+    await expect(page.locator("table")).toBeVisible();
+  });
+
+  // H11 & H12: S05 export CSV download vs XLSX informative notice
+  test("H11 & H12: S05 export handles CSV ready download vs XLSX provider notice", async ({ page }) => {
+    await page.goto("/carga-masiva/descargas");
+    await expect(page.getByRole("heading", { name: "Descargas y exportación masiva" })).toBeVisible();
+
+    // Check templates
+    await expect(page.getByRole("button", { name: "Descargar CSV de ejemplo" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "No disponible en demo" })).toBeDisabled();
+
+    // Request CSV export
+    await page.getByRole("button", { name: "Solicitar exportación" }).click();
+    await expect(page.getByText(/Trabajo de exportación: exp-/)).toBeVisible();
+  });
 });
