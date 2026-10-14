@@ -77,6 +77,8 @@ export interface CatalogCandidateProduct {
   hasVariants: boolean;
   skuBase: string;
   status: "ACTIVO" | "BORRADOR" | "INACTIVO";
+  typeName?: string;
+  typeId?: string;
   variants: {
     variantId: string;
     sku: string;
@@ -194,6 +196,8 @@ export const catalogCandidateProducts: CatalogCandidateProduct[] = [
     hasVariants: false,
     skuBase: "COMBO-ANIDADO-SKU",
     status: "ACTIVO",
+    typeId: "TIP-COMBO",
+    typeName: "Combo",
     variants: [],
   },
 ];

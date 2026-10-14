@@ -109,4 +109,43 @@ test.describe("MK-002 — Dominio: Evaluación Económica y Precisión Decimal S
     expect(res.isPricingComplete).toBe(false);
     expect(res.message).toContain("faltan precios de uno o más componentes");
   });
+
+  test("Cantidades extremas o no seguras son rechazadas (Number.isSafeInteger)", () => {
+    const pricingMap: Record<string, ComponentPricingSnapshot> = {
+      SKU1: { sku: "SKU1", regularPrice: 100, publicPrice: 80, currency: "PEN", available: true },
+    };
+
+    // Unsafe integer > MAX_SAFE_INTEGER
+    const resUnsafe = evaluateComboEconomicBenefit(
+      [{ sku: "SKU1", quantity: Number.MAX_SAFE_INTEGER + 10 }],
+      50.0,
+      pricingMap,
+    );
+    expect(resUnsafe.isValidBenefit).toBe(false);
+    expect(resUnsafe.message).toContain("entero positivo seguro");
+
+    // Zero or negative quantity
+    const resZero = evaluateComboEconomicBenefit(
+      [{ sku: "SKU1", quantity: 0 }],
+      50.0,
+      pricingMap,
+    );
+    expect(resZero.isValidBenefit).toBe(false);
+    expect(resZero.message).toContain("entero positivo seguro");
+  });
+
+  test("Ausencia de moneda nunca genera 'PEN' por fallback arbitrario", () => {
+    const pricingMap: Record<string, ComponentPricingSnapshot> = {
+      SKU1: { sku: "SKU1", regularPrice: 100, publicPrice: 80, currency: "", available: false },
+    };
+
+    const res = evaluateComboEconomicBenefit(
+      [{ sku: "SKU1", quantity: 1 }],
+      50.0,
+      pricingMap,
+    );
+
+    expect(res.currency).toBe("");
+    expect(res.currency).not.toBe("PEN");
+  });
 });

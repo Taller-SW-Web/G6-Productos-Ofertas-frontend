@@ -208,7 +208,7 @@ test.describe("MK-002 — Gestión de combos de productos", () => {
         ],
         precioCombo: 120,
       }),
-    ).rejects.toThrow(/entero positivo mayor o igual a 1/);
+    ).rejects.toThrow(/entero positivo.*mayor o igual a 1/);
   });
 
   // H05: Edición de cantidad en tabla con actualización de precio y disponibilidad
@@ -242,7 +242,7 @@ test.describe("MK-002 — Gestión de combos de productos", () => {
   });
 
   // H07: Fallo de Pricing sin falsa aprobación económica
-  test("S02 (H07): Fallo de Pricing muestra alerta explícita y no otorga aprobación económica", async ({
+  test("S02 (H07): Fallo de Pricing muestra alerta explícita, no muestra precios obsoletos y bloquea guardado", async ({
     page,
   }) => {
     // Navigate with pricing-error scenario
@@ -256,6 +256,17 @@ test.describe("MK-002 — Gestión de combos de productos", () => {
     // Pricing failure alert appears
     await expect(page.getByText("Fallo al consultar Pricing de componentes")).toBeVisible();
     await expect(page.getByText("No disponible")).toHaveCount(2);
+
+    // Verify table displays "—" and not stale or zero prices
+    const tableFirstRow = page.locator("tbody tr").first();
+    await expect(tableFirstRow.locator("td").nth(3)).toHaveText("—");
+    await expect(tableFirstRow.locator("td").nth(4)).toHaveText("—");
+
+    // Try submitting: must be blocked because pricing failed
+    await page.getByLabel("Nombre comercial del combo").fill("Combo Bloqueado por Pricing");
+    await page.getByTestId("combo-price-input").fill("50.00");
+    await page.getByTestId("combo-submit-button").click();
+    await expect(page.getByText("No se puede confirmar el precio porque falló la consulta de Pricing.")).toBeVisible();
 
     // Click retry pricing: clears scenario and fetches actual pricing
     await page.getByTestId("retry-pricing-btn").click();
@@ -286,14 +297,14 @@ test.describe("MK-002 — Gestión de combos de productos", () => {
   });
 
   // H06: Conflicto de versión real y recuperación sin sobrescritura silenciosa
-  test("S03 (H06): Conflicto de versión muestra diffs reales y no sobrescribe sin confirmación explícita", async ({
+  test("S03 (H06): Conflicto de versión muestra diffs reales y completa ciclo de sincronización y segundo guardado", async ({
     page,
   }) => {
     // Open edit with deterministic version-conflict scenario
     await page.goto("/combos/combo-001/editar?modoRevision=1&escenario=version-conflict");
     await expect(page.getByRole("heading", { name: "Editar combo" })).toBeVisible();
 
-    // Try saving form
+    // Try saving form with modified price
     const priceInput = page.getByTestId("combo-price-input");
     await priceInput.fill("142.00");
     await page.getByTestId("combo-submit-button").click();
@@ -301,12 +312,17 @@ test.describe("MK-002 — Gestión de combos de productos", () => {
     // Version conflict alert with diffs appears
     const conflictAlert = page.getByTestId("version-conflict-alert");
     await expect(conflictAlert).toBeVisible();
-    await expect(conflictAlert.getByText("PEN 150.00")).toBeVisible();
+    await expect(conflictAlert.getByText("PEN 160.00")).toBeVisible(); // server price changed from 150 to 160
     await expect(conflictAlert.getByText("PEN 142.00")).toBeVisible();
 
-    // Safe resolution option B: Confirm and synchronize version
+    // Safe resolution option B: Confirm and synchronize version, keeping local draft
     await page.getByTestId("sync-version-keep-draft-btn").click();
     await expect(page.getByTestId("version-conflict-alert")).toHaveCount(0);
+
+    // Now save again: should successfully update without conflict and navigate to detail page
+    await page.getByTestId("combo-submit-button").click();
+    await expect(page).toHaveURL(/\/combos\/combo-001$/);
+    await expect(page.getByText("S/ 142.00")).toBeVisible();
   });
 
   // H12: Guard de cambios sin guardar
@@ -329,6 +345,35 @@ test.describe("MK-002 — Gestión de combos de productos", () => {
     // Confirm discard
     await page.getByTestId("confirm-discard-button").click();
     await expect(page).toHaveURL("/combos");
+  });
+
+  // Navigation Guard: Bloqueo de navegación SPA con modificaciones no guardadas
+  test("S02 (Audit P2): Navegación interna por menú con formulario sucio activa modal de confirmación", async ({
+    page,
+  }) => {
+    await page.goto("/combos/nuevo");
+
+    // Modify a field
+    await page.getByLabel("Nombre comercial del combo").fill("Borrador con navegación interna");
+
+    // Click on sidebar link to "Productos y variantes"
+    const nav = page.getByRole("navigation", { name: "Navegación de la aplicación" });
+    await nav.getByRole("link", { name: "Gestión de productos" }).click();
+
+    // Modal dialog MUST appear, blocking navigation
+    const dialog = page.getByRole("dialog", { name: "Descartar cambios sin guardar" });
+    await expect(dialog).toBeVisible();
+
+    // Click "Continuar editando" -> dialog closes, remains on form
+    await dialog.getByRole("button", { name: "Continuar editando" }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page).toHaveURL("/combos/nuevo");
+
+    // Try navigating again and confirm discard
+    await nav.getByRole("link", { name: "Gestión de productos" }).click();
+    await expect(dialog).toBeVisible();
+    await page.getByTestId("confirm-discard-button").click();
+    await expect(page).toHaveURL("/productos");
   });
 
   // H01: Disponibilidad calculada dinámicamente e invalidada en edición
@@ -394,6 +439,16 @@ test.describe("MK-002 — Gestión de combos de productos", () => {
   test("S04: Pantalla de indisponibilidad comercial para combo agotado, desactualizado e inactivo", async ({
     page,
   }) => {
+    // combo-001: activo y disponible (la condición de indisponibilidad no aplica)
+    await page.goto("/combos/combo-001/no-disponible");
+    await expect(
+      page.getByRole("heading", {
+        name: "Estado de disponibilidad comercial: Pack Ejecutivo Smart Casual",
+      }),
+    ).toBeVisible();
+    await expect(page.getByTestId("available-combo-info-alert")).toBeVisible();
+    await expect(page.getByText("La condición de indisponibilidad comercial no aplica actualmente.")).toBeVisible();
+
     // combo-002: agotado confirmado
     await page.goto("/combos/combo-002/no-disponible");
     await expect(page.getByTestId("sold-out-alert")).toBeVisible();

@@ -19,6 +19,8 @@ export interface CandidateProduct {
   skuBase: string;
   hasVariants: boolean;
   status: "ACTIVO" | "INACTIVO" | "BORRADOR";
+  typeName?: string;
+  typeId?: string;
   variants: CandidateVariant[];
 }
 

@@ -24,7 +24,9 @@ export function EconomicComparator({ comparison }: EconomicComparatorProps) {
               Suma regular de componentes
             </Text>
             <Text fw={600} size="md">
-              {isPricingComplete ? `${currency} ${regularSum.toFixed(2)}` : "No disponible"}
+              {isPricingComplete
+                ? `${currency ? `${currency} ` : ""}${regularSum.toFixed(2)}`
+                : "No disponible"}
             </Text>
           </Paper>
 
@@ -33,7 +35,9 @@ export function EconomicComparator({ comparison }: EconomicComparatorProps) {
               Suma pública vigente (con ofertas)
             </Text>
             <Text fw={600} size="md">
-              {isPricingComplete ? `${currency} ${publicSum.toFixed(2)}` : "No disponible"}
+              {isPricingComplete
+                ? `${currency ? `${currency} ` : ""}${publicSum.toFixed(2)}`
+                : "No disponible"}
             </Text>
           </Paper>
 
@@ -47,7 +51,9 @@ export function EconomicComparator({ comparison }: EconomicComparatorProps) {
               Precio propuesto del combo
             </Text>
             <Text fw={700} size="md" c={comboPrice > 0 ? undefined : "dimmed"}>
-              {comboPrice > 0 ? `${currency} ${comboPrice.toFixed(2)}` : "Sin definir"}
+              {comboPrice > 0
+                ? `${currency ? `${currency} ` : ""}${comboPrice.toFixed(2)}`
+                : "Sin definir"}
             </Text>
           </Paper>
         </Group>

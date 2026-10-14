@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useContext, useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useBlocker, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Alert,
   Box,
@@ -22,6 +22,7 @@ import {
 import { PageHeader } from "../../../components/shared/PageHeader";
 import { SectionCard } from "../../../components/shared/SectionCard";
 import { FeedbackAlert } from "../../../components/shared/FeedbackAlert";
+import { DataModeContext } from "../../../app/config/DataModeContext";
 import { useCombosRepository } from "../hooks/useCombosRepository";
 import { ComponentSelector } from "../components/ComponentSelector";
 import { ComponentsTable } from "../components/ComponentsTable";
@@ -35,6 +36,7 @@ import type {
 } from "../types/combos";
 
 export function ComboFormPage() {
+  const dataMode = useContext(DataModeContext);
   const { comboId } = useParams<{ comboId?: string }>();
   const isEditing = Boolean(comboId);
 
@@ -59,6 +61,7 @@ export function ComboFormPage() {
   // Version Conflict state (H06)
   const [versionConflict, setVersionConflict] = useState(false);
   const [serverVersionCombo, setServerVersionCombo] = useState<ComboView | null>(null);
+  const [forceScenarioCleared, setForceScenarioCleared] = useState(false);
 
   // Pricing snapshot for components (H07)
   const [pricingMap, setPricingMap] = useState<Record<string, ComponentPricingSnapshot>>({});
@@ -66,16 +69,24 @@ export function ComboFormPage() {
   const [pricingError, setPricingError] = useState<string | null>(null);
   const [pricingScenarioCleared, setPricingScenarioCleared] = useState(false);
 
-  // Dirty state & Unsaved changes modal (H12)
+  // Dirty state & Unsaved changes modal (H12 / Audit P2)
   const [isDirty, setIsDirty] = useState(false);
-  const [discardModalOpen, setDiscardModalOpen] = useState(false);
+  const isDirtyRef = useRef(false);
+  isDirtyRef.current = isDirty;
+
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      isDirtyRef.current && !submitting && currentLocation.pathname !== nextLocation.pathname,
+  );
 
   // Submission lock to strictly prevent double submit
   const isSubmittingRef = useRef(false);
+  const initialLoadedRef = useRef<string | null>(null);
 
   // Load existing combo for editing
   useEffect(() => {
     if (!isEditing || !comboId) return;
+    if (initialLoadedRef.current === comboId) return;
 
     let active = true;
     const controller = new AbortController();
@@ -86,6 +97,7 @@ export function ComboFormPage() {
       try {
         const data = await repository.getCombo(comboId, scenarioParam, controller.signal);
         if (active && data) {
+          initialLoadedRef.current = comboId;
           setName(data.name);
           setDescription(data.description || "");
           setPrice(data.price);
@@ -205,18 +217,26 @@ export function ComboFormPage() {
     );
   }, [components, parsedPrice, pricingMap]);
 
-  // Derived components with prices for display in table
+  // Derived components with prices for display in table (H07 / Audit P1)
   const displayComponents = useMemo(() => {
     return components.map((c) => {
       const p = pricingMap[c.sku];
+      if (pricingError || pricingLoading || !p) {
+        return {
+          ...c,
+          regularPrice: undefined,
+          publicPrice: undefined,
+          currency: "",
+        };
+      }
       return {
         ...c,
-        regularPrice: p?.regularPrice ?? c.regularPrice ?? 0,
-        publicPrice: p?.publicPrice ?? c.publicPrice ?? 0,
-        currency: p?.currency ?? c.currency ?? "PEN",
+        regularPrice: p.regularPrice,
+        publicPrice: p.publicPrice,
+        currency: p.currency || "",
       };
     });
-  }, [components, pricingMap]);
+  }, [components, pricingMap, pricingError, pricingLoading]);
 
   // Handle Form Submit
   const handleSubmit = async (e: React.FormEvent) => {
@@ -242,7 +262,9 @@ export function ComboFormPage() {
       errors.price = "El precio del combo debe ser mayor a cero.";
     } else if (pricingError) {
       errors.price = "No se puede confirmar el precio porque falló la consulta de Pricing.";
-    } else if (components.length >= 2 && !comparison.isValidBenefit) {
+    } else if (pricingLoading) {
+      errors.price = "Consultando precios vigentes. Espera a que finalice la validación.";
+    } else if (components.length >= 2 && (!comparison.isPricingComplete || !comparison.isValidBenefit)) {
       errors.price =
         comparison.message ||
         "El precio debe ser estrictamente menor que la suma regular y la suma pública vigente.";
@@ -257,6 +279,10 @@ export function ComboFormPage() {
     isSubmittingRef.current = true;
     setSubmitting(true);
 
+    const activeScenario = forceScenarioCleared
+      ? undefined
+      : (searchParams.get("escenario") || undefined);
+
     try {
       if (isEditing && comboId) {
         const updated = await repository.updateCombo(comboId, {
@@ -268,7 +294,7 @@ export function ComboFormPage() {
           })),
           precioCombo: parsedPrice,
           version,
-        }, scenarioParam);
+        }, activeScenario);
         setIsDirty(false);
         navigate(`/combos/${updated.comboId}`);
       } else {
@@ -314,9 +340,14 @@ export function ComboFormPage() {
     }
   };
 
-  // Safe Concurrency Recovery Options (H06)
+  // Safe Concurrency Recovery Options (H06 / Audit P1)
   const handleAdoptServerVersion = () => {
     if (!serverVersionCombo) return;
+    setForceScenarioCleared(true);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("escenario");
+    setSearchParams(nextParams, { replace: true });
+
     setName(serverVersionCombo.name);
     setDescription(serverVersionCombo.description || "");
     setPrice(serverVersionCombo.price);
@@ -330,19 +361,20 @@ export function ComboFormPage() {
 
   const handleSyncVersionAndKeepDraft = () => {
     if (!serverVersionCombo) return;
+    setForceScenarioCleared(true);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("escenario");
+    setSearchParams(nextParams, { replace: true });
+
     setVersion(serverVersionCombo.version);
     setVersionConflict(false);
     setServerVersionCombo(null);
     setSubmitError(null);
   };
 
-  // Safe Discard Changes Cancel (H12)
+  // Safe Discard Changes Cancel (H12 / Navigation Guard P2)
   const handleCancelClick = () => {
-    if (isDirty) {
-      setDiscardModalOpen(true);
-    } else {
-      navigate(isEditing ? `/combos/${comboId}` : "/combos");
-    }
+    navigate(isEditing ? `/combos/${comboId}` : "/combos");
   };
 
   if (loadingInitial) {
@@ -361,6 +393,46 @@ export function ComboFormPage() {
             Cargando datos del combo...
           </Text>
         </Paper>
+      </Stack>
+    );
+  }
+
+  if (dataMode === "api") {
+    return (
+      <Stack gap="lg">
+        <PageHeader
+          title={isEditing ? "Editar combo" : "Crear combo"}
+          breadcrumbs={[
+            { label: "Catálogo", to: "/productos" },
+            { label: "Combos", to: "/combos" },
+          ]}
+        />
+        <FeedbackAlert
+          semantic="error"
+          title="Integración API no disponible para Combos"
+        >
+          Este microservicio aún no cuenta con contrato HTTP homologado desplegado en el ambiente.
+        </FeedbackAlert>
+      </Stack>
+    );
+  }
+
+  if (isEditing && submitError && !name) {
+    return (
+      <Stack gap="lg">
+        <PageHeader
+          title="Editar combo"
+          breadcrumbs={[
+            { label: "Catálogo", to: "/productos" },
+            { label: "Combos", to: "/combos" },
+          ]}
+        />
+        <FeedbackAlert
+          semantic="error"
+          title="Error al cargar el combo"
+        >
+          {submitError}
+        </FeedbackAlert>
       </Stack>
     );
   }
@@ -384,10 +456,14 @@ export function ComboFormPage() {
         ]}
       />
 
-      {/* Discard Unsaved Changes Modal (H12) */}
+      {/* Discard Unsaved Changes Modal (H12 & Navigation Guard P2) */}
       <Modal
-        opened={discardModalOpen}
-        onClose={() => setDiscardModalOpen(false)}
+        opened={blocker.state === "blocked"}
+        onClose={() => {
+          if (blocker.state === "blocked") {
+            blocker.reset();
+          }
+        }}
         title="Descartar cambios sin guardar"
         centered
         data-testid="discard-changes-modal"
@@ -400,16 +476,22 @@ export function ComboFormPage() {
           <Group justify="flex-end" gap="sm">
             <Button
               variant="default"
-              onClick={() => setDiscardModalOpen(false)}
+              onClick={() => {
+                if (blocker.state === "blocked") {
+                  blocker.reset();
+                }
+              }}
             >
               Continuar editando
             </Button>
             <Button
               color="red"
               onClick={() => {
-                setDiscardModalOpen(false);
+                isDirtyRef.current = false;
                 setIsDirty(false);
-                navigate(isEditing ? `/combos/${comboId}` : "/combos");
+                if (blocker.state === "blocked") {
+                  blocker.proceed();
+                }
               }}
               data-testid="confirm-discard-button"
             >

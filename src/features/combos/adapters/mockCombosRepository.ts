@@ -17,6 +17,7 @@ import {
   catalogCandidateProducts,
   initialInventorySnapshot,
 } from "../mocks/combosFixtures";
+import { initialProducts } from "../../catalog/mocks/catalogFixtures";
 import { evaluateComboEconomicBenefit } from "../utils/economicEvaluation";
 
 export { evaluateComboEconomicBenefit };
@@ -75,14 +76,20 @@ export interface CatalogSkuResolution {
 }
 
 export function resolveCatalogSku(sku: string): CatalogSkuResolution {
+  // Check candidate products
   for (const p of catalogCandidateProducts) {
+    const isComboType =
+      Boolean(p.typeName?.toLowerCase().includes("combo")) ||
+      Boolean(p.typeId?.toLowerCase().includes("combo")) ||
+      p.name.toLowerCase().startsWith("combo ");
+
     if (!p.hasVariants) {
       if (p.skuBase === sku) {
         return {
           found: true,
           productName: p.name,
           isActive: p.status === "ACTIVO",
-          isNestedCombo: p.skuBase === "COMBO-ANIDADO-SKU" || p.productId === "PROD-008",
+          isNestedCombo: isComboType,
         };
       }
     } else {
@@ -91,7 +98,7 @@ export function resolveCatalogSku(sku: string): CatalogSkuResolution {
           found: true,
           productName: p.name,
           isActive: p.status === "ACTIVO",
-          isNestedCombo: false,
+          isNestedCombo: isComboType,
           isVariantParentWithoutSelection: true,
         };
       }
@@ -102,7 +109,46 @@ export function resolveCatalogSku(sku: string): CatalogSkuResolution {
           productName: p.name,
           variantLabel: v.label,
           isActive: p.status === "ACTIVO" && v.status === "ACTIVA",
-          isNestedCombo: false,
+          isNestedCombo: isComboType,
+        };
+      }
+    }
+  }
+
+  // Check shared Catalog fixtures
+  for (const cp of initialProducts) {
+    const isComboType =
+      Boolean(cp.typeName?.toLowerCase().includes("combo")) ||
+      Boolean(cp.typeId?.toLowerCase().includes("combo")) ||
+      cp.name.toLowerCase().startsWith("combo ");
+
+    if (!cp.hasVariants) {
+      if (cp.skuBase === sku) {
+        return {
+          found: true,
+          productName: cp.name,
+          isActive: cp.status === "ACTIVO",
+          isNestedCombo: isComboType,
+        };
+      }
+    } else {
+      if (cp.skuBase === sku) {
+        return {
+          found: true,
+          productName: cp.name,
+          isActive: cp.status === "ACTIVO",
+          isNestedCombo: isComboType,
+          isVariantParentWithoutSelection: true,
+        };
+      }
+      const v = cp.variants.find((vr) => vr.sku === sku);
+      if (v) {
+        return {
+          found: true,
+          productName: cp.name,
+          variantLabel: v.attributesSummary,
+          isActive: cp.status === "ACTIVO" && v.status === "ACTIVA",
+          isNestedCombo: isComboType,
         };
       }
     }
@@ -240,11 +286,11 @@ export class MockCombosRepository implements CombosRepository {
     const resolutions: CatalogSkuResolution[] = [];
 
     for (const comp of components) {
-      // Validate quantity integrity: positive integer >= 1
-      if (!Number.isInteger(comp.quantity) || comp.quantity < 1) {
+      // Validate quantity integrity: positive safe integer >= 1
+      if (!Number.isSafeInteger(comp.quantity) || comp.quantity < 1) {
         throw new ComboRepositoryError(
           "CANTIDAD_INVALIDA",
-          `La cantidad del SKU ${comp.sku} debe ser un número entero positivo mayor o igual a 1.`,
+          `La cantidad del SKU ${comp.sku} debe ser un entero positivo seguro mayor o igual a 1.`,
         );
       }
 
@@ -356,11 +402,22 @@ export class MockCombosRepository implements CombosRepository {
     const current = this.combos[existingIndex]!;
 
     // Concurrency check or simulated conflict scenario
-    if (payload.version !== current.version || scenario === "version-conflict" || scenario === "conflict") {
+    if (scenario === "version-conflict" || scenario === "conflict") {
+      current.version += 1;
+      current.name = `${current.name} (Modificado externamente)`;
+      current.price = Math.round((current.price + 10) * 100) / 100;
       throw new ComboRepositoryError(
         "VERSION_CONFLICT",
         "Este combo cambió desde que comenzaste a editarlo. Revisa la versión actual antes de volver a guardar tus cambios.",
-        current.version + 1,
+        current.version,
+      );
+    }
+
+    if (payload.version !== current.version) {
+      throw new ComboRepositoryError(
+        "VERSION_CONFLICT",
+        "Este combo cambió desde que comenzaste a editarlo. Revisa la versión actual antes de volver a guardar tus cambios.",
+        current.version,
       );
     }
 

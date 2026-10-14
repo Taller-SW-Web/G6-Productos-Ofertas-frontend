@@ -139,16 +139,23 @@ export function ComboUnavailablePage() {
     combo.informativeAvailability > 0 &&
     combo.freshness === "ACTUALIZADA";
 
+  const pageTitle = isAvailableConfirmed
+    ? `Estado de disponibilidad comercial: ${combo.name}`
+    : `Indisponibilidad comercial: ${combo.name}`;
+
   return (
     <Stack gap="lg">
       <PageHeader
-        title={`Indisponibilidad comercial: ${combo.name}`}
+        title={pageTitle}
         description={`Identificador: ${combo.comboId}`}
         breadcrumbs={[
           { label: "Catálogo", to: "/productos" },
           { label: "Combos", to: "/combos" },
           { label: combo.name, to: `/combos/${combo.comboId}` },
-          { label: "No disponible", to: `/combos/${combo.comboId}/no-disponible` },
+          {
+            label: isAvailableConfirmed ? "Disponibilidad" : "No disponible",
+            to: `/combos/${combo.comboId}/no-disponible`,
+          },
         ]}
         actions={
           <Group gap="sm">
@@ -177,15 +184,30 @@ export function ComboUnavailablePage() {
           {isAvailableConfirmed && (
             <Alert
               icon={<IconInfoCircle size={20} />}
-              title="Disponibilidad confirmada"
+              title="La condición de indisponibilidad no aplica"
               color="green"
               variant="light"
+              role="status"
+              data-testid="available-combo-info-alert"
             >
-              <Text size="sm">
-                Este combo se encuentra activo y cuenta con disponibilidad estimada de{" "}
-                <strong>{combo.informativeAvailability} unidades</strong>. No presenta bloqueo de
-                existencias en este momento.
-              </Text>
+              <Stack gap="xs">
+                <Text size="sm">
+                  Este combo se encuentra activo y cuenta con disponibilidad estimada de{" "}
+                  <strong>{combo.informativeAvailability} unidades</strong>. La condición de
+                  indisponibilidad comercial no aplica actualmente.
+                </Text>
+                <Group>
+                  <Button
+                    size="xs"
+                    component={Link}
+                    to={`/combos/${combo.comboId}`}
+                    variant="outline"
+                    color="green"
+                  >
+                    Regresar a la ficha administrativa
+                  </Button>
+                </Group>
+              </Stack>
             </Alert>
           )}
 

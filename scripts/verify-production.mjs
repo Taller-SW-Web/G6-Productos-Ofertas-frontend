@@ -215,14 +215,51 @@ try {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   }
   // Combos (MK-002), estrictamente ADITIVO sobre las comprobaciones anteriores:
+  const combosUnavailablePattern =
+    /La condición de indisponibilidad no aplica|Disponibilidad confirmada|Agotado|desactualizada|Inactivo|incompleta|Nota de trazabilidad/i;
+
   const combosPaths = [
-    { path: "/combos", table: true, form: false },
-    { path: "/combos/nuevo", table: false, form: true },
-    { path: "/combos/combo-001", table: false, form: false },
-    { path: "/combos/combo-001/editar", table: false, form: true },
-    { path: "/combos/combo-001/no-disponible", table: false, form: false },
+    { path: "/combos", table: true, form: false, allowedAlertPattern: null },
+    { path: "/combos/nuevo", table: false, form: true, allowedAlertPattern: null },
+    {
+      path: "/combos/combo-001",
+      table: false,
+      form: false,
+      allowedAlertPattern: /La disponibilidad es una estimación/i,
+    },
+    { path: "/combos/combo-001/editar", table: false, form: true, allowedAlertPattern: null },
+    {
+      path: "/combos/combo-001/no-disponible",
+      table: false,
+      form: false,
+      allowedAlertPattern: combosUnavailablePattern,
+    },
+    {
+      path: "/combos/combo-002/no-disponible",
+      table: false,
+      form: false,
+      allowedAlertPattern: combosUnavailablePattern,
+    },
+    {
+      path: "/combos/combo-003/no-disponible",
+      table: false,
+      form: false,
+      allowedAlertPattern: combosUnavailablePattern,
+    },
+    {
+      path: "/combos/combo-004/no-disponible",
+      table: false,
+      form: false,
+      allowedAlertPattern: combosUnavailablePattern,
+    },
+    {
+      path: "/combos/combo-005/no-disponible",
+      table: false,
+      form: false,
+      allowedAlertPattern: combosUnavailablePattern,
+    },
   ];
-  for (const { path, table, form } of combosPaths) {
+  for (const { path, table, form, allowedAlertPattern } of combosPaths) {
     await page.goto(baseURL + path);
     if (mode === "api") {
       const alert = page.getByRole("alert").first();
@@ -237,7 +274,16 @@ try {
       await page.getByRole("heading", { level: 1 }).waitFor();
       if (table) await page.getByRole("table").waitFor();
       if (form) await page.locator("main form").waitFor();
-      assert.equal(await page.getByRole("alert").count(), 0);
+      const alerts = page.getByRole("alert");
+      const alertCount = await alerts.count();
+      if (allowedAlertPattern) {
+        for (let i = 0; i < alertCount; i++) {
+          const alertText = await alerts.nth(i).innerText();
+          assert.match(alertText, allowedAlertPattern, `Alerta inesperada en ${path}: ${alertText}`);
+        }
+      } else {
+        assert.equal(alertCount, 0, `Alerta de error no autorizada en ruta ${path}`);
+      }
     }
     assert.equal(
       await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),

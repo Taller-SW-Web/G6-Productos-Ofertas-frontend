@@ -62,7 +62,7 @@ export function evaluateComboEconomicBenefit(
       comboPrice,
       isValidBenefit: false,
       isPricingComplete: false,
-      currency: "PEN",
+      currency: "",
       message: "La precisión del precio del combo no es válida (máximo 2 decimales).",
     };
   }
@@ -76,6 +76,18 @@ export function evaluateComboEconomicBenefit(
   let currencyMismatch = false;
 
   for (const comp of components) {
+    if (!Number.isSafeInteger(comp.quantity) || comp.quantity < 1) {
+      return {
+        regularSum: 0,
+        publicSum: 0,
+        comboPrice,
+        isValidBenefit: false,
+        isPricingComplete: false,
+        currency: dominantCurrency || "",
+        message: `La cantidad del SKU ${comp.sku} debe ser un entero positivo seguro.`,
+      };
+    }
+
     const pricing = pricingMap[comp.sku];
     if (!pricing || !pricing.available || !pricing.currency) {
       isPricingComplete = false;
@@ -107,7 +119,7 @@ export function evaluateComboEconomicBenefit(
     publicCentsTotal += pubCents * comp.quantity;
   }
 
-  const finalCurrency = dominantCurrency || "PEN";
+  const finalCurrency = dominantCurrency || "";
 
   if (currencyMismatch) {
     return {
