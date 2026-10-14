@@ -65,7 +65,7 @@ export interface BulkImportRow {
 export interface BulkImportBatch {
   batch_id: string;
   status: BulkImportStatus;
-  total_rows: number;
+  total_rows?: number | null;
   completed_rows: number;
   failed_rows: number;
   needs_reconciliation: boolean;

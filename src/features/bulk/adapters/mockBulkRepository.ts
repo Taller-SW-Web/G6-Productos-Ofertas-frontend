@@ -14,6 +14,7 @@ import type {
   BulkRepository,
   DownloadResource,
 } from "../services/bulkRepository";
+import { parseCsvSafely } from "../utils/localFileCheck";
 
 export const DEMO_CONFIG = {
   PROCESSING_DELAY_MS: 1200,
@@ -45,7 +46,8 @@ function scheduleImportSimulation(batchId: string) {
     const batch = dynamicBatches.get(batchId);
     if (batch && batch.status === "QUEUED") {
       batch.status = "PROCESSING";
-      batch.completed_rows = Math.floor(batch.total_rows * 0.7);
+      const total = typeof batch.total_rows === "number" ? batch.total_rows : null;
+      batch.completed_rows = total !== null ? Math.floor(total * 0.7) : 0;
       batch.failed_rows = 0;
       batch.updated_at = new Date().toISOString();
     }
@@ -56,13 +58,22 @@ function scheduleImportSimulation(batchId: string) {
     activeTimers.delete(t2);
     const batch = dynamicBatches.get(batchId);
     if (batch && (batch.status === "PROCESSING" || batch.status === "QUEUED")) {
-      batch.status = "COMPLETED";
-      batch.completed_rows = batch.total_rows;
-      batch.failed_rows = 0;
-      batch.needs_reconciliation = false;
-      batch.updated_at = new Date().toISOString();
-      if (!batch.rows) {
-        batch.rows = [];
+      const total = typeof batch.total_rows === "number" ? batch.total_rows : null;
+      // An XLSX without verified rows in browser does not finalize as COMPLETED with 0 rows in simulation
+      if (total === null && (!batch.rows || batch.rows.length === 0)) {
+        batch.status = "PROCESSING";
+        batch.completed_rows = 0;
+        batch.failed_rows = 0;
+        batch.updated_at = new Date().toISOString();
+      } else {
+        batch.status = "COMPLETED";
+        batch.completed_rows = total ?? batch.rows?.length ?? 0;
+        batch.failed_rows = 0;
+        batch.needs_reconciliation = false;
+        batch.updated_at = new Date().toISOString();
+        if (!batch.rows) {
+          batch.rows = [];
+        }
       }
     }
   }, DEMO_CONFIG.COMPLETION_DELAY_MS);
@@ -92,16 +103,17 @@ function applyReconciliationCompletion(batch: BulkImportBatch) {
         newlyCompleted++;
       }
     }
-    batch.completed_rows = Math.min(
-      batch.total_rows,
-      batch.completed_rows + newlyCompleted,
-    );
+    const total = typeof batch.total_rows === "number" ? batch.total_rows : null;
+    batch.completed_rows = total !== null
+      ? Math.min(total, batch.completed_rows + newlyCompleted)
+      : batch.completed_rows + newlyCompleted;
     batch.failed_rows = Math.max(0, batch.failed_rows - newlyCompleted);
     batch.needs_reconciliation = batch.rows.some(
       (r) => r.status === "FAILED" && r.needs_reconciliation,
     );
   } else {
-    batch.completed_rows = batch.total_rows;
+    const total = typeof batch.total_rows === "number" ? batch.total_rows : null;
+    batch.completed_rows = total ?? 0;
     batch.failed_rows = 0;
     batch.needs_reconciliation = false;
   }
@@ -222,25 +234,24 @@ export const mockBulkRepository: BulkRepository & {
       );
     }
 
-    // Determine observed row count for CSV without inventing fake numbers
-    let estimatedRows = 0;
+    // Determine observed row count for CSV using the same parser as local check
+    let estimatedRows: number | undefined = undefined;
     if (lowerName.endsWith(".csv")) {
       try {
         const text = await file.text();
-        const lines = text
-          .split(/\r\n|\r|\n/)
-          .filter((l) => l.trim().length > 0);
-        if (lines.length > 1) {
-          estimatedRows = lines.length - 1;
-        } else if (lines.length === 1) {
+        const cleanText = text.replace(/^\uFEFF/, "");
+        const parsed = parseCsvSafely(cleanText);
+        if (!parsed.error && parsed.rows.length > 1) {
+          estimatedRows = parsed.rows.length - 1;
+        } else if (!parsed.error && parsed.rows.length <= 1) {
           estimatedRows = 0;
         }
       } catch {
-        estimatedRows = 0;
+        estimatedRows = undefined;
       }
     } else if (lowerName.endsWith(".xlsx")) {
-      // In demo mode, XLSX row count cannot be verified on the client
-      estimatedRows = 0;
+      // For XLSX, browser client cannot verify row count: quantity is unknown (undefined), not 0
+      estimatedRows = undefined;
     }
 
     batchSequence++;
@@ -463,10 +474,8 @@ export const mockBulkRepository: BulkRepository & {
 
     if (batch.status === "QUEUED") {
       batch.status = "PROCESSING";
-      batch.completed_rows = Math.min(
-        Math.floor(batch.total_rows * 0.7),
-        batch.total_rows,
-      );
+      const total = typeof batch.total_rows === "number" ? batch.total_rows : null;
+      batch.completed_rows = total !== null ? Math.floor(total * 0.7) : 0;
       batch.failed_rows = 0;
       batch.updated_at = new Date().toISOString();
     } else if (batch.status === "PROCESSING") {

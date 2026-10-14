@@ -37,7 +37,8 @@ export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> 
   }
 
   if (isXlsx) {
-    if (fileSize < 30) {
+    // A standard ZIP / OOXML spreadsheet contains at least Local File Header (30B) + EOCD (22B) = 52 bytes minimum
+    if (fileSize < 52) {
       return {
         valid: false,
         format: "XLSX",
@@ -52,11 +53,16 @@ export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> 
     }
 
     try {
-      const slice = await file.slice(0, 4).arrayBuffer();
-      const bytes = new Uint8Array(slice);
-      // Valid ZIP (PK) header signature is 0x50, 0x4B, 0x03, 0x04 or 0x50, 0x4B, 0x05, 0x06 / 0x07, 0x08
-      const isZip = bytes[0] === 0x50 && bytes[1] === 0x4b;
-      if (!isZip) {
+      // 1. Read first 30 bytes to check standard ZIP Local File Header (0x50, 0x4B, 0x03, 0x04)
+      const headerSlice = await file.slice(0, 30).arrayBuffer();
+      const headerBytes = new Uint8Array(headerSlice);
+      const hasLocalHeaderSignature =
+        headerBytes[0] === 0x50 &&
+        headerBytes[1] === 0x4b &&
+        headerBytes[2] === 0x03 &&
+        headerBytes[3] === 0x04;
+
+      if (!hasLocalHeaderSignature) {
         return {
           valid: false,
           format: "XLSX",
@@ -64,7 +70,39 @@ export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> 
           fileSize,
           warnings: [],
           errors: [
-            "El archivo XLSX está corrupto o no tiene una estructura de contenedor válida (firma ZIP/PK no detectada).",
+            "El archivo XLSX está corrupto o no tiene una estructura de contenedor válida (firma ZIP/PK local header no detectada).",
+          ],
+          unverifiedAspects: [],
+        };
+      }
+
+      // 2. Read the tail of the file (up to 1024 bytes) to verify presence of ZIP End of Central Directory record (0x50, 0x4B, 0x05, 0x06)
+      const tailSize = Math.min(fileSize, 1024);
+      const tailSlice = await file.slice(fileSize - tailSize, fileSize).arrayBuffer();
+      const tailBytes = new Uint8Array(tailSlice);
+      let hasEocd = false;
+
+      for (let i = 0; i < tailBytes.length - 3; i++) {
+        if (
+          tailBytes[i] === 0x50 &&
+          tailBytes[i + 1] === 0x4b &&
+          tailBytes[i + 2] === 0x05 &&
+          tailBytes[i + 3] === 0x06
+        ) {
+          hasEocd = true;
+          break;
+        }
+      }
+
+      if (!hasEocd) {
+        return {
+          valid: false,
+          format: "XLSX",
+          fileName,
+          fileSize,
+          warnings: [],
+          errors: [
+            "El archivo XLSX está incompleto o truncado (registro de fin de directorio central ZIP no encontrado).",
           ],
           unverifiedAspects: [],
         };
@@ -243,7 +281,7 @@ export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> 
 /**
  * Robust RFC 4180 CSV parser checking unclosed quotes, escaped quotes and structure.
  */
-function parseCsvSafely(text: string): { rows: string[][]; error?: string } {
+export function parseCsvSafely(text: string): { rows: string[][]; error?: string } {
   const rows: string[][] = [];
   let currentRow: string[] = [];
   let currentField = "";
