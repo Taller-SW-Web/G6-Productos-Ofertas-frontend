@@ -5,7 +5,7 @@ import type {
   CreateComboPayload,
   UpdateComboPayload,
   ComponentPricingSnapshot,
-  EconomicComparisonResult,
+  FreshnessStatus,
 } from "../types/combos";
 import {
   ComboRepositoryError,
@@ -15,88 +15,167 @@ import {
   initialCombos,
   initialPricingCatalog,
   catalogCandidateProducts,
+  initialInventorySnapshot,
 } from "../mocks/combosFixtures";
+import { evaluateComboEconomicBenefit } from "../utils/economicEvaluation";
 
-export function evaluateComboEconomicBenefit(
+export { evaluateComboEconomicBenefit };
+
+/**
+ * Calculates informative inventory availability per SPEC-002:
+ * min(floor(stockDisponibleSKU / cantidadRequerida))
+ *
+ * If any SKU has null or unconfirmed stock, returns null availability with INCOMPLETA freshness.
+ * If any component has 0 stock (min = 0), returns 0 with ACTUALIZADA freshness (Agotado).
+ * If all have sufficient stock, returns the min units available with ACTUALIZADA freshness.
+ */
+export function calculateComboAvailability(
   components: { sku: string; quantity: number }[],
-  comboPrice: number,
-  pricingMap: Record<string, ComponentPricingSnapshot>,
-): EconomicComparisonResult {
-  let regularSum = 0;
-  let publicSum = 0;
-  let isPricingComplete = true;
-  let currency = "PEN";
-
-  for (const comp of components) {
-    const pricing = pricingMap[comp.sku];
-    if (!pricing || !pricing.available) {
-      isPricingComplete = false;
-      continue;
+  stockSnapshot: Record<string, number | null>,
+): {
+  informativeAvailability: number | null;
+  freshness: FreshnessStatus;
+} {
+  let minAvail = Infinity;
+  for (const c of components) {
+    const stock = stockSnapshot[c.sku];
+    if (stock === undefined || stock === null) {
+      return {
+        informativeAvailability: null,
+        freshness: "INCOMPLETA",
+      };
     }
-    currency = pricing.currency;
-    regularSum += pricing.regularPrice * comp.quantity;
-    publicSum += pricing.publicPrice * comp.quantity;
+    if (c.quantity <= 0) continue;
+    const units = Math.floor(stock / c.quantity);
+    if (units < minAvail) {
+      minAvail = units;
+    }
   }
 
-  // Rounded to 2 decimals
-  regularSum = Math.round(regularSum * 100) / 100;
-  publicSum = Math.round(publicSum * 100) / 100;
-  const roundedPrice = Math.round(comboPrice * 100) / 100;
-
-  const isValidBenefit =
-    isPricingComplete &&
-    roundedPrice > 0 &&
-    roundedPrice < regularSum &&
-    roundedPrice < publicSum;
-
-  let message: string;
-  if (!isPricingComplete) {
-    message = "No se puede confirmar la comparación porque faltan precios de uno o más componentes.";
-  } else if (roundedPrice <= 0) {
-    message = "El precio del combo debe ser mayor a cero.";
-  } else if (roundedPrice >= regularSum || roundedPrice >= publicSum) {
-    message =
-      "El precio del combo debe ser menor que la suma regular y que la suma pública vigente de sus componentes.";
-  } else {
-    message = "El precio propuesto es menor que ambas referencias actuales.";
+  if (minAvail === Infinity) {
+    return {
+      informativeAvailability: null,
+      freshness: "NO_VERIFICABLE",
+    };
   }
 
   return {
-    regularSum,
-    publicSum,
-    comboPrice: roundedPrice,
-    isValidBenefit,
-    isPricingComplete,
-    currency,
-    message,
+    informativeAvailability: minAvail,
+    freshness: "ACTUALIZADA",
+  };
+}
+
+export interface CatalogSkuResolution {
+  found: boolean;
+  productName: string;
+  variantLabel?: string;
+  isActive: boolean;
+  isNestedCombo: boolean;
+  isVariantParentWithoutSelection?: boolean;
+}
+
+export function resolveCatalogSku(sku: string): CatalogSkuResolution {
+  for (const p of catalogCandidateProducts) {
+    if (!p.hasVariants) {
+      if (p.skuBase === sku) {
+        return {
+          found: true,
+          productName: p.name,
+          isActive: p.status === "ACTIVO",
+          isNestedCombo: p.skuBase === "COMBO-ANIDADO-SKU" || p.productId === "PROD-008",
+        };
+      }
+    } else {
+      if (p.skuBase === sku) {
+        return {
+          found: true,
+          productName: p.name,
+          isActive: p.status === "ACTIVO",
+          isNestedCombo: false,
+          isVariantParentWithoutSelection: true,
+        };
+      }
+      const v = p.variants.find((vr) => vr.sku === sku);
+      if (v) {
+        return {
+          found: true,
+          productName: p.name,
+          variantLabel: v.label,
+          isActive: p.status === "ACTIVO" && v.status === "ACTIVA",
+          isNestedCombo: false,
+        };
+      }
+    }
+  }
+
+  return {
+    found: false,
+    productName: "",
+    isActive: false,
+    isNestedCombo: false,
   };
 }
 
 export class MockCombosRepository implements CombosRepository {
   private combos: ComboView[];
   private pricing: Record<string, ComponentPricingSnapshot>;
+  private stockSnapshot: Record<string, number | null>;
   private nextId = 100;
 
+  // Failure simulation flags for testing negative scenarios
+  private pricingFailure = false;
+  private listFailure = false;
+
   constructor(customCombos?: ComboView[]) {
-    // Clone to prevent cross-test pollution
     this.combos = (customCombos ?? initialCombos).map((c) => ({
       ...c,
       components: c.components.map((comp) => ({ ...comp })),
     }));
     this.pricing = { ...initialPricingCatalog };
+    this.stockSnapshot = { ...initialInventorySnapshot };
   }
 
-  // Reset to initial state for tests
   public reset(customCombos?: ComboView[]): void {
     this.combos = (customCombos ?? initialCombos).map((c) => ({
       ...c,
       components: c.components.map((comp) => ({ ...comp })),
     }));
     this.pricing = { ...initialPricingCatalog };
+    this.stockSnapshot = { ...initialInventorySnapshot };
     this.nextId = 100;
+    this.pricingFailure = false;
+    this.listFailure = false;
   }
 
-  async listCombos(query: ComboListQuery): Promise<ComboPageResult> {
+  public setPricingFailure(fail: boolean): void {
+    this.pricingFailure = fail;
+  }
+
+  public setListFailure(fail: boolean): void {
+    this.listFailure = fail;
+  }
+
+  public setStockForSku(sku: string, stock: number | null): void {
+    this.stockSnapshot[sku] = stock;
+  }
+
+  async listCombos(query: ComboListQuery, scenario?: string): Promise<ComboPageResult> {
+    if (this.listFailure || scenario === "list-error" || scenario === "error") {
+      throw new ComboRepositoryError(
+        "ERROR_INTERNO",
+        "Error al cargar el listado de combos.",
+      );
+    }
+
+    if (scenario === "list-empty" || scenario === "empty") {
+      return {
+        items: [],
+        total: 0,
+        page: 1,
+        pageSize: query.pageSize || 10,
+      };
+    }
+
     let filtered = [...this.combos];
 
     if (query.status && query.status !== "all") {
@@ -127,7 +206,10 @@ export class MockCombosRepository implements CombosRepository {
     };
   }
 
-  async getCombo(comboId: string): Promise<ComboView | null> {
+  async getCombo(comboId: string, scenario?: string): Promise<ComboView | null> {
+    if (scenario === "not-found" || scenario === "missing") {
+      return null;
+    }
     const found = this.combos.find((c) => c.comboId === comboId);
     if (!found) return null;
     return {
@@ -136,20 +218,17 @@ export class MockCombosRepository implements CombosRepository {
     };
   }
 
-  async createCombo(payload: CreateComboPayload): Promise<ComboView> {
-    // Validations per SPEC-002
-    if (!payload.nombre || payload.nombre.trim() === "") {
-      throw new ComboRepositoryError("ERROR_INTERNO", "El nombre es obligatorio");
-    }
-
-    if (!payload.componentes || payload.componentes.length < 2) {
+  private validatePayloadComponents(
+    components: { sku: string; quantity: number }[],
+  ): CatalogSkuResolution[] {
+    if (!components || components.length < 2) {
       throw new ComboRepositoryError(
         "COMBO_COMPONENTES_INSUFICIENTES",
         "Un combo debe contener al menos dos componentes SKU vendibles directos.",
       );
     }
 
-    const skus = payload.componentes.map((c) => c.sku);
+    const skus = components.map((c) => c.sku);
     const uniqueSkus = new Set(skus);
     if (uniqueSkus.size !== skus.length) {
       throw new ComboRepositoryError(
@@ -158,15 +237,56 @@ export class MockCombosRepository implements CombosRepository {
       );
     }
 
-    // Check nested combo prohibition
-    for (const sku of skus) {
-      if (sku === "COMBO-ANIDADO-SKU") {
+    const resolutions: CatalogSkuResolution[] = [];
+
+    for (const comp of components) {
+      // Validate quantity integrity: positive integer >= 1
+      if (!Number.isInteger(comp.quantity) || comp.quantity < 1) {
         throw new ComboRepositoryError(
-          "COMBO_ANIDADO_NO_PERMITIDO",
-          "No se admiten combos anidados como componentes.",
+          "CANTIDAD_INVALIDA",
+          `La cantidad del SKU ${comp.sku} debe ser un número entero positivo mayor o igual a 1.`,
         );
       }
+
+      // Catalog SKU eligibility verification
+      const res = resolveCatalogSku(comp.sku);
+      if (!res.found) {
+        throw new ComboRepositoryError(
+          "SKU_NO_ENCONTRADO",
+          `El SKU '${comp.sku}' no existe en el catálogo.`,
+        );
+      }
+      if (res.isNestedCombo) {
+        throw new ComboRepositoryError(
+          "COMBO_ANIDADO_NO_PERMITIDO",
+          `El SKU '${comp.sku}' corresponde a un combo. No se admiten combos anidados como componentes.`,
+        );
+      }
+      if (res.isVariantParentWithoutSelection) {
+        throw new ComboRepositoryError(
+          "SKU_NO_ELEGIBLE",
+          `El producto '${res.productName}' posee variantes; debe seleccionarse una variante vendible específica, no el SKU base.`,
+        );
+      }
+      if (!res.isActive) {
+        throw new ComboRepositoryError(
+          "SKU_NO_ELEGIBLE",
+          `El SKU '${comp.sku}' pertenece a un producto o variante inactivo/no vendible.`,
+        );
+      }
+
+      resolutions.push(res);
     }
+
+    return resolutions;
+  }
+
+  async createCombo(payload: CreateComboPayload): Promise<ComboView> {
+    if (!payload.nombre || payload.nombre.trim() === "") {
+      throw new ComboRepositoryError("ERROR_INTERNO", "El nombre del combo es obligatorio.");
+    }
+
+    const resolutions = this.validatePayloadComponents(payload.componentes);
 
     // Economic evaluation
     const economic = evaluateComboEconomicBenefit(
@@ -179,9 +299,15 @@ export class MockCombosRepository implements CombosRepository {
       throw new ComboRepositoryError(
         "COMBO_PRECIO_INVALIDO",
         economic.message ||
-          "El precio del combo debe ser menor que la suma regular y que la suma pública vigente de sus componentes.",
+          "El precio del combo debe ser estrictamente menor que la suma regular y que la suma pública vigente de sus componentes.",
       );
     }
+
+    // Availability calculated deterministically from stock snapshot (never hardcoded 10)
+    const availability = calculateComboAvailability(
+      payload.componentes,
+      this.stockSnapshot,
+    );
 
     const newId = `combo-${++this.nextId}`;
 
@@ -189,39 +315,24 @@ export class MockCombosRepository implements CombosRepository {
       comboId: newId,
       name: payload.nombre.trim(),
       description: payload.descripcion ? payload.descripcion.trim() : null,
-      status: "ACTIVO", // Creation does not allow setting status; default is ACTIVO
+      status: "ACTIVO",
       price: payload.precioCombo,
-      components: payload.componentes.map((comp) => {
+      components: payload.componentes.map((comp, idx) => {
         const pr = this.pricing[comp.sku];
-        // Lookup candidate metadata if available
-        let productName = comp.sku;
-        let variantLabel: string | undefined;
-        for (const p of catalogCandidateProducts) {
-          if (!p.hasVariants && p.skuBase === comp.sku) {
-            productName = p.name;
-            break;
-          }
-          const v = p.variants.find((vr) => vr.sku === comp.sku);
-          if (v) {
-            productName = p.name;
-            variantLabel = v.label;
-            break;
-          }
-        }
-
+        const res = resolutions[idx]!;
         return {
           sku: comp.sku,
           quantity: comp.quantity,
-          productName,
-          variantLabel,
+          productName: res.productName,
+          variantLabel: res.variantLabel,
           regularPrice: pr?.regularPrice ?? 0,
           publicPrice: pr?.publicPrice ?? 0,
           currency: pr?.currency ?? "PEN",
         };
       }),
-      informativeAvailability: 10,
+      informativeAvailability: availability.informativeAvailability,
       calculatedAt: new Date().toISOString(),
-      freshness: "ACTUALIZADA",
+      freshness: availability.freshness,
       version: 1,
     };
 
@@ -232,6 +343,7 @@ export class MockCombosRepository implements CombosRepository {
   async updateCombo(
     comboId: string,
     payload: UpdateComboPayload,
+    scenario?: string,
   ): Promise<ComboView> {
     const existingIndex = this.combos.findIndex((c) => c.comboId === comboId);
     if (existingIndex === -1) {
@@ -241,52 +353,22 @@ export class MockCombosRepository implements CombosRepository {
       );
     }
 
-    const current = this.combos[existingIndex];
-    if (!current) {
-      throw new ComboRepositoryError(
-        "COMBO_NO_ENCONTRADO",
-        `No se encontró el combo con identificador ${comboId}`,
-      );
-    }
+    const current = this.combos[existingIndex]!;
 
-    // Concurrency check
-    if (payload.version !== current.version) {
+    // Concurrency check or simulated conflict scenario
+    if (payload.version !== current.version || scenario === "version-conflict" || scenario === "conflict") {
       throw new ComboRepositoryError(
         "VERSION_CONFLICT",
         "Este combo cambió desde que comenzaste a editarlo. Revisa la versión actual antes de volver a guardar tus cambios.",
-        current.version,
+        current.version + 1,
       );
     }
 
     if (!payload.nombre || payload.nombre.trim() === "") {
-      throw new ComboRepositoryError("ERROR_INTERNO", "El nombre es obligatorio");
+      throw new ComboRepositoryError("ERROR_INTERNO", "El nombre del combo es obligatorio.");
     }
 
-    if (!payload.componentes || payload.componentes.length < 2) {
-      throw new ComboRepositoryError(
-        "COMBO_COMPONENTES_INSUFICIENTES",
-        "Un combo debe contener al menos dos componentes SKU vendibles directos.",
-      );
-    }
-
-    const skus = payload.componentes.map((c) => c.sku);
-    const uniqueSkus = new Set(skus);
-    if (uniqueSkus.size !== skus.length) {
-      throw new ComboRepositoryError(
-        "COMBO_COMPONENTE_DUPLICADO",
-        "No se permiten componentes duplicados dentro del mismo combo.",
-      );
-    }
-
-    // Check nested combo prohibition
-    for (const sku of skus) {
-      if (sku === "COMBO-ANIDADO-SKU") {
-        throw new ComboRepositoryError(
-          "COMBO_ANIDADO_NO_PERMITIDO",
-          "No se admiten combos anidados como componentes.",
-        );
-      }
-    }
+    const resolutions = this.validatePayloadComponents(payload.componentes);
 
     // Economic evaluation
     const economic = evaluateComboEconomicBenefit(
@@ -299,9 +381,15 @@ export class MockCombosRepository implements CombosRepository {
       throw new ComboRepositoryError(
         "COMBO_PRECIO_INVALIDO",
         economic.message ||
-          "El precio del combo debe ser menor que la suma regular y que la suma pública vigente de sus componentes.",
+          "El precio del combo debe ser estrictamente menor que la suma regular y que la suma pública vigente de sus componentes.",
       );
     }
+
+    // Availability recalculated dynamically on update (never reusing stale estimate)
+    const availability = calculateComboAvailability(
+      payload.componentes,
+      this.stockSnapshot,
+    );
 
     const updated: ComboView = {
       ...current,
@@ -309,33 +397,22 @@ export class MockCombosRepository implements CombosRepository {
       description: payload.descripcion ? payload.descripcion.trim() : null,
       price: payload.precioCombo,
       version: current.version + 1,
-      components: payload.componentes.map((comp) => {
+      components: payload.componentes.map((comp, idx) => {
         const pr = this.pricing[comp.sku];
-        let productName = comp.sku;
-        let variantLabel: string | undefined;
-        for (const p of catalogCandidateProducts) {
-          if (!p.hasVariants && p.skuBase === comp.sku) {
-            productName = p.name;
-            break;
-          }
-          const v = p.variants.find((vr) => vr.sku === comp.sku);
-          if (v) {
-            productName = p.name;
-            variantLabel = v.label;
-            break;
-          }
-        }
-
+        const res = resolutions[idx]!;
         return {
           sku: comp.sku,
           quantity: comp.quantity,
-          productName,
-          variantLabel,
+          productName: res.productName,
+          variantLabel: res.variantLabel,
           regularPrice: pr?.regularPrice ?? 0,
           publicPrice: pr?.publicPrice ?? 0,
           currency: pr?.currency ?? "PEN",
         };
       }),
+      informativeAvailability: availability.informativeAvailability,
+      freshness: availability.freshness,
+      calculatedAt: new Date().toISOString(),
     };
 
     this.combos[existingIndex] = updated;
@@ -351,15 +428,8 @@ export class MockCombosRepository implements CombosRepository {
       );
     }
 
-    const current = this.combos[existingIndex];
-    if (!current) {
-      throw new ComboRepositoryError(
-        "COMBO_NO_ENCONTRADO",
-        `No se encontró el combo con identificador ${comboId}`,
-      );
-    }
+    const current = this.combos[existingIndex]!;
     if (current.status === "INACTIVO") {
-      // Already deactivated, return current
       return { ...current };
     }
 
@@ -373,7 +443,17 @@ export class MockCombosRepository implements CombosRepository {
     return { ...updated };
   }
 
-  async getComponentsPricing(skus: string[]): Promise<Record<string, ComponentPricingSnapshot>> {
+  async getComponentsPricing(
+    skus: string[],
+    scenario?: string,
+  ): Promise<Record<string, ComponentPricingSnapshot>> {
+    if (this.pricingFailure || scenario === "pricing-error") {
+      throw new ComboRepositoryError(
+        "SERVICIO_NO_DISPONIBLE",
+        "Error al consultar el servicio de precios de componentes.",
+      );
+    }
+
     const result: Record<string, ComponentPricingSnapshot> = {};
     for (const sku of skus) {
       if (this.pricing[sku]) {

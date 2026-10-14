@@ -59,6 +59,18 @@ export const initialPricingCatalog: Record<string, ComponentPricingSnapshot> = {
   },
 };
 
+export const initialInventorySnapshot: Record<string, number | null> = {
+  "CAM-NEG-M": 50,
+  "PAN-GRI-32": 25,
+  "POL-DEP-AZU-L": 0, // agotado
+  "SHO-DEP-NEG-M": 15,
+  "CAM-OXF-BLA-M": 30,
+  "CAM-OXF-AZU-L": 10,
+  "PROD-ZAP-002": 5,
+  "SKU-NO-PRICING": 20,
+  "SKU-STOCK-NULL": null, // incompleta / no verificable
+};
+
 export interface CatalogCandidateProduct {
   productId: string;
   name: string;

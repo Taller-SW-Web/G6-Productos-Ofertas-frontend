@@ -1,17 +1,24 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Alert,
   Box,
   Button,
   Group,
+  Modal,
   Paper,
   Stack,
+  Table,
   Text,
   TextInput,
   Textarea,
 } from "@mantine/core";
-import { IconDeviceFloppy, IconX, IconAlertTriangle } from "@tabler/icons-react";
+import {
+  IconDeviceFloppy,
+  IconX,
+  IconAlertTriangle,
+  IconRefresh,
+} from "@tabler/icons-react";
 import { PageHeader } from "../../../components/shared/PageHeader";
 import { SectionCard } from "../../../components/shared/SectionCard";
 import { FeedbackAlert } from "../../../components/shared/FeedbackAlert";
@@ -19,10 +26,11 @@ import { useCombosRepository } from "../hooks/useCombosRepository";
 import { ComponentSelector } from "../components/ComponentSelector";
 import { ComponentsTable } from "../components/ComponentsTable";
 import { EconomicComparator } from "../components/EconomicComparator";
-import { evaluateComboEconomicBenefit } from "../adapters/mockCombosRepository";
+import { evaluateComboEconomicBenefit } from "../utils/economicEvaluation";
 import { ComboRepositoryError } from "../services/combosRepository";
 import type {
   ComboComponentItem,
+  ComboView,
   ComponentPricingSnapshot,
 } from "../types/combos";
 
@@ -32,6 +40,8 @@ export function ComboFormPage() {
 
   const repository = useCombosRepository();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const scenarioParam = searchParams.get("escenario") || undefined;
 
   // Form fields
   const [name, setName] = useState("");
@@ -44,13 +54,21 @@ export function ComboFormPage() {
   const [loadingInitial, setLoadingInitial] = useState(isEditing);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [versionConflict, setVersionConflict] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  // Pricing snapshot for components
-  const [pricingMap, setPricingMap] = useState<
-    Record<string, ComponentPricingSnapshot>
-  >({});
+  // Version Conflict state (H06)
+  const [versionConflict, setVersionConflict] = useState(false);
+  const [serverVersionCombo, setServerVersionCombo] = useState<ComboView | null>(null);
+
+  // Pricing snapshot for components (H07)
+  const [pricingMap, setPricingMap] = useState<Record<string, ComponentPricingSnapshot>>({});
+  const [pricingLoading, setPricingLoading] = useState(false);
+  const [pricingError, setPricingError] = useState<string | null>(null);
+  const [pricingScenarioCleared, setPricingScenarioCleared] = useState(false);
+
+  // Dirty state & Unsaved changes modal (H12)
+  const [isDirty, setIsDirty] = useState(false);
+  const [discardModalOpen, setDiscardModalOpen] = useState(false);
 
   // Submission lock to strictly prevent double submit
   const isSubmittingRef = useRef(false);
@@ -66,13 +84,14 @@ export function ComboFormPage() {
       if (!comboId) return;
       setLoadingInitial(true);
       try {
-        const data = await repository.getCombo(comboId, controller.signal);
+        const data = await repository.getCombo(comboId, scenarioParam, controller.signal);
         if (active && data) {
           setName(data.name);
           setDescription(data.description || "");
           setPrice(data.price);
           setComponents(data.components);
           setVersion(data.version);
+          setIsDirty(false);
         } else if (active && !data) {
           setSubmitError(`No se encontró el combo con ID ${comboId}`);
         }
@@ -97,45 +116,62 @@ export function ComboFormPage() {
       active = false;
       controller.abort();
     };
-  }, [isEditing, comboId, repository]);
+  }, [isEditing, comboId, repository, scenarioParam]);
+
+  // Warn before browser unload if dirty
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isDirty) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isDirty]);
 
   const componentSkusKey = useMemo(
     () => components.map((c) => c.sku).sort().join(","),
     [components],
   );
 
-  // Fetch Pricing for all component SKUs whenever components change
-  useEffect(() => {
-    let active = true;
-    const controller = new AbortController();
-
-    async function fetchPricing() {
+  // Fetch Pricing for all component SKUs (H07: handles errors explicitly and invalidates)
+  const fetchPricing = useCallback(
+    async (ignoreScenario = false) => {
       const skus = componentSkusKey ? componentSkusKey.split(",").filter(Boolean) : [];
-      if (skus.length === 0) return;
-      try {
-        const prices = await repository.getComponentsPricing(
-          skus,
-          controller.signal,
-        );
-        if (active) {
-          setPricingMap((prev) => ({ ...prev, ...prices }));
-        }
-      } catch {
-        // Retain prior prices on failure
+      if (skus.length === 0) {
+        setPricingMap({});
+        setPricingError(null);
+        return;
       }
-    }
 
+      setPricingLoading(true);
+      setPricingError(null);
+      try {
+        const activeScenario = ignoreScenario || pricingScenarioCleared ? undefined : scenarioParam;
+        const prices = await repository.getComponentsPricing(skus, activeScenario);
+        setPricingMap(prices);
+      } catch (err: unknown) {
+        setPricingError(
+          err instanceof Error
+            ? err.message
+            : "Error al consultar los precios de los componentes.",
+        );
+        setPricingMap({});
+      } finally {
+        setPricingLoading(false);
+      }
+    },
+    [componentSkusKey, repository, scenarioParam, pricingScenarioCleared],
+  );
+
+  useEffect(() => {
     fetchPricing();
-
-    return () => {
-      active = false;
-      controller.abort();
-    };
-  }, [componentSkusKey, repository]);
+  }, [fetchPricing]);
 
   // Handle Add Component
   const handleAddComponent = (item: ComboComponentItem) => {
     setComponents((prev) => [...prev, item]);
+    setIsDirty(true);
     setFieldErrors((prev) => {
       const copy = { ...prev };
       delete copy.components;
@@ -146,12 +182,21 @@ export function ComboFormPage() {
   // Handle Remove Component
   const handleRemoveComponent = (sku: string) => {
     setComponents((prev) => prev.filter((c) => c.sku !== sku));
+    setIsDirty(true);
+  };
+
+  // Handle Update Quantity (H05)
+  const handleUpdateQuantity = (sku: string, newQuantity: number) => {
+    setComponents((prev) =>
+      prev.map((c) => (c.sku === sku ? { ...c, quantity: newQuantity } : c)),
+    );
+    setIsDirty(true);
   };
 
   const parsedPrice =
     typeof price === "number" ? price : parseFloat(price) || 0;
 
-  // Real-time economic evaluation
+  // Real-time economic evaluation (H03)
   const comparison = useMemo(() => {
     return evaluateComboEconomicBenefit(
       components.map((c) => ({ sku: c.sku, quantity: c.quantity })),
@@ -195,6 +240,8 @@ export function ComboFormPage() {
 
     if (parsedPrice <= 0) {
       errors.price = "El precio del combo debe ser mayor a cero.";
+    } else if (pricingError) {
+      errors.price = "No se puede confirmar el precio porque falló la consulta de Pricing.";
     } else if (components.length >= 2 && !comparison.isValidBenefit) {
       errors.price =
         comparison.message ||
@@ -221,7 +268,8 @@ export function ComboFormPage() {
           })),
           precioCombo: parsedPrice,
           version,
-        });
+        }, scenarioParam);
+        setIsDirty(false);
         navigate(`/combos/${updated.comboId}`);
       } else {
         const created = await repository.createCombo({
@@ -233,6 +281,7 @@ export function ComboFormPage() {
           })),
           precioCombo: parsedPrice,
         });
+        setIsDirty(false);
         navigate(`/combos/${created.comboId}`);
       }
     } catch (err: unknown) {
@@ -240,6 +289,12 @@ export function ComboFormPage() {
         if (err.code === "VERSION_CONFLICT") {
           setVersionConflict(true);
           setSubmitError(err.message);
+          // Fetch current server version for explicit review (H06)
+          if (comboId) {
+            repository.getCombo(comboId).then((fresh) => {
+              if (fresh) setServerVersionCombo(fresh);
+            });
+          }
         } else if (err.code === "COMBO_PRECIO_INVALIDO") {
           setSubmitError(err.message);
           setFieldErrors((prev) => ({ ...prev, price: err.message }));
@@ -259,17 +314,34 @@ export function ComboFormPage() {
     }
   };
 
-  const handleRefreshVersion = async () => {
-    if (!comboId) return;
-    try {
-      const fresh = await repository.getCombo(comboId);
-      if (fresh) {
-        setVersion(fresh.version);
-        setVersionConflict(false);
-        setSubmitError(null);
-      }
-    } catch {
-      // ignore
+  // Safe Concurrency Recovery Options (H06)
+  const handleAdoptServerVersion = () => {
+    if (!serverVersionCombo) return;
+    setName(serverVersionCombo.name);
+    setDescription(serverVersionCombo.description || "");
+    setPrice(serverVersionCombo.price);
+    setComponents(serverVersionCombo.components);
+    setVersion(serverVersionCombo.version);
+    setVersionConflict(false);
+    setServerVersionCombo(null);
+    setSubmitError(null);
+    setIsDirty(false);
+  };
+
+  const handleSyncVersionAndKeepDraft = () => {
+    if (!serverVersionCombo) return;
+    setVersion(serverVersionCombo.version);
+    setVersionConflict(false);
+    setServerVersionCombo(null);
+    setSubmitError(null);
+  };
+
+  // Safe Discard Changes Cancel (H12)
+  const handleCancelClick = () => {
+    if (isDirty) {
+      setDiscardModalOpen(true);
+    } else {
+      navigate(isEditing ? `/combos/${comboId}` : "/combos");
     }
   };
 
@@ -312,26 +384,111 @@ export function ComboFormPage() {
         ]}
       />
 
+      {/* Discard Unsaved Changes Modal (H12) */}
+      <Modal
+        opened={discardModalOpen}
+        onClose={() => setDiscardModalOpen(false)}
+        title="Descartar cambios sin guardar"
+        centered
+        data-testid="discard-changes-modal"
+      >
+        <Stack gap="md">
+          <Text size="sm">
+            Tienes modificaciones no guardadas en este formulario. Si sales ahora,
+            perderás todos los cambios realizados.
+          </Text>
+          <Group justify="flex-end" gap="sm">
+            <Button
+              variant="default"
+              onClick={() => setDiscardModalOpen(false)}
+            >
+              Continuar editando
+            </Button>
+            <Button
+              color="red"
+              onClick={() => {
+                setDiscardModalOpen(false);
+                setIsDirty(false);
+                navigate(isEditing ? `/combos/${comboId}` : "/combos");
+              }}
+              data-testid="confirm-discard-button"
+            >
+              Descartar y salir
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {/* Explicit Concurrency Conflict Review (H06) */}
       {versionConflict && (
         <Alert
           icon={<IconAlertTriangle size={18} />}
-          title="Conflicto de concurrencia detectado"
+          title="Conflicto de versiones concurrentes detectado"
           color="yellow"
           variant="filled"
+          data-testid="version-conflict-alert"
         >
-          <Stack gap="xs">
+          <Stack gap="sm">
             <Text size="sm">
-              Este combo cambió desde que comenzaste a editarlo. Revisa la
-              versión actual antes de volver a guardar tus cambios.
+              Este combo fue modificado por otro proceso mientras lo editabas.
+              Tus cambios no se sobrescribieron automáticamente para proteger la integridad.
             </Text>
-            <Group>
+
+            {serverVersionCombo && (
+              <Paper withBorder p="sm" bg="white" c="dark" radius="xs">
+                <Text size="xs" fw={700} mb="xs">
+                  Comparación entre versión actual del servidor (v{serverVersionCombo.version}) y tu borrador:
+                </Text>
+                <Table withTableBorder withColumnBorders>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Campo</Table.Th>
+                      <Table.Th>Versión en servidor (v{serverVersionCombo.version})</Table.Th>
+                      <Table.Th>Tu borrador</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    <Table.Tr>
+                      <Table.Td fw={600}>Nombre</Table.Td>
+                      <Table.Td>{serverVersionCombo.name}</Table.Td>
+                      <Table.Td>{name}</Table.Td>
+                    </Table.Tr>
+                    <Table.Tr>
+                      <Table.Td fw={600}>Precio</Table.Td>
+                      <Table.Td>PEN {serverVersionCombo.price.toFixed(2)}</Table.Td>
+                      <Table.Td>PEN {parsedPrice.toFixed(2)}</Table.Td>
+                    </Table.Tr>
+                    <Table.Tr>
+                      <Table.Td fw={600}>Componentes</Table.Td>
+                      <Table.Td>
+                        {serverVersionCombo.components.map((c) => `${c.sku} (x${c.quantity})`).join(", ")}
+                      </Table.Td>
+                      <Table.Td>
+                        {components.map((c) => `${c.sku} (x${c.quantity})`).join(", ")}
+                      </Table.Td>
+                    </Table.Tr>
+                  </Table.Tbody>
+                </Table>
+              </Paper>
+            )}
+
+            <Group gap="sm" mt="xs">
               <Button
                 variant="white"
                 color="dark"
                 size="xs"
-                onClick={handleRefreshVersion}
+                onClick={handleAdoptServerVersion}
+                data-testid="adopt-server-version-btn"
               >
-                Consultar versión actual
+                Cargar versión del servidor (descartar borrador)
+              </Button>
+              <Button
+                variant="default"
+                size="xs"
+                onClick={handleSyncVersionAndKeepDraft}
+                data-testid="sync-version-keep-draft-btn"
+              >
+                Confirmar y sincronizar versión para reintentar guardado
               </Button>
             </Group>
           </Stack>
@@ -357,6 +514,7 @@ export function ComboFormPage() {
                 value={name}
                 onChange={(e) => {
                   setName(e.currentTarget.value);
+                  setIsDirty(true);
                   setFieldErrors((prev) => {
                     const c = { ...prev };
                     delete c.name;
@@ -370,7 +528,10 @@ export function ComboFormPage() {
                 label="Descripción comercial"
                 placeholder="Describe el propósito y contenido del combo..."
                 value={description}
-                onChange={(e) => setDescription(e.currentTarget.value)}
+                onChange={(e) => {
+                  setDescription(e.currentTarget.value);
+                  setIsDirty(true);
+                }}
                 minRows={3}
               />
             </Stack>
@@ -381,7 +542,8 @@ export function ComboFormPage() {
               <Text size="sm" c="dimmed">
                 Selecciona al menos dos SKUs vendibles directos. Un producto con
                 variantes requiere la elección explícita de su variante. No se
-                admiten combos anidados ni SKUs duplicados.
+                admiten combos anidados ni SKUs duplicados. Puedes editar las
+                cantidades directamente en la tabla.
               </Text>
 
               <ComponentSelector
@@ -403,6 +565,7 @@ export function ComboFormPage() {
                   components={displayComponents}
                   editable
                   onRemove={handleRemoveComponent}
+                  onUpdateQuantity={handleUpdateQuantity}
                 />
               </Box>
             </Stack>
@@ -410,6 +573,37 @@ export function ComboFormPage() {
 
           <SectionCard title="Precio y regla de ventaja económica">
             <Stack gap="md">
+              {pricingError && (
+                <FeedbackAlert
+                  semantic="error"
+                  title="Fallo al consultar Pricing de componentes"
+                >
+                  <Stack gap="xs">
+                    <Text size="sm">
+                      {pricingError}. No se puede validar la ventaja económica del combo sin precios vigentes.
+                    </Text>
+                    <Group>
+                      <Button
+                        size="xs"
+                        variant="default"
+                        leftSection={<IconRefresh size={14} />}
+                        onClick={() => {
+                          const nextParams = new URLSearchParams(searchParams);
+                          nextParams.delete("escenario");
+                          setSearchParams(nextParams);
+                          setPricingScenarioCleared(true);
+                          fetchPricing(true);
+                        }}
+                        loading={pricingLoading}
+                        data-testid="retry-pricing-btn"
+                      >
+                        Reintentar consulta de precios
+                      </Button>
+                    </Group>
+                  </Stack>
+                </FeedbackAlert>
+              )}
+
               <Group align="flex-start" grow>
                 <TextInput
                   label="Precio promocional del combo (PEN)"
@@ -418,6 +612,7 @@ export function ComboFormPage() {
                   onChange={(e) => {
                     const val = e.currentTarget.value;
                     setPrice(val);
+                    setIsDirty(true);
                     setFieldErrors((prev) => {
                       const c = { ...prev };
                       delete c.price;
@@ -439,10 +634,11 @@ export function ComboFormPage() {
               <Button
                 variant="subtle"
                 color="gray"
-                component={Link}
-                to={isEditing ? `/combos/${comboId}` : "/combos"}
+                type="button"
+                onClick={handleCancelClick}
                 leftSection={<IconX size={16} />}
                 disabled={submitting}
+                data-testid="combo-cancel-button"
               >
                 Cancelar
               </Button>

@@ -1,6 +1,26 @@
 export type ComboStatus = "ACTIVO" | "INACTIVO";
 
-export type FreshnessStatus = "ACTUALIZADA" | "DESACTUALIZADA" | "INCOMPLETA";
+export type FreshnessStatus =
+  | "ACTUALIZADA"
+  | "DESACTUALIZADA"
+  | "INCOMPLETA"
+  | "NO_VERIFICABLE"
+  | "ERROR_CONSULTA";
+
+export interface CandidateVariant {
+  sku: string;
+  label: string;
+  status: "ACTIVA" | "INACTIVA" | "BORRADOR";
+}
+
+export interface CandidateProduct {
+  productId: string;
+  name: string;
+  skuBase: string;
+  hasVariants: boolean;
+  status: "ACTIVO" | "INACTIVO" | "BORRADOR";
+  variants: CandidateVariant[];
+}
 
 export interface ComboComponentItem {
   sku: string;

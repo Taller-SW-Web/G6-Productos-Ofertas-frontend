@@ -1,4 +1,4 @@
-import { ActionIcon, Badge, Table, Text } from "@mantine/core";
+import { ActionIcon, Badge, Table, Text, TextInput } from "@mantine/core";
 import { IconTrash } from "@tabler/icons-react";
 import type { ComboComponentItem } from "../types/combos";
 
@@ -6,6 +6,7 @@ interface ComponentsTableProps {
   components: ComboComponentItem[];
   editable?: boolean;
   onRemove?: (sku: string) => void;
+  onUpdateQuantity?: (sku: string, newQuantity: number) => void;
   currency?: string;
 }
 
@@ -13,6 +14,7 @@ export function ComponentsTable({
   components,
   editable = false,
   onRemove,
+  onUpdateQuantity,
   currency = "PEN",
 }: ComponentsTableProps) {
   if (components.length === 0) {
@@ -23,6 +25,15 @@ export function ComponentsTable({
     );
   }
 
+  const handleQuantityChange = (sku: string, rawVal: string) => {
+    // Strictly validate positive integer >= 1
+    const trimmed = rawVal.trim();
+    if (/^[1-9]\d*$/.test(trimmed)) {
+      const parsed = parseInt(trimmed, 10);
+      onUpdateQuantity?.(sku, parsed);
+    }
+  };
+
   return (
     <Table.ScrollContainer minWidth={650}>
       <Table verticalSpacing="sm" withTableBorder withColumnBorders>
@@ -30,7 +41,7 @@ export function ComponentsTable({
           <Table.Tr>
             <Table.Th>SKU</Table.Th>
             <Table.Th>Producto / Variante</Table.Th>
-            <Table.Th style={{ textAlign: "right" }}>Cantidad</Table.Th>
+            <Table.Th style={{ width: 120, textAlign: "right" }}>Cantidad</Table.Th>
             <Table.Th style={{ textAlign: "right" }}>Precio Regular</Table.Th>
             <Table.Th style={{ textAlign: "right" }}>Precio Público Vigente</Table.Th>
             <Table.Th style={{ textAlign: "right" }}>Subtotal Regular</Table.Th>
@@ -61,9 +72,23 @@ export function ComponentsTable({
                   )}
                 </Table.Td>
                 <Table.Td style={{ textAlign: "right" }}>
-                  <Text size="sm" fw={600}>
-                    {comp.quantity}
-                  </Text>
+                  {editable && onUpdateQuantity ? (
+                    <TextInput
+                      size="xs"
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={comp.quantity}
+                      onChange={(e) => handleQuantityChange(comp.sku, e.currentTarget.value)}
+                      data-testid={`combo-quantity-input-${comp.sku}`}
+                      style={{ width: 80, marginLeft: "auto" }}
+                      aria-label={`Cantidad para ${comp.sku}`}
+                    />
+                  ) : (
+                    <Text size="sm" fw={600}>
+                      {comp.quantity}
+                    </Text>
+                  )}
                 </Table.Td>
                 <Table.Td style={{ textAlign: "right" }}>
                   <Text size="sm">
@@ -88,6 +113,7 @@ export function ComponentsTable({
                       onClick={() => onRemove?.(comp.sku)}
                       title={`Quitar ${comp.sku}`}
                       aria-label={`Quitar componente ${comp.sku}`}
+                      data-testid={`combo-remove-component-${comp.sku}`}
                     >
                       <IconTrash size={16} />
                     </ActionIcon>

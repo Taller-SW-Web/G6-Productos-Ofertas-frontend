@@ -10,7 +10,7 @@ import {
   Table,
   Text,
 } from "@mantine/core";
-import { IconPlus, IconEye, IconEdit } from "@tabler/icons-react";
+import { IconPlus, IconEye, IconEdit, IconRefresh } from "@tabler/icons-react";
 import { PageHeader } from "../../../components/shared/PageHeader";
 import { SectionCard } from "../../../components/shared/SectionCard";
 import { FeedbackAlert } from "../../../components/shared/FeedbackAlert";
@@ -25,6 +25,7 @@ export function CombosListPage() {
 
   const statusParam = (searchParams.get("estado") as ComboStatus | null) ?? "all";
   const pageParam = parseInt(searchParams.get("pagina") || "1", 10) || 1;
+  const scenarioParam = searchParams.get("escenario") || undefined;
 
   const [items, setItems] = useState<ComboSummaryItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -33,12 +34,14 @@ export function CombosListPage() {
   const [, startTransition] = useTransition();
 
   const pageSize = 10;
+  const [clearedScenario, setClearedScenario] = useState(false);
+  const effectiveScenario = clearedScenario ? undefined : scenarioParam;
 
   useEffect(() => {
     let active = true;
     const controller = new AbortController();
 
-    async function load() {
+    async function fetchCombos() {
       setLoading(true);
       setError(null);
       try {
@@ -48,6 +51,7 @@ export function CombosListPage() {
             page: pageParam,
             pageSize,
           },
+          effectiveScenario,
           controller.signal,
         );
         if (active) {
@@ -61,6 +65,8 @@ export function CombosListPage() {
               ? err.message
               : "No se pudieron cargar los combos comerciales.",
           );
+          setItems([]);
+          setTotal(0);
         }
       } finally {
         if (active) {
@@ -69,13 +75,13 @@ export function CombosListPage() {
       }
     }
 
-    load();
+    fetchCombos();
 
     return () => {
       active = false;
       controller.abort();
     };
-  }, [repository, statusParam, pageParam]);
+  }, [repository, statusParam, pageParam, effectiveScenario]);
 
   const handleStatusChange = (val: string | null) => {
     startTransition(() => {
@@ -98,13 +104,13 @@ export function CombosListPage() {
     });
   };
 
-  const totalPages = Math.ceil(total / pageSize) || 1;
+  const totalPages = Math.ceil(total / pageSize);
 
   return (
     <Stack gap="lg">
       <PageHeader
         title="Gestión de combos"
-        description="Administra ofertas comerciales agrupadas sin duplicar ownership de stock ni precios maestros."
+        description="Agrupaciones comerciales de productos y SKUs con ventaja económica garantizada."
         breadcrumbs={[
           { label: "Catálogo", to: "/productos" },
           { label: "Combos", to: "/combos" },
@@ -114,20 +120,12 @@ export function CombosListPage() {
             component={Link}
             to="/combos/nuevo"
             leftSection={<IconPlus size={16} />}
+            data-testid="combo-create-button"
           >
-            Crear combo
+            Nuevo combo
           </Button>
         }
       />
-
-      {error && (
-        <FeedbackAlert
-          semantic="error"
-          title="Error al consultar combos"
-        >
-          {error}
-        </FeedbackAlert>
-      )}
 
       <SectionCard title="Listado de combos">
         <Stack gap="md">
@@ -142,18 +140,53 @@ export function CombosListPage() {
               value={statusParam}
               onChange={handleStatusChange}
               style={{ width: 240 }}
+              data-testid="combo-status-filter"
             />
 
-            <Text size="sm" c="dimmed">
-              {total} {total === 1 ? "combo registrado" : "combos registrados"}
-            </Text>
+            {!error && !loading && (
+              <Text size="sm" c="dimmed">
+                {total} {total === 1 ? "combo registrado" : "combos registrados"}
+              </Text>
+            )}
           </Group>
 
-          {loading ? (
+          {/* Explicit Error State (H11: never renders EmptyState alongside error) */}
+          {error && (
+            <FeedbackAlert
+              semantic="error"
+              title="Error al consultar combos"
+            >
+              <Stack gap="xs">
+                <Text size="sm">{error}</Text>
+                <Group>
+                  <Button
+                    size="xs"
+                    variant="default"
+                    leftSection={<IconRefresh size={14} />}
+                    onClick={() => {
+                      const nextParams = new URLSearchParams(searchParams);
+                      nextParams.delete("escenario");
+                      setSearchParams(nextParams);
+                      setClearedScenario(true);
+                    }}
+                    data-testid="retry-list-btn"
+                  >
+                    Reintentar consulta
+                  </Button>
+                </Group>
+              </Stack>
+            </FeedbackAlert>
+          )}
+
+          {/* Loading State */}
+          {loading && !error && (
             <Text size="sm" c="dimmed" p="md">
               Cargando combos...
             </Text>
-          ) : items.length === 0 ? (
+          )}
+
+          {/* Empty State (only when not loading and no error) */}
+          {!loading && !error && items.length === 0 && (
             <EmptyState
               title={
                 statusParam !== "all"
@@ -177,7 +210,10 @@ export function CombosListPage() {
                 ) : undefined
               }
             />
-          ) : (
+          )}
+
+          {/* Success / Table State */}
+          {!loading && !error && items.length > 0 && (
             <>
               <Table.ScrollContainer minWidth={800}>
                 <Table verticalSpacing="sm" withTableBorder withColumnBorders>
@@ -235,6 +271,7 @@ export function CombosListPage() {
                               color="gray"
                               title="Ver detalle del combo"
                               aria-label={`Ver detalle del combo ${combo.name}`}
+                              data-testid={`combo-view-btn-${combo.comboId}`}
                             >
                               <IconEye size={16} />
                             </ActionIcon>
@@ -245,6 +282,7 @@ export function CombosListPage() {
                               color="blue"
                               title="Editar combo"
                               aria-label={`Editar combo ${combo.name}`}
+                              data-testid={`combo-edit-btn-${combo.comboId}`}
                             >
                               <IconEdit size={16} />
                             </ActionIcon>

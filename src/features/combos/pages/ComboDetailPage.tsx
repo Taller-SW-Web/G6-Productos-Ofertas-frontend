@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   Alert,
   Box,
@@ -16,6 +16,7 @@ import {
   IconArrowLeft,
   IconAlertCircle,
   IconInfoCircle,
+  IconRefresh,
 } from "@tabler/icons-react";
 import { PageHeader } from "../../../components/shared/PageHeader";
 import { SectionCard } from "../../../components/shared/SectionCard";
@@ -24,7 +25,8 @@ import { useCombosRepository } from "../hooks/useCombosRepository";
 import { ComboStatusBadge, AvailabilityBadge } from "../components/ComboStatusBadge";
 import { ComponentsTable } from "../components/ComponentsTable";
 import { EconomicComparator } from "../components/EconomicComparator";
-import { evaluateComboEconomicBenefit } from "../adapters/mockCombosRepository";
+import { evaluateComboEconomicBenefit } from "../utils/economicEvaluation";
+import { tokens } from "../../../theme/tokens";
 import type { ComboView, ComponentPricingSnapshot } from "../types/combos";
 
 export function ComboDetailPage() {
@@ -33,17 +35,41 @@ export function ComboDetailPage() {
 
   const [combo, setCombo] = useState<ComboView | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [comboError, setComboError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // Separate pricing loading and error states (H08)
+  const [pricingMap, setPricingMap] = useState<Record<string, ComponentPricingSnapshot>>({});
+  const [pricingLoading, setPricingLoading] = useState(false);
+  const [pricingError, setPricingError] = useState<string | null>(null);
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const scenarioParam = searchParams.get("escenario") || undefined;
 
   // Deactivation confirmation modal
   const [deactivateModalOpen, setDeactivateModalOpen] = useState(false);
   const [deactivating, setDeactivating] = useState(false);
   const isDeactivatingRef = useRef(false);
 
-  // Pricing snapshot for components
-  const [pricingMap, setPricingMap] = useState<Record<string, ComponentPricingSnapshot>>({});
+  // Fetch Pricing for components
+  const fetchPricing = useCallback(async (skus: string[], signal?: AbortSignal) => {
+    if (skus.length === 0) return;
+    setPricingLoading(true);
+    setPricingError(null);
+    try {
+      const prices = await repository.getComponentsPricing(skus, scenarioParam, signal);
+      setPricingMap(prices);
+    } catch (err: unknown) {
+      setPricingError(
+        err instanceof Error ? err.message : "Error al consultar los precios de referencia.",
+      );
+      setPricingMap({});
+    } finally {
+      setPricingLoading(false);
+    }
+  }, [repository, scenarioParam]);
 
+  // Load combo
   useEffect(() => {
     if (!comboId) return;
 
@@ -53,25 +79,21 @@ export function ComboDetailPage() {
     async function load() {
       if (!comboId) return;
       setLoading(true);
-      setError(null);
+      setComboError(null);
       try {
-        const data = await repository.getCombo(comboId, controller.signal);
+        const data = await repository.getCombo(comboId, scenarioParam, controller.signal);
         if (active) {
           if (data) {
             setCombo(data);
-            // Fetch pricing for components
             const skus = data.components.map((c) => c.sku);
-            const prices = await repository.getComponentsPricing(skus, controller.signal);
-            if (active) {
-              setPricingMap(prices);
-            }
+            fetchPricing(skus, controller.signal);
           } else {
-            setError(`No se encontró el combo con identificador ${comboId}`);
+            setComboError(`No se encontró el combo con identificador ${comboId}`);
           }
         }
       } catch (err: unknown) {
         if (active) {
-          setError(
+          setComboError(
             err instanceof Error ? err.message : "Error al cargar la ficha del combo.",
           );
         }
@@ -88,7 +110,7 @@ export function ComboDetailPage() {
       active = false;
       controller.abort();
     };
-  }, [comboId, repository]);
+  }, [comboId, repository, fetchPricing, scenarioParam]);
 
   const comparison = useMemo(() => {
     if (!combo) {
@@ -108,20 +130,21 @@ export function ComboDetailPage() {
     );
   }, [combo, pricingMap]);
 
-  // Handle deactivation execution
   const handleConfirmDeactivate = async () => {
     if (!combo || isDeactivatingRef.current) return;
-
     isDeactivatingRef.current = true;
     setDeactivating(true);
-
     try {
       const updated = await repository.deactivateCombo(combo.comboId);
       setCombo(updated);
       setDeactivateModalOpen(false);
-      setSuccessMessage("El combo ha sido desactivado exitosamente. Ya no estará disponible para nuevas ventas.");
+      setSuccessMessage(
+        `El combo "${updated.name}" ha sido desactivado comercialmente.`,
+      );
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Error al desactivar el combo.");
+      setComboError(
+        err instanceof Error ? err.message : "Error al desactivar el combo.",
+      );
     } finally {
       isDeactivatingRef.current = false;
       setDeactivating(false);
@@ -132,8 +155,8 @@ export function ComboDetailPage() {
     return (
       <Stack gap="lg">
         <PageHeader
-          title="Ficha de combo"
-          description="Cargando información del combo..."
+          title="Ficha técnica del combo"
+          description="Cargando configuración y referencias del combo..."
           breadcrumbs={[
             { label: "Catálogo", to: "/productos" },
             { label: "Combos", to: "/combos" },
@@ -148,48 +171,45 @@ export function ComboDetailPage() {
     );
   }
 
-  if (error || !combo) {
+  if (comboError && !combo) {
     return (
       <Stack gap="lg">
         <PageHeader
-          title="Combo no encontrado"
-          description="El combo solicitado no existe o no se pudo cargar."
+          title="Ficha técnica del combo"
           breadcrumbs={[
             { label: "Catálogo", to: "/productos" },
             { label: "Combos", to: "/combos" },
           ]}
-          actions={
-            <Button
-              component={Link}
-              to="/combos"
-              variant="default"
-              leftSection={<IconArrowLeft size={16} />}
-            >
-              Volver a combos
-            </Button>
-          }
         />
-        <FeedbackAlert
-          semantic="error"
-          title="No se encontró el combo"
-        >
-          {error || "El identificador no corresponde a ningún combo registrado."}
+        <FeedbackAlert semantic="error" title="No se pudo cargar el combo">
+          {comboError}
         </FeedbackAlert>
+        <Group>
+          <Button
+            component={Link}
+            to="/combos"
+            variant="default"
+            leftSection={<IconArrowLeft size={16} />}
+          >
+            Volver a la lista de combos
+          </Button>
+        </Group>
       </Stack>
     );
   }
 
+  if (!combo) return null;
+
   const isUnavailable =
     combo.status === "INACTIVO" ||
     combo.informativeAvailability === 0 ||
-    combo.freshness === "INCOMPLETA" ||
     combo.informativeAvailability === null;
 
   return (
     <Stack gap="lg">
       <PageHeader
         title={combo.name}
-        description={`Identificador: ${combo.comboId} · Versión: ${combo.version}`}
+        description={`Ficha técnica del combo comercial. Versión: ${combo.version} · Identificador: ${combo.comboId}`}
         breadcrumbs={[
           { label: "Catálogo", to: "/productos" },
           { label: "Combos", to: "/combos" },
@@ -233,6 +253,7 @@ export function ComboDetailPage() {
                 variant="light"
                 leftSection={<IconBan size={16} />}
                 onClick={() => setDeactivateModalOpen(true)}
+                data-testid="deactivate-combo-button"
               >
                 Desactivar
               </Button>
@@ -247,6 +268,15 @@ export function ComboDetailPage() {
           title="Operación confirmada"
         >
           {successMessage}
+        </FeedbackAlert>
+      )}
+
+      {comboError && (
+        <FeedbackAlert
+          semantic="error"
+          title="Error en la operación"
+        >
+          {comboError}
         </FeedbackAlert>
       )}
 
@@ -278,7 +308,7 @@ export function ComboDetailPage() {
               )}
             </Stack>
 
-            <Paper withBorder p="md" radius="sm" bg="var(--mantine-color-gray-0)">
+            <Paper withBorder p="md" radius="sm" bg={tokens.color.cloud}>
               <Text size="xs" c="dimmed">
                 Precio del combo (PEN)
               </Text>
@@ -304,7 +334,38 @@ export function ComboDetailPage() {
       </SectionCard>
 
       <SectionCard title="Comparación económica y referencias comerciales">
-        <EconomicComparator comparison={comparison} />
+        <Stack gap="sm">
+          {pricingError && (
+            <FeedbackAlert
+              semantic="warning"
+              title="Precios de referencia no disponibles temporalmente"
+            >
+              <Stack gap="xs">
+                <Text size="sm">
+                  {pricingError}. La definición administrativa del combo se mantiene accesible.
+                </Text>
+                <Group>
+                  <Button
+                    size="xs"
+                    variant="default"
+                    leftSection={<IconRefresh size={14} />}
+                    onClick={() => {
+                      const nextParams = new URLSearchParams(searchParams);
+                      nextParams.delete("escenario");
+                      setSearchParams(nextParams);
+                      fetchPricing(combo.components.map((c) => c.sku));
+                    }}
+                    loading={pricingLoading}
+                    data-testid="retry-detail-pricing-btn"
+                  >
+                    Reintentar consulta de precios
+                  </Button>
+                </Group>
+              </Stack>
+            </FeedbackAlert>
+          )}
+          <EconomicComparator comparison={comparison} />
+        </Stack>
       </SectionCard>
 
       <SectionCard title={`Componentes SKU incluidos (${combo.components.length})`}>
@@ -317,6 +378,7 @@ export function ComboDetailPage() {
         onClose={() => !deactivating && setDeactivateModalOpen(false)}
         title="Confirmar desactivación del combo"
         centered
+        data-testid="deactivate-modal"
       >
         <Stack gap="md">
           <Text size="sm">
@@ -333,6 +395,7 @@ export function ComboDetailPage() {
               color="gray"
               onClick={() => setDeactivateModalOpen(false)}
               disabled={deactivating}
+              data-testid="cancel-deactivate-btn"
             >
               Cancelar
             </Button>
@@ -340,6 +403,7 @@ export function ComboDetailPage() {
               color="red"
               onClick={handleConfirmDeactivate}
               loading={deactivating}
+              data-testid="confirm-deactivate-btn"
             >
               Desactivar combo
             </Button>

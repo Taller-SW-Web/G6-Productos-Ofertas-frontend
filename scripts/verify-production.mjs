@@ -214,6 +214,37 @@ try {
     }
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   }
+  // Combos (MK-002), estrictamente ADITIVO sobre las comprobaciones anteriores:
+  const combosPaths = [
+    { path: "/combos", table: true, form: false },
+    { path: "/combos/nuevo", table: false, form: true },
+    { path: "/combos/combo-001", table: false, form: false },
+    { path: "/combos/combo-001/editar", table: false, form: true },
+    { path: "/combos/combo-001/no-disponible", table: false, form: false },
+  ];
+  for (const { path, table, form } of combosPaths) {
+    await page.goto(baseURL + path);
+    if (mode === "api") {
+      const alert = page.getByRole("alert").first();
+      await alert.waitFor();
+      assert.match(
+        await alert.innerText(),
+        /Integración API no disponible para Combos|No se pudieron cargar los combos|Catálogo no disponible/i,
+      );
+      assert.equal(await page.getByRole("table").count(), 0);
+      assert.equal(await page.locator("main form").count(), 0);
+    } else {
+      await page.getByRole("heading", { level: 1 }).waitFor();
+      if (table) await page.getByRole("table").waitFor();
+      if (form) await page.locator("main form").waitFor();
+      assert.equal(await page.getByRole("alert").count(), 0);
+    }
+    assert.equal(
+      await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+      true,
+    );
+  }
+
   if (mode === "api")
     assert.equal(
       requests.some((url) =>
@@ -221,16 +252,23 @@ try {
         // Taxonomía ni en URLs de DEV (/features/taxonomy/) ni en bundles
         // compilados de dist/assets/ (chunks derivados de las páginas y el
         // servicio de taxonomía).
-        /createMockAuditRuntime|reviewRepository|audit-demo\.(csv|pdf)|createDemoPricingRuntime|mock[A-Z]|\/prices-|\/catalogChoices-|\/promotionServices-|\/PromotionDataNotice-|\/(?:Coupon|Campaign|Recommendation)[^/]*Page-|\/features\/taxonomy\/|\/assets\/[^/]*(?:Category(?:Tree|Create|Edit|Detail|Deactivate)|Characteristic|ProductType|Brand|Seo(?:List|Config)|SEO|taxonomyServices)[^/]*\.(?:js|css)/.test(
+        /createMockAuditRuntime|reviewRepository|audit-demo\.(csv|pdf)|createDemoPricingRuntime|mock[A-Z]|combosFixtures|\/prices-|\/catalogChoices-|\/promotionServices-|\/PromotionDataNotice-|\/(?:Coupon|Campaign|Recommendation)[^/]*Page-|\/features\/taxonomy\/|\/assets\/[^/]*(?:Category(?:Tree|Create|Edit|Detail|Deactivate)|Characteristic|ProductType|Brand|Seo(?:List|Config)|SEO|taxonomyServices)[^/]*\.(?:js|css)/.test(
           url,
         ),
       ),
       false,
     );
   assert.deepEqual(errors, []);
-  const totalViews = 4 + 16 + catalogPaths.length + taxonomyPaths.length + (mode === "mock" ? 4 : 0) + 5;
+  const totalViews =
+    4 +
+    16 +
+    catalogPaths.length +
+    taxonomyPaths.length +
+    combosPaths.length +
+    (mode === "mock" ? 4 : 0) +
+    5;
   console.log(
-    `PASS producción ${mode}: ${totalViews} vistas de Catálogo, Promotions, Pricing S01, Auditoría S01–S05 y Taxonomía, 1440 px, sin errores; ${mode === "api" ? "providers ausentes explícitos, reintento y persistencia del error de Pricing, taxonomía bloqueada y cero carga de mocks/bundles" : "módulos presentes, tablas comerciales verificadas y controles de revisión ausentes"}.`,
+    `PASS producción ${mode}: ${totalViews} vistas de Catálogo, Promotions, Pricing S01, Auditoría S01–S05, Taxonomía y Combos MK-002, 1440 px, sin errores; ${mode === "api" ? "providers ausentes explícitos, reintento y persistencia del error de Pricing, taxonomía bloqueada y cero carga de mocks/bundles" : "módulos presentes, tablas comerciales verificadas y controles de revisión ausentes"}.`,
   );
 } finally {
   await browser.close();

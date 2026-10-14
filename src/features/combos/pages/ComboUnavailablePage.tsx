@@ -15,6 +15,7 @@ import {
   IconPackageOff,
   IconEye,
   IconInfoCircle,
+  IconClock,
 } from "@tabler/icons-react";
 import { PageHeader } from "../../../components/shared/PageHeader";
 import { SectionCard } from "../../../components/shared/SectionCard";
@@ -42,7 +43,7 @@ export function ComboUnavailablePage() {
       setLoading(true);
       setError(null);
       try {
-        const data = await repository.getCombo(comboId, controller.signal);
+        const data = await repository.getCombo(comboId, undefined, controller.signal);
         if (active) {
           if (data) {
             setCombo(data);
@@ -84,7 +85,7 @@ export function ComboUnavailablePage() {
         />
         <Paper p="xl" withBorder>
           <Text size="sm" c="dimmed">
-            Cargando...
+            Cargando estado del combo...
           </Text>
         </Paper>
       </Stack>
@@ -116,19 +117,27 @@ export function ComboUnavailablePage() {
           semantic="error"
           title="Error de consulta"
         >
-          {error || "El identificador no corresponde a ningún combo."}
+          {error || "El identificador no corresponde a ningún combo registrado."}
         </FeedbackAlert>
       </Stack>
     );
   }
 
-  // Derive condition:
-  // Case A: Sold out (active, but informativeAvailability === 0)
-  // Case B: Inactive
-  // Case C: Availability incomplete / unconfirmed (null)
-  const isSoldOut = combo.status === "ACTIVO" && combo.informativeAvailability === 0;
+  // Derive exact condition per H09
   const isInactive = combo.status === "INACTIVO";
-  const isUnconfirmed = combo.informativeAvailability === null;
+  const isConfirmedSoldOut =
+    combo.status === "ACTIVO" &&
+    combo.informativeAvailability === 0 &&
+    combo.freshness === "ACTUALIZADA";
+  const isStale = combo.freshness === "DESACTUALIZADA";
+  const isIncomplete = combo.freshness === "INCOMPLETA";
+  const isUnverifiable =
+    combo.informativeAvailability === null && combo.freshness !== "INCOMPLETA";
+  const isAvailableConfirmed =
+    combo.status === "ACTIVO" &&
+    combo.informativeAvailability !== null &&
+    combo.informativeAvailability > 0 &&
+    combo.freshness === "ACTUALIZADA";
 
   return (
     <Stack gap="lg">
@@ -157,7 +166,7 @@ export function ComboUnavailablePage() {
               variant="outline"
               leftSection={<IconEye size={16} />}
             >
-              Ver definición del combo
+              Ver ficha del combo
             </Button>
           </Group>
         }
@@ -165,12 +174,28 @@ export function ComboUnavailablePage() {
 
       <SectionCard title="Estado y causa de indisponibilidad comercial">
         <Stack gap="md">
-          {isSoldOut && (
+          {isAvailableConfirmed && (
+            <Alert
+              icon={<IconInfoCircle size={20} />}
+              title="Disponibilidad confirmada"
+              color="green"
+              variant="light"
+            >
+              <Text size="sm">
+                Este combo se encuentra activo y cuenta con disponibilidad estimada de{" "}
+                <strong>{combo.informativeAvailability} unidades</strong>. No presenta bloqueo de
+                existencias en este momento.
+              </Text>
+            </Alert>
+          )}
+
+          {isConfirmedSoldOut && (
             <Alert
               icon={<IconPackageOff size={20} />}
-              title="Agotado actualmente"
+              title="Agotado actualmente (existencias confirmadas en 0)"
               color="red"
               variant="filled"
+              data-testid="sold-out-alert"
             >
               <Stack gap="xs">
                 <Text size="sm">
@@ -183,12 +208,32 @@ export function ComboUnavailablePage() {
             </Alert>
           )}
 
+          {isStale && (
+            <Alert
+              icon={<IconClock size={20} />}
+              title="Disponibilidad desactualizada (sin confirmación de agotamiento)"
+              color="yellow"
+              variant="filled"
+              data-testid="stale-availability-alert"
+            >
+              <Stack gap="xs">
+                <Text size="sm">
+                  La sincronización de existencias de este combo está desactualizada. No se puede confirmar agotamiento terminal ni saldo suficiente sin consultar nuevamente al servicio de Inventario.
+                </Text>
+                <Text size="xs">
+                  Último cálculo registrado: {combo.calculatedAt ? new Date(combo.calculatedAt).toLocaleString("es-PE") : "No registrado"}.
+                </Text>
+              </Stack>
+            </Alert>
+          )}
+
           {isInactive && (
             <Alert
               icon={<IconAlertTriangle size={20} />}
               title="No disponible para nuevas ventas"
               color="gray"
               variant="filled"
+              data-testid="inactive-combo-alert"
             >
               <Stack gap="xs">
                 <Text size="sm">
@@ -201,22 +246,39 @@ export function ComboUnavailablePage() {
             </Alert>
           )}
 
-          {isUnconfirmed && (
+          {isIncomplete && (
             <Alert
               icon={<IconAlertTriangle size={20} />}
-              title="Disponibilidad no confirmada"
+              title="Disponibilidad incompleta"
               color="yellow"
               variant="filled"
+              data-testid="incomplete-availability-alert"
             >
               <Stack gap="xs">
                 <Text size="sm">
-                  No se puede confirmar la disponibilidad actual del combo.
-                  {combo.freshness === "INCOMPLETA"
-                    ? " Uno o más componentes no resolvieron su saldo en inventario."
-                    : " Los datos de existencias no se encuentran disponibles o no son verificables en este momento."}
+                  Uno o más componentes SKU no resolvieron su saldo de inventario en las sucursales requeridas.
                 </Text>
                 <Text size="xs">
-                  La ausencia de confirmación no equivale a saldo cero. Se requiere verificar la conectividad con el servicio de Inventario.
+                  La ausencia de confirmación no equivale a saldo cero. Se requiere verificar la consistencia con el servicio de Inventario.
+                </Text>
+              </Stack>
+            </Alert>
+          )}
+
+          {isUnverifiable && !isIncomplete && (
+            <Alert
+              icon={<IconAlertTriangle size={20} />}
+              title="Disponibilidad no verificable"
+              color="gray"
+              variant="filled"
+              data-testid="unverifiable-availability-alert"
+            >
+              <Stack gap="xs">
+                <Text size="sm">
+                  No existen datos de existencias confirmados ni cálculo de inventario para este combo.
+                </Text>
+                <Text size="xs">
+                  El sistema no puede garantizar unidades disponibles.
                 </Text>
               </Stack>
             </Alert>

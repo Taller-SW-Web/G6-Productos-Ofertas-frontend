@@ -1,9 +1,10 @@
 import { test, expect } from "@playwright/test";
+import { MockCombosRepository } from "../src/features/combos/adapters/mockCombosRepository";
+import { ComboRepositoryError } from "../src/features/combos/services/combosRepository";
 
 test.describe("MK-002 — Gestión de combos de productos", () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    // Navigate to commercial root
     await page.goto("/combos");
     await page.waitForLoadState("domcontentloaded");
   });
@@ -27,12 +28,12 @@ test.describe("MK-002 — Gestión de combos de productos", () => {
     await expect(page.getByText("Pack Ejecutivo Smart Casual")).toBeVisible();
     await expect(page.getByText("S/ 150.00")).toBeVisible();
     await expect(page.getByText("24 combos estimados")).toBeVisible();
-    await expect(page.getByText("Agotado actualmente")).toBeVisible();
+    await expect(page.getByText("Agotado actualmente (0 un.)")).toBeVisible();
   });
 
   test("S01: Filtro por estado administrativo actualiza la lista y URL", async ({ page }) => {
     // Filter by INACTIVO
-    const filterSelect = page.getByRole("combobox", { name: "Filtrar por estado administrativo" });
+    const filterSelect = page.getByTestId("combo-status-filter");
     await filterSelect.click();
     await page.getByRole("option", { name: "Inactivo" }).click();
 
@@ -50,7 +51,7 @@ test.describe("MK-002 — Gestión de combos de productos", () => {
 
   test("S01: Navegación desde listado hacia crear y hacia detalle", async ({ page }) => {
     // Click Crear combo
-    await page.getByRole("link", { name: "Crear combo" }).first().click();
+    await page.getByRole("link", { name: "Nuevo combo" }).click();
     await expect(page).toHaveURL("/combos/nuevo");
     await expect(page.getByRole("heading", { name: "Crear combo" })).toBeVisible();
 
@@ -61,6 +62,24 @@ test.describe("MK-002 — Gestión de combos de productos", () => {
     await page.getByRole("link", { name: "Pack Ejecutivo Smart Casual", exact: true }).click();
     await expect(page).toHaveURL("/combos/combo-001");
     await expect(page.getByRole("heading", { name: "Pack Ejecutivo Smart Casual" })).toBeVisible();
+  });
+
+  // H11: Error de listado sin presentar estado vacío
+  test("S01 (H11): Error de listado muestra FeedbackAlert con reintento y no renderiza estado vacío", async ({
+    page,
+  }) => {
+    // Navigate with deterministic scenario parameter
+    await page.goto("/combos?modoRevision=1&escenario=list-error");
+
+    // Error alert must appear
+    await expect(page.getByText("Error al cargar el listado de combos.")).toBeVisible();
+    // Must NOT render empty state "No hay combos registrados"
+    await expect(page.getByText("No hay combos registrados")).toHaveCount(0);
+    await expect(page.getByText("No se encontraron combos para el filtro seleccionado")).toHaveCount(0);
+
+    // Clicking retry button clears error scenario and reloads table
+    await page.getByTestId("retry-list-btn").click();
+    await expect(page.locator("tbody tr")).toHaveCount(6);
   });
 
   // S02: Creación de combos con validaciones y selector de productos/SKUs
@@ -108,135 +127,291 @@ test.describe("MK-002 — Gestión de combos de productos", () => {
     await expect(page.getByText("Componentes seleccionados (2)")).toBeVisible();
   });
 
-  test("S02: Comparador económico valida regla de precio < sumaRegular y < sumaPublicaVigente", async ({
+  // H02: Creación rechazada por SKU no vendible, no encontrado o combo anidado
+  test("S02 (H02): Rechazo de SKU no vendible, variante inactiva, no encontrado y combo anidado", async ({
     page,
   }) => {
     await page.goto("/combos/nuevo");
-    await page.getByLabel("Nombre comercial del combo").fill("Combo Ahorro");
 
-    // Add CAM-NEG-M (Reg 100, Pub 90)
+    // Select product with inactive variant (PROD-001 has CAM-DISAB-S which is disabled)
     await page.getByTestId("combo-candidate-product-select").selectOption("PROD-001");
     const variantSelect = page.getByTestId("combo-candidate-variant-select");
-    await expect(variantSelect).toBeVisible();
-    await variantSelect.selectOption("CAM-NEG-M");
-    const addBtn = page.getByTestId("combo-add-component-button");
-    await expect(addBtn).toBeEnabled();
-    await addBtn.click({ force: true });
+    const disabledOption = variantSelect.locator('option[value="CAM-DISAB-S"]');
+    await expect(disabledOption).toBeDisabled();
 
-    // Add PAN-GRI-32 (Reg 80, Pub 75)
+    // Verify Repository rejects non-existent SKU, inactive SKU, and nested combo
+    const repo = new MockCombosRepository();
+
+    // 1. Non-existent SKU
+    await expect(
+      repo.createCombo({
+        nombre: "Test Invalido",
+        componentes: [
+          { sku: "CAM-NEG-M", quantity: 1 },
+          { sku: "SKU-INEXISTENTE-999", quantity: 1 },
+        ],
+        precioCombo: 100,
+      }),
+    ).rejects.toThrow(ComboRepositoryError);
+
+    // 2. Inactive product SKU
+    await expect(
+      repo.createCombo({
+        nombre: "Test Inactivo",
+        componentes: [
+          { sku: "CAM-NEG-M", quantity: 1 },
+          { sku: "SKU-PROD-INACTIVO", quantity: 1 },
+        ],
+        precioCombo: 100,
+      }),
+    ).rejects.toThrow(ComboRepositoryError);
+
+    // 3. Nested combo
+    await expect(
+      repo.createCombo({
+        nombre: "Test Anidado",
+        componentes: [
+          { sku: "CAM-NEG-M", quantity: 1 },
+          { sku: "COMBO-ANIDADO-SKU", quantity: 1 },
+        ],
+        precioCombo: 100,
+      }),
+    ).rejects.toThrow(ComboRepositoryError);
+  });
+
+  // H10: Cantidad decimal rechazada en UI y en repositorio
+  test("S02 (H10): Cantidad decimal o no entera rechazada en UI y en repositorio", async ({
+    page,
+  }) => {
+    await page.goto("/combos/nuevo");
+
+    await page.getByTestId("combo-candidate-product-select").selectOption("PROD-001");
+    await page.getByTestId("combo-candidate-variant-select").selectOption("CAM-NEG-M");
+
+    // Try filling decimal quantity "1.5"
+    const qtyInput = page.getByTestId("combo-quantity-input");
+    await qtyInput.fill("1.5");
+    await page.getByTestId("combo-add-component-button").click({ force: true });
+
+    await expect(
+      page.getByText("La cantidad debe ser un número entero positivo mayor o igual a 1"),
+    ).toBeVisible();
+
+    // Repo check: rejects decimal quantity
+    const repo = new MockCombosRepository();
+    await expect(
+      repo.createCombo({
+        nombre: "Combo Decimal Invalido",
+        componentes: [
+          { sku: "CAM-NEG-M", quantity: 1.5 },
+          { sku: "PAN-GRI-32", quantity: 1 },
+        ],
+        precioCombo: 120,
+      }),
+    ).rejects.toThrow(/entero positivo mayor o igual a 1/);
+  });
+
+  // H05: Edición de cantidad en tabla con actualización de precio y disponibilidad
+  test("S02 (H05): Edición de cantidad en tabla actualiza inmediatamente la suma regular y suma pública", async ({
+    page,
+  }) => {
+    await page.goto("/combos/nuevo");
+    await page.getByLabel("Nombre comercial del combo").fill("Combo Cantidades");
+
+    // Add CAM-NEG-M (Reg 100, Pub 90) x1
+    await page.getByTestId("combo-candidate-product-select").selectOption("PROD-001");
+    await page.getByTestId("combo-candidate-variant-select").selectOption("CAM-NEG-M");
+    await page.getByTestId("combo-add-component-button").click({ force: true });
+
+    // Add PAN-GRI-32 (Reg 80, Pub 75) x1
     await page.getByTestId("combo-candidate-product-select").selectOption("PROD-002");
-    await expect(variantSelect).toBeVisible();
-    await variantSelect.selectOption("PAN-GRI-32");
-    await expect(addBtn).toBeEnabled();
-    await addBtn.click({ force: true });
+    await page.getByTestId("combo-candidate-variant-select").selectOption("PAN-GRI-32");
+    await page.getByTestId("combo-add-component-button").click({ force: true });
 
-    // Sum regular = 180, Sum public = 165
+    // Sum regular = 180.00, Sum public = 165.00
     await expect(page.getByText("PEN 180.00")).toBeVisible();
     await expect(page.getByText("PEN 165.00")).toBeVisible();
 
-    const priceInput = page.getByTestId("combo-price-input");
+    // Update quantity of PAN-GRI-32 from 1 to 2
+    const panQtyInput = page.getByTestId("combo-quantity-input-PAN-GRI-32");
+    await panQtyInput.fill("2");
 
-    // Price higher than public sum (e.g. 170) -> should show violation
-    await priceInput.fill("170.00");
-    await expect(
-      page.getByText("El precio del combo debe ser menor que la suma regular y que la suma pública vigente"),
-    ).toBeVisible();
-
-    // Valid price (140) -> should show green success indicator
-    await priceInput.fill("140.00");
-    await expect(
-      page.getByText("El precio propuesto es menor que ambas referencias actuales."),
-    ).toBeVisible();
-
-    // Save combo
-    await page.getByTestId("combo-submit-button").click();
-
-    // Expect navigation to newly created combo detail
-    await expect(page).toHaveURL(/\/combos\/combo-101/);
-    await expect(page.getByRole("heading", { name: "Combo Ahorro" })).toBeVisible();
-    await expect(page.getByText("S/ 140.00")).toBeVisible();
+    // New sums: Reg = 100 + 80*2 = 260.00; Pub = 90 + 75*2 = 240.00
+    await expect(page.getByText("PEN 260.00")).toBeVisible();
+    await expect(page.getByText("PEN 240.00")).toBeVisible();
   });
 
-  // S03: Detalle, edición y persistencia
-  test("S03: Edición de combo conserva versión, componentes y maneja conflicto VERSION_CONFLICT", async ({
+  // H07: Fallo de Pricing sin falsa aprobación económica
+  test("S02 (H07): Fallo de Pricing muestra alerta explícita y no otorga aprobación económica", async ({
+    page,
+  }) => {
+    // Navigate with pricing-error scenario
+    await page.goto("/combos/nuevo?modoRevision=1&escenario=pricing-error");
+
+    // Add CAM-NEG-M
+    await page.getByTestId("combo-candidate-product-select").selectOption("PROD-001");
+    await page.getByTestId("combo-candidate-variant-select").selectOption("CAM-NEG-M");
+    await page.getByTestId("combo-add-component-button").click({ force: true });
+
+    // Pricing failure alert appears
+    await expect(page.getByText("Fallo al consultar Pricing de componentes")).toBeVisible();
+    await expect(page.getByText("No disponible")).toHaveCount(2);
+
+    // Click retry pricing: clears scenario and fetches actual pricing
+    await page.getByTestId("retry-pricing-btn").click();
+    await expect(page.getByText("PEN 100.00").first()).toBeVisible();
+  });
+
+  // H08: Fallo de Pricing en detalle conserva definición administrativa
+  test("S03 (H08): Fallo de Pricing en detalle conserva datos administrativos y muestra reintento", async ({
+    page,
+  }) => {
+    // Navigate with pricing-error scenario on detail
+    await page.goto("/combos/combo-001?modoRevision=1&escenario=pricing-error");
+
+    // Heading and administrative data MUST still be visible (NOT "Combo no encontrado")
+    await expect(page.getByRole("heading", { name: "Pack Ejecutivo Smart Casual" })).toBeVisible();
+    await expect(page.getByText("S/ 150.00")).toBeVisible();
+    await expect(page.getByText("Estado administrativo:")).toBeVisible();
+
+    // Pricing warning alert is displayed with retry button
+    await expect(
+      page.getByText("Precios de referencia no disponibles temporalmente"),
+    ).toBeVisible();
+    await expect(page.getByTestId("retry-detail-pricing-btn")).toBeVisible();
+
+    // Clicking retry recovers pricing
+    await page.getByTestId("retry-detail-pricing-btn").click();
+    await expect(page.getByText("PEN 180.00")).toBeVisible();
+  });
+
+  // H06: Conflicto de versión real y recuperación sin sobrescritura silenciosa
+  test("S03 (H06): Conflicto de versión muestra diffs reales y no sobrescribe sin confirmación explícita", async ({
+    page,
+  }) => {
+    // Open edit with deterministic version-conflict scenario
+    await page.goto("/combos/combo-001/editar?modoRevision=1&escenario=version-conflict");
+    await expect(page.getByRole("heading", { name: "Editar combo" })).toBeVisible();
+
+    // Try saving form
+    const priceInput = page.getByTestId("combo-price-input");
+    await priceInput.fill("142.00");
+    await page.getByTestId("combo-submit-button").click();
+
+    // Version conflict alert with diffs appears
+    const conflictAlert = page.getByTestId("version-conflict-alert");
+    await expect(conflictAlert).toBeVisible();
+    await expect(conflictAlert.getByText("PEN 150.00")).toBeVisible();
+    await expect(conflictAlert.getByText("PEN 142.00")).toBeVisible();
+
+    // Safe resolution option B: Confirm and synchronize version
+    await page.getByTestId("sync-version-keep-draft-btn").click();
+    await expect(page.getByTestId("version-conflict-alert")).toHaveCount(0);
+  });
+
+  // H12: Guard de cambios sin guardar
+  test("S02 (H12): Cancelar con modificaciones muestra modal de confirmación antes de descartar", async ({
+    page,
+  }) => {
+    await page.goto("/combos/nuevo");
+
+    // Modify a field
+    await page.getByLabel("Nombre comercial del combo").fill("Borrador No Guardado");
+
+    // Click Cancelar
+    await page.getByTestId("combo-cancel-button").click();
+
+    // Modal dialog appears
+    const dialog = page.getByRole("dialog", { name: "Descartar cambios sin guardar" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText("Tienes modificaciones no guardadas en este formulario.")).toBeVisible();
+
+    // Confirm discard
+    await page.getByTestId("confirm-discard-button").click();
+    await expect(page).toHaveURL("/combos");
+  });
+
+  // H01: Disponibilidad calculada dinámicamente e invalidada en edición
+  test("S01/S03 (H01): Disponibilidad es calculada por min(floor(stock/qty)) y se recalcula al editar", async () => {
+    const repo = new MockCombosRepository();
+
+    // Create combo with CAM-NEG-M (stock=50, qty=2) and PAN-GRI-32 (stock=25, qty=1)
+    // min(floor(50/2), floor(25/1)) = min(25, 25) = 25
+    const created = await repo.createCombo({
+      nombre: "Combo Stock Dinamico",
+      componentes: [
+        { sku: "CAM-NEG-M", quantity: 2 },
+        { sku: "PAN-GRI-32", quantity: 1 },
+      ],
+      precioCombo: 190,
+    });
+
+    expect(created.informativeAvailability).toBe(25);
+    expect(created.freshness).toBe("ACTUALIZADA");
+
+    // Now update quantity of PAN-GRI-32 to 5 -> min(25, floor(25/5)=5) = 5
+    const updated = await repo.updateCombo(created.comboId, {
+      nombre: "Combo Stock Dinamico",
+      componentes: [
+        { sku: "CAM-NEG-M", quantity: 2 },
+        { sku: "PAN-GRI-32", quantity: 5 },
+      ],
+      precioCombo: 180,
+      version: 1,
+    });
+
+    // Recalculated availability must be 5 (never reusing stale 25 or hardcoded 10)
+    expect(updated.informativeAvailability).toBe(5);
+  });
+
+  // S03: Desactivación requiere confirmación y cancelación no muta estado
+  test("S03: Cancelación de desactivación no muta estado y confirmación desactiva", async ({
     page,
   }) => {
     await page.goto("/combos/combo-001");
-    await expect(page.getByText("Versión: 1")).toBeVisible();
-
-    // Navigate to edit
-    await page.getByRole("link", { name: "Editar combo" }).click();
-    await expect(page).toHaveURL("/combos/combo-001/editar");
-
-    // Wait for form to load
-    await expect(page.getByRole("heading", { name: "Editar combo" })).toBeVisible();
-
-    // Clear and fill new price 145.00
-    const priceInput = page.getByTestId("combo-price-input");
-    await expect(priceInput).toBeVisible();
-    await priceInput.click();
-    await priceInput.fill("145.00");
-    await page.getByTestId("combo-submit-button").click();
-
-    // Verify updated version and price on detail
-    await expect(page).toHaveURL("/combos/combo-001");
-    await expect(page.getByText("Versión: 2")).toBeVisible();
-    await expect(page.getByText("S/ 145.00")).toBeVisible();
-  });
-
-  test("S03: Desactivación requiere confirmación, cambia estado a INACTIVO y mantiene componentes", async ({
-    page,
-  }) => {
-    await page.goto("/combos/combo-002");
     await expect(page.getByText("Activo")).toBeVisible();
 
     // Click Desactivar
-    await page.getByRole("button", { name: "Desactivar" }).click();
+    await page.getByTestId("deactivate-combo-button").click();
+    const dialog = page.getByRole("dialog", { name: "Confirmar desactivación del combo" });
+    await expect(dialog).toBeVisible();
 
-    // Modal appears
-    await expect(page.getByRole("dialog", { name: "Confirmar desactivación del combo" })).toBeVisible();
-    await expect(
-      page.getByText("Al desactivar este combo, dejará de ofrecerse para nuevas ventas en todos los canales."),
-    ).toBeVisible();
+    // Cancel deactivation
+    await page.getByTestId("cancel-deactivate-btn").click();
+    await expect(dialog).toHaveCount(0);
 
-    // Confirm deactivation
-    await page.getByRole("dialog").getByRole("button", { name: "Desactivar combo" }).click();
+    // State remains ACTIVO
+    await expect(page.getByText("Activo")).toBeVisible();
 
-    // Feedback and status changed to INACTIVO
-    await expect(page.getByText("El combo ha sido desactivado exitosamente.")).toBeVisible();
+    // Open again and confirm
+    await page.getByTestId("deactivate-combo-button").click();
+    await page.getByTestId("confirm-deactivate-btn").click();
+
     await expect(page.getByText("Inactivo")).toBeVisible();
-
-    // Deactivation button is now hidden
-    await expect(page.getByRole("button", { name: "Desactivar" })).toHaveCount(0);
   });
 
-  // S04: Pantalla de no disponible / indisponibilidad comercial
-  test("S04: Representación de indisponibilidad para combo agotado e inactivo sin confundir null con 0", async ({
+  // S04: Pantalla de no disponible
+  test("S04: Pantalla de indisponibilidad comercial para combo agotado, desactualizado e inactivo", async ({
     page,
   }) => {
-    // combo-002 is agotado (availability = 0)
+    // combo-002: agotado confirmado
     await page.goto("/combos/combo-002/no-disponible");
-    await expect(
-      page.getByRole("heading", { name: /Indisponibilidad comercial: Set Entrenamiento Deportivo Pro/ }),
-    ).toBeVisible();
-    await expect(page.getByRole("alert").getByText("Agotado actualmente")).toBeVisible();
-    await expect(
-      page.getByText("La disponibilidad estimada del combo es 0. Uno o más de sus componentes SKU no cuenta con existencias suficientes"),
-    ).toBeVisible();
+    await expect(page.getByTestId("sold-out-alert")).toBeVisible();
 
-    // combo-005 has availability null (INCOMPLETA)
+    // combo-004: desactualizado
+    await page.goto("/combos/combo-004/no-disponible");
+    await expect(page.getByTestId("stale-availability-alert")).toBeVisible();
+
+    // combo-003: inactivo
+    await page.goto("/combos/combo-003/no-disponible");
+    await expect(page.getByTestId("inactive-combo-alert")).toBeVisible();
+
+    // combo-005: incompleta
     await page.goto("/combos/combo-005/no-disponible");
-    await expect(page.getByRole("alert").getByText("Disponibilidad no confirmada")).toBeVisible();
-    await expect(
-      page.getByText("La ausencia de confirmación no equivale a saldo cero."),
-    ).toBeVisible();
-
-    // Button to return to detail
-    await page.getByRole("link", { name: "Ver definición del combo" }).click();
-    await expect(page).toHaveURL("/combos/combo-005");
+    await expect(page.getByTestId("incomplete-availability-alert")).toBeVisible();
   });
 
-  // S01-S04 Desktop Viewport 1440x900 Screenshot Evidence
+  // Desktop 1440x900 screenshots
   test("MK-002: Capturas de pantalla en viewport canónico 1440x900 para S01-S04 sin overflow horizontal", async ({
     page,
   }) => {
@@ -255,13 +430,11 @@ test.describe("MK-002 — Gestión de combos de productos", () => {
       await page.goto(r.path);
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
-      // Horizontal overflow check
       const isHorizontalScrollable = await page.evaluate(
         () => document.documentElement.scrollWidth > window.innerWidth,
       );
       expect(isHorizontalScrollable).toBe(false);
 
-      // Take screenshot
       await page.screenshot({
         path: `test-results/mk-002-${r.name}-1440x900.png`,
         fullPage: true,

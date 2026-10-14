@@ -1,17 +1,18 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Button,
   Card,
   Group,
-  NumberInput,
   NativeSelect,
+  Skeleton,
   Stack,
   Text,
-  Alert,
+  TextInput,
 } from "@mantine/core";
-import { IconPlus, IconAlertCircle } from "@tabler/icons-react";
-import { catalogCandidateProducts } from "../mocks/combosFixtures";
-import type { ComboComponentItem } from "../types/combos";
+import { IconPlus } from "@tabler/icons-react";
+import { FeedbackAlert } from "../../../components/shared/FeedbackAlert";
+import { useCandidateProducts } from "../services/candidateProductsService";
+import type { CandidateProduct, ComboComponentItem } from "../types/combos";
 
 interface ComponentSelectorProps {
   existingSkus: string[];
@@ -22,18 +23,58 @@ export function ComponentSelector({
   existingSkus,
   onAddComponent,
 }: ComponentSelectorProps) {
+  const candidateService = useCandidateProducts();
+  const [candidates, setCandidates] = useState<CandidateProduct[]>([]);
+  const [loadingCandidates, setLoadingCandidates] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
   const [selectedVariantSku, setSelectedVariantSku] = useState<string | null>(null);
-  const [quantity, setQuantity] = useState<number | string>(1);
+  const [quantityStr, setQuantityStr] = useState<string>("1");
   const [error, setError] = useState<string | null>(null);
 
-  const selectedProduct = catalogCandidateProducts.find(
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+
+    async function loadCandidates() {
+      setLoadingCandidates(true);
+      setLoadError(null);
+      try {
+        const data = await candidateService.getCandidateProducts(controller.signal);
+        if (active) {
+          setCandidates(data);
+        }
+      } catch (err: unknown) {
+        if (active) {
+          setLoadError(
+            err instanceof Error
+              ? err.message
+              : "No se pudieron cargar los productos candidatos de Catálogo.",
+          );
+        }
+      } finally {
+        if (active) {
+          setLoadingCandidates(false);
+        }
+      }
+    }
+
+    loadCandidates();
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [candidateService]);
+
+  const selectedProduct = candidates.find(
     (p) => p.productId === selectedProductId,
   );
 
   const productOptions = [
     { value: "", label: "Seleccionar producto de catálogo..." },
-    ...catalogCandidateProducts
+    ...candidates
       .filter((p) => p.status === "ACTIVO")
       .map((p) => ({
         value: p.productId,
@@ -65,11 +106,14 @@ export function ComponentSelector({
       return;
     }
 
-    const qty = typeof quantity === "number" ? quantity : parseInt(quantity, 10);
-    if (isNaN(qty) || qty < 1) {
-      setError("La cantidad debe ser un número entero mayor o igual a 1.");
+    // Strict positive integer validation per H10: reject decimals, negatives, zero, NaN, partial strings
+    const trimmedQty = quantityStr.trim();
+    if (!/^[1-9]\d*$/.test(trimmedQty)) {
+      setError("La cantidad debe ser un número entero positivo mayor o igual a 1 (sin decimales ni signos).");
       return;
     }
+
+    const qty = parseInt(trimmedQty, 10);
 
     let targetSku: string;
     let variantLabel: string | undefined;
@@ -91,7 +135,7 @@ export function ComponentSelector({
     }
 
     // Check nested combo prohibition
-    if (targetSku === "COMBO-ANIDADO-SKU") {
+    if (targetSku === "COMBO-ANIDADO-SKU" || selectedProduct.productId === "PROD-008") {
       setError("No se admiten combos anidados como componentes de otro combo.");
       return;
     }
@@ -112,11 +156,33 @@ export function ComponentSelector({
     // Reset selection
     setSelectedProductId(null);
     setSelectedVariantSku(null);
-    setQuantity(1);
+    setQuantityStr("1");
   };
 
+  if (loadingCandidates) {
+    return (
+      <Card withBorder radius="sm" p="md">
+        <Stack gap="xs">
+          <Skeleton height={20} width={200} />
+          <Skeleton height={36} />
+        </Stack>
+      </Card>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <FeedbackAlert
+        semantic="error"
+        title="Catálogo no disponible"
+      >
+        {loadError}
+      </FeedbackAlert>
+    );
+  }
+
   return (
-    <Card withBorder radius="sm" p="md" bg="var(--mantine-color-gray-0)">
+    <Card withBorder radius="sm" p="md">
       <Stack gap="sm">
         <Text fw={600} size="sm">
           Agregar componente desde Catálogo
@@ -144,20 +210,25 @@ export function ComponentSelector({
             />
           )}
 
-          <NumberInput
+          <TextInput
             label="Cantidad requerida"
-            value={quantity}
-            onChange={setQuantity}
+            value={quantityStr}
+            onChange={(e) => {
+              setQuantityStr(e.currentTarget.value);
+              setError(null);
+            }}
+            type="number"
             min={1}
             step={1}
             style={{ maxWidth: 140 }}
+            data-testid="combo-quantity-input"
           />
         </Group>
 
         {error && (
-          <Alert icon={<IconAlertCircle size={16} />} color="red" variant="light" p="xs">
+          <FeedbackAlert semantic="error" title="Error de selección">
             {error}
-          </Alert>
+          </FeedbackAlert>
         )}
 
         <Group justify="flex-end" mt="xs">

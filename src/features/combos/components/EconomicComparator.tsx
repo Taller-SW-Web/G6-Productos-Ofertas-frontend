@@ -1,5 +1,6 @@
 import { Group, Paper, Stack, Text, ThemeIcon } from "@mantine/core";
 import { IconCheck, IconAlertTriangle } from "@tabler/icons-react";
+import { tokens } from "../../../theme/tokens";
 import type { EconomicComparisonResult } from "../types/combos";
 
 interface EconomicComparatorProps {
@@ -18,7 +19,7 @@ export function EconomicComparator({ comparison }: EconomicComparatorProps) {
         </Text>
 
         <Group grow align="flex-start">
-          <Paper withBorder p="xs" radius="xs" bg="var(--mantine-color-gray-0)">
+          <Paper withBorder p="xs" radius="xs" bg={tokens.color.cloud}>
             <Text size="xs" c="dimmed">
               Suma regular de componentes
             </Text>
@@ -27,7 +28,7 @@ export function EconomicComparator({ comparison }: EconomicComparatorProps) {
             </Text>
           </Paper>
 
-          <Paper withBorder p="xs" radius="xs" bg="var(--mantine-color-gray-0)">
+          <Paper withBorder p="xs" radius="xs" bg={tokens.color.cloud}>
             <Text size="xs" c="dimmed">
               Suma pública vigente (con ofertas)
             </Text>
@@ -40,7 +41,7 @@ export function EconomicComparator({ comparison }: EconomicComparatorProps) {
             withBorder
             p="xs"
             radius="xs"
-            bg={isValidBenefit ? "var(--mantine-color-green-0)" : "var(--mantine-color-gray-0)"}
+            bg={isValidBenefit ? tokens.color.successBg : tokens.color.cloud}
           >
             <Text size="xs" c="dimmed">
               Precio propuesto del combo
@@ -56,13 +57,30 @@ export function EconomicComparator({ comparison }: EconomicComparatorProps) {
             <ThemeIcon
               size="sm"
               variant="light"
-              color={isValidBenefit ? "green" : isPricingComplete ? "red" : "yellow"}
+              style={{
+                backgroundColor: isValidBenefit
+                  ? tokens.color.successBg
+                  : isPricingComplete
+                    ? tokens.color.errorBg
+                    : tokens.color.warningBg,
+                color: isValidBenefit
+                  ? tokens.color.success
+                  : isPricingComplete
+                    ? tokens.color.error
+                    : tokens.color.warning,
+              }}
             >
               {isValidBenefit ? <IconCheck size={14} /> : <IconAlertTriangle size={14} />}
             </ThemeIcon>
             <Text
               size="xs"
-              c={isValidBenefit ? "green.8" : isPricingComplete ? "red.8" : "yellow.9"}
+              style={{
+                color: isValidBenefit
+                  ? tokens.color.successText
+                  : isPricingComplete
+                    ? tokens.color.errorText
+                    : tokens.color.warningText,
+              }}
               fw={500}
             >
               {message}

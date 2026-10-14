@@ -1,4 +1,4 @@
-import { Badge } from "@mantine/core";
+import { StatusBadge } from "../../../components/shared/StatusBadge";
 import type { ComboStatus, FreshnessStatus } from "../types/combos";
 
 interface ComboStatusBadgeProps {
@@ -8,16 +8,16 @@ interface ComboStatusBadgeProps {
 export function ComboStatusBadge({ status }: ComboStatusBadgeProps) {
   if (status === "ACTIVO") {
     return (
-      <Badge color="gray" variant="filled" size="md">
+      <StatusBadge semantic="neutral" size="md">
         Activo
-      </Badge>
+      </StatusBadge>
     );
   }
 
   return (
-    <Badge color="gray" variant="outline" size="md">
+    <StatusBadge semantic="neutral" size="md">
       Inactivo
-    </Badge>
+    </StatusBadge>
   );
 }
 
@@ -30,40 +30,70 @@ export function AvailabilityBadge({
   availability,
   freshness,
 }: AvailabilityBadgeProps) {
+  if (freshness === "ERROR_CONSULTA") {
+    return (
+      <StatusBadge semantic="error" size="md">
+        Fallo de consulta de inventario
+      </StatusBadge>
+    );
+  }
+
   if (availability === null) {
     if (freshness === "INCOMPLETA") {
       return (
-        <Badge color="yellow" variant="light" size="md">
+        <StatusBadge semantic="warning" size="md">
           Disponibilidad incompleta
-        </Badge>
+        </StatusBadge>
+      );
+    }
+    if (freshness === "NO_VERIFICABLE") {
+      return (
+        <StatusBadge semantic="neutral" size="md">
+          Disponibilidad no verificable
+        </StatusBadge>
       );
     }
     return (
-      <Badge color="gray" variant="light" size="md">
-        Disponibilidad no verificable
-      </Badge>
+      <StatusBadge semantic="neutral" size="md">
+        Disponibilidad no confirmada
+      </StatusBadge>
     );
   }
 
   if (availability === 0) {
+    if (freshness === "DESACTUALIZADA") {
+      return (
+        <StatusBadge semantic="warning" size="md">
+          Desactualizada (0 un. sin confirmar)
+        </StatusBadge>
+      );
+    }
     return (
-      <Badge color="red" variant="light" size="md">
-        Agotado actualmente
-      </Badge>
+      <StatusBadge semantic="error" size="md">
+        Agotado actualmente (0 un.)
+      </StatusBadge>
     );
   }
 
   if (freshness === "DESACTUALIZADA") {
     return (
-      <Badge color="yellow" variant="light" size="md">
-        Desactualizada ({availability} combos)
-      </Badge>
+      <StatusBadge semantic="warning" size="md">
+        Desactualizada ({availability} un.)
+      </StatusBadge>
+    );
+  }
+
+  if (freshness === "ACTUALIZADA") {
+    return (
+      <StatusBadge semantic="success" size="md">
+        {availability} combos estimados
+      </StatusBadge>
     );
   }
 
   return (
-    <Badge color="green" variant="light" size="md">
+    <StatusBadge semantic="info" size="md">
       {availability} combos estimados
-    </Badge>
+    </StatusBadge>
   );
 }
