@@ -18,13 +18,18 @@ Comandos disponibles:
 ```sh
 npm run typecheck
 npm run lint
-npm test
 ```
 
-`npm test` ejecuta Playwright. Para instalar su navegador en una máquina local:
+Instala primero Chromium para Playwright:
 
 ```sh
 npx playwright install chromium
+```
+
+Después, ejecuta la suite automatizada:
+
+```sh
+npm test
 ```
 
 Para construir y servir la versión compilada:
@@ -44,7 +49,9 @@ La única variable de entorno de la aplicación es `VITE_DATA_MODE` (ver [.env.e
 | Valor | Comportamiento |
 |---|---|
 | `mock` | Demostración con repositorios en memoria y fixtures. No requiere Backend, credenciales ni conexión de red. Las escrituras simuladas se pierden al recargar. |
-| `api` | Selecciona puertos API cuando hay providers configurados. En las features sin provider implementado, la pantalla informa el bloqueo o el repositorio falla explícitamente; no cambia a mocks como respaldo. |
+| `api` | Selecciona puertos API cuando hay providers configurados; sin ellos, cada módulo define su respuesta. La excepción de Bulk, que usa mocks directamente, se detalla debajo. |
+
+**Excepción en Bulk:** `bulkService.ts` usa `mockBulkRepository` directamente, incluso cuando `VITE_DATA_MODE=api`; `/carga-masiva` no está entre las rutas que `CommercialModeGate` bloquea o trata según el modo. Por tanto, ese flujo sigue siendo una simulación en ambos modos. Es una discrepancia funcional que requiere corrección independiente; este cambio solo la documenta.
 
 En desarrollo, la aplicación usa `mock` si la variable no está definida. Para `npm run build` se requiere definir `VITE_DATA_MODE` expresamente como `mock` o `api`; un valor ausente o inválido detiene el build. Copiar `.env.example` a `.env.local` configura `mock`. Vite carga las variables al arrancar: reinicia el servidor o vuelve a construir tras cambiarlas.
 
@@ -60,8 +67,8 @@ La tabla resume lo que muestran el código y la configuración de esta rama; la 
 | Taxonomía (categorías, características, tipos, marcas y SEO) | Pantallas disponibles en mock. En `api`, la integración se bloquea visiblemente mientras no exista un provider configurado. |
 | Precios y programaciones/importación | Flujos de demostración mock. El modo `api` requiere un adapter; la implementación predeterminada falla explícitamente, sin fallback. Las operaciones de archivo no acreditan procesamiento comercial de Backend. |
 | Auditoría de precios | Listado, detalle y exportación de demostración mock. El runtime permite inyección, pero no incluye provider API predeterminado. Los archivos disponibles son muestras. |
-| Cupones, promociones y recomendaciones | Flujos de demostración mock. En modo `api` sus vistas quedan bloqueadas hasta configurar el provider; precio y disponibilidad de recomendaciones no están disponibles. |
-| Carga masiva | Flujo de demostración mock. La revisión local de archivos no sustituye la validación comercial; XLSX y procesamiento/exportación reales requieren Backend. |
+| Cupones, promociones y recomendaciones | Flujos de demostración mock. En modo `api` sus vistas quedan bloqueadas hasta configurar el provider. Las recomendaciones no calculan un precio final ni garantizan stock; ambos datos figuran como no disponibles en la demostración. |
+| Carga masiva | Simulación mock tanto en `mock` como en `api` por la excepción descrita arriba. La revisión local de archivos no sustituye la validación comercial; XLSX y procesamiento/exportación reales requieren Backend. Ver [límites de carga masiva](docs/ESTADO_CARGA_MASIVA.md). |
 | Combos e inventario | No hay features frontend en esta rama. |
 | Foundation | Galería de componentes accesible solo en desarrollo; no es un flujo comercial. |
 
@@ -87,10 +94,27 @@ La configuración de Playwright fija Chromium a `1440 × 900`. Los tests viven e
 ```sh
 npm run typecheck
 npm run lint
+npx playwright install chromium
 npm test
 ```
 
-Para validar ambos builds de forma local, establece `VITE_DATA_MODE=mock` y luego `VITE_DATA_MODE=api` antes de cada `npm run build`. La verificación de preview en CI comprueba que API no use datos mock como fallback. Estas comprobaciones no convierten los adapters sustituibles en una integración HTTP real.
+Antes de compilar, define explícitamente el modo. En PowerShell:
+
+```powershell
+$env:VITE_DATA_MODE = 'mock'
+npm run build
+$env:VITE_DATA_MODE = 'api'
+npm run build
+```
+
+En Bash:
+
+```bash
+VITE_DATA_MODE=mock npm run build
+VITE_DATA_MODE=api npm run build
+```
+
+El workflow valida ambos builds y revisa en preview rutas seleccionadas; esa revisión no cubre Bulk ni acredita que todos los módulos eviten mocks en modo `api`.
 
 Los reportes técnicos y las capturas que corresponden a auditorías concretas están en [`docs/`](docs/). Entre ellos: [auditoría de Pricing](docs/AUDITORIA_MK013.md), [auditoría de Catálogo y variantes](docs/AUDITORIA_CATALOGO_MK003_MK004.md), [validación de auditoría de precios](docs/VALIDACION_MK014.md), [validación de Foundation](docs/VALIDACION_FOUNDATION.md), y [evidencias](docs/evidencias/). Son registros de sus respectivas revisiones; consulta fecha, alcance y commit documentados antes de aplicar sus resultados a otra revisión.
 
@@ -102,6 +126,7 @@ Los reportes técnicos y las capturas que corresponden a auditorías concretas e
 | Procedimiento de implementación | [GUIA_IMPLEMENTACION_FRONTEND_REACT.md](docs/GUIA_IMPLEMENTACION_FRONTEND_REACT.md) |
 | Componentes y patrones existentes | [COMPONENTES_FOUNDATION.md](docs/COMPONENTES_FOUNDATION.md) |
 | Auditorías y evidencia | [docs/](docs/) |
+| Estado y límites de carga masiva | [ESTADO_CARGA_MASIVA.md](docs/ESTADO_CARGA_MASIVA.md) |
 | Requisitos funcionales, UX/Design System, arquitectura y contratos | [Repositorio Docs](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs) — `requisitos/`, `ux/mockups/`, `arquitectura/` y `contratos/` |
 
 Docs es la fuente para SPEC, HU, flujos, decisiones UX y contratos ejecutables. Backend es un repositorio independiente responsable de sus servicios. Antes de integrar, verifica el contrato vigente del provider y los acuerdos aplicables; la documentación o un adapter local no prueban homologación, despliegue o autorización.
