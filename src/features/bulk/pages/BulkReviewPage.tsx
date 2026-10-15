@@ -13,10 +13,12 @@ import {
 } from "../../../components/shared";
 import { BulkFileReview } from "../components/BulkFileReview";
 import { useBulkUploadContext } from "../context/BulkUploadContext";
-import { bulkService } from "../services/bulkService";
+import { BulkRepositoryError } from "../services/bulkService";
+import { useBulkRepository } from "../hooks/useBulkRepository";
 
 export function BulkReviewPage() {
   const navigate = useNavigate();
+  const bulkRepository = useBulkRepository();
   const isSubmittingRef = useRef(false);
   const {
     selectedFile,
@@ -65,7 +67,9 @@ export function BulkReviewPage() {
     setSubmitting(true);
     setSubmissionError(null);
     try {
-      const batch = await bulkService.createImport(selectedFile);
+      const batch = await bulkRepository.createImport(selectedFile, {
+        detectedRows: fileCheck.detectedRows,
+      });
       // Navigate to tracking screen S03
       navigate(`/carga-masiva/importaciones/${batch.batch_id}`);
     } catch (err: unknown) {
@@ -75,11 +79,13 @@ export function BulkReviewPage() {
         err instanceof Error
           ? err.message
           : "El servicio no pudo admitir el lote de importación.";
-      setSubmissionError(message);
+      const category = err instanceof BulkRepositoryError ? err.category : "unknown";
+      setSubmissionError({ category, message });
     }
   };
 
   const hasBlockingErrors = !fileCheck.valid;
+  const admissionUnknown = submissionError?.category === "unknown";
 
   return (
     <>
@@ -106,7 +112,7 @@ export function BulkReviewPage() {
               leftSection={<IconCheck size={18} stroke={2} aria-hidden="true" />}
               onClick={handleConfirmImport}
               loading={submitting}
-              disabled={submitting || hasBlockingErrors}
+              disabled={submitting || hasBlockingErrors || admissionUnknown}
             >
               Confirmar importación
             </Button>
@@ -116,8 +122,22 @@ export function BulkReviewPage() {
 
       <Stack gap="lg">
         {submissionError && (
-          <FeedbackAlert semantic="error" title="Rechazo en la admisión del lote">
-            {submissionError}
+          <FeedbackAlert
+            semantic="error"
+            title={
+              submissionError.category === "rejected"
+                ? "Archivo rechazado en la admisión"
+                : submissionError.category === "configuration"
+                  ? "Servicio de carga masiva no configurado"
+                  : submissionError.category === "communication"
+                    ? "No se pudo comunicar con el servicio"
+                    : "No se confirmó el resultado de admisión"
+            }
+          >
+            {submissionError.message}
+            {submissionError.category === "unknown" && (
+              <div>Consulta el lote antes de intentar enviar el archivo otra vez.</div>
+            )}
           </FeedbackAlert>
         )}
 
@@ -136,7 +156,7 @@ export function BulkReviewPage() {
             leftSection={<IconCheck size={18} stroke={2} aria-hidden="true" />}
             onClick={handleConfirmImport}
             loading={submitting}
-            disabled={submitting || hasBlockingErrors}
+            disabled={submitting || hasBlockingErrors || admissionUnknown}
           >
             Confirmar importación
           </Button>

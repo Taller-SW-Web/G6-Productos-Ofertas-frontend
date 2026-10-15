@@ -14,7 +14,7 @@ import type {
   BulkRepository,
   DownloadResource,
 } from "../services/bulkRepository";
-import { parseCsvSafely } from "../utils/localFileCheck";
+import { BulkRepositoryError } from "../services/bulkErrors";
 
 export const DEMO_CONFIG = {
   PROCESSING_DELAY_MS: 1200,
@@ -26,6 +26,7 @@ export const DEMO_CONFIG = {
 const dynamicBatches: Map<string, BulkImportBatch> = new Map();
 const dynamicExports: Map<string, BulkExportJob> = new Map();
 const activeTimers: Set<ReturnType<typeof setTimeout>> = new Set();
+const resumingBatches = new Set<string>();
 
 let batchSequence = 1000;
 let exportSequence = 1000;
@@ -201,7 +202,7 @@ export const mockBulkRepository: BulkRepository & {
 
   async createImport(
     file: File,
-    scenario?: string,
+    localSummary?: { detectedRows?: number },
     signal?: AbortSignal,
   ): Promise<BulkImportBatch> {
     createImportCallCount++;
@@ -210,52 +211,41 @@ export const mockBulkRepository: BulkRepository & {
     const lowerName = file.name.toLowerCase();
 
     // Rejection scenarios based on scenario param or file naming
-    if (scenario === "ARCHIVO_INVALIDO" || lowerName.includes("invalido")) {
-      throw new Error(
+    if (lowerName.includes("invalido")) {
+      throw new BulkRepositoryError(
         "El archivo seleccionado no tiene una estructura legible o contiene caracteres corruptos.",
+        "rejected",
       );
     }
-    if (scenario === "ARCHIVO_EXCEDE_LIMITE" || lowerName.includes("excede")) {
-      throw new Error(
+    if (lowerName.includes("excede")) {
+      throw new BulkRepositoryError(
         "El archivo excede el tamaño máximo permitido por el servicio.",
+        "rejected",
       );
     }
     if (
-      scenario === "PLANTILLA_INCOMPATIBLE" ||
       lowerName.includes("incompatible")
     ) {
-      throw new Error(
+      throw new BulkRepositoryError(
         "La plantilla no coincide con la versión vigente de carga masiva.",
+        "rejected",
       );
     }
     if (
-      scenario === "CONTENIDO_ACTIVO_NO_PERMITIDO" ||
       lowerName.includes("macros")
     ) {
-      throw new Error(
+      throw new BulkRepositoryError(
         "El archivo contiene macros o contenido activo no admitido por la política de seguridad.",
+        "rejected",
       );
     }
 
     // Determine observed row count for CSV using the same parser as local check
-    let estimatedRows: number | undefined = undefined;
-    if (lowerName.endsWith(".csv")) {
-      try {
-        const text = await file.text();
-        const cleanText = text.replace(/^\uFEFF/, "");
-        const parsed = parseCsvSafely(cleanText);
-        if (!parsed.error && parsed.rows.length > 1) {
-          estimatedRows = parsed.rows.length - 1;
-        } else if (!parsed.error && parsed.rows.length <= 1) {
-          estimatedRows = 0;
-        }
-      } catch {
-        estimatedRows = undefined;
-      }
-    } else if (lowerName.endsWith(".xlsx")) {
-      // For XLSX, browser client cannot verify row count: quantity is unknown (undefined), not 0
-      estimatedRows = undefined;
-    }
+    // The review stage already streamed and counted CSV rows; do not read the file again.
+    // For XLSX the browser cannot verify row count, so leave it unknown.
+    const estimatedRows = lowerName.endsWith(".csv")
+      ? localSummary?.detectedRows
+      : undefined;
 
     batchSequence++;
     const batchId = `lote-imp-${batchSequence}-${Math.random().toString(36).slice(2, 6)}`;
@@ -369,6 +359,11 @@ export const mockBulkRepository: BulkRepository & {
       );
     }
 
+    if (resumingBatches.has(batchId)) {
+      throw new Error(`El lote ${batchId} ya tiene una reanudación en curso.`);
+    }
+    resumingBatches.add(batchId);
+
     const resumedBatch: BulkImportBatch = {
       ...existing,
       status: "QUEUED",
@@ -377,6 +372,9 @@ export const mockBulkRepository: BulkRepository & {
 
     dynamicBatches.set(batchId, resumedBatch);
     scheduleResumeSimulation(batchId);
+    // The demo returns the 202-shaped response synchronously. The guard remains active
+    // until the next turn so a rapid duplicate cannot schedule a second run.
+    queueMicrotask(() => resumingBatches.delete(batchId));
 
     return deepCloneBatch(resumedBatch);
   },
@@ -539,6 +537,7 @@ export const mockBulkRepository: BulkRepository & {
     activeTimers.clear();
     dynamicBatches.clear();
     dynamicExports.clear();
+    resumingBatches.clear();
     batchSequence = 1000;
     exportSequence = 1000;
     createImportCallCount = 0;

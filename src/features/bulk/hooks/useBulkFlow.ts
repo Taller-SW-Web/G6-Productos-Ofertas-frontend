@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
-import { bulkService } from "../services/bulkService";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   BulkExportFormat,
   BulkExportJob,
   BulkImportBatch,
 } from "../types/bulk";
+import type { DownloadResource } from "../services/bulkRepository";
 import { triggerDownload } from "../utils/downloadAsset";
+import { useBulkRepository } from "./useBulkRepository";
 
 type BatchQueryState =
   | { status: "loading" }
@@ -14,6 +15,7 @@ type BatchQueryState =
   | { status: "error"; message: string };
 
 export function useBulkBatch(batchId: string | undefined) {
+  const repository = useBulkRepository();
   const [revision, setRevision] = useState(0);
   const [response, setResponse] = useState<{
     key: string;
@@ -24,27 +26,25 @@ export function useBulkBatch(batchId: string | undefined) {
     batch: BulkImportBatch;
   }>();
   const [resuming, setResuming] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
   const [downloadingReport, setDownloadingReport] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const resumeInFlight = useRef(false);
+  const reportInFlight = useRef(false);
 
   const requestKey = JSON.stringify([batchId, revision]);
 
   useEffect(() => {
     if (!batchId) return;
     const controller = new AbortController();
-    void bulkService.getImport(batchId, controller.signal).then(
+    void repository.getImport(batchId, controller.signal).then(
       (result) => {
         if (controller.signal.aborted) return;
         if (result) {
           setLastSuccess({ batchId, batch: result });
-          setResponse({
-            key: requestKey,
-            state: { status: "success", batch: result },
-          });
+          setResponse({ key: requestKey, state: { status: "success", batch: result } });
         } else {
-          setResponse({
-            key: requestKey,
-            state: { status: "not_found" },
-          });
+          setResponse({ key: requestKey, state: { status: "not_found" } });
         }
       },
       (err: unknown) => {
@@ -53,222 +53,303 @@ export function useBulkBatch(batchId: string | undefined) {
           err instanceof Error
             ? err.message
             : "No se pudo consultar la información del lote.";
-        setResponse({
-          key: requestKey,
-          state: { status: "error", message },
-        });
+        setResponse({ key: requestKey, state: { status: "error", message } });
       },
     );
     return () => controller.abort();
-  }, [batchId, revision, requestKey]);
+  }, [batchId, requestKey, repository]);
 
-  const refreshBatch = useCallback(async () => {
+  const refreshBatch = useCallback(() => {
     setRevision((prev) => prev + 1);
   }, []);
 
   const resumeBatch = useCallback(async () => {
-    if (!batchId) return;
+    if (!batchId || resumeInFlight.current) return;
+    resumeInFlight.current = true;
     setResuming(true);
+    setResumeError(null);
     try {
-      const resumed = await bulkService.resumeImport(batchId);
+      const resumed = await repository.resumeImport(batchId);
       setLastSuccess({ batchId, batch: resumed });
-      setResponse({
-        key: requestKey,
-        state: { status: "success", batch: resumed },
-      });
+      setResponse({ key: requestKey, state: { status: "success", batch: resumed } });
       return resumed;
     } catch (err: unknown) {
       const message =
         err instanceof Error
           ? err.message
           : "No se pudo reanudar el lote de importación.";
-      setResponse({
-        key: requestKey,
-        state: { status: "error", message },
-      });
+      setResumeError(message);
       throw err;
     } finally {
+      resumeInFlight.current = false;
       setResuming(false);
     }
-  }, [batchId, requestKey]);
+  }, [batchId, repository, requestKey]);
 
   const downloadReport = useCallback(async () => {
-    if (!batchId) return;
+    if (!batchId || reportInFlight.current) return;
+    reportInFlight.current = true;
     setDownloadingReport(true);
+    setReportError(null);
     try {
-      const resource = await bulkService.getImportReport(batchId);
+      const resource = await repository.getImportReport(batchId);
       if (resource) {
         triggerDownload(resource);
       } else {
-        setResponse({
-          key: requestKey,
-          state: {
-            status: "error",
-            message: "No hay reporte de errores disponible para este lote.",
-          },
-        });
+        setReportError("El servicio no entregó un reporte descargable para este lote.");
       }
     } catch (err: unknown) {
       const message =
         err instanceof Error
           ? err.message
           : "Error al descargar el reporte de errores.";
-      setResponse({
-        key: requestKey,
-        state: { status: "error", message },
-      });
+      setReportError(message);
     } finally {
+      reportInFlight.current = false;
       setDownloadingReport(false);
     }
-  }, [batchId, requestKey]);
+  }, [batchId, repository]);
 
   const isCurrent = response?.key === requestKey;
   const currentBatch =
     isCurrent && response.state.status === "success"
       ? response.state.batch
-      : lastSuccess?.batchId === batchId
-        ? (lastSuccess?.batch ?? null)
+      : lastSuccess && lastSuccess.batchId === batchId
+        ? lastSuccess.batch
         : null;
 
   const loading = !isCurrent || response?.state.status === "loading";
   const isNotFound = isCurrent && response?.state.status === "not_found";
   const error =
-    isCurrent && response?.state.status === "error"
-      ? response.state.message
-      : null;
-  const isStale = Boolean(error && currentBatch);
+    isCurrent && response?.state.status === "error" ? response.state.message : null;
 
   return {
     batch: currentBatch,
     loading,
     error,
     isNotFound,
-    isStale,
+    isStale: Boolean(error && currentBatch),
     resuming,
+    resumeError,
     downloadingReport,
+    reportError,
     refreshBatch,
     resumeBatch,
     downloadReport,
   };
 }
 
+type ExportQueryState =
+  | { exportId: string; revision: number; status: "success"; job: BulkExportJob }
+  | { exportId: string; revision: number; status: "not_found" }
+  | { exportId: string; revision: number; status: "error"; message: string };
+
 export function useBulkDownloads(initialExportId?: string) {
-  const [exportJob, setExportJob] = useState<BulkExportJob | null>(null);
+  const repository = useBulkRepository();
+  const [exportJobState, setExportJobState] = useState<{
+    routeExportId?: string;
+    job: BulkExportJob;
+  }>();
+  const [createdJob, setCreatedJob] = useState<{
+    routeExportId?: string;
+    job: BulkExportJob;
+  }>();
+  const [queryState, setQueryState] = useState<ExportQueryState>();
+  const [queryRevision, setQueryRevision] = useState(0);
   const [submittingExport, setSubmittingExport] = useState(false);
   const [refreshingJob, setRefreshingJob] = useState(false);
   const [downloadingExport, setDownloadingExport] = useState(false);
   const [downloadingTemplate, setDownloadingTemplate] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const refreshInFlight = useRef(false);
+  const exportInFlight = useRef(false);
 
   useEffect(() => {
     if (!initialExportId) return;
     const controller = new AbortController();
-    void bulkService.getExport(initialExportId, controller.signal).then(
+    void repository.getExport(initialExportId, controller.signal).then(
       (job) => {
-        if (!controller.signal.aborted && job) {
-          setExportJob(job);
+        if (controller.signal.aborted) return;
+        if (job) {
+          setExportJobState({ routeExportId: initialExportId, job });
+          setQueryState({ exportId: initialExportId, revision: queryRevision, status: "success", job });
+        } else {
+          setExportJobState(undefined);
+          setQueryState({ exportId: initialExportId, revision: queryRevision, status: "not_found" });
         }
       },
-      () => {
-        // ignore initial query errors
+      (err: unknown) => {
+        if (controller.signal.aborted) return;
+        setQueryState({
+          exportId: initialExportId,
+          revision: queryRevision,
+          status: "error",
+          message:
+            err instanceof Error
+              ? err.message
+              : "No se pudo consultar el trabajo de exportación.",
+        });
       },
     );
     return () => controller.abort();
-  }, [initialExportId]);
+  }, [initialExportId, queryRevision, repository]);
 
-  const requestExport = useCallback(async (format: BulkExportFormat) => {
-    setSubmittingExport(true);
-    setError(null);
-    try {
-      const job = await bulkService.createExport(format);
-      setExportJob(job);
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : "No se pudo iniciar el trabajo de exportación.";
-      setError(message);
-    } finally {
-      setSubmittingExport(false);
-    }
-  }, []);
+  const queryMatches = Boolean(
+    queryState &&
+      queryState.exportId === initialExportId &&
+      queryState.revision === queryRevision,
+  );
+  const matchingQuery = queryMatches ? queryState : undefined;
+  const createdJobMatches = Boolean(
+    createdJob && createdJob.routeExportId === initialExportId,
+  );
+  const jobMatchesCurrentRoute =
+    exportJobState?.routeExportId === initialExportId;
+  const visibleJob = createdJobMatches
+    ? createdJob?.job ?? null
+    : matchingQuery?.status === "success"
+      ? matchingQuery.job
+      : jobMatchesCurrentRoute
+        ? exportJobState?.job ?? null
+        : null;
+  const initialQueryStatus = initialExportId && !createdJobMatches
+    ? matchingQuery
+      ? matchingQuery.status
+      : "loading"
+    : null;
+  const initialQueryError =
+    !createdJobMatches && matchingQuery?.status === "error"
+      ? matchingQuery.message
+      : null;
+
+  const requestExport = useCallback(
+    async (format: BulkExportFormat) => {
+      if (exportInFlight.current) return;
+      exportInFlight.current = true;
+      setSubmittingExport(true);
+      setError(null);
+      try {
+        const job = await repository.createExport(format);
+        setCreatedJob({ routeExportId: initialExportId, job });
+      } catch (err: unknown) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "No se pudo iniciar el trabajo de exportación.",
+        );
+      } finally {
+        exportInFlight.current = false;
+        setSubmittingExport(false);
+      }
+    },
+    [initialExportId, repository],
+  );
 
   const refreshJob = useCallback(async () => {
-    if (!exportJob) return;
+    if (!visibleJob || refreshInFlight.current) return;
+    refreshInFlight.current = true;
     setRefreshingJob(true);
     setError(null);
     try {
-      const updated = await bulkService.getExport(exportJob.export_id);
+      const updated = await repository.getExport(visibleJob.export_id);
       if (updated) {
-        setExportJob(updated);
+        if (createdJobMatches) {
+          setCreatedJob({ routeExportId: initialExportId, job: updated });
+        } else {
+          setExportJobState({ routeExportId: initialExportId, job: updated });
+        }
+        if (initialExportId === updated.export_id) {
+          setQueryState({ exportId: updated.export_id, revision: queryRevision, status: "success", job: updated });
+        }
+      } else if (initialExportId === visibleJob.export_id) {
+        setExportJobState(undefined);
+        setCreatedJob(undefined);
+        setQueryState({ exportId: visibleJob.export_id, revision: queryRevision, status: "not_found" });
+      } else {
+        setError("El trabajo de exportación ya no está disponible.");
       }
     } catch (err: unknown) {
-      const message =
+      setError(
         err instanceof Error
           ? err.message
-          : "No se pudo actualizar el estado de la exportación.";
-      setError(message);
+          : "No se pudo actualizar el estado de la exportación.",
+      );
     } finally {
+      refreshInFlight.current = false;
       setRefreshingJob(false);
     }
-  }, [exportJob]);
+  }, [createdJobMatches, initialExportId, queryRevision, repository, visibleJob]);
+
+  const retryInitialQuery = useCallback(() => {
+    if (initialExportId) setQueryRevision((revision) => revision + 1);
+  }, [initialExportId]);
 
   const downloadExportFile = useCallback(async () => {
-    if (!exportJob) return;
+    if (!visibleJob || visibleJob.status !== "COMPLETED") return;
     setDownloadingExport(true);
     setError(null);
     try {
-      const resource = await bulkService.getExportFile(exportJob.export_id);
+      const resource = await repository.getExportFile(visibleJob.export_id);
       if (resource) {
         triggerDownload(resource);
       } else {
         setError(
-          "El recurso descargable no está disponible en este momento o el formato XLSX de demostración requiere integración con el servicio exportador.",
+          visibleJob.format === "XLSX"
+            ? "La exportación XLSX terminó, pero el modo mock no genera un libro descargable."
+            : "El archivo de exportación no está disponible en este momento.",
         );
       }
     } catch (err: unknown) {
-      const message =
+      setError(
         err instanceof Error
           ? err.message
-          : "Error al descargar el archivo de exportación.";
-      setError(message);
+          : "Error al descargar el archivo de exportación.",
+      );
     } finally {
       setDownloadingExport(false);
     }
-  }, [exportJob]);
+  }, [repository, visibleJob]);
 
-  const downloadTemplate = useCallback(async (format: BulkExportFormat) => {
-    setDownloadingTemplate(true);
-    setError(null);
-    try {
-      const resource = await bulkService.getTemplate(format);
-      if (resource) {
-        triggerDownload(resource);
-      } else {
+  const downloadTemplate = useCallback(
+    async (format: BulkExportFormat) => {
+      setDownloadingTemplate(true);
+      setError(null);
+      try {
+        const resource: DownloadResource | null = await repository.getTemplate(format);
+        if (resource) {
+          triggerDownload(resource);
+        } else {
+          setError(
+            format === "XLSX"
+              ? "No existe una plantilla XLSX descargable en el modo mock."
+              : "La plantilla solicitada no está disponible.",
+          );
+        }
+      } catch (err: unknown) {
         setError(
-          "La plantilla XLSX no está disponible localmente (limitación de demostración: use formato CSV).",
+          err instanceof Error
+            ? err.message
+            : "Error al obtener la plantilla solicitada.",
         );
+      } finally {
+        setDownloadingTemplate(false);
       }
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : "Error al obtener la plantilla oficial.";
-      setError(message);
-    } finally {
-      setDownloadingTemplate(false);
-    }
-  }, []);
+    },
+    [repository],
+  );
 
   return {
-    exportJob,
+    exportJob: visibleJob,
     submittingExport,
     refreshingJob,
     downloadingExport,
     downloadingTemplate,
     error,
+    initialQueryStatus,
+    initialQueryError,
     requestExport,
     refreshJob,
+    retryInitialQuery,
     downloadExportFile,
     downloadTemplate,
   };

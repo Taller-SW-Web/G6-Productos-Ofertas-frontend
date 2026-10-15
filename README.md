@@ -18,8 +18,9 @@ npm run typecheck
 $env:VITE_DATA_MODE = 'mock'
 npm run build
 npm run lint
+npm run test
 npx playwright install chromium
-npm test
+npm run test:e2e:smoke:bulk
 ```
 
 El modo `mock` funciona sin Backend, Docs ni credenciales. Solo el servidor de desarrollo admite `mock` como valor predeterminado. **Todo build de producción exige `VITE_DATA_MODE=mock` o `api` explícito**; sin valor o con uno inválido, falla. `.env.example` documenta la demostración: copiarlo a `.env.local` selecciona mocks intencionalmente. Para un despliegue destinado al backend real, configurar `api` en el entorno de build. Inter/Oswald y el logo se sirven como assets locales. `npm run preview` permite revisar `dist/` después del build. Un hosting futuro deberá resolver las rutas hacia `index.html`; no se declara desplegada la app.
@@ -34,9 +35,14 @@ con ese resultado, dentro del `DataModeContext` existente. Las páginas y hooks 
 La inyección explícita tiene prioridad sobre la caché del runtime predeterminado.
 Sin provider API, cada puerto falla explícitamente y no carga mocks.
 
+`npm run test` ejecuta las pruebas puras con Vitest en Node, sin iniciar Chromium.
+`npm run test:e2e:smoke:bulk` ejecuta los tres recorridos críticos de Bulk con Chromium
+headless y un worker. `npm run test:e2e` reserva la suite completa de interfaz para CI
+o una ejecución explícita.
+
 `tests/harness/catalog-adapter.html` usa las mismas páginas con otro producto,
 otros IDs, atributos LISTA/NUMERO/TEXTO y filtros externos en modo API. Ejecutar
-`npm test -- tests/catalog-adapters.spec.ts tests/catalog-injection.spec.ts` prueba
+`npm run test:e2e -- tests/catalog-adapters.spec.ts tests/catalog-injection.spec.ts` prueba
 sustitución, permisos de reintento y fallos del esquema; no acredita HTTP real.
 El harness es de pruebas y no forma parte del build comercial.
 
@@ -65,7 +71,7 @@ metadatos pendientes, sin copiar el módulo ni modificar sus servicios.
 
 Las páginas/hooks usan `PricingProvider` y el puerto `PricingRepository`: catálogo de productos/SKU, lecturas, escrituras, prevalidación `File + allowPartial` y reportes `Blob + filename`. No importan targets/fixtures ni reciben `scenario`. El contexto mantiene IDs opacos y la asociación `productTargetId`; no deriva producto desde SKU ni usa `base` como identidad productiva. Las monedas se conservan desde la lectura; no se habilita conversión ni elección de otra moneda sin política publicada. La validación preliminar de oferta programada consulta la vigencia correspondiente al inicio; la validación definitiva pertenece a Pricing.
 
-`tests/harness/pricing-adapter.html` monta el mismo `App` con `AlternatePricingRepository`: cafetera, otro UUID de producto, otro SKU, moneda CHF y otro lote. El harness es de pruebas, servido por Vite en desarrollo y ausente del build de producto; no es una ruta comercial. Ejecutar `npm test -- tests/pricing-audit.spec.ts` verifica sustitución, entradas de archivo/política, errores sin fallback y descarga del archivo de ese adapter.
+`tests/harness/pricing-adapter.html` monta el mismo `App` con `AlternatePricingRepository`: cafetera, otro UUID de producto, otro SKU, moneda CHF y otro lote. El harness es de pruebas, servido por Vite en desarrollo y ausente del build de producto; no es una ruta comercial. Ejecutar `npm run test:e2e -- tests/pricing-audit.spec.ts` verifica sustitución, entradas de archivo/política, errores sin fallback y descarga del archivo de ese adapter.
 
 ## Rutas y límites
 
@@ -199,7 +205,7 @@ Para actualizar deliberadamente las evidencias de los tres MK de Cueva después 
 
 ```powershell
 $env:UPDATE_PROMOTIONS_EVIDENCE = "1"
-npm test -- --workers=2 --grep "desktop evidence|seven desktop views"
+npm run test:e2e -- --workers=1 --grep "desktop evidence|seven desktop views"
 Remove-Item Env:UPDATE_PROMOTIONS_EVIDENCE
 ```
 

@@ -1,210 +1,351 @@
 import type { LocalFileCheckResult } from "../types/bulk";
 
-export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> {
+const FILE_READ_CHUNK_SIZE = 64 * 1024;
+const ZIP_MAX_EOCD_SIZE = 22 + 65_535;
+
+interface CsvFileSummary {
+  headers: string[];
+  dataRows: number;
+  malformedRow?: { rowNumber: number; fieldCount: number };
+  error?: string;
+}
+
+function createCsvSummaryScanner() {
+  let insideQuotes = false;
+  let fieldStarted = false;
+  let afterClosingQuote = false;
+  let currentField = "";
+  let currentRowFields: string[] = [];
+  let currentRowHasData = false;
+  let skipLineFeed = false;
+  let headers: string[] | undefined;
+  let dataRows = 0;
+  let malformedRow: CsvFileSummary["malformedRow"];
+  let error: string | undefined;
+
+  const appendCurrentField = () => {
+    currentRowFields.push(currentField);
+    currentField = "";
+    fieldStarted = false;
+    afterClosingQuote = false;
+  };
+
+  const finishRow = () => {
+    appendCurrentField();
+    if (currentRowHasData) {
+      if (!headers) {
+        headers = currentRowFields.map((field) => field.trim().toLowerCase());
+      } else {
+        dataRows++;
+        if (!malformedRow && currentRowFields.length !== headers.length) {
+          malformedRow = {
+            rowNumber: dataRows + 1,
+            fieldCount: currentRowFields.length,
+          };
+        }
+      }
+    }
+    currentRowFields = [];
+    currentRowHasData = false;
+  };
+
+  const push = (chunk: string) => {
+    for (let i = 0; i < chunk.length && !error; i++) {
+      const char = chunk[i] ?? "";
+      const nextChar = chunk[i + 1];
+
+      if (skipLineFeed) {
+        skipLineFeed = false;
+        if (char === "\n") continue;
+      }
+
+      if (char === '"') {
+        if (insideQuotes) {
+          if (nextChar === '"') {
+            if (!headers) currentField += '"';
+            i++;
+          } else {
+            insideQuotes = false;
+            afterClosingQuote = true;
+          }
+        } else if (!fieldStarted) {
+          insideQuotes = true;
+          fieldStarted = true;
+        } else {
+          error = "El archivo CSV contiene comillas en posiciones inválidas dentro de un campo no delimitado.";
+        }
+        continue;
+      }
+
+      if (char === "," && !insideQuotes) {
+        appendCurrentField();
+        continue;
+      }
+
+      if ((char === "\r" || char === "\n") && !insideQuotes) {
+        finishRow();
+        if (char === "\r") skipLineFeed = true;
+        continue;
+      }
+
+      if (afterClosingQuote && char !== " " && char !== "\t") {
+        error = "El archivo CSV contiene caracteres después de cerrar comillas sin un delimitador de columna.";
+        continue;
+      }
+
+      fieldStarted = true;
+      if (!headers) currentField += char;
+      if (!/\s/.test(char)) {
+        currentRowHasData = true;
+      }
+    }
+  };
+
+  const finish = (): CsvFileSummary => {
+    if (!error && insideQuotes) {
+      error = "El archivo CSV contiene comillas sin cerrar en la estructura de campos.";
+    }
+    if (!error && (fieldStarted || currentRowFields.length > 0 || currentRowHasData)) {
+      finishRow();
+    }
+    if (!error && headers) {
+      if (headers.some((header) => header.length === 0)) {
+        error = "El encabezado contiene columnas con nombre vacío.";
+      } else if (new Set(headers).size !== headers.length) {
+        error = "El encabezado contiene nombres de columna duplicados.";
+      }
+    }
+    if (!error && headers && !malformedRow && dataRows === 0) {
+      error = "El archivo CSV contiene únicamente el encabezado y no tiene filas de datos para importar.";
+    }
+    return {
+      headers: headers ?? [],
+      dataRows,
+      malformedRow,
+      error,
+    };
+  };
+
+  return { push, finish, hasError: () => Boolean(error) };
+}
+
+async function inspectCsvFile(
+  file: File,
+  signal?: AbortSignal,
+): Promise<CsvFileSummary> {
+  const scanner = createCsvSummaryScanner();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const reader = file.stream().getReader();
+  const cancelRead = () => void reader.cancel();
+  signal?.addEventListener("abort", cancelRead, { once: true });
+
+  try {
+    while (true) {
+      signal?.throwIfAborted();
+      const { done, value } = await reader.read();
+      if (done) break;
+      scanner.push(decoder.decode(value, { stream: true }));
+      if (scanner.hasError()) {
+        await reader.cancel();
+        break;
+      }
+    }
+    if (!scanner.hasError()) scanner.push(decoder.decode());
+    return scanner.finish();
+  } finally {
+    signal?.removeEventListener("abort", cancelRead);
+    reader.releaseLock();
+  }
+}
+
+async function hasCanonicalXlsxEntries(
+  file: File,
+  directoryStart: number,
+  directorySize: number,
+  expectedEntries: number,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  let cursor = 0;
+  let pending = new Uint8Array(0);
+  let parsedEntries = 0;
+  let hasContentTypes = false;
+  let hasWorkbook = false;
+  const contentTypes = new TextEncoder().encode("[Content_Types].xml");
+  const workbook = new TextEncoder().encode("xl/workbook.xml");
+
+  while (cursor < directorySize) {
+    signal?.throwIfAborted();
+    const end = Math.min(directorySize, cursor + FILE_READ_CHUNK_SIZE);
+    const chunk = new Uint8Array(
+      await file.slice(directoryStart + cursor, directoryStart + end).arrayBuffer(),
+    );
+    cursor = end;
+    const joined = new Uint8Array(pending.length + chunk.length);
+    joined.set(pending);
+    joined.set(chunk, pending.length);
+    pending = joined;
+
+    let offset = 0;
+    while (pending.length - offset >= 46) {
+      const header = pending.subarray(offset, offset + 46);
+      if (
+        header[0] !== 0x50 || header[1] !== 0x4b ||
+        header[2] !== 0x01 || header[3] !== 0x02
+      ) return false;
+
+      const view = new DataView(header.buffer, header.byteOffset, header.byteLength);
+      const nameLength = view.getUint16(28, true);
+      const extraLength = view.getUint16(30, true);
+      const commentLength = view.getUint16(32, true);
+      const recordLength = 46 + nameLength + extraLength + commentLength;
+      if (pending.length - offset < recordLength) break;
+
+      const name = pending.subarray(offset + 46, offset + 46 + nameLength);
+      const matches = (expected: Uint8Array) =>
+        name.length === expected.length && expected.every((byte, index) => name[index] === byte);
+      hasContentTypes ||= matches(contentTypes);
+      hasWorkbook ||= matches(workbook);
+      parsedEntries++;
+      offset += recordLength;
+    }
+
+    pending = pending.slice(offset);
+  }
+
+  return (
+    pending.length === 0 &&
+    parsedEntries === expectedEntries &&
+    hasContentTypes &&
+    hasWorkbook
+  );
+}
+
+function invalidFile(
+  format: LocalFileCheckResult["format"],
+  fileName: string,
+  fileSize: number,
+  error: string,
+): LocalFileCheckResult {
+  return {
+    valid: false,
+    format,
+    fileName,
+    fileSize,
+    warnings: [],
+    errors: [error],
+    unverifiedAspects: [],
+  };
+}
+
+export async function checkLocalFile(
+  file: File,
+  signal?: AbortSignal,
+): Promise<LocalFileCheckResult> {
   const fileName = file.name.trim();
   const fileSize = file.size;
   const lowerName = fileName.toLowerCase();
-
   const isCsv = lowerName.endsWith(".csv");
   const isXlsx = lowerName.endsWith(".xlsx");
 
   if (!isCsv && !isXlsx) {
     return {
-      valid: false,
-      format: "UNKNOWN",
-      fileName,
-      fileSize,
-      warnings: [],
-      errors: [
+      ...invalidFile(
+        "UNKNOWN",
+        fileName,
+        fileSize,
         `Formato no admitido. Se requiere un archivo con extensión .csv o .xlsx (recibido: ${fileName})`,
-      ],
-      unverifiedAspects: [
-        "El contenido no fue procesado debido a formato no admitido.",
-      ],
+      ),
+      unverifiedAspects: ["El contenido no fue procesado debido a formato no admitido."],
     };
   }
-
+  const format = isCsv ? "CSV" : "XLSX";
   if (fileSize === 0) {
-    return {
-      valid: false,
-      format: isCsv ? "CSV" : "XLSX",
-      fileName,
-      fileSize,
-      warnings: [],
-      errors: ["El archivo seleccionado está vacío (0 bytes)."],
-      unverifiedAspects: [],
-    };
+    return invalidFile(format, fileName, fileSize, "El archivo seleccionado está vacío (0 bytes).");
   }
 
   if (isXlsx) {
-    // A standard ZIP / OOXML spreadsheet contains at least Local File Header (30B) + EOCD (22B) = 52 bytes minimum
     if (fileSize < 52) {
-      return {
-        valid: false,
-        format: "XLSX",
+      return invalidFile(
+        "XLSX",
         fileName,
         fileSize,
-        warnings: [],
-        errors: [
-          "El archivo XLSX tiene un tamaño insuficiente para ser un contenedor de hoja de cálculo válido.",
-        ],
-        unverifiedAspects: [],
-      };
+        "El archivo XLSX tiene un tamaño insuficiente para ser un contenedor de hoja de cálculo válido.",
+      );
     }
 
     try {
-      // 1. Read first 30 bytes to check standard ZIP Local File Header (0x50, 0x4B, 0x03, 0x04)
-      const headerSlice = await file.slice(0, 30).arrayBuffer();
-      const headerBytes = new Uint8Array(headerSlice);
-      const hasLocalHeaderSignature =
-        headerBytes[0] === 0x50 &&
-        headerBytes[1] === 0x4b &&
-        headerBytes[2] === 0x03 &&
-        headerBytes[3] === 0x04;
-
-      if (!hasLocalHeaderSignature) {
-        return {
-          valid: false,
-          format: "XLSX",
+      signal?.throwIfAborted();
+      const header = new Uint8Array(await file.slice(0, 4).arrayBuffer());
+      if (header[0] !== 0x50 || header[1] !== 0x4b || header[2] !== 0x03 || header[3] !== 0x04) {
+        return invalidFile(
+          "XLSX",
           fileName,
           fileSize,
-          warnings: [],
-          errors: [
-            "El archivo XLSX está corrupto o no tiene una estructura de contenedor válida (firma ZIP/PK local header no detectada).",
-          ],
-          unverifiedAspects: [],
-        };
+          "El archivo XLSX está corrupto o no tiene una estructura de contenedor válida (firma ZIP/PK local header no detectada).",
+        );
       }
 
-      // 2. Read the tail of the file to locate and parse the ZIP End of Central Directory (EOCD) record
-      const tailSize = Math.min(fileSize, 1024);
-      const tailSlice = await file.slice(fileSize - tailSize, fileSize).arrayBuffer();
-      const tailBytes = new Uint8Array(tailSlice);
-      let eocdOffsetInTail = -1;
-
-      // Scan backwards for EOCD signature PK\x05\x06 (0x06054b50)
-      for (let i = tailBytes.length - 22; i >= 0; i--) {
+      const tailSize = Math.min(fileSize, ZIP_MAX_EOCD_SIZE);
+      const tail = new Uint8Array(
+        await file.slice(fileSize - tailSize, fileSize).arrayBuffer(),
+      );
+      signal?.throwIfAborted();
+      let eocdOffset = -1;
+      for (let i = tail.length - 22; i >= 0; i--) {
         if (
-          tailBytes[i] === 0x50 &&
-          tailBytes[i + 1] === 0x4b &&
-          tailBytes[i + 2] === 0x05 &&
-          tailBytes[i + 3] === 0x06
+          tail[i] === 0x50 && tail[i + 1] === 0x4b &&
+          tail[i + 2] === 0x05 && tail[i + 3] === 0x06
         ) {
-          eocdOffsetInTail = i;
-          break;
+          const view = new DataView(tail.buffer, tail.byteOffset + i, 22);
+          if (i + 22 + view.getUint16(20, true) === tail.length) {
+            eocdOffset = i;
+            break;
+          }
         }
       }
-
-      if (eocdOffsetInTail === -1) {
-        return {
-          valid: false,
-          format: "XLSX",
+      if (eocdOffset < 0) {
+        return invalidFile(
+          "XLSX",
           fileName,
           fileSize,
-          warnings: [],
-          errors: [
-            "El archivo XLSX está incompleto o truncado (registro de fin de directorio central ZIP no encontrado).",
-          ],
-          unverifiedAspects: [],
-        };
+          "El archivo XLSX está incompleto o truncado (registro de fin de directorio central ZIP no encontrado).",
+        );
       }
 
-      const eocdView = new DataView(tailBytes.buffer, tailBytes.byteOffset + eocdOffsetInTail);
-      const cdEntriesCount = eocdView.getUint16(8, true);
-      const cdSize = eocdView.getUint32(12, true);
-      const cdStartOffset = eocdView.getUint32(16, true);
-
-      // Verify basic mathematical coherence of ZIP directory
+      const eocd = new DataView(tail.buffer, tail.byteOffset + eocdOffset, 22);
+      const diskEntries = eocd.getUint16(8, true);
+      const totalEntries = eocd.getUint16(10, true);
+      const directorySize = eocd.getUint32(12, true);
+      const directoryStart = eocd.getUint32(16, true);
       if (
-        cdEntriesCount === 0 ||
-        cdStartOffset + cdSize > fileSize ||
-        cdStartOffset < 30
+        diskEntries === 0 || diskEntries !== totalEntries ||
+        directoryStart < 30 || directoryStart + directorySize > fileSize
       ) {
-        return {
-          valid: false,
-          format: "XLSX",
+        return invalidFile(
+          "XLSX",
           fileName,
           fileSize,
-          warnings: [],
-          errors: [
-            "El directorio central del contenedor ZIP contiene valores inconsistentes o corruptos.",
-          ],
-          unverifiedAspects: [],
-        };
+          "El directorio central del contenedor ZIP contiene valores inconsistentes o corruptos.",
+        );
       }
 
-      // 3. Read the Central Directory to inspect genuine entry names inside the archive
-      const cdSlice = await file.slice(cdStartOffset, cdStartOffset + cdSize).arrayBuffer();
-      const cdBytes = new Uint8Array(cdSlice);
-      const cdView = new DataView(cdBytes.buffer, cdBytes.byteOffset);
-      const entryNames: string[] = [];
-
-      let ptr = 0;
-      const textDecoder = new TextDecoder("utf-8", { fatal: false });
-
-      while (ptr + 46 <= cdBytes.length) {
-        if (
-          cdBytes[ptr] !== 0x50 ||
-          cdBytes[ptr + 1] !== 0x4b ||
-          cdBytes[ptr + 2] !== 0x01 ||
-          cdBytes[ptr + 3] !== 0x02
-        ) {
-          break;
-        }
-        const fileNameLength = cdView.getUint16(ptr + 28, true);
-        const extraFieldLength = cdView.getUint16(ptr + 30, true);
-        const fileCommentLength = cdView.getUint16(ptr + 32, true);
-
-        if (ptr + 46 + fileNameLength <= cdBytes.length) {
-          const nameBytes = cdBytes.slice(ptr + 46, ptr + 46 + fileNameLength);
-          entryNames.push(textDecoder.decode(nameBytes));
-        }
-
-        ptr += 46 + fileNameLength + extraFieldLength + fileCommentLength;
-      }
-
-      if (entryNames.length !== cdEntriesCount || ptr !== cdBytes.length) {
-        return {
-          valid: false,
-          format: "XLSX",
+      const canonicalEntriesPresent = await hasCanonicalXlsxEntries(
+        file,
+        directoryStart,
+        directorySize,
+        totalEntries,
+        signal,
+      );
+      if (!canonicalEntriesPresent) {
+        return invalidFile(
+          "XLSX",
           fileName,
           fileSize,
-          warnings: [],
-          errors: [
-            "El directorio central del contenedor ZIP está incompleto o es incoherente con las entradas declaradas.",
-          ],
-          unverifiedAspects: [],
-        };
-      }
-
-      const hasContentTypes = entryNames.includes("[Content_Types].xml");
-      const hasWorkbook = entryNames.includes("xl/workbook.xml");
-
-      if (!hasContentTypes || !hasWorkbook) {
-        return {
-          valid: false,
-          format: "XLSX",
-          fileName,
-          fileSize,
-          warnings: [],
-          errors: [
-            "El contenedor ZIP no presenta las entradas canónicas de una hoja de cálculo OOXML (se requieren [Content_Types].xml y xl/workbook.xml en el directorio central).",
-          ],
-          unverifiedAspects: [],
-        };
+          "El directorio central está incompleto o el contenedor no presenta [Content_Types].xml y xl/workbook.xml.",
+        );
       }
     } catch {
-      return {
-        valid: false,
-        format: "XLSX",
-        fileName,
-        fileSize,
-        warnings: [],
-        errors: [
-          "No se pudo leer la estructura del archivo XLSX.",
-        ],
-        unverifiedAspects: [],
-      };
+      return invalidFile("XLSX", fileName, fileSize, "No se pudo leer la estructura del archivo XLSX.");
     }
 
     return {
@@ -223,125 +364,49 @@ export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> 
     };
   }
 
-  // Parse CSV client-side safely
   try {
-    const text = await file.text();
-    // Strip UTF-8 BOM if present without trimming whole payload
-    const cleanText = text.replace(/^\uFEFF/, "");
-    if (cleanText.trim().length === 0) {
+    const summary = await inspectCsvFile(file, signal);
+    if (summary.error) {
       return {
-        valid: false,
-        format: "CSV",
-        fileName,
-        fileSize,
-        warnings: [],
-        errors: ["El archivo CSV no contiene texto ni datos legibles."],
-        unverifiedAspects: [],
+        ...invalidFile("CSV", fileName, fileSize, summary.error),
+        detectedRows: summary.dataRows,
+        detectedColumns: summary.headers.length ? summary.headers : undefined,
       };
     }
-
-    const { rows: rawLines, error: parseError } = parseCsvSafely(cleanText);
-
-    if (parseError) {
+    if (!summary.headers.length) {
+      return invalidFile("CSV", fileName, fileSize, "El archivo CSV no contiene texto ni datos legibles.");
+    }
+    if (summary.malformedRow) {
       return {
-        valid: false,
-        format: "CSV",
-        fileName,
-        fileSize,
-        warnings: [],
-        errors: [parseError],
-        unverifiedAspects: [],
+        ...invalidFile(
+          "CSV",
+          fileName,
+          fileSize,
+          `La fila ${summary.malformedRow.rowNumber} contiene ${summary.malformedRow.fieldCount} campos, mientras que el encabezado define ${summary.headers.length} columnas.`,
+        ),
+        detectedRows: summary.dataRows,
+        detectedColumns: summary.headers,
       };
     }
-
-    if (rawLines.length === 0) {
+    if (summary.dataRows === 0) {
       return {
-        valid: false,
-        format: "CSV",
-        fileName,
-        fileSize,
-        warnings: [],
-        errors: ["No se encontraron líneas válidas en el archivo CSV."],
-        unverifiedAspects: [],
-      };
-    }
-
-    const headerLine = rawLines[0] ?? [];
-    const headers = headerLine.map((h) => h.trim().toLowerCase());
-
-    // Check for empty headers
-    if (headers.some((h) => h.length === 0)) {
-      return {
-        valid: false,
-        format: "CSV",
-        fileName,
-        fileSize,
-        warnings: [],
-        errors: ["El encabezado contiene columnas con nombre vacío."],
-        unverifiedAspects: [],
-      };
-    }
-
-    // Check for duplicate columns
-    const uniqueHeaders = new Set(headers);
-    if (uniqueHeaders.size !== headers.length) {
-      return {
-        valid: false,
-        format: "CSV",
-        fileName,
-        fileSize,
-        warnings: [],
-        errors: ["El encabezado contiene nombres de columna duplicados."],
-        unverifiedAspects: [],
-      };
-    }
-
-    const dataRows = rawLines.slice(1);
-    const dataRowsCount = dataRows.length;
-
-    if (dataRowsCount === 0) {
-      return {
-        valid: false,
-        format: "CSV",
-        fileName,
-        fileSize,
-        detectedRows: 0,
-        detectedColumns: headers,
-        warnings: [],
-        errors: [
+        ...invalidFile(
+          "CSV",
+          fileName,
+          fileSize,
           "El archivo CSV contiene únicamente el encabezado y no tiene filas de datos para importar.",
-        ],
-        unverifiedAspects: [],
+        ),
+        detectedRows: 0,
+        detectedColumns: summary.headers,
       };
     }
-
-    // Check row field counts
-    const columnCount = headers.length;
-    const malformedRowIndex = dataRows.findIndex((r) => r.length !== columnCount);
-
-    if (malformedRowIndex !== -1) {
-      return {
-        valid: false,
-        format: "CSV",
-        fileName,
-        fileSize,
-        detectedRows: dataRowsCount,
-        detectedColumns: headers,
-        warnings: [],
-        errors: [
-          `La fila ${malformedRowIndex + 2} contiene ${dataRows[malformedRowIndex]?.length} campos, mientras que el encabezado define ${columnCount} columnas.`,
-        ],
-        unverifiedAspects: [],
-      };
-    }
-
     return {
       valid: true,
       format: "CSV",
       fileName,
       fileSize,
-      detectedRows: dataRowsCount,
-      detectedColumns: headers,
+      detectedRows: summary.dataRows,
+      detectedColumns: summary.headers,
       warnings: [],
       errors: [],
       unverifiedAspects: [
@@ -350,22 +415,18 @@ export async function checkLocalFile(file: File): Promise<LocalFileCheckResult> 
       ],
     };
   } catch {
-    return {
-      valid: false,
-      format: "CSV",
+    return invalidFile(
+      "CSV",
       fileName,
       fileSize,
-      warnings: [],
-      errors: [
-        "No se pudo leer el contenido del archivo CSV. Verifique que la codificación sea UTF-8 válida.",
-      ],
-      unverifiedAspects: [],
-    };
+      "No se pudo leer el contenido del archivo CSV. Verifique que la codificación sea UTF-8 válida.",
+    );
   }
 }
 
 /**
- * Robust RFC 4180 CSV parser checking unclosed quotes, escaped quotes and structure.
+ * Full parser retained for deterministic fixtures and small in-memory callers.
+ * User-selected files use the bounded streaming scanner above.
  */
 export function parseCsvSafely(text: string): { rows: string[][]; error?: string } {
   const rows: string[][] = [];
@@ -377,68 +438,44 @@ export function parseCsvSafely(text: string): { rows: string[][]; error?: string
   for (let i = 0; i < text.length; i++) {
     const char = text[i];
     const nextChar = text[i + 1];
-
     if (char === '"') {
       if (insideQuotes) {
         if (nextChar === '"') {
           currentField += '"';
-          i++; // skip escaped quote
+          i++;
         } else {
           insideQuotes = false;
         }
+      } else if (currentField.length === 0) {
+        insideQuotes = true;
+        fieldHasQuotes = true;
       } else {
-        if (currentField.length === 0) {
-          insideQuotes = true;
-          fieldHasQuotes = true;
-        } else {
-          return {
-            rows: [],
-            error: "El archivo CSV contiene comillas en posiciones inválidas dentro de un campo no delimitado.",
-          };
-        }
+        return { rows: [], error: "El archivo CSV contiene comillas en posiciones inválidas dentro de un campo no delimitado." };
       }
     } else if (char === "," && !insideQuotes) {
       currentRow.push(currentField);
       currentField = "";
       fieldHasQuotes = false;
     } else if ((char === "\r" || char === "\n") && !insideQuotes) {
-      if (char === "\r" && nextChar === "\n") {
-        i++;
-      }
+      if (char === "\r" && nextChar === "\n") i++;
       currentRow.push(currentField);
       currentField = "";
       fieldHasQuotes = false;
-      if (currentRow.some((f) => f.trim().length > 0)) {
-        rows.push(currentRow);
-      }
+      if (currentRow.some((field) => field.trim().length > 0)) rows.push(currentRow);
       currentRow = [];
     } else {
-      if (!insideQuotes && fieldHasQuotes) {
-        // Character found after closing quote before delimiter
-        if (char !== " " && char !== "\t") {
-          return {
-            rows: [],
-            error: "El archivo CSV contiene caracteres después de cerrar comillas sin un delimitador de columna.",
-          };
-        }
+      if (!insideQuotes && fieldHasQuotes && char !== " " && char !== "\t") {
+        return { rows: [], error: "El archivo CSV contiene caracteres después de cerrar comillas sin un delimitador de columna." };
       }
       currentField += char;
     }
   }
-
   if (insideQuotes) {
-    return {
-      rows: [],
-      error: "El archivo CSV contiene comillas sin cerrar en la estructura de campos.",
-    };
+    return { rows: [], error: "El archivo CSV contiene comillas sin cerrar en la estructura de campos." };
   }
-
   if (currentField.length > 0 || currentRow.length > 0) {
     currentRow.push(currentField);
-    if (currentRow.some((f) => f.trim().length > 0)) {
-      rows.push(currentRow);
-    }
+    if (currentRow.some((field) => field.trim().length > 0)) rows.push(currentRow);
   }
-
   return { rows };
 }

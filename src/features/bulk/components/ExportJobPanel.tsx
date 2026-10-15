@@ -3,6 +3,7 @@ import { Button, Group, Radio, Stack, Text } from "@mantine/core";
 import { IconDownload, IconFileSpreadsheet, IconRefresh } from "@tabler/icons-react";
 import { FeedbackAlert, SectionCard, StatusBadge } from "../../../components/shared";
 import type { BulkExportFormat, BulkExportJob } from "../types/bulk";
+import type { DataMode } from "../../../app/config/dataMode";
 
 export interface ExportJobPanelProps {
   job: BulkExportJob | null;
@@ -12,6 +13,7 @@ export interface ExportJobPanelProps {
   submitting?: boolean;
   refreshing?: boolean;
   downloading?: boolean;
+  dataMode: DataMode;
 }
 
 export function ExportJobPanel({
@@ -22,6 +24,7 @@ export function ExportJobPanel({
   submitting = false,
   refreshing = false,
   downloading = false,
+  dataMode,
 }: ExportJobPanelProps) {
   const [selectedFormat, setSelectedFormat] = useState<BulkExportFormat>("CSV");
 
@@ -30,8 +33,8 @@ export function ExportJobPanel({
   const isQueued = job?.status === "QUEUED";
   const isFailed = job?.status === "FAILED_GENERAL";
 
-  // In demo mode, XLSX download requires real backend export service
-  const canDownload = isCompleted && job?.format === "CSV";
+  const canDownload =
+    isCompleted && (job?.format === "CSV" || dataMode === "api");
 
   return (
     <SectionCard
@@ -40,7 +43,9 @@ export function ExportJobPanel({
     >
       <Stack gap="lg">
         <Text size="xs" c="dimmed">
-          Modo demostración · Generación asíncrona simulada de exportación
+          {dataMode === "mock"
+            ? "Modo demostración · Generación asíncrona simulada de exportación"
+            : "Trabajo de exportación completo del catálogo, sin filtros adicionales"}
         </Text>
         <Text size="sm">
           La exportación procesa la totalidad del catálogo activo en segundo plano sin bloquear las consultas transaccionales.
@@ -98,8 +103,10 @@ export function ExportJobPanel({
           >
             <Stack gap="md">
               {isQueued && (
-                <FeedbackAlert semantic="info" title="Solicitud en cola (202 Accepted)">
-                  El trabajo de exportación fue recibido por el proveedor y está en espera de consolidación.
+                <FeedbackAlert semantic="info" title="Solicitud recibida en cola">
+                  {dataMode === "mock"
+                    ? "La demostración mock recibió la solicitud y espera iniciar la consolidación."
+                    : "El provider informó la admisión del trabajo, que permanece pendiente de consolidación."}
                 </FeedbackAlert>
               )}
 
@@ -111,12 +118,18 @@ export function ExportJobPanel({
 
               {isCompleted && (
                 <FeedbackAlert
-                  semantic={job.format === "CSV" ? "success" : "info"}
-                  title={job.format === "CSV" ? "Archivo CSV listo para descarga" : "Exportación XLSX finalizada"}
-                >
-                  {job.format === "CSV"
-                    ? `${job.file_name ?? "catalogo_exportado.csv"} · Archivo de demostración listo para descargar.`
-                    : "El trabajo XLSX concluyó exitosamente. La descarga directa del libro binario estará disponible al conectar con el servicio bulk-svc."}
+                    semantic={job.format === "CSV" || dataMode === "api" ? "success" : "warning"}
+                    title={
+                      job.format === "CSV" || dataMode === "api"
+                        ? "Exportación terminada"
+                        : "XLSX completado sin archivo descargable"
+                    }
+                  >
+                    {job.format === "CSV"
+                      ? `${job.file_name ?? "catalogo_exportado.csv"}${dataMode === "mock" ? " · Archivo de demostración listo para descargar." : ""}`
+                      : dataMode === "mock"
+                        ? "La demostración no genera libros XLSX ni renombra un CSV como XLSX."
+                        : "El trabajo terminó y el archivo está disponible según el provider API configurado."}
                 </FeedbackAlert>
               )}
 
@@ -135,7 +148,9 @@ export function ExportJobPanel({
                 >
                   {job.format === "CSV"
                     ? "Descargar archivo CSV consolidado"
-                    : "Descarga XLSX no disponible en demo"}
+                    : dataMode === "mock"
+                      ? "Descarga XLSX no disponible en demo"
+                      : "Descargar archivo XLSX consolidado"}
                 </Button>
               </Group>
             </Stack>

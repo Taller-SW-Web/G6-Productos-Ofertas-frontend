@@ -12,7 +12,11 @@
     "preview": "vite preview --host 127.0.0.1",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "playwright test"
+    "test": "npm run test:unit:bulk",
+    "test:e2e": "playwright test",
+    "test:e2e:smoke:bulk": "playwright test tests/bulk.spec.ts",
+    "test:ci": "npm run test:unit:bulk && npm run test:e2e -- --reporter=line",
+    "test:unit:bulk": "vitest run --config vitest.bulk.config.ts"
   },
   "dependencies": {
     "@fontsource/inter": "5.3.0",
@@ -37,6 +41,7 @@
     "globals": "17.13.0",
     "typescript": "6.0.3",
     "typescript-eslint": "8.71.1",
-    "vite": "8.3.4"
+    "vite": "8.3.4",
+    "vitest": "^5.0.5"
   }
 }

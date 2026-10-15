@@ -17,7 +17,7 @@ export interface BulkRepository {
 
   createImport(
     file: File,
-    scenario?: string,
+    localSummary?: { detectedRows?: number },
     signal?: AbortSignal,
   ): Promise<BulkImportBatch>;
 

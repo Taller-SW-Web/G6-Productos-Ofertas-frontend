@@ -8,7 +8,13 @@ import {
   type ReactNode,
 } from "react";
 import type { LocalFileCheckResult } from "../types/bulk";
+import type { BulkFailureCategory } from "../services/bulkService";
 import { checkLocalFile } from "../utils/localFileCheck";
+
+export interface BulkSubmissionError {
+  category: BulkFailureCategory;
+  message: string;
+}
 
 interface BulkUploadContextValue {
   selectedFile: File | null;
@@ -18,8 +24,8 @@ interface BulkUploadContextValue {
   clearSelection: () => void;
   submitting: boolean;
   setSubmitting: (submitting: boolean) => void;
-  submissionError: string | null;
-  setSubmissionError: (error: string | null) => void;
+  submissionError: BulkSubmissionError | null;
+  setSubmissionError: (error: BulkSubmissionError | null) => void;
 }
 
 const BulkUploadContext = createContext<BulkUploadContextValue | null>(null);
@@ -29,12 +35,15 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
   const [fileCheck, setFileCheck] = useState<LocalFileCheckResult | null>(null);
   const [checking, setChecking] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const [submissionError, setSubmissionError] =
+    useState<BulkSubmissionError | null>(null);
 
   // Counter to guarantee that only the latest file check result is applied
   const validationVersionRef = useRef(0);
+  const validationControllerRef = useRef<AbortController | null>(null);
 
   const setSelectedFile = useCallback(async (file: File | null) => {
+    validationControllerRef.current?.abort();
     const currentVersion = ++validationVersionRef.current;
     setSubmissionError(null);
 
@@ -48,9 +57,11 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
     setFileState(file);
     setFileCheck(null); // Invalidate previous result immediately
     setChecking(true);
+    const controller = new AbortController();
+    validationControllerRef.current = controller;
 
     try {
-      const result = await checkLocalFile(file);
+      const result = await checkLocalFile(file, controller.signal);
       // Only commit result if this is still the active validation
       if (validationVersionRef.current === currentVersion) {
         setFileCheck(result);
@@ -63,6 +74,8 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const clearSelection = useCallback(() => {
+    validationControllerRef.current?.abort();
+    validationControllerRef.current = null;
     validationVersionRef.current++;
     setFileState(null);
     setFileCheck(null);

@@ -1,5 +1,6 @@
 import { Button, Group, SimpleGrid, Stack, Text } from "@mantine/core";
 import { IconRefresh, IconArrowRight, IconRotateClockwise } from "@tabler/icons-react";
+import { useContext } from "react";
 import { Link } from "react-router-dom";
 import {
   FeedbackAlert,
@@ -7,6 +8,7 @@ import {
   SectionCard,
   StatusBadge,
 } from "../../../components/shared";
+import { DataModeContext } from "../../../app/config/DataModeContext";
 import type { BulkImportBatch } from "../types/bulk";
 
 export interface BatchStatusPanelProps {
@@ -26,10 +28,16 @@ export function BatchStatusPanel({
   resuming = false,
   showDetailsLink = false,
 }: BatchStatusPanelProps) {
+  const dataMode = useContext(DataModeContext);
   const isTerminal =
     batch.status === "COMPLETED" || batch.status === "FAILED_GENERAL";
-  const isPartial = batch.status === "COMPLETED" && batch.failed_rows > 0;
-  const isSuccess = batch.status === "COMPLETED" && batch.failed_rows === 0;
+  const isPartial =
+    batch.status === "COMPLETED" &&
+    (batch.failed_rows > 0 || batch.needs_reconciliation);
+  const isSuccess =
+    batch.status === "COMPLETED" &&
+    batch.failed_rows === 0 &&
+    !batch.needs_reconciliation;
   const isFailedGeneral = batch.status === "FAILED_GENERAL";
   const isProcessing = batch.status === "PROCESSING";
   const isQueued = batch.status === "QUEUED";
@@ -83,10 +91,11 @@ export function BatchStatusPanel({
       }
     >
       <Stack gap="lg">
-        {/* Subtle demo indicator */}
-        <Text size="xs" c="dimmed">
-          Modo demostración · Datos simulados de importación masiva
-        </Text>
+        {dataMode === "mock" && (
+          <Text size="xs" c="dimmed">
+            Modo demostración · Datos simulados de importación masiva
+          </Text>
+        )}
 
         {/* KPI Metrics */}
         <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
@@ -164,8 +173,10 @@ export function BatchStatusPanel({
         )}
 
         {isQueued && typeof batch.total_rows === "number" && (
-          <FeedbackAlert semantic="info" title="Solicitud admitida en cola">
-            La importación ha sido admitida por el proveedor (202 Accepted) y está a la espera de un hilo de procesamiento.
+          <FeedbackAlert semantic="info" title="Solicitud en cola">
+            {batch.file_name
+              ? "La demostración mock recibió la solicitud y espera iniciar el procesamiento."
+              : "El lote está en cola y espera iniciar el procesamiento."}
           </FeedbackAlert>
         )}
 

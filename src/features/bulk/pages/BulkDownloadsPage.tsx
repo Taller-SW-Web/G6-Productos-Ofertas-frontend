@@ -1,8 +1,10 @@
-import { Button, Group, SimpleGrid, Stack, Text } from "@mantine/core";
+import { useContext, useState } from "react";
+import { Button, Group, Radio, Stack } from "@mantine/core";
 import {
   IconArrowLeft,
   IconDownload,
 } from "@tabler/icons-react";
+import { DataModeContext } from "../../../app/config/DataModeContext";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   FeedbackAlert,
@@ -11,10 +13,13 @@ import {
 } from "../../../components/shared";
 import { ExportJobPanel } from "../components/ExportJobPanel";
 import { useBulkDownloads } from "../hooks/useBulkFlow";
+import type { BulkExportFormat } from "../types/bulk";
 
 export function BulkDownloadsPage() {
+  const dataMode = useContext(DataModeContext);
   const [searchParams] = useSearchParams();
   const initialExportId = searchParams.get("export_id") ?? undefined;
+  const [templateFormat, setTemplateFormat] = useState<BulkExportFormat>("CSV");
 
   const {
     exportJob,
@@ -23,8 +28,11 @@ export function BulkDownloadsPage() {
     downloadingExport,
     downloadingTemplate,
     error,
+    initialQueryStatus,
+    initialQueryError,
     requestExport,
     refreshJob,
+    retryInitialQuery,
     downloadExportFile,
     downloadTemplate,
   } = useBulkDownloads(initialExportId);
@@ -51,6 +59,29 @@ export function BulkDownloadsPage() {
       />
 
       <Stack gap="lg">
+        {initialQueryStatus === "loading" && (
+          <FeedbackAlert semantic="info" title="Consultando exportación">
+            Consultando el trabajo {initialExportId}…
+          </FeedbackAlert>
+        )}
+        {initialQueryStatus === "not_found" && (
+          <FeedbackAlert semantic="warning" title="Exportación no encontrada">
+            No existe un trabajo de exportación con identificador {initialExportId}.
+          </FeedbackAlert>
+        )}
+        {initialQueryError && (
+          <FeedbackAlert
+            semantic="error"
+            title="No se pudo consultar la exportación"
+            actions={
+              <Button size="xs" variant="outline" onClick={retryInitialQuery}>
+                Reintentar consulta
+              </Button>
+            }
+          >
+            {initialQueryError}
+          </FeedbackAlert>
+        )}
         {error && (
           <FeedbackAlert semantic="error" title="Observación en la descarga">
             {error}
@@ -67,50 +98,29 @@ export function BulkDownloadsPage() {
               La plantilla oficial estará disponible cuando se habilite el servicio de carga masiva. Para pruebas y demostración se ofrece el archivo CSV de muestra.
             </FeedbackAlert>
 
-            <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
-              <SectionCard
-                title="Archivo CSV de ejemplo (Demostración)"
-                description="Formato de texto delimitado por comas con codificación UTF-8"
+            <Group justify="space-between" align="flex-end" wrap="wrap" gap="md">
+              <Radio.Group
+                label="Formato de plantilla"
+                description="La muestra CSV es ficticia; el modo mock no incluye una plantilla XLSX."
+                value={templateFormat}
+                onChange={(value) => setTemplateFormat(value as BulkExportFormat)}
               >
-                <Stack gap="sm">
-                  <Text size="xs" c="dimmed">
-                    Contiene datos de muestra ficticios para validar la estructura del flujo.
-                  </Text>
-                  <Group justify="flex-end">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      leftSection={<IconDownload size={16} stroke={2} aria-hidden="true" />}
-                      onClick={() => downloadTemplate("CSV")}
-                      loading={downloadingTemplate}
-                    >
-                      Descargar CSV de ejemplo
-                    </Button>
-                  </Group>
-                </Stack>
-              </SectionCard>
-
-              <SectionCard
-                title="Plantilla XLSX"
-                description="Libro de Microsoft Excel con validación de celdas"
+                <Group mt="xs" gap="lg">
+                  <Radio value="CSV" label="CSV de ejemplo" />
+                  <Radio value="XLSX" label="XLSX" />
+                </Group>
+              </Radio.Group>
+              <Button
+                variant="outline"
+                size="sm"
+                leftSection={<IconDownload size={16} stroke={2} aria-hidden="true" />}
+                onClick={() => downloadTemplate(templateFormat)}
+                loading={downloadingTemplate}
+                disabled={downloadingTemplate}
               >
-                <Stack gap="sm">
-                  <Text size="xs" c="dimmed">
-                    Plantilla oficial pendiente de publicación por el proveedor de catálogo.
-                  </Text>
-                  <Group justify="flex-end">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      leftSection={<IconDownload size={16} stroke={2} aria-hidden="true" />}
-                      disabled
-                    >
-                      No disponible en demo
-                    </Button>
-                  </Group>
-                </Stack>
-              </SectionCard>
-            </SimpleGrid>
+                Descargar {templateFormat} {templateFormat === "CSV" ? "de ejemplo" : ""}
+              </Button>
+            </Group>
           </Stack>
         </SectionCard>
 
@@ -123,6 +133,7 @@ export function BulkDownloadsPage() {
           submitting={submittingExport}
           refreshing={refreshingJob}
           downloading={downloadingExport}
+          dataMode={dataMode ?? "mock"}
         />
       </Stack>
     </>

@@ -34,7 +34,7 @@ jobs:
             sleep 1
           done
           node scripts/verify-production.mjs mock
-      - run: npm test
+      - run: npm run test:ci
       - name: Verify API mode without mock fallback
         run: |
           VITE_DATA_MODE=api npm run build
