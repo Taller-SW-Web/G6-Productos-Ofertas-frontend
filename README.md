@@ -18,6 +18,7 @@ Comandos disponibles:
 ```sh
 npm run typecheck
 npm run lint
+npm run test:ci
 ```
 
 Instala primero Chromium para Playwright:
@@ -40,7 +41,7 @@ npm run build
 npm run preview
 ```
 
-`npm run preview` sirve `dist/` localmente; no publica ni despliega la aplicación. El workflow [frontend.yml](.github/workflows/frontend.yml) ejecuta typecheck, build, lint, pruebas y verificaciones de build/preview para ambos modos. Que el workflow exista no implica que haya corrido para un cambio concreto.
+`npm run preview` sirve `dist/` localmente; no publica ni despliega la aplicación. El workflow [frontend.yml](.github/workflows/frontend.yml) ejecuta typecheck, build, lint, pruebas y verificaciones de build/preview para ambos modos. La validación compartida está en `scripts/ci/validate-frontend.sh`; el sincronizador usa ese mismo flujo sobre una integración temporal antes de abrir PRs en borrador. No hace push a las ramas de desarrollo. Que el workflow exista no implica que haya corrido para un cambio concreto.
 
 ## Configuración de datos
 
