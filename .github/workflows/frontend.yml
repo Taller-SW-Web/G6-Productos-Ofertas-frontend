@@ -1,16 +1,16 @@
 name: Frontend Foundation
 on:
   pull_request:
+    branches: [castilla, poma, lopez, cueva, taco, vera, master]
   push:
-    branches: [vera, master]
+    branches: [castilla, poma, lopez, cueva, taco, vera, master]
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      VITE_DATA_MODE: mock # This workflow validates the explicit demonstration build.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0
@@ -20,32 +20,9 @@ jobs:
       - name: Revision under validation
         run: git rev-parse HEAD > validation-commit.txt
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm run build
-      - run: npm run lint
       - run: npx playwright install --with-deps chromium
-      - name: Verify the explicit demonstration build
-        run: |
-          node node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 5174 --strictPort > preview-production.log 2>&1 &
-          preview_pid=$!
-          trap 'kill "$preview_pid" || true' EXIT
-          for attempt in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:5174/ > /dev/null; then break; fi
-            sleep 1
-          done
-          node scripts/verify-production.mjs mock
-      - run: npm test
-      - name: Verify API mode without mock fallback
-        run: |
-          VITE_DATA_MODE=api npm run build
-          node node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 5174 --strictPort > preview-api.log 2>&1 &
-          preview_pid=$!
-          trap 'kill "$preview_pid" || true' EXIT
-          for attempt in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:5174/ > /dev/null; then break; fi
-            sleep 1
-          done
-          node scripts/verify-production.mjs api
+      - name: Validate build modes, lint and Playwright suite
+        run: bash scripts/ci/validate-frontend.sh
       - name: Evidence and diagnostics
         if: always()
         uses: actions/upload-artifact@v7.0.2
@@ -55,4 +32,5 @@ jobs:
             validation-commit.txt
             docs/evidencias/
             test-results/
+            preview-*.log
           retention-days: 14

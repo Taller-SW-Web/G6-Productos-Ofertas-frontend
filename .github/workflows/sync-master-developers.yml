@@ -1,243 +1,202 @@
-
-name: Sync Master to Developer Branches
+name: Propose Master Integration for Developer Branches
 
 on:
   push:
-    branches:
-      - master
-
+    branches: [master]
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "Simular sin modificar ramas remotas"
+        description: "Only report merge and validation results; do not open pull requests"
         required: true
         type: boolean
         default: true
 
 permissions:
-  contents: write
+  contents: read
+  pull-requests: write
 
 concurrency:
   group: sync-master-developers
   cancel-in-progress: false
 
 jobs:
-  sync:
-    name: Sincronizar ramas de desarrolladores
+  validate-and-propose:
+    name: Validate master into ${{ matrix.branch }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: [castilla, poma, lopez, cueva, taco, vera]
+    env:
+      TARGET_BRANCH: ${{ matrix.branch }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
 
     steps:
-      - name: Obtener repositorio
+      - name: Check out master
         uses: actions/checkout@v4
         with:
+          ref: master
           fetch-depth: 0
-          persist-credentials: true
+          persist-credentials: false
 
-      - name: Configurar Node.js
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
 
-      - name: Sincronizar ramas
+      - name: Prepare and classify merge candidate
+        id: candidate
         shell: bash
-        env:
-          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
-
         run: |
-          set -euo pipefail
+          set -uo pipefail
 
-          BRANCHES=(castilla poma lopez cueva taco vera)
-          failures=0
+          git fetch --no-tags origin \
+            "+refs/heads/master:refs/remotes/origin/master" \
+            "+refs/heads/$TARGET_BRANCH:refs/remotes/origin/$TARGET_BRANCH" || {
+              echo "::error title=Git setup failed::Could not fetch master and $TARGET_BRANCH."
+              exit 10
+            }
+          echo "expected_master=$(git rev-parse origin/master)" >> "$GITHUB_OUTPUT"
+          echo "expected_base=$(git rev-parse "origin/$TARGET_BRANCH")" >> "$GITHUB_OUTPUT"
+          git rev-parse origin/master > validation-commit.txt
+
+          if git merge-base --is-ancestor \
+            origin/master "origin/$TARGET_BRANCH"; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "### $TARGET_BRANCH: already contains master" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          else
+            ancestry_status=$?
+            if [[ "$ancestry_status" -ne 1 ]]; then
+              echo "::error title=Git ancestry check failed::git merge-base exited $ancestry_status for $TARGET_BRANCH."
+              exit 11
+            fi
+          fi
+
+          git checkout --detach "origin/$TARGET_BRANCH" || {
+            echo "::error title=Git setup failed::Could not check out $TARGET_BRANCH."
+            exit 12
+          }
 
           git config user.name "github-actions[bot]"
-          git config user.email \
-            "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git fetch origin --prune
-
-          {
-            echo "## Sincronización de master"
-            echo ""
-            echo "| Rama | Estado | Detalle |"
-            echo "|---|---|---|"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          report() {
-            echo "| \`$1\` | $2 | $3 |" \
-              >> "$GITHUB_STEP_SUMMARY"
-          }
-
-          validate_frontend() {
-            local app_dir=""
-
-            for candidate in \
-              . frontend client web apps/frontend apps/web
-            do
-              if [[ -f "$candidate/package.json" ]]; then
-                app_dir="$candidate"
-                break
-              fi
-            done
-
-            if [[ -z "$app_dir" ]]; then
-              echo "::error::No se encontró package.json"
-              return 1
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git merge --no-ff --no-commit origin/master; then
+            echo "expected_tree=$(git write-tree)" >> "$GITHUB_OUTPUT"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "### $TARGET_BRANCH: merge candidate prepared" >> "$GITHUB_STEP_SUMMARY"
+            echo "The candidate is being validated before a draft pull request is opened." >> "$GITHUB_STEP_SUMMARY"
+          else
+            merge_status=$?
+            conflict_files="$(git diff --name-only --diff-filter=U)"
+            if [[ -n "$conflict_files" ]]; then
+              git merge --abort || true
+              echo "### $TARGET_BRANCH: Git conflict" >> "$GITHUB_STEP_SUMMARY"
+              echo '```text' >> "$GITHUB_STEP_SUMMARY"
+              printf '%s\n' "$conflict_files" >> "$GITHUB_STEP_SUMMARY"
+              echo '```' >> "$GITHUB_STEP_SUMMARY"
+              echo "::error title=Git merge conflict::$TARGET_BRANCH requires manual resolution in the listed files. No developer branch was changed."
+              exit 20
             fi
+            echo "::error title=Git merge failed::git merge exited $merge_status without conflict markers for $TARGET_BRANCH."
+            exit 21
+          fi
 
-            (
-              cd "$app_dir" || exit 1
+      - name: Install locked dependencies
+        if: steps.candidate.outputs.changed == 'true'
+        run: npm ci --no-audit --no-fund
 
-              if [[ -f package-lock.json || \
-                    -f npm-shrinkwrap.json ]]; then
+      - name: Install Chromium for Playwright
+        if: steps.candidate.outputs.changed == 'true'
+        run: npx playwright install --with-deps chromium
 
-                npm ci --no-audit --no-fund || exit 1
+      - name: Validate the merged application
+        if: steps.candidate.outputs.changed == 'true'
+        run: bash scripts/ci/validate-frontend.sh
 
-              elif [[ -f pnpm-lock.yaml ]]; then
-
-                corepack enable || exit 1
-                corepack pnpm install --frozen-lockfile || exit 1
-
-              elif [[ -f yarn.lock ]]; then
-
-                corepack enable || exit 1
-                version="$(corepack yarn --version)" || exit 1
-
-                if [[ "${version%%.*}" -gt 1 ]]; then
-                  corepack yarn install --immutable || exit 1
-                else
-                  corepack yarn install --frozen-lockfile || exit 1
-                fi
-
-              else
-                echo "::error::No existe lockfile reconocido"
-                exit 1
-              fi
-
-              if ! node -e "
-                const scripts = require('./package.json').scripts || {};
-                process.exit(scripts.build ? 0 : 1);
-              "; then
-                echo "::error::Falta el script build"
-                exit 1
-              fi
-
-              npm run build || exit 1
-              npm run lint --if-present || exit 1
-              npm run typecheck --if-present || exit 1
-              npm run test:ci --if-present || exit 1
-            )
-          }
-
-          for branch in "${BRANCHES[@]}"; do
-            echo "::group::Procesando $branch"
-
-            git reset --hard HEAD
-            git clean -ffdx
-
-            if ! git show-ref --verify --quiet \
-              "refs/remotes/origin/$branch"; then
-
-              report "$branch" "ERROR" "Rama inexistente"
-              failures=$((failures + 1))
-              echo "::endgroup::"
-              continue
-            fi
-
-            if git merge-base --is-ancestor \
-              origin/master "origin/$branch"; then
-
-              report "$branch" "OK" "Ya contiene master"
-              echo "::endgroup::"
-              continue
-            fi
-
-            if ! git checkout -B __sync_temp \
-              "origin/$branch"; then
-
-              report "$branch" "ERROR" "No se pudo preparar"
-              failures=$((failures + 1))
-              echo "::endgroup::"
-              continue
-            fi
-
-            if git merge-base --is-ancestor \
-              "origin/$branch" origin/master; then
-
-              mode="fast-forward"
-
-              if ! git merge --ff-only origin/master; then
-                report "$branch" "ERROR" "Falló fast-forward"
-                failures=$((failures + 1))
-                echo "::endgroup::"
-                continue
-              fi
-
-            else
-              mode="merge"
-
-              if ! git merge --no-ff --no-edit \
-                -m "chore(sync): integrate master into $branch" \
-                origin/master; then
-
-                git merge --abort || true
-
-                report "$branch" "CONFLICTO" \
-                  "Requiere resolución manual"
-
-                failures=$((failures + 1))
-                echo "::endgroup::"
-                continue
-              fi
-            fi
-
-            if ! validate_frontend; then
-
-              report "$branch" "ERROR" \
-                "Falló validación del frontend"
-
-              failures=$((failures + 1))
-              echo "::endgroup::"
-              continue
-            fi
-
-            if ! git diff --quiet || \
-               ! git diff --cached --quiet; then
-
-              report "$branch" "ERROR" \
-                "La validación modificó archivos versionados"
-
-              failures=$((failures + 1))
-              echo "::endgroup::"
-              continue
-            fi
-
-            if [[ "$DRY_RUN" == "true" ]]; then
-
-              report "$branch" "SIMULADO" \
-                "$mode validado; no se hizo push"
-
-              echo "::endgroup::"
-              continue
-            fi
-
-            if git push origin \
-              "HEAD:refs/heads/$branch"; then
-
-              report "$branch" "OK" \
-                "Sincronizado mediante $mode"
-
-            else
-              report "$branch" "ERROR" \
-                "Push rechazado o rama modificada"
-
-              failures=$((failures + 1))
-            fi
-
-            echo "::endgroup::"
-          done
-
-          if [[ "$failures" -gt 0 ]]; then
-            echo "::error::$failures rama(s) requieren atención"
+      - name: Ensure validation did not alter tracked files
+        if: steps.candidate.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -u
+          git diff --exit-code
+          actual_tree="$(git write-tree)"
+          if [[ "$actual_tree" != "${{ steps.candidate.outputs.expected_tree }}" ]]; then
+            echo "::error title=Validation modified tracked files::The test/build steps changed the merge candidate tree."
             exit 1
           fi
+
+      - name: Open or report draft integration pull request
+        if: steps.candidate.outputs.changed == 'true' && env.DRY_RUN != 'true'
+        id: pull-request
+        uses: actions/github-script@v7
+        env:
+          TARGET_BRANCH: ${{ matrix.branch }}
+          EXPECTED_BASE_SHA: ${{ steps.candidate.outputs.expected_base }}
+          EXPECTED_MASTER_SHA: ${{ steps.candidate.outputs.expected_master }}
+        with:
+          script: |
+            const base = process.env.TARGET_BRANCH;
+            const head = `${context.repo.owner}:master`;
+            const [baseRef, masterRef] = await Promise.all([
+              github.rest.repos.getBranch({ owner: context.repo.owner, repo: context.repo.repo, branch: base }),
+              github.rest.repos.getBranch({ owner: context.repo.owner, repo: context.repo.repo, branch: "master" }),
+            ]);
+            if (baseRef.data.commit.sha !== process.env.EXPECTED_BASE_SHA ||
+                masterRef.data.commit.sha !== process.env.EXPECTED_MASTER_SHA) {
+              throw new Error(`Refs changed during validation; rerun before opening a PR (base ${baseRef.data.commit.sha}, master ${masterRef.data.commit.sha}).`);
+            }
+            const existing = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              base,
+              head,
+            });
+
+            let pullRequest = existing.data[0];
+            if (!pullRequest) {
+              pullRequest = (await github.rest.pulls.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `chore(sync): integrate master into ${base}`,
+                head: "master",
+                base,
+                draft: true,
+                body: [
+                  `This draft proposes the current master revision for \`${base}\`.`,
+                  "",
+                  `The sync workflow [validated a temporary merge of \`master\` into \`${base}\`](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) before opening this pull request.`,
+                  "Review the diff and validation run before marking it ready or merging it.",
+                  "The validation ran in the sync workflow because GitHub does not start another workflow for pull requests created with GITHUB_TOKEN.",
+                  "",
+                  `Validated source: \`${context.sha}\``,
+                ].join("\n"),
+              })).data;
+            }
+
+            core.setOutput("url", pullRequest.html_url);
+            await core.summary
+              .addHeading(`${base}: draft integration pull request`)
+              .addLink(pullRequest.html_url, pullRequest.title)
+              .write();
+
+      - name: Record dry-run result
+        if: steps.candidate.outputs.changed == 'true' && env.DRY_RUN == 'true'
+        run: |
+          echo "Validation passed for $TARGET_BRANCH. Dry run is enabled; no pull request was opened and no branch was modified." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload validation diagnostics
+        if: always() && steps.candidate.outputs.changed == 'true'
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: sync-validation-${{ matrix.branch }}
+          path: |
+            validation-commit.txt
+            docs/evidencias/
+            test-results/
+            preview-*.log
+          if-no-files-found: ignore
+          retention-days: 14
