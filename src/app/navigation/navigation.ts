@@ -8,7 +8,6 @@ import {
   IconLayoutList,
   IconMessageCircle,
   IconTag,
-  IconPackages,
   IconBrandApple,
   IconSeo,
   IconTicket,
@@ -16,6 +15,7 @@ import {
   IconArrowsShuffle,
   IconPackage,
   IconFileSpreadsheet,
+  IconPackages,
   type TablerIcon,
 } from "@tabler/icons-react";
 export interface NavigationItem {
@@ -47,6 +47,12 @@ export const bulkNavigation: NavigationItem[] = [
   },
 ];
 export const productNavigation: NavigationItem[] = [
+  {
+    to: "/combos",
+    label: "Gestión de combos",
+    icon: IconPackage,
+    group: "Catálogo",
+  },
   {
     to: "/productos",
     label: "Gestión de productos",
