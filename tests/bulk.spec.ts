@@ -52,10 +52,8 @@ test("Bulk smoke: resultado parcial y acciones compatibles con el lote", async (
   await page.goto("/carga-masiva/importaciones/batch-failed-general/resultado");
   await expect(page.getByText("Fallo general", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Reanudar operaciones pendientes" })).toHaveCount(0);
-  const reportButton = page.getByRole("button", { name: "Descargar reporte de errores" });
-  await expect(reportButton).toBeEnabled();
-  await reportButton.click();
-  await expect(page.getByText("El servicio no entregó un reporte descargable para este lote.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Descargar reporte de errores" })).toHaveCount(0);
+  await expect(page.getByText("No hay un recurso de reporte descargable para este lote.")).toBeVisible();
 
   await page.goto("/carga-masiva/importaciones/lote-inexistente");
   await expect(page.getByText("Lote no encontrado")).toBeVisible();

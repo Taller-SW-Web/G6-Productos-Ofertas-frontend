@@ -15,6 +15,7 @@ import { BulkFileReview } from "../components/BulkFileReview";
 import { useBulkUploadContext } from "../context/BulkUploadContext";
 import { BulkRepositoryError } from "../services/bulkService";
 import { useBulkRepository } from "../hooks/useBulkRepository";
+import { runSingleFlight } from "../utils/asyncGuards";
 
 export function BulkReviewPage() {
   const navigate = useNavigate();
@@ -62,26 +63,26 @@ export function BulkReviewPage() {
   }
 
   const handleConfirmImport = async () => {
-    if (submitting || isSubmittingRef.current) return;
-    isSubmittingRef.current = true;
-    setSubmitting(true);
-    setSubmissionError(null);
-    try {
-      const batch = await bulkRepository.createImport(selectedFile, {
-        detectedRows: fileCheck.detectedRows,
-      });
-      // Navigate to tracking screen S03
-      navigate(`/carga-masiva/importaciones/${batch.batch_id}`);
-    } catch (err: unknown) {
-      isSubmittingRef.current = false;
-      setSubmitting(false);
-      const message =
-        err instanceof Error
-          ? err.message
-          : "El servicio no pudo admitir el lote de importación.";
-      const category = err instanceof BulkRepositoryError ? err.category : "unknown";
-      setSubmissionError({ category, message });
-    }
+    if (submitting) return;
+    await runSingleFlight(isSubmittingRef, async () => {
+      setSubmitting(true);
+      setSubmissionError(null);
+      try {
+        const batch = await bulkRepository.createImport(selectedFile, {
+          detectedRows: fileCheck.detectedRows,
+        });
+        // Navigate to tracking screen S03
+        navigate(`/carga-masiva/importaciones/${batch.batch_id}`);
+      } catch (err: unknown) {
+        setSubmitting(false);
+        const message =
+          err instanceof Error
+            ? err.message
+            : "El servicio no pudo admitir el lote de importación.";
+        const category = err instanceof BulkRepositoryError ? err.category : "unknown";
+        setSubmissionError({ category, message });
+      }
+    });
   };
 
   const hasBlockingErrors = !fileCheck.valid;

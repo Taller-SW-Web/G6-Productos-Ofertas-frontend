@@ -2,6 +2,9 @@ import type { LocalFileCheckResult } from "../types/bulk";
 
 const FILE_READ_CHUNK_SIZE = 64 * 1024;
 const ZIP_MAX_EOCD_SIZE = 22 + 65_535;
+// Local parser safety bounds, not contractual upload limits.
+const MAX_HEADER_CHARACTERS = 256 * 1024;
+const MAX_HEADER_COLUMNS = 4096;
 
 interface CsvFileSummary {
   headers: string[];
@@ -12,10 +15,13 @@ interface CsvFileSummary {
 
 function createCsvSummaryScanner() {
   let insideQuotes = false;
+  let pendingQuote = false;
   let fieldStarted = false;
   let afterClosingQuote = false;
   let currentField = "";
-  let currentRowFields: string[] = [];
+  let headerFields: string[] = [];
+  let headerCharacters = 0;
+  let rowFieldCount = 1;
   let currentRowHasData = false;
   let skipLineFeed = false;
   let headers: string[] | undefined;
@@ -23,29 +29,49 @@ function createCsvSummaryScanner() {
   let malformedRow: CsvFileSummary["malformedRow"];
   let error: string | undefined;
 
-  const appendCurrentField = () => {
-    currentRowFields.push(currentField);
+  const appendHeaderCharacter = (char: string) => {
+    if (headers) return;
+    headerCharacters++;
+    if (headerCharacters > MAX_HEADER_CHARACTERS) {
+      error = "El encabezado supera el límite de inspección local (256 KiB); reduzca su tamaño para revisar el archivo.";
+      return;
+    }
+    currentField += char;
+  };
+
+  const finishCurrentField = () => {
+    if (!headers) {
+      if (headerFields.length >= MAX_HEADER_COLUMNS) {
+        error = "El encabezado supera el límite de inspección local (4096 columnas); reduzca la cantidad de columnas para revisar el archivo.";
+      } else {
+        headerFields.push(currentField.trim().toLowerCase());
+      }
+    }
     currentField = "";
     fieldStarted = false;
     afterClosingQuote = false;
   };
 
   const finishRow = () => {
-    appendCurrentField();
     if (currentRowHasData) {
       if (!headers) {
-        headers = currentRowFields.map((field) => field.trim().toLowerCase());
+        finishCurrentField();
+        if (!error) headers = headerFields;
       } else {
         dataRows++;
-        if (!malformedRow && currentRowFields.length !== headers.length) {
+        if (!malformedRow && rowFieldCount !== headers.length) {
           malformedRow = {
             rowNumber: dataRows + 1,
-            fieldCount: currentRowFields.length,
+            fieldCount: rowFieldCount,
           };
         }
       }
     }
-    currentRowFields = [];
+    currentField = "";
+    fieldStarted = false;
+    afterClosingQuote = false;
+    if (!headers) headerFields = [];
+    rowFieldCount = 1;
     currentRowHasData = false;
   };
 
@@ -59,11 +85,27 @@ function createCsvSummaryScanner() {
         if (char === "\n") continue;
       }
 
+      if (pendingQuote) {
+        pendingQuote = false;
+        if (char === '"') {
+          appendHeaderCharacter('"');
+          fieldStarted = true;
+          if (!/\s/.test(char)) currentRowHasData = true;
+          continue;
+        }
+        insideQuotes = false;
+        afterClosingQuote = true;
+        // Reprocess this character as the first one following a closing quote.
+      }
+
       if (char === '"') {
         if (insideQuotes) {
           if (nextChar === '"') {
-            if (!headers) currentField += '"';
+            appendHeaderCharacter('"');
             i++;
+          } else if (i === chunk.length - 1) {
+            // The next chunk decides whether this quote closes the field or is escaped.
+            pendingQuote = true;
           } else {
             insideQuotes = false;
             afterClosingQuote = true;
@@ -78,7 +120,8 @@ function createCsvSummaryScanner() {
       }
 
       if (char === "," && !insideQuotes) {
-        appendCurrentField();
+        finishCurrentField();
+        rowFieldCount++;
         continue;
       }
 
@@ -94,7 +137,7 @@ function createCsvSummaryScanner() {
       }
 
       fieldStarted = true;
-      if (!headers) currentField += char;
+      appendHeaderCharacter(char);
       if (!/\s/.test(char)) {
         currentRowHasData = true;
       }
@@ -102,10 +145,15 @@ function createCsvSummaryScanner() {
   };
 
   const finish = (): CsvFileSummary => {
+    if (pendingQuote) {
+      pendingQuote = false;
+      insideQuotes = false;
+      afterClosingQuote = true;
+    }
     if (!error && insideQuotes) {
       error = "El archivo CSV contiene comillas sin cerrar en la estructura de campos.";
     }
-    if (!error && (fieldStarted || currentRowFields.length > 0 || currentRowHasData)) {
+    if (!error && (fieldStarted || rowFieldCount > 1 || currentRowHasData)) {
       finishRow();
     }
     if (!error && headers) {
@@ -150,7 +198,9 @@ async function inspectCsvFile(
         break;
       }
     }
+    signal?.throwIfAborted();
     if (!scanner.hasError()) scanner.push(decoder.decode());
+    signal?.throwIfAborted();
     return scanner.finish();
   } finally {
     signal?.removeEventListener("abort", cancelRead);
@@ -241,6 +291,7 @@ export async function checkLocalFile(
   file: File,
   signal?: AbortSignal,
 ): Promise<LocalFileCheckResult> {
+  signal?.throwIfAborted();
   const fileName = file.name.trim();
   const fileSize = file.size;
   const lowerName = fileName.toLowerCase();
@@ -344,7 +395,8 @@ export async function checkLocalFile(
           "El directorio central está incompleto o el contenedor no presenta [Content_Types].xml y xl/workbook.xml.",
         );
       }
-    } catch {
+    } catch (err) {
+      if (signal?.aborted) throw err;
       return invalidFile("XLSX", fileName, fileSize, "No se pudo leer la estructura del archivo XLSX.");
     }
 
@@ -414,7 +466,8 @@ export async function checkLocalFile(
         "Validación de stock y reglas de canales de precios se evalúan en el procesamiento asíncrono.",
       ],
     };
-  } catch {
+  } catch (err) {
+    if (signal?.aborted) throw err;
     return invalidFile(
       "CSV",
       fileName,

@@ -10,6 +10,7 @@ import {
 import type { LocalFileCheckResult } from "../types/bulk";
 import type { BulkFailureCategory } from "../services/bulkService";
 import { checkLocalFile } from "../utils/localFileCheck";
+import { LatestTaskCoordinator } from "../utils/asyncGuards";
 
 export interface BulkSubmissionError {
   category: BulkFailureCategory;
@@ -38,16 +39,18 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
   const [submissionError, setSubmissionError] =
     useState<BulkSubmissionError | null>(null);
 
-  // Counter to guarantee that only the latest file check result is applied
-  const validationVersionRef = useRef(0);
-  const validationControllerRef = useRef<AbortController | null>(null);
+  const validationCoordinatorRef = useRef<LatestTaskCoordinator | null>(null);
+  if (validationCoordinatorRef.current == null) {
+    validationCoordinatorRef.current = new LatestTaskCoordinator();
+  }
 
   const setSelectedFile = useCallback(async (file: File | null) => {
-    validationControllerRef.current?.abort();
-    const currentVersion = ++validationVersionRef.current;
+    const coordinator = validationCoordinatorRef.current;
+    if (!coordinator) return;
     setSubmissionError(null);
 
     if (!file) {
+      coordinator.cancel();
       setFileState(null);
       setFileCheck(null);
       setChecking(false);
@@ -57,26 +60,25 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
     setFileState(file);
     setFileCheck(null); // Invalidate previous result immediately
     setChecking(true);
-    const controller = new AbortController();
-    validationControllerRef.current = controller;
+    const task = coordinator.start();
 
     try {
-      const result = await checkLocalFile(file, controller.signal);
+      const result = await checkLocalFile(file, task.signal);
       // Only commit result if this is still the active validation
-      if (validationVersionRef.current === currentVersion) {
+      if (task.isCurrent()) {
         setFileCheck(result);
       }
+    } catch (err) {
+      if (!task.signal.aborted) throw err;
     } finally {
-      if (validationVersionRef.current === currentVersion) {
+      if (task.isCurrent()) {
         setChecking(false);
       }
     }
   }, []);
 
   const clearSelection = useCallback(() => {
-    validationControllerRef.current?.abort();
-    validationControllerRef.current = null;
-    validationVersionRef.current++;
+    validationCoordinatorRef.current?.cancel();
     setFileState(null);
     setFileCheck(null);
     setChecking(false);

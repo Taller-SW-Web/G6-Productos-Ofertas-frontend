@@ -34,6 +34,7 @@ export function BulkResultPage() {
     resumeError,
     downloadingReport,
     reportError,
+    reportAvailable,
     refreshBatch,
     resumeBatch,
     downloadReport,
@@ -77,7 +78,7 @@ export function BulkResultPage() {
             >
               Nueva carga masiva
             </Button>
-            {batch && isTerminal && batch.failed_rows > 0 && (
+            {batch && isTerminal && reportAvailable && (
               <Button
                 variant="outline"
                 leftSection={<IconDownload size={18} stroke={2} aria-hidden="true" />}
@@ -135,6 +136,12 @@ export function BulkResultPage() {
         {reportError && (
           <FeedbackAlert semantic="error" title="Reporte no disponible">
             {reportError}
+          </FeedbackAlert>
+        )}
+
+        {batch && isTerminal && batch.failed_rows > 0 && !reportAvailable && (
+          <FeedbackAlert semantic="info" title="Reporte de errores no disponible">
+            No hay un recurso de reporte descargable para este lote. No se ofrece un archivo ficticio.
           </FeedbackAlert>
         )}
 

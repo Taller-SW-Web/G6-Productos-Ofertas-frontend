@@ -1,13 +1,43 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mockBulkRepository } from "../src/features/bulk/adapters/mockBulkRepository";
 import { createBulkRepository } from "../src/features/bulk/services/bulkService";
+import { canRequestImportReport } from "../src/features/bulk/services/bulkRepository";
+import { canMockProvideImportReport } from "../src/features/bulk/services/reportAvailability";
+import { isBulkProviderConfigured } from "../src/features/bulk/services/bulkProviderStatus";
+import { getQueuedBatchDescription, getUnknownRowCountDescription } from "../src/features/bulk/components/batchStatusMessages";
+import { isExportSnapshotStale, selectBatchQueryView } from "../src/features/bulk/hooks/bulkQueryState";
+import { LatestTaskCoordinator, runSingleFlight } from "../src/features/bulk/utils/asyncGuards";
 import { checkLocalFile, parseCsvSafely } from "../src/features/bulk/utils/localFileCheck";
 import { getGenuineMinimalXlsxArrayBuffer } from "./fixtures/genuineXlsxFixture";
+import { mockBatches } from "../src/features/bulk/mocks/bulkFixtures";
 
 function fileWithBytes(name: string, bytes: Uint8Array) {
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
   return new File([copy.buffer], name);
+}
+
+function fileWithChunks(name: string, bytes: Uint8Array, chunkSize = 64 * 1024) {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  const file = new File([copy.buffer], name);
+  Object.defineProperty(file, "stream", {
+    value: () => {
+      let offset = 0;
+      return new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (offset >= bytes.length) {
+            controller.close();
+            return;
+          }
+          const end = Math.min(offset + chunkSize, bytes.length);
+          controller.enqueue(bytes.slice(offset, end));
+          offset = end;
+        },
+      });
+    },
+  });
+  return file;
 }
 
 function buildZip(entries: string[], options?: { declaredEntries?: number }) {
@@ -69,6 +99,13 @@ describe("Bulk mock repository and global data mode", () => {
     expect(batch.file_name).toBe("catalogo.csv");
   });
 
+  it("keeps batch refresh reads free of import writes", async () => {
+    const getCreateCalls = () => mockBulkRepository.getCreateImportCallCount?.() ?? 0;
+    const createCallsBefore = getCreateCalls();
+    await mockBulkRepository.getImport("batch-completed");
+    expect(getCreateCalls()).toBe(createCallsBefore);
+  });
+
   it("preserves confirmed rows and batch identity when resuming an eligible batch", async () => {
     const batch = await mockBulkRepository.getImport("batch-partial");
     const resumed = await mockBulkRepository.resumeImport("batch-partial");
@@ -81,6 +118,21 @@ describe("Bulk mock repository and global data mode", () => {
     await expect(mockBulkRepository.resumeImport("batch-completed")).rejects.toThrow(
       "no contiene operaciones pendientes",
     );
+  });
+
+  it("rejects a duplicate resume while preserving the same batch identity", async () => {
+    const results = await Promise.allSettled([
+      mockBulkRepository.resumeImport("batch-partial"),
+      mockBulkRepository.resumeImport("batch-partial"),
+    ]);
+    const accepted = results.filter((result) => result.status === "fulfilled");
+    const rejected = results.filter((result) => result.status === "rejected");
+    expect(accepted).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(accepted[0]).toMatchObject({
+      status: "fulfilled",
+      value: { batch_id: "batch-partial" },
+    });
   });
 
   it("exports a CSV file and never returns a CSV renamed as XLSX", async () => {
@@ -101,6 +153,99 @@ describe("Bulk mock repository and global data mode", () => {
     expect(partial?.fileName).toContain("batch-partial");
     expect(await partial?.blob.text()).toContain("SKU_DUPLICADO");
     expect(await mockBulkRepository.getImportReport("batch-failed-general")).toBeNull();
+    expect(canMockProvideImportReport(mockBatches["batch-failed-general"]!)).toBe(false);
+    expect(canRequestImportReport(mockBulkRepository, mockBatches["batch-failed-general"]!)).toBe(false);
+
+    const apiRepository = { ...mockBulkRepository, canDownloadImportReport: undefined };
+    expect(canRequestImportReport(apiRepository, mockBatches["batch-failed-general"]!)).toBe(true);
+  });
+
+  it("keeps mock/API status messages tied to the global mode, not the filename", () => {
+    expect(getQueuedBatchDescription("mock")).toContain("demostración mock");
+    expect(getQueuedBatchDescription("api")).toContain("provider configurado");
+    expect(getUnknownRowCountDescription("mock")).not.toContain("XLSX");
+    expect(getUnknownRowCountDescription("api")).not.toContain("XLSX");
+    expect(isBulkProviderConfigured("api", null)).toBe(false);
+    expect(isBulkProviderConfigured("api", mockBulkRepository)).toBe(true);
+    expect(isBulkProviderConfigured("mock", null)).toBe(true);
+  });
+
+  it("uses the latest completed batch query and discards stale responses", () => {
+    const batch = mockBatches["batch-partial"]!;
+    const staleResponse = { key: '["batch-partial",0]', state: { status: "success" as const, batch } };
+    const notFound = selectBatchQueryView({
+      batchId: "batch-partial",
+      requestKey: '["batch-partial",1]',
+      response: { key: '["batch-partial",1]', state: { status: "not_found" } },
+      lastSuccess: { batchId: batch.batch_id, batch },
+    });
+    expect(notFound).toMatchObject({ batch: null, isNotFound: true, loading: false });
+
+    const communicationError = selectBatchQueryView({
+      batchId: "batch-partial",
+      requestKey: '["batch-partial",2]',
+      response: { key: '["batch-partial",2]', state: { status: "error", message: "offline" } },
+      lastSuccess: { batchId: batch.batch_id, batch },
+    });
+    expect(communicationError).toMatchObject({ batch, error: "offline", isStale: true });
+
+    expect(selectBatchQueryView({
+      batchId: "another-batch",
+      requestKey: '["another-batch",0]',
+      response: staleResponse,
+      lastSuccess: { batchId: batch.batch_id, batch },
+    })).toMatchObject({ batch: null, loading: true, isNotFound: false });
+  });
+
+  it("marks the last export stale only for the same export ID", () => {
+    expect(isExportSnapshotStale({
+      visibleExportId: "exp-a",
+      initialExportId: "exp-a",
+      routeExportId: "exp-a",
+      createdJobMatches: false,
+      currentQueryStatus: "error",
+    })).toBe(true);
+    expect(isExportSnapshotStale({
+      visibleExportId: "exp-b",
+      initialExportId: "exp-b",
+      routeExportId: "exp-a",
+      createdJobMatches: false,
+      currentQueryStatus: "error",
+      refreshErrorExportId: "exp-a",
+    })).toBe(false);
+    expect(isExportSnapshotStale({
+      visibleExportId: "exp-c",
+      createdJobMatches: true,
+      refreshErrorExportId: "exp-c",
+    })).toBe(true);
+  });
+
+  it("guards duplicate confirmations and cancels stale file-selection checks", async () => {
+    const guard = { current: false };
+    let complete!: (value: string) => void;
+    let submissions = 0;
+    const first = runSingleFlight(guard, () => {
+      submissions++;
+      return new Promise<string>((resolve) => { complete = resolve; });
+    });
+    const duplicate = await runSingleFlight(guard, async () => {
+      submissions++;
+      return "duplicate";
+    });
+    expect(duplicate).toBeUndefined();
+    expect(submissions).toBe(1);
+    complete("accepted");
+    await expect(first).resolves.toBe("accepted");
+
+    const coordinator = new LatestTaskCoordinator();
+    const fileA = coordinator.start();
+    const fileB = coordinator.start();
+    expect(fileA.signal.aborted).toBe(true);
+    expect(fileA.isCurrent()).toBe(false);
+    expect(fileB.isCurrent()).toBe(true);
+    coordinator.cancel();
+    expect(fileB.signal.aborted).toBe(true);
+    expect(fileB.isCurrent()).toBe(false);
   });
 });
 
@@ -169,5 +314,92 @@ describe("Bulk local file checks", () => {
       ["A", "Producto, uno"],
     ]);
     expect(parseCsvSafely('sku,nombre\nA,"sin cerrar').error).toContain("comillas sin cerrar");
+  });
+
+  it("handles escaped quotes in ordinary CSV fields and headers", async () => {
+    const result = await checkLocalFile(
+      new File(['"sku""code",nombre\n"AB""C",Producto\n'], "comillas.csv"),
+    );
+    expect(result.valid).toBe(true);
+    expect(result.detectedColumns).toEqual(['sku"code', "nombre"]);
+    expect(result.detectedRows).toBe(1);
+  });
+
+  it("keeps escaped quotes intact when the pair straddles two 64 KiB reads", async () => {
+    const encoder = new TextEncoder();
+    const prefix = encoder.encode('sku,detalle\nA,"');
+    const padding = new Uint8Array(64 * 1024 - prefix.length - 1).fill("x".charCodeAt(0));
+    const bytes = new Uint8Array([
+      ...prefix,
+      ...padding,
+      ...encoder.encode('""y"\nB,ok\n'),
+    ]);
+    const result = await checkLocalFile(fileWithChunks("comillas-frontera.csv", bytes));
+    expect(result.valid).toBe(true);
+    expect(result.detectedRows).toBe(2);
+  });
+
+  it("handles escaped quotes split in a header and a CRLF split at the read boundary", async () => {
+    const encoder = new TextEncoder();
+    const headerPrefix = encoder.encode('"sku');
+    const headerPadding = new Uint8Array(64 * 1024 - headerPrefix.length - 1).fill("x".charCodeAt(0));
+    const headerBytes = new Uint8Array([
+      ...headerPrefix,
+      ...headerPadding,
+      ...encoder.encode('""code",nombre\nA,B\n'),
+    ]);
+    const headerResult = await checkLocalFile(fileWithChunks("header-frontera.csv", headerBytes));
+    expect(headerResult.valid).toBe(true);
+    expect(headerResult.detectedColumns?.[0]).toMatch(/"code$/);
+
+    const rowPrefix = encoder.encode("sku,nombre\nA,");
+    const rowPadding = new Uint8Array(64 * 1024 - rowPrefix.length - 1).fill("x".charCodeAt(0));
+    const rowBytes = new Uint8Array([
+      ...rowPrefix,
+      ...rowPadding,
+      ...encoder.encode("\r\nB,Producto\n"),
+    ]);
+    const crlfResult = await checkLocalFile(fileWithChunks("crlf-frontera.csv", rowBytes));
+    expect(crlfResult.valid).toBe(true);
+    expect(crlfResult.detectedRows).toBe(2);
+  });
+
+  it("decodes UTF-8 multibyte characters split across reads", async () => {
+    const encoder = new TextEncoder();
+    const prefix = encoder.encode("sku,nombre\nA,");
+    const padding = new Uint8Array(64 * 1024 - prefix.length - 1).fill("x".charCodeAt(0));
+    const bytes = new Uint8Array([
+      ...prefix,
+      ...padding,
+      ...encoder.encode("ñ\nB,Producto\n"),
+    ]);
+    const result = await checkLocalFile(fileWithChunks("utf8-frontera.csv", bytes));
+    expect(result.valid).toBe(true);
+    expect(result.detectedRows).toBe(2);
+  });
+
+  it("bounds oversized local headers without imposing a commercial file-size limit", async () => {
+    const header = new Uint8Array(256 * 1024 + 1).fill("x".charCodeAt(0));
+    const bytes = new Uint8Array([...header, 10, 65, 10]);
+    const result = await checkLocalFile(fileWithChunks("header-grande.csv", bytes));
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain("límite de inspección local");
+  });
+
+  it("cancels an active streaming read when the selection is cleared", async () => {
+    const file = new File(["sku,nombre\nA,B\n"], "cancelar.csv");
+    let cancelled = false;
+    Object.defineProperty(file, "stream", {
+      value: () => new ReadableStream<Uint8Array>({
+        pull() {},
+        cancel() { cancelled = true; },
+      }),
+    });
+    const controller = new AbortController();
+    const pending = checkLocalFile(file, controller.signal);
+    await Promise.resolve();
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(cancelled).toBe(true);
   });
 });

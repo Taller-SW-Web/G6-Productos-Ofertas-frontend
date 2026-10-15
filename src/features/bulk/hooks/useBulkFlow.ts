@@ -4,15 +4,14 @@ import type {
   BulkExportJob,
   BulkImportBatch,
 } from "../types/bulk";
-import type { DownloadResource } from "../services/bulkRepository";
+import { canRequestImportReport, type DownloadResource } from "../services/bulkRepository";
 import { triggerDownload } from "../utils/downloadAsset";
 import { useBulkRepository } from "./useBulkRepository";
-
-type BatchQueryState =
-  | { status: "loading" }
-  | { status: "success"; batch: BulkImportBatch }
-  | { status: "not_found" }
-  | { status: "error"; message: string };
+import {
+  isExportSnapshotStale,
+  selectBatchQueryView,
+  type BatchQueryState,
+} from "./bulkQueryState";
 
 export function useBulkBatch(batchId: string | undefined) {
   const repository = useBulkRepository();
@@ -110,29 +109,27 @@ export function useBulkBatch(batchId: string | undefined) {
     }
   }, [batchId, repository]);
 
-  const isCurrent = response?.key === requestKey;
-  const currentBatch =
-    isCurrent && response.state.status === "success"
-      ? response.state.batch
-      : lastSuccess && lastSuccess.batchId === batchId
-        ? lastSuccess.batch
-        : null;
-
-  const loading = !isCurrent || response?.state.status === "loading";
-  const isNotFound = isCurrent && response?.state.status === "not_found";
-  const error =
-    isCurrent && response?.state.status === "error" ? response.state.message : null;
+  const batchView = selectBatchQueryView({
+    batchId,
+    requestKey,
+    response,
+    lastSuccess,
+  });
+  const reportAvailable = Boolean(
+    batchView.batch && canRequestImportReport(repository, batchView.batch),
+  );
 
   return {
-    batch: currentBatch,
-    loading,
-    error,
-    isNotFound,
-    isStale: Boolean(error && currentBatch),
+    batch: batchView.batch,
+    loading: batchView.loading,
+    error: batchView.error,
+    isNotFound: batchView.isNotFound,
+    isStale: batchView.isStale,
     resuming,
     resumeError,
     downloadingReport,
     reportError,
+    reportAvailable,
     refreshBatch,
     resumeBatch,
     downloadReport,
@@ -155,6 +152,10 @@ export function useBulkDownloads(initialExportId?: string) {
     job: BulkExportJob;
   }>();
   const [queryState, setQueryState] = useState<ExportQueryState>();
+  const [refreshErrorForExport, setRefreshErrorForExport] = useState<{
+    exportId: string;
+    message: string;
+  }>();
   const [queryRevision, setQueryRevision] = useState(0);
   const [submittingExport, setSubmittingExport] = useState(false);
   const [refreshingJob, setRefreshingJob] = useState(false);
@@ -172,9 +173,11 @@ export function useBulkDownloads(initialExportId?: string) {
         if (controller.signal.aborted) return;
         if (job) {
           setExportJobState({ routeExportId: initialExportId, job });
+          setRefreshErrorForExport(undefined);
           setQueryState({ exportId: initialExportId, revision: queryRevision, status: "success", job });
         } else {
           setExportJobState(undefined);
+          setRefreshErrorForExport(undefined);
           setQueryState({ exportId: initialExportId, revision: queryRevision, status: "not_found" });
         }
       },
@@ -221,6 +224,14 @@ export function useBulkDownloads(initialExportId?: string) {
     !createdJobMatches && matchingQuery?.status === "error"
       ? matchingQuery.message
       : null;
+  const exportJobStale = isExportSnapshotStale({
+    visibleExportId: visibleJob?.export_id,
+    initialExportId,
+    routeExportId: exportJobState?.routeExportId,
+    createdJobMatches,
+    currentQueryStatus: matchingQuery?.status,
+    refreshErrorExportId: refreshErrorForExport?.exportId,
+  });
 
   const requestExport = useCallback(
     async (format: BulkExportFormat) => {
@@ -253,6 +264,7 @@ export function useBulkDownloads(initialExportId?: string) {
     try {
       const updated = await repository.getExport(visibleJob.export_id);
       if (updated) {
+        setRefreshErrorForExport(undefined);
         if (createdJobMatches) {
           setCreatedJob({ routeExportId: initialExportId, job: updated });
         } else {
@@ -262,18 +274,22 @@ export function useBulkDownloads(initialExportId?: string) {
           setQueryState({ exportId: updated.export_id, revision: queryRevision, status: "success", job: updated });
         }
       } else if (initialExportId === visibleJob.export_id) {
+        setRefreshErrorForExport(undefined);
         setExportJobState(undefined);
         setCreatedJob(undefined);
         setQueryState({ exportId: visibleJob.export_id, revision: queryRevision, status: "not_found" });
       } else {
-        setError("El trabajo de exportación ya no está disponible.");
+        const message = "El trabajo de exportación ya no está disponible.";
+        setRefreshErrorForExport({ exportId: visibleJob.export_id, message });
+        setError(message);
       }
     } catch (err: unknown) {
-      setError(
+      const message =
         err instanceof Error
           ? err.message
-          : "No se pudo actualizar el estado de la exportación.",
-      );
+          : "No se pudo actualizar el estado de la exportación.";
+      setRefreshErrorForExport({ exportId: visibleJob.export_id, message });
+      setError(message);
     } finally {
       refreshInFlight.current = false;
       setRefreshingJob(false);
@@ -347,6 +363,7 @@ export function useBulkDownloads(initialExportId?: string) {
     error,
     initialQueryStatus,
     initialQueryError,
+    isStale: exportJobStale,
     requestExport,
     refreshJob,
     retryInitialQuery,

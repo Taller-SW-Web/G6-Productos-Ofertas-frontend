@@ -15,6 +15,7 @@ import type {
   DownloadResource,
 } from "../services/bulkRepository";
 import { BulkRepositoryError } from "../services/bulkErrors";
+import { canMockProvideImportReport } from "../services/reportAvailability";
 
 export const DEMO_CONFIG = {
   PROCESSING_DELAY_MS: 1200,
@@ -306,16 +307,11 @@ export const mockBulkRepository: BulkRepository & {
   ): Promise<DownloadResource | null> {
     signal?.throwIfAborted();
     const batch = await this.getImport(batchId, signal);
-    if (
-      !batch ||
-      batch.failed_rows === 0 ||
-      !batch.rows ||
-      batch.rows.length === 0
-    ) {
+    if (!batch || !canMockProvideImportReport(batch)) {
       return null;
     }
 
-    const failedRows = batch.rows.filter((r) => r.status === "FAILED");
+    const failedRows = (batch.rows ?? []).filter((r) => r.status === "FAILED");
     if (failedRows.length === 0) {
       return null;
     }
@@ -329,6 +325,10 @@ export const mockBulkRepository: BulkRepository & {
       blob,
       fileName: `reporte_errores_${batchId}.csv`,
     };
+  },
+
+  canDownloadImportReport(batch: BulkImportBatch) {
+    return canMockProvideImportReport(batch);
   },
 
   /**

@@ -10,6 +10,10 @@ import {
 } from "../../../components/shared";
 import { DataModeContext } from "../../../app/config/DataModeContext";
 import type { BulkImportBatch } from "../types/bulk";
+import {
+  getQueuedBatchDescription,
+  getUnknownRowCountDescription,
+} from "./batchStatusMessages";
 
 export interface BatchStatusPanelProps {
   batch: BulkImportBatch;
@@ -29,6 +33,7 @@ export function BatchStatusPanel({
   showDetailsLink = false,
 }: BatchStatusPanelProps) {
   const dataMode = useContext(DataModeContext);
+  if (!dataMode) throw new Error("El estado de carga masiva requiere DataModeContext.");
   const isTerminal =
     batch.status === "COMPLETED" || batch.status === "FAILED_GENERAL";
   const isPartial =
@@ -105,7 +110,7 @@ export function BatchStatusPanel({
             description={
               typeof batch.total_rows === "number"
                 ? "Filas declaradas en el lote"
-                : "Recuento no verificado en cliente (XLSX)"
+                : "Recuento no informado o no verificado"
             }
           />
           <MetricCard
@@ -162,7 +167,7 @@ export function BatchStatusPanel({
             semantic="warning"
             title="Lote en procesamiento — Verificación dependiente del proveedor"
           >
-            El archivo XLSX fue recibido y admitido en cola, pero la demostración local no puede verificar su contenido interno ni confirmar su resultado final sin la integración real con el servicio bulk-svc. El estado permanece en procesamiento para no generar resultados ficticios. Puede iniciar una nueva carga o volver a la selección de archivos.
+            {getUnknownRowCountDescription(dataMode)}
           </FeedbackAlert>
         )}
 
@@ -174,9 +179,7 @@ export function BatchStatusPanel({
 
         {isQueued && typeof batch.total_rows === "number" && (
           <FeedbackAlert semantic="info" title="Solicitud en cola">
-            {batch.file_name
-              ? "La demostración mock recibió la solicitud y espera iniciar el procesamiento."
-              : "El lote está en cola y espera iniciar el procesamiento."}
+            {getQueuedBatchDescription(dataMode)}
           </FeedbackAlert>
         )}
 

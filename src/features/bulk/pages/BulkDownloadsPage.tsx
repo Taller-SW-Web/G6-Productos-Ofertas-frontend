@@ -30,6 +30,7 @@ export function BulkDownloadsPage() {
     error,
     initialQueryStatus,
     initialQueryError,
+    isStale,
     requestExport,
     refreshJob,
     retryInitialQuery,
@@ -85,6 +86,11 @@ export function BulkDownloadsPage() {
         {error && (
           <FeedbackAlert semantic="error" title="Observación en la descarga">
             {error}
+          </FeedbackAlert>
+        )}
+        {exportJob && isStale && (
+          <FeedbackAlert semantic="warning" title="Información de exportación desactualizada">
+            Se conserva la última respuesta conocida para {exportJob.export_id}; la consulta más reciente no confirmó su estado actual.
           </FeedbackAlert>
         )}
 
