@@ -333,30 +333,56 @@ export class MockInventoryAdapter implements InventoryRepository {
       status: filters?.status,
     });
 
+    // Sin datos de inventario para la selección consultada: los indicadores son
+    // "sin datos" (null), nunca cero. El cero real queda para cuando el dato
+    // existe y vale 0 (hallazgo TAC-08).
+    if (items.length === 0) {
+      return {
+        availableUnits: null,
+        blockedUnits: null,
+        totalPhysicalUnits: null,
+        totalVendibleSkus: null,
+        skusAvailable: null,
+        skusLowStock: null,
+        skusOutOfStock: null,
+        reservedUnits: null,
+        totalPendingTransfers: null,
+        transfersInTransit: null,
+        transfersPartiallyReceived: null,
+        transfersWithDiscrepancy: null,
+      };
+    }
+
     const availableUnits = items.reduce((acc, i) => acc + i.available, 0);
     const blockedUnits = items.reduce((acc, i) => acc + i.blocked, 0);
     const totalPhysicalUnits = items.reduce((acc, i) => acc + i.onHand, 0);
     const reservedUnits = items.reduce((acc, i) => acc + i.reserved, 0);
 
-    // KPIs por SKU: consolidar por SKU para no contar el mismo artículo en varias ubicaciones.
-    const bySku = new Map<string, { available: number; threshold: number }>();
+    // KPIs por SKU cuando el mismo SKU existe en varias ubicaciones: se clasifica
+    // por ubicación y NUNCA se agrega el saldo de otras ubicaciones para ocultar
+    // el stock bajo de una (hallazgo TAC-06).
+    //   AGOTADO    -> sin unidades disponibles en ninguna de sus ubicaciones
+    //   STOCK_BAJO -> al menos una ubicación está bajo umbral (0 < available <= umbral)
+    //   DISPONIBLE -> ninguna ubicación está baja y tiene saldo
+    const bySku = new Map<string, { totalAvailable: number; anyLow: boolean }>();
     for (const item of items) {
-      const current = bySku.get(item.sku) ?? {
-        available: 0,
-        threshold: item.threshold,
+      const aggregate = bySku.get(item.sku) ?? {
+        totalAvailable: 0,
+        anyLow: false,
       };
-      current.available += item.available;
-      current.threshold = Math.max(current.threshold, item.threshold);
-      bySku.set(item.sku, current);
+      aggregate.totalAvailable += item.available;
+      if (item.status === "STOCK_BAJO") aggregate.anyLow = true;
+      bySku.set(item.sku, aggregate);
     }
-    const skuAggregates = Array.from(bySku.values());
-    const skusAvailable = skuAggregates.filter(
-      (s) => s.available > s.threshold,
-    ).length;
-    const skusLowStock = skuAggregates.filter(
-      (s) => s.available > 0 && s.available <= s.threshold,
-    ).length;
-    const skusOutOfStock = skuAggregates.filter((s) => s.available === 0).length;
+
+    let skusAvailable = 0;
+    let skusLowStock = 0;
+    let skusOutOfStock = 0;
+    for (const aggregate of bySku.values()) {
+      if (aggregate.totalAvailable === 0) skusOutOfStock += 1;
+      else if (aggregate.anyLow) skusLowStock += 1;
+      else skusAvailable += 1;
+    }
 
     const allowedSkus = new Set(bySku.keys());
     let relatedTransfers = this.transfers.filter((t) => allowedSkus.has(t.sku));
@@ -437,35 +463,80 @@ export class MockInventoryAdapter implements InventoryRepository {
       }
     }
 
-    // 2. Alertas de discrepancias en traslados cerrados
-    const itemsWithAlertSkus = new Set(items.map((i) => i.sku));
+    // 2. Alertas de discrepancias en traslados cerrados. No dependen del saldo
+    // filtrado del destino: una recepción con merma y cierre final puede no dejar
+    // saldo en la ubicación destino y la discrepancia debe mostrarse igual
+    // (hallazgo TAC-07). El filtro de ubicación se aplica sobre el destino del
+    // traslado y categoría/marca se resuelven por catálogo del SKU.
+    const skuCatalog = new Map<
+      string,
+      { categoryName: string; brandName: string }
+    >();
+    for (const item of this.stockItems) {
+      if (!skuCatalog.has(item.sku)) {
+        skuCatalog.set(item.sku, {
+          categoryName: item.categoryName,
+          brandName: item.brandName,
+        });
+      }
+    }
+    const search = filters?.search?.toLowerCase().trim();
+
     for (const transfer of this.transfers) {
+      if (transfer.status !== "COMPLETADO_CON_DISCREPANCIA") continue;
+
       if (
-        transfer.status === "COMPLETADO_CON_DISCREPANCIA" &&
-        itemsWithAlertSkus.has(transfer.sku)
+        filters?.locationId &&
+        filters.locationId !== "all" &&
+        transfer.targetLocationId !== filters.locationId
       ) {
+        continue;
+      }
+
+      if (
+        search &&
+        !transfer.sku.toLowerCase().includes(search) &&
+        !transfer.productName.toLowerCase().includes(search)
+      ) {
+        continue;
+      }
+
+      const catalogEntry = skuCatalog.get(transfer.sku);
+      if (filters?.category && filters.category !== "all") {
+        const target = this.normalizeKey(filters.category);
         if (
-          filters?.locationId &&
-          filters.locationId !== "all" &&
-          transfer.targetLocationId !== filters.locationId
+          !catalogEntry ||
+          (catalogEntry.categoryName !== filters.category &&
+            this.normalizeKey(catalogEntry.categoryName) !== target)
         ) {
           continue;
         }
-        // Evitar duplicados
-        const existingAlert = alerts.find(
-          (a) => a.transferId === transfer.id && a.severity === "error"
-        );
-        if (!existingAlert) {
-          alerts.push({
-            id: `disc-${transfer.id}`,
-            severity: "error",
-            title: `Discrepancia en recepción de traslado ${transfer.transferCode}`,
-            message: `Traslado ${transfer.transferCode} cerrado con ${transfer.quantityPending} unidades faltantes no recibidas para SKU ${transfer.sku}.`,
-            actionLabel: "Ver traslados",
-            targetRoute: "/inventario/traslados",
-            transferId: transfer.id,
-          });
+      }
+      if (filters?.brand && filters.brand !== "all") {
+        const target = this.normalizeKey(filters.brand);
+        if (
+          !catalogEntry ||
+          (catalogEntry.brandName !== filters.brand &&
+            this.normalizeKey(catalogEntry.brandName) !== target)
+        ) {
+          continue;
         }
+      }
+
+      // Evitar duplicados
+      const existingAlert = alerts.find(
+        (a) => a.transferId === transfer.id && a.severity === "error"
+      );
+      if (!existingAlert) {
+        alerts.push({
+          id: `disc-${transfer.id}`,
+          severity: "error",
+          title: `Discrepancia en recepción de traslado ${transfer.transferCode}`,
+          message: `Traslado ${transfer.transferCode} cerrado con ${transfer.quantityPending} unidades faltantes no recibidas para SKU ${transfer.sku}.`,
+          actionLabel: "Ver traslados",
+          targetRoute: "/inventario/traslados",
+          transferId: transfer.id,
+        });
       }
     }
 

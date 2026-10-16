@@ -1,4 +1,4 @@
-import { Button, SimpleGrid, Skeleton } from "@mantine/core";
+import { Button, SimpleGrid, Skeleton, Text } from "@mantine/core";
 import { FeedbackAlert, MetricCard } from "../../../components/shared";
 import type { InventoryKpiSummary } from "../services/inventoryTypes";
 
@@ -7,6 +7,19 @@ interface DashboardKpiGridProps {
   loading: boolean;
   error?: string | null;
   onRetry?: () => void;
+}
+
+// Un KPI ausente (null) se muestra como "Sin datos"; un cero real se muestra
+// como "0" (hallazgo TAC-08). No se sustituye un dato ausente por cero.
+function KpiValue({ value }: { value: number | null }) {
+  if (value === null) {
+    return (
+      <Text component="span" size="sm" c="dimmed" fw={600}>
+        Sin datos
+      </Text>
+    );
+  }
+  return <>{value}</>;
 }
 
 export function DashboardKpiGrid({
@@ -48,68 +61,68 @@ export function DashboardKpiGrid({
       {/* Fila 1: Saldos principales */}
       <MetricCard
         label="Unidades disponibles"
-        value={kpis.availableUnits}
+        value={<KpiValue value={kpis.availableUnits} />}
         description="Aptas para venta comercial en todos los canales"
       />
       <MetricCard
         label="Unidades bloqueadas"
-        value={kpis.blockedUnits}
+        value={<KpiValue value={kpis.blockedUnits} />}
         description="En cuarentena física por incidencia o reclamo"
       />
       <MetricCard
         label="Unidades físicas totales"
-        value={kpis.totalPhysicalUnits}
+        value={<KpiValue value={kpis.totalPhysicalUnits} />}
         description="Suma física contabilizada en todas las ubicaciones"
       />
 
       {/* Fila 2: Conteo de SKUs por estado */}
       <MetricCard
         label="Total SKUs vendibles"
-        value={kpis.totalVendibleSkus}
+        value={<KpiValue value={kpis.totalVendibleSkus} />}
         description="Artículos activos con catálogo y SKU asignado"
       />
       <MetricCard
         label="SKUs Disponibles"
-        value={kpis.skusAvailable}
+        value={<KpiValue value={kpis.skusAvailable} />}
         description="Con saldo mayor a su umbral de stock bajo"
       />
       <MetricCard
         label="SKUs con Stock bajo"
-        value={kpis.skusLowStock}
+        value={<KpiValue value={kpis.skusLowStock} />}
         description="Saldo disponible menor o igual a umbral resuelto"
       />
 
       {/* Fila 3: Riesgos y reservas */}
       <MetricCard
         label="SKUs Agotados"
-        value={kpis.skusOutOfStock}
+        value={<KpiValue value={kpis.skusOutOfStock} />}
         description="Sin unidades disponibles para venta"
       />
       <MetricCard
         label="Unidades reservadas"
-        value={kpis.reservedUnits}
+        value={<KpiValue value={kpis.reservedUnits} />}
         description="Comprometidas activamente por pedidos pendientes"
       />
       <MetricCard
         label="Traslados pendientes totales"
-        value={kpis.totalPendingTransfers}
+        value={<KpiValue value={kpis.totalPendingTransfers} />}
         description="Movimientos entre almacenes sin recepción final"
       />
 
       {/* Fila 4: Estados operativos de traslados */}
       <MetricCard
         label="Traslados en tránsito"
-        value={kpis.transfersInTransit}
+        value={<KpiValue value={kpis.transfersInTransit} />}
         description="En despacho interprovincial o ruta logística"
       />
       <MetricCard
         label="Traslados recibidos parcialmente"
-        value={kpis.transfersPartiallyReceived}
+        value={<KpiValue value={kpis.transfersPartiallyReceived} />}
         description="Con entregas pendientes de completar en destino"
       />
       <MetricCard
         label="Traslados con discrepancia"
-        value={kpis.transfersWithDiscrepancy}
+        value={<KpiValue value={kpis.transfersWithDiscrepancy} />}
         description="Cerrados con unidades faltantes o mermas"
       />
     </SimpleGrid>

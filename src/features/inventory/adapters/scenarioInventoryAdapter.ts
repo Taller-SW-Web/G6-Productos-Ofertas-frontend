@@ -20,19 +20,21 @@ import { getInventoryScenario } from "../dev/inventoryScenario";
 // sin contaminar el contrato de negocio. Se compone SOLO en el punto único de
 // selección y vive en el bundle de desarrollo; nunca en producción.
 
-const EMPTY_KPIS: InventoryKpiSummary = {
-  availableUnits: 0,
-  blockedUnits: 0,
-  totalPhysicalUnits: 0,
-  totalVendibleSkus: 0,
-  skusAvailable: 0,
-  skusLowStock: 0,
-  skusOutOfStock: 0,
-  reservedUnits: 0,
-  totalPendingTransfers: 0,
-  transfersInTransit: 0,
-  transfersPartiallyReceived: 0,
-  transfersWithDiscrepancy: 0,
+// En el escenario "empty" no hay datos: los indicadores deben mostrarse como
+// "sin datos" (null) y no como cero, que afirmaría un dato inexistente.
+const NO_DATA_KPIS: InventoryKpiSummary = {
+  availableUnits: null,
+  blockedUnits: null,
+  totalPhysicalUnits: null,
+  totalVendibleSkus: null,
+  skusAvailable: null,
+  skusLowStock: null,
+  skusOutOfStock: null,
+  reservedUnits: null,
+  totalPendingTransfers: null,
+  transfersInTransit: null,
+  transfersPartiallyReceived: null,
+  transfersWithDiscrepancy: null,
 };
 
 function pending<T>(): Promise<T> {
@@ -133,7 +135,7 @@ export class ScenarioInventoryAdapter implements InventoryRepository {
           ),
         );
       case "empty":
-        return { ...EMPTY_KPIS };
+        return { ...NO_DATA_KPIS };
       default:
         return this.delegate.getDashboardKpis(filters);
     }

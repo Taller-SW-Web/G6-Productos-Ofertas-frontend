@@ -81,19 +81,24 @@ export interface LocationDistribution {
   skusOutOfStockCount: number;
 }
 
+// Un KPI puede ser un valor numérico (incluido el cero real) o `null` cuando
+// no existe dato para la selección consultada. Mostrar "0" en ese caso
+// sustituiría información ausente por un valor, lo que la auditoría prohíbe.
+export type KpiMetricValue = number | null;
+
 export interface InventoryKpiSummary {
-  availableUnits: number;
-  blockedUnits: number;
-  totalPhysicalUnits: number;
-  totalVendibleSkus: number;
-  skusAvailable: number;
-  skusLowStock: number;
-  skusOutOfStock: number;
-  reservedUnits: number;
-  totalPendingTransfers: number;
-  transfersInTransit: number;
-  transfersPartiallyReceived: number;
-  transfersWithDiscrepancy: number;
+  availableUnits: KpiMetricValue;
+  blockedUnits: KpiMetricValue;
+  totalPhysicalUnits: KpiMetricValue;
+  totalVendibleSkus: KpiMetricValue;
+  skusAvailable: KpiMetricValue;
+  skusLowStock: KpiMetricValue;
+  skusOutOfStock: KpiMetricValue;
+  reservedUnits: KpiMetricValue;
+  totalPendingTransfers: KpiMetricValue;
+  transfersInTransit: KpiMetricValue;
+  transfersPartiallyReceived: KpiMetricValue;
+  transfersWithDiscrepancy: KpiMetricValue;
 }
 
 export interface InventoryAlert {
