@@ -1,0 +1,552 @@
+import type { InventoryRepository } from "../../src/features/inventory/services/inventoryRepository";
+import type {
+  DashboardFiltersQuery,
+  InventoryAlert,
+  InventoryBrandOption,
+  InventoryCategoryOption,
+  InventoryKpiSummary,
+  InventoryLocationOption,
+  LocationDistribution,
+  ReceiveTransferPayload,
+  StockFiltersQuery,
+  StockItem,
+  ThresholdConfig,
+  TransferFiltersQuery,
+  TransferItem,
+} from "../../src/features/inventory/services/inventoryTypes";
+import { notifyInventoryChanged } from "../../src/features/inventory/services/inventoryEvents";
+import { InventoryError } from "../../src/features/inventory/services/inventoryErrors";
+
+export interface AlternateInventoryAudit {
+  calls: { operation: string; args?: unknown }[];
+  failRead: boolean;
+  failReceive: boolean;
+  empty: boolean;
+}
+
+export const alternateInventoryStock: StockItem[] = [
+  {
+    sku: "ALT-RUN-41-BLU",
+    productName: "Zapatilla Alternate Trail Runner",
+    categoryName: "Calzado",
+    brandName: "Inka Athletics",
+    locationId: "ALT-LOC-01",
+    locationName: "Centro de Distribucion Arequipa",
+    onHand: 50,
+    reserved: 10,
+    blocked: 5,
+    available: 35,
+    threshold: 15,
+    status: "DISPONIBLE",
+    stockVersion: 1,
+    updatedAt: "2026-10-12T10:00:00Z",
+  },
+  {
+    sku: "ALT-POL-M-RED",
+    productName: "Polo Alternate Performance",
+    categoryName: "Ropa Deportiva",
+    brandName: "Inka Athletics",
+    locationId: "ALT-LOC-01",
+    locationName: "Centro de Distribucion Arequipa",
+    onHand: 12,
+    reserved: 2,
+    blocked: 0,
+    available: 10,
+    threshold: 10,
+    status: "STOCK_BAJO",
+    stockVersion: 1,
+    updatedAt: "2026-10-12T10:00:00Z",
+  },
+  {
+    sku: "ALT-GOR-U-BLK",
+    productName: "Gorra Alternate DryFit",
+    categoryName: "Accesorios",
+    brandName: "Inka Athletics",
+    locationId: "ALT-LOC-02",
+    locationName: "Tienda Cusco Imperial",
+    onHand: 5,
+    reserved: 5,
+    blocked: 0,
+    available: 0,
+    threshold: 5,
+    status: "AGOTADO",
+    stockVersion: 1,
+    updatedAt: "2026-10-12T10:00:00Z",
+  },
+];
+
+export const alternateInventoryTransfers: TransferItem[] = [
+  {
+    id: "alt-tr-901",
+    transferCode: "TR-ALT-901",
+    sku: "ALT-RUN-41-BLU",
+    productName: "Zapatilla Alternate Trail Runner",
+    sourceLocationId: "ALT-LOC-01",
+    sourceLocationName: "Centro de Distribucion Arequipa",
+    targetLocationId: "ALT-LOC-02",
+    targetLocationName: "Tienda Cusco Imperial",
+    quantityShipped: 20,
+    quantityReceived: 0,
+    quantityPending: 20,
+    status: "EN_TRANSITO",
+    shippedAt: "2026-10-11T08:00:00Z",
+  },
+];
+
+export class AlternateInventoryRepository implements InventoryRepository {
+  readonly audit: AlternateInventoryAudit = {
+    calls: [],
+    failRead: false,
+    failReceive: false,
+    empty: false,
+  };
+
+  private stock: StockItem[] = JSON.parse(JSON.stringify(alternateInventoryStock));
+  private transfers: TransferItem[] = JSON.parse(JSON.stringify(alternateInventoryTransfers));
+  private thresholds: ThresholdConfig = {
+    globalThreshold: 10,
+    skuOverrides: { "ALT-RUN-41-BLU": 15 },
+  };
+  private alerts: InventoryAlert[] = [];
+  private processedOperations = new Map<string, TransferItem>();
+  private processedOperationKeys = new Map<string, string>();
+
+  private record(operation: string, args?: unknown): void {
+    this.audit.calls.push({ operation, args });
+  }
+
+  private isUuid(value: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+  }
+
+  private computeOperationIntent(payload: ReceiveTransferPayload): string {
+    // Nota: la nota NO es parte de la intencin, ya que puede cambiar en reintentos.
+    // La intencin se define por: transferId, quantityReceived, disposition, finalReceipt.
+    return `${payload.transferId}|${payload.quantityReceived}|${payload.disposition}|${payload.finalReceipt}`;
+  }
+
+  private isTerminalTransferStatus(status: TransferItem["status"]): boolean {
+    return status === "COMPLETADO" || status === "COMPLETADO_CON_DISCREPANCIA";
+  }
+
+  private getOrCreateDestinationStockItem(transfer: TransferItem): StockItem {
+    const existing = this.stock.find(
+      (s) => s.sku === transfer.sku && s.locationId === transfer.targetLocationId,
+    );
+    if (existing) return existing;
+
+    const reference = this.stock.find((s) => s.sku === transfer.sku);
+    const created: StockItem = {
+      sku: transfer.sku,
+      productName: transfer.productName,
+      categoryName: reference?.categoryName ?? "Sin categora",
+      brandName: reference?.brandName ?? "Sin marca",
+      locationId: transfer.targetLocationId,
+      locationName: transfer.targetLocationName,
+      onHand: 0,
+      reserved: 0,
+      blocked: 0,
+      available: 0,
+      threshold:
+        this.thresholds.skuOverrides[transfer.sku] ?? this.thresholds.globalThreshold,
+      status: "AGOTADO",
+      stockVersion: 0,
+      updatedAt: transfer.shippedAt,
+    };
+    this.stock.push(created);
+    return created;
+  }
+
+  private recalculateStockStatus(item: StockItem): void {
+    const effectiveThreshold =
+      this.thresholds.skuOverrides[item.sku] ?? this.thresholds.globalThreshold;
+    item.threshold = effectiveThreshold;
+    item.available = Math.max(item.onHand - item.reserved - item.blocked, 0);
+
+    if (item.available === 0) {
+      item.status = "AGOTADO";
+    } else if (item.available <= effectiveThreshold) {
+      item.status = "STOCK_BAJO";
+    } else {
+      item.status = "DISPONIBLE";
+    }
+  }
+
+  async getStockItems(filters?: StockFiltersQuery): Promise<StockItem[]> {
+    this.record("getStockItems", filters);
+    if (this.audit.failRead) {
+      throw new Error("Error controlado en AlternateInventoryRepository.getStockItems");
+    }
+    if (this.audit.empty) {
+      return [];
+    }
+    let res = [...this.stock];
+    if (filters?.search) {
+      const q = filters.search.toLowerCase().trim();
+      res = res.filter(
+        (i) => i.sku.toLowerCase().includes(q) || i.productName.toLowerCase().includes(q),
+      );
+    }
+    if (filters?.locationId && filters.locationId !== "all") {
+      res = res.filter((i) => i.locationId === filters.locationId);
+    }
+    if (filters?.status && filters.status !== "all") {
+      res = res.filter((i) => i.status === filters.status);
+    }
+    return res;
+  }
+
+  async getStockDetail(sku: string, locationId: string): Promise<StockItem | null> {
+    this.record("getStockDetail", { sku, locationId });
+    if (this.audit.failRead) {
+      throw new Error("Error controlado en AlternateInventoryRepository.getStockDetail");
+    }
+    return this.stock.find((i) => i.sku === sku && i.locationId === locationId) ?? null;
+  }
+
+  async getThresholds(): Promise<ThresholdConfig> {
+    this.record("getThresholds");
+    if (this.audit.failRead) {
+      throw new Error("Error controlado en AlternateInventoryRepository.getThresholds");
+    }
+    return JSON.parse(JSON.stringify(this.thresholds));
+  }
+
+  async updateGlobalThreshold(threshold: number): Promise<ThresholdConfig> {
+    this.record("updateGlobalThreshold", threshold);
+    this.thresholds.globalThreshold = threshold;
+    notifyInventoryChanged();
+    return JSON.parse(JSON.stringify(this.thresholds));
+  }
+
+  async updateSkuThreshold(sku: string, threshold: number): Promise<ThresholdConfig> {
+    this.record("updateSkuThreshold", { sku, threshold });
+    this.thresholds.skuOverrides[sku] = threshold;
+    notifyInventoryChanged();
+    return JSON.parse(JSON.stringify(this.thresholds));
+  }
+
+  async getTransfers(filters?: TransferFiltersQuery): Promise<TransferItem[]> {
+    this.record("getTransfers", filters);
+    if (this.audit.failRead) {
+      throw new Error("Error controlado en AlternateInventoryRepository.getTransfers");
+    }
+    if (this.audit.empty) {
+      return [];
+    }
+    let res = [...this.transfers];
+    if (filters?.targetLocationId && filters.targetLocationId !== "all") {
+      res = res.filter((t) => t.targetLocationId === filters.targetLocationId);
+    }
+    if (filters?.status && filters.status !== "all") {
+      res = res.filter((t) => t.status === filters.status);
+    }
+    return res;
+  }
+
+  async receiveTransfer(payload: ReceiveTransferPayload): Promise<TransferItem> {
+    this.record("receiveTransfer", payload);
+    if (this.audit.failReceive) {
+      throw new InventoryError("VALIDACION", "Error controlado en AlternateInventoryRepository.receiveTransfer");
+    }
+
+    // 1. Validación de formato de operation_id (UUID según OpenAPI)
+    if (!payload.operationId || !this.isUuid(payload.operationId)) {
+      throw new InventoryError(
+        "VALIDACION",
+        "El identificador de operación (operation_id) debe ser un UUID válido.",
+      );
+    }
+
+    // 2. Validación de longitud de nota (máximo 500 caracteres según OpenAPI)
+    if (payload.note && payload.note.length > 500) {
+      throw new InventoryError(
+        "VALIDACION",
+        "La nota de recepción (note) no puede superar los 500 caracteres.",
+      );
+    }
+
+    // 3. Validación de disposición permitida
+    const validDispositions: ReceiveTransferPayload["disposition"][] = [
+      "REINGRESAR_DISPONIBLE",
+      "REINGRESAR_BLOQUEADO",
+      "CONFIRMAR_MERMA",
+    ];
+    if (!validDispositions.includes(payload.disposition)) {
+      throw new InventoryError(
+        "DISPOSICION_RECEPCION_INVALIDA",
+        "La disposición de recepción no es válida para la operación.",
+      );
+    }
+
+    // 4. Verificación de Idempotencia
+    const intent = this.computeOperationIntent(payload);
+    const previousIntent = this.processedOperationKeys.get(payload.operationId);
+    const alreadyProcessed = this.processedOperations.get(payload.operationId);
+
+    // Si ya fue procesada con la misma identidad e intención: retornar sin modificar stock
+    if (alreadyProcessed && previousIntent && previousIntent === intent) {
+      return { ...alreadyProcessed };
+    }
+
+    // Si la misma identidad se reutiliza con intención diferente: conflicto de idempotencia
+    if (alreadyProcessed && previousIntent && previousIntent !== intent) {
+      throw new InventoryError(
+        "IDEMPOTENCY_CONFLICT",
+        "Idempotencia conflictiva: la misma operation_id fue reutilizada para otra intención.",
+      );
+    }
+
+    // 5. Validación de existencia y estado del traslado
+    const transfer = this.transfers.find((t) => t.id === payload.transferId);
+    if (!transfer) {
+      throw new InventoryError(
+        "TRASLADO_NO_ENCONTRADO",
+        `Traslado con ID ${payload.transferId} no encontrado.`,
+      );
+    }
+
+    if (this.isTerminalTransferStatus(transfer.status)) {
+      throw new InventoryError(
+        "TRASLADO_NO_RECIBIBLE",
+        "El traslado ya está cerrado o no admite nuevas recepciones.",
+      );
+    }
+
+    // 6. Validacin de cantidades
+    if (
+      !Number.isInteger(payload.quantityReceived) ||
+      payload.quantityReceived <= 0
+    ) {
+      throw new InventoryError(
+        "CANTIDAD_INVALIDA",
+        "La cantidad recibida debe ser un nmero entero mayor que cero.",
+      );
+    }
+
+    if (payload.quantityReceived > transfer.quantityPending) {
+      throw new InventoryError(
+        "CANTIDAD_RECIBIDA_EXCEDE_TRASLADO",
+        `La cantidad recibida (${payload.quantityReceived}) supera la cantidad pendiente (${transfer.quantityPending}).`,
+      );
+    }
+
+    // 7. Aplicacin de la recepcin
+    transfer.quantityReceived += payload.quantityReceived;
+    transfer.quantityPending = Math.max(
+      transfer.quantityShipped - transfer.quantityReceived,
+      0,
+    );
+
+    if (transfer.quantityPending === 0) {
+      transfer.status = "COMPLETADO";
+    } else if (payload.finalReceipt) {
+      transfer.status = "COMPLETADO_CON_DISCREPANCIA";
+      this.alerts.unshift({
+        id: `alt-${Date.now()}`,
+        severity: "error",
+        title: `Discrepancia en recepcin de traslado ${transfer.transferCode}`,
+        message: `Traslado ${transfer.transferCode} cerrado con ${transfer.quantityPending} unidades faltantes no recibidas para SKU ${transfer.sku}.`,
+        actionLabel: "Ver traslados",
+        targetRoute: "/inventario/traslados",
+        transferId: transfer.id,
+      });
+    } else {
+      transfer.status = "RECIBIDO_PARCIAL";
+    }
+
+    if (payload.note) {
+      transfer.notes = payload.note;
+    }
+
+    // Solo las disposiciones de reingreso acreditan saldo fsico; la merma no.
+    if (payload.disposition !== "CONFIRMAR_MERMA") {
+      const stockItem = this.getOrCreateDestinationStockItem(transfer);
+      stockItem.onHand += payload.quantityReceived;
+      if (payload.disposition === "REINGRESAR_BLOQUEADO") {
+        stockItem.blocked += payload.quantityReceived;
+      }
+      stockItem.stockVersion += 1;
+      stockItem.updatedAt = payload.receivedAt;
+      this.recalculateStockStatus(stockItem);
+    }
+
+    const result: TransferItem = { ...transfer };
+    this.processedOperations.set(payload.operationId, result);
+    this.processedOperationKeys.set(payload.operationId, intent);
+    notifyInventoryChanged();
+    return result;
+  }
+
+  async getDashboardKpis(
+    filters?: DashboardFiltersQuery,
+  ): Promise<InventoryKpiSummary> {
+    this.record("getDashboardKpis", filters);
+    if (this.audit.failRead) {
+      throw new Error("Error controlado en AlternateInventoryRepository.getDashboardKpis");
+    }
+    if (this.audit.empty) {
+      return {
+        availableUnits: 0,
+        blockedUnits: 0,
+        totalPhysicalUnits: 0,
+        totalVendibleSkus: 0,
+        skusAvailable: 0,
+        skusLowStock: 0,
+        skusOutOfStock: 0,
+        reservedUnits: 0,
+        totalPendingTransfers: 0,
+        transfersInTransit: 0,
+        transfersPartiallyReceived: 0,
+        transfersWithDiscrepancy: 0,
+      };
+    }
+    const items = await this.getStockItems(filters);
+    const availableUnits = items.reduce((a, b) => a + b.available, 0);
+    const blockedUnits = items.reduce((a, b) => a + b.blocked, 0);
+    const totalPhysicalUnits = items.reduce((a, b) => a + b.onHand, 0);
+    const reservedUnits = items.reduce((a, b) => a + b.reserved, 0);
+
+    return {
+      availableUnits,
+      blockedUnits,
+      totalPhysicalUnits,
+      totalVendibleSkus: items.length,
+      skusAvailable: items.filter((i) => i.status === "DISPONIBLE").length,
+      skusLowStock: items.filter((i) => i.status === "STOCK_BAJO").length,
+      skusOutOfStock: items.filter((i) => i.status === "AGOTADO").length,
+      reservedUnits,
+      totalPendingTransfers: this.transfers.filter((t) => t.status === "EN_TRANSITO").length,
+      transfersInTransit: this.transfers.filter((t) => t.status === "EN_TRANSITO").length,
+      transfersPartiallyReceived: 0,
+      transfersWithDiscrepancy: 0,
+    };
+  }
+
+  async getDashboardAlerts(
+    filters?: DashboardFiltersQuery,
+  ): Promise<InventoryAlert[]> {
+    this.record("getDashboardAlerts", filters);
+    if (this.audit.failRead) {
+      throw new Error("Error controlado en AlternateInventoryRepository.getDashboardAlerts");
+    }
+    if (this.audit.empty) {
+      return [];
+    }
+    const items = await this.getStockItems(filters);
+    const alerts: InventoryAlert[] = [];
+    for (const item of items) {
+      if (item.status === "AGOTADO") {
+        alerts.push({
+          id: `alt-out-${item.sku}`,
+          severity: "error",
+          title: `Quiebre de stock: ${item.sku}`,
+          message: `${item.productName} sin unidades disponibles.`,
+          actionLabel: "Ver detalle",
+          targetRoute: `/inventario?search=${item.sku}`,
+          sku: item.sku,
+        });
+      } else if (item.status === "STOCK_BAJO") {
+        alerts.push({
+          id: `alt-low-${item.sku}`,
+          severity: "warning",
+          title: `Stock bajo: ${item.sku}`,
+          message: `${item.productName} tiene existencias por debajo del umbral.`,
+          actionLabel: "Ver detalle",
+          targetRoute: `/inventario?search=${item.sku}`,
+          sku: item.sku,
+        });
+      }
+    }
+    return alerts;
+  }
+
+  async getLocationDistribution(
+    filters?: DashboardFiltersQuery,
+  ): Promise<LocationDistribution[]> {
+    this.record("getLocationDistribution", filters);
+    if (this.audit.failRead) {
+      throw new Error("Error controlado en AlternateInventoryRepository.getLocationDistribution");
+    }
+    if (this.audit.empty) {
+      return [];
+    }
+    const items = await this.getStockItems(filters);
+    const map = new Map<string, LocationDistribution>();
+    for (const item of items) {
+      let d = map.get(item.locationId);
+      if (!d) {
+        d = {
+          locationId: item.locationId,
+          locationName: item.locationName,
+          onHandTotal: 0,
+          reservedTotal: 0,
+          blockedTotal: 0,
+          availableTotal: 0,
+          skusAvailableCount: 0,
+          skusLowStockCount: 0,
+          skusOutOfStockCount: 0,
+        };
+        map.set(item.locationId, d);
+      }
+      d.onHandTotal += item.onHand;
+      d.reservedTotal += item.reserved;
+      d.blockedTotal += item.blocked;
+      d.availableTotal += item.available;
+      if (item.status === "DISPONIBLE") d.skusAvailableCount++;
+      else if (item.status === "STOCK_BAJO") d.skusLowStockCount++;
+      else if (item.status === "AGOTADO") d.skusOutOfStockCount++;
+    }
+    return Array.from(map.values());
+  }
+
+  async getCategories(): Promise<InventoryCategoryOption[]> {
+    const categories = new Map<string, InventoryCategoryOption>();
+    for (const item of this.stock) {
+      if (!categories.has(item.categoryName)) {
+        const id = item.categoryName
+          .toUpperCase()
+          .replace(/[\s-]+/g, "_")
+          .trim();
+        categories.set(item.categoryName, {
+          id,
+          name: item.categoryName,
+          active: true,
+        });
+      }
+    }
+    return Array.from(categories.values());
+  }
+
+  async getBrands(): Promise<InventoryBrandOption[]> {
+    const brands = new Map<string, InventoryBrandOption>();
+    for (const item of this.stock) {
+      if (!brands.has(item.brandName)) {
+        const id = item.brandName
+          .toUpperCase()
+          .replace(/[\s-]+/g, "_")
+          .trim();
+        brands.set(item.brandName, {
+          id,
+          name: item.brandName,
+          active: true,
+        });
+      }
+    }
+    return Array.from(brands.values());
+  }
+
+  async getLocations(): Promise<InventoryLocationOption[]> {
+    const locations = new Map<string, InventoryLocationOption>();
+    for (const item of this.stock) {
+      if (!locations.has(item.locationName)) {
+        locations.set(item.locationName, {
+          id: item.locationId,
+          name: item.locationName,
+          active: true,
+        });
+      }
+    }
+    return Array.from(locations.values());
+  }
+}
