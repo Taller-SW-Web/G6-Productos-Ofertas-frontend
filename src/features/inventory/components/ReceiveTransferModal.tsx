@@ -55,6 +55,11 @@ function TransferFormInner({
   onConfirm,
 }: TransferFormInnerProps) {
   const operationIdRef = useRef<string>(createOperationId());
+  // Rastrea si ya se intentó una operación y cuál fue su intención. La intención
+  // replica exactamente la del contrato/repositorio (transferId, cantidad,
+  // disposición y cierre final); la nota NO forma parte de la intención.
+  const attemptedRef = useRef(false);
+  const lastIntentRef = useRef<string | null>(null);
   const [quantity, setQuantity] = useState<number | string>(
     transfer.quantityPending,
   );
@@ -91,6 +96,17 @@ function TransferFormInner({
     }
 
     setErrorValidation(null);
+
+    // Conservar el operationId solo para reintentar EXACTAMENTE la misma
+    // operación. Si tras un intento cambia la intención (cantidad, disposición
+    // o cierre final), se genera una nueva identidad de idempotencia.
+    const intent = `${numQty}|${disposition}|${finalReceipt}`;
+    if (attemptedRef.current && intent !== lastIntentRef.current) {
+      operationIdRef.current = createOperationId();
+    }
+    lastIntentRef.current = intent;
+    attemptedRef.current = true;
+
     try {
       await onConfirm({
         transferId: transfer.id,
@@ -103,7 +119,8 @@ function TransferFormInner({
       });
       onClose();
     } catch {
-      // El error se maneja en el hook/parent; operationId se conserva para reintentar
+      // El error se maneja en el hook/parent; operationId se conserva para
+      // reintentar la MISMA operación.
     }
   };
 

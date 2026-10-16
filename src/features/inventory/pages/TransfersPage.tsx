@@ -48,6 +48,8 @@ export function TransfersPage() {
     submitError,
     successMessage,
     receive,
+    refetch,
+    clearSubmitError,
     clearFeedback,
   } = useTransfers(filters);
 
@@ -68,6 +70,18 @@ export function TransfersPage() {
 
   const handleConfirmReception = async (payload: ReceiveTransferPayload) => {
     await receive(payload);
+  };
+
+  // Al abrir o cerrar el modal se descarta cualquier error de una operación
+  // previa para no mostrar el fallo de un traslado distinto.
+  const handleOpenReceptionModal = (row: TransferItem) => {
+    clearSubmitError();
+    setActiveTransfer(row);
+  };
+
+  const handleCloseReceptionModal = () => {
+    clearSubmitError();
+    setActiveTransfer(null);
   };
 
   const locationOptions = [
@@ -192,7 +206,7 @@ export function TransfersPage() {
             variant={receivable ? "filled" : "light"}
             disabled={!receivable}
             leftSection={<IconChecklist size={14} />}
-            onClick={() => setActiveTransfer(row)}
+            onClick={() => handleOpenReceptionModal(row)}
           >
             {receivable ? "Recepcionar" : "Cerrado"}
           </Button>
@@ -211,7 +225,7 @@ export function TransfersPage() {
             <Button
               size="xs"
               variant="outline"
-              onClick={() => setParams(new URLSearchParams())}
+              onClick={refetch}
             >
               Reintentar
             </Button>
@@ -320,7 +334,7 @@ export function TransfersPage() {
         opened={Boolean(activeTransfer)}
         submitting={submitting}
         submitError={submitError}
-        onClose={() => setActiveTransfer(null)}
+        onClose={handleCloseReceptionModal}
         onConfirm={handleConfirmReception}
       />
     </>

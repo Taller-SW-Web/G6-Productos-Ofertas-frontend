@@ -11,7 +11,14 @@ import type {
 export function useTransfers(filters: TransferFiltersQuery) {
   const revision = useInventoryChangeSignal();
   const { targetLocationId, status } = filters;
-  const requestKey = JSON.stringify([targetLocationId, status, revision]);
+  // Token de recarga explícito para reintentos reales sin alterar los filtros.
+  const [reloadToken, setReloadToken] = useState(0);
+  const requestKey = JSON.stringify([
+    targetLocationId,
+    status,
+    revision,
+    reloadToken,
+  ]);
 
   const [response, setResponse] = useState<{
     requestKey: string;
@@ -95,6 +102,8 @@ export function useTransfers(filters: TransferFiltersQuery) {
     submitError,
     successMessage,
     receive,
+    refetch: () => setReloadToken((token) => token + 1),
+    clearSubmitError: () => setSubmitError(null),
     clearFeedback: () => {
       setSubmitError(null);
       setSuccessMessage(null);
