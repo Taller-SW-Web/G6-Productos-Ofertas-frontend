@@ -1,4 +1,4 @@
-import { effectivePublicMinor } from "./comboRules";
+import { currentGlobalPricesForSku, effectivePublicMinor } from "./comboRules";
 import { comboFixtures, productDetails, productFixtures, priceFixtures } from "../mocks/comboFixtures";
 import { ComboError, type ComboPayload, type ProductDetail, type ProductSummary, type SkuPrice } from "../types/combos";
 
@@ -6,13 +6,6 @@ const DEMO_CURRENCY = "PEN";
 
 function isValidDate(value: string): boolean {
   return value.length > 0 && Number.isFinite(Date.parse(value));
-}
-
-function isEffectivePrice(price: SkuPrice, now: number): boolean {
-  const start = Date.parse(price.validFrom);
-  const end = price.validUntil === null ? Number.POSITIVE_INFINITY : Date.parse(price.validUntil);
-  return isValidDate(price.validFrom) && start <= now &&
-    (price.validUntil === null || (isValidDate(price.validUntil) && end > now));
 }
 
 export function validateMockComboPayload(
@@ -61,17 +54,18 @@ export function validateMockComboPayload(
     throw new ComboError("price_invalid", "El precio del combo debe ser mayor que cero.");
   }
 
-  const selectedPrices = payload.components.map(({ sku }) => prices.filter((price) => price.sku === sku));
+  const now = Date.now();
+  const selectedPrices = payload.components.map(({ sku }) => currentGlobalPricesForSku(sku, prices, now));
   if (selectedPrices.some((matches) => matches.length !== 1)) {
-    throw new ComboError("pricing_unavailable", "No se pudo confirmar una referencia vigente de Pricing para cada SKU.");
+    throw new ComboError("pricing_unavailable", "No se pudo confirmar una referencia global vigente única de Pricing para cada SKU.");
   }
 
   const references = selectedPrices.map((matches) => matches[0]!);
   const referenceCurrency = references[0]?.currency;
   if (!referenceCurrency || referenceCurrency !== DEMO_CURRENCY || references.some((price) =>
-    price.currency !== referenceCurrency || price.channelId !== null ||
+    price.currency !== referenceCurrency ||
     !Number.isSafeInteger(price.priceVersion) || price.priceVersion < 0 ||
-    !price.validityId.trim() || !isEffectivePrice(price, Date.now()) ||
+    !price.validityId.trim() || !isValidDate(price.validFrom) ||
     price.regularMinor === null || !Number.isSafeInteger(price.regularMinor) || price.regularMinor <= 0 ||
     (price.offerMinor !== null && (!Number.isSafeInteger(price.offerMinor) || price.offerMinor <= 0)),
   )) {

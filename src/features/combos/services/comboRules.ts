@@ -44,6 +44,17 @@ export function effectivePublicMinor(price: SkuPrice): number | null {
   return price.offerMinor ?? price.regularMinor;
 }
 
+export function isCurrentGlobalPrice(price: SkuPrice, now = Date.now()): boolean {
+  const start = Date.parse(price.validFrom);
+  const end = price.validUntil === null ? Number.POSITIVE_INFINITY : Date.parse(price.validUntil);
+  return price.channelId === null && Number.isFinite(start) && start <= now &&
+    (price.validUntil === null || (Number.isFinite(end) && end > now));
+}
+
+export function currentGlobalPricesForSku(sku: string, prices: SkuPrice[], now = Date.now()): SkuPrice[] {
+  return prices.filter((price) => price.sku === sku && isCurrentGlobalPrice(price, now));
+}
+
 export function validateComposition(draft: Pick<ComboDraft, "components">) {
   const errors: string[] = [];
   if (draft.components.length < 2) errors.push("Agrega al menos dos SKU vendibles.");
@@ -64,15 +75,24 @@ export function compareComboPrice(
   prices: SkuPrice[],
 ): ComparisonResult {
   if (components.length === 0) return { status: "unavailable", reason: "Agrega componentes para consultar sus precios." };
-  const bySku = new Map(prices.map((price) => [price.sku, price]));
   let regularMinor = 0;
   let publicMinor = 0;
+  let currency: string | null = null;
   for (const component of components) {
-    const price = bySku.get(component.sku);
+    const matches = currentGlobalPricesForSku(component.sku, prices);
+    if (matches.length !== 1) {
+      return { status: "unavailable", reason: "No se pudo confirmar una referencia global vigente única para cada componente." };
+    }
+    const price = matches[0]!;
     const publicMinorForSku = price ? effectivePublicMinor(price) : null;
-    if (!price || price.regularMinor === null || publicMinorForSku === null) {
+    if (!price || price.regularMinor === null || publicMinorForSku === null ||
+      !Number.isSafeInteger(price.priceVersion) || price.priceVersion < 0 || !price.validityId.trim() ||
+      !Number.isSafeInteger(price.regularMinor) || price.regularMinor <= 0 ||
+      (price.offerMinor !== null && (!Number.isSafeInteger(price.offerMinor) || price.offerMinor <= 0)) ||
+      price.currency !== "PEN" || (currency !== null && price.currency !== currency)) {
       return { status: "unavailable", reason: "No se pudo confirmar el precio vigente de todos los componentes." };
     }
+    currency = price.currency;
     regularMinor += price.regularMinor * component.quantity;
     publicMinor += publicMinorForSku * component.quantity;
   }
@@ -98,10 +118,13 @@ export function compareComboPrice(
 }
 
 export function toComparisonComponents(draft: ComponentDraft[], prices: SkuPrice[]): ComboComponent[] {
-  const priceBySku = new Map(prices.map((item) => [item.sku, item]));
-  return draft.map((item) => ({
-    ...item,
-    regularUnitMinor: priceBySku.get(item.sku)?.regularMinor ?? null,
-    publicUnitMinor: priceBySku.get(item.sku) ? effectivePublicMinor(priceBySku.get(item.sku)!) : null,
-  }));
+  return draft.map((item) => {
+    const matches = currentGlobalPricesForSku(item.sku, prices);
+    const price = matches.length === 1 ? matches[0] : undefined;
+    return {
+      ...item,
+      regularUnitMinor: price?.regularMinor ?? null,
+      publicUnitMinor: price ? effectivePublicMinor(price) : null,
+    };
+  });
 }

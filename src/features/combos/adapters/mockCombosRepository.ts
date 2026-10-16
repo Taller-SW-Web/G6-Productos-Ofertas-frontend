@@ -1,5 +1,5 @@
 import { comboFixtures, priceFixtures, productDetails, productFixtures } from "../mocks/comboFixtures";
-import { effectivePublicMinor } from "../services/comboRules";
+import { currentGlobalPricesForSku, effectivePublicMinor } from "../services/comboRules";
 import { validateMockComboPayload } from "../services/validateMockComboPayload";
 import {
   ComboError,
@@ -31,6 +31,7 @@ export interface MockCombosOptions {
 export class MockCombosRepository implements CombosRepository, CombosCatalogPort, CombosPricingPort {
   private combos: Combo[] = clone(comboFixtures);
   private listErrorDelivered = false;
+  private readonly versionConflictScenariosTriggered = new Set<string>();
   private readonly catalog: ProductSummary[];
   private readonly details: ProductDetail[];
   private readonly prices: SkuPrice[];
@@ -77,21 +78,30 @@ export class MockCombosRepository implements CombosRepository, CombosCatalogPort
   }
 
   async update(id: string, payload: ComboPayload, scenario?: string): Promise<Combo> {
-    const current = this.combos.find((item) => item.id === id);
+    let current = this.combos.find((item) => item.id === id);
     if (!current) throw new ComboError("not_found", "No se encontró el combo.");
-    if (scenario === "version-conflict" || payload.version !== current.version) {
-      const latest = { ...clone(current), name: `${current.name} (actualizado en servidor)`, version: current.version + 1 };
-      if (scenario === "version-conflict") {
-        this.combos = this.combos.map((item) => item.id === id ? latest : item);
-      }
-      throw new ComboError("version_conflict", "Este combo cambió desde que comenzaste a editarlo.", clone(latest));
+    if (scenario === "version-conflict" && !this.versionConflictScenariosTriggered.has(id)) {
+      const concurrent = { ...clone(current), name: `${current.name} (actualizado en servidor)`, version: current.version + 1 };
+      this.combos = this.combos.map((item) => item.id === id ? concurrent : item);
+      this.versionConflictScenariosTriggered.add(id);
+      current = concurrent;
+      throw new ComboError("version_conflict", "Este combo cambió desde que comenzaste a editarlo.", clone(current));
+    }
+    if (payload.version !== current.version) {
+      throw new ComboError("version_conflict", "Este combo cambió desde que comenzaste a editarlo.", clone(current));
     }
     if (scenario === "server-price-rejected") {
       throw new ComboError("price_invalid", "El precio del combo no cumple la regla económica.");
     }
     validateMockComboPayload(payload, this.catalog, this.details, this.prices, this.combos.map((combo) => combo.id));
     const updated = this.buildCombo(payload, current.id, current.version + 1, current.status);
-    updated.availability = clone(current.availability);
+    const sameComposition = current.components.length === payload.components.length &&
+      current.components.every((component) => payload.components.some((proposed) =>
+        proposed.sku === component.sku && proposed.quantity === component.quantity,
+      ));
+    updated.availability = sameComposition
+      ? clone(current.availability)
+      : { verifiable: false, quantity: null, freshness: "INCOMPLETA", calculatedAt: null };
     this.combos = this.combos.map((item) => item.id === id ? updated : item);
     return clone(updated);
   }
@@ -125,7 +135,8 @@ export class MockCombosRepository implements CombosRepository, CombosCatalogPort
 
   async readCurrent(skus: string[], signal?: AbortSignal): Promise<SkuPrice[]> {
     throwIfAborted(signal);
-    return clone(this.prices.filter((item) => item.channelId === null && skus.includes(item.sku)));
+    const now = Date.now();
+    return clone(skus.flatMap((sku) => currentGlobalPricesForSku(sku, this.prices, now)));
   }
 
   private buildCombo(payload: ComboPayload, id: string, version: number, status: Combo["status"]): Combo {
@@ -135,7 +146,8 @@ export class MockCombosRepository implements CombosRepository, CombosCatalogPort
           ? this.details.find((detail) => detail.productId === candidate.productId)?.variants.some((variant) => variant.sku === item.sku)
           : candidate.baseSku === item.sku,
       );
-      const price = this.prices.find((candidate) => candidate.sku === item.sku && candidate.channelId === null);
+      const currentPrices = currentGlobalPricesForSku(item.sku, this.prices);
+      const price = currentPrices.length === 1 ? currentPrices[0] : undefined;
       return {
         sku: item.sku,
         productName: product?.name ?? item.sku,
