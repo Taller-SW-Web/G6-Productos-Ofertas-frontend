@@ -22,7 +22,26 @@ export interface AlternateInventoryAudit {
   failRead: boolean;
   failReceive: boolean;
   empty: boolean;
+  failCategories: boolean;
+  failBrands: boolean;
 }
+
+// Indicadores "sin datos": se usan cuando no hay datos para la selección, para
+// no reportar un cero inexistente (hallazgo TAC-08).
+const NO_DATA_KPIS: InventoryKpiSummary = {
+  availableUnits: null,
+  blockedUnits: null,
+  totalPhysicalUnits: null,
+  totalVendibleSkus: null,
+  skusAvailable: null,
+  skusLowStock: null,
+  skusOutOfStock: null,
+  reservedUnits: null,
+  totalPendingTransfers: null,
+  transfersInTransit: null,
+  transfersPartiallyReceived: null,
+  transfersWithDiscrepancy: null,
+};
 
 export const alternateInventoryStock: StockItem[] = [
   {
@@ -99,6 +118,8 @@ export class AlternateInventoryRepository implements InventoryRepository {
     failRead: false,
     failReceive: false,
     empty: false,
+    failCategories: false,
+    failBrands: false,
   };
 
   private stock: StockItem[] = JSON.parse(JSON.stringify(alternateInventoryStock));
@@ -386,40 +407,67 @@ export class AlternateInventoryRepository implements InventoryRepository {
       throw new Error("Error controlado en AlternateInventoryRepository.getDashboardKpis");
     }
     if (this.audit.empty) {
-      return {
-        availableUnits: 0,
-        blockedUnits: 0,
-        totalPhysicalUnits: 0,
-        totalVendibleSkus: 0,
-        skusAvailable: 0,
-        skusLowStock: 0,
-        skusOutOfStock: 0,
-        reservedUnits: 0,
-        totalPendingTransfers: 0,
-        transfersInTransit: 0,
-        transfersPartiallyReceived: 0,
-        transfersWithDiscrepancy: 0,
-      };
+      return { ...NO_DATA_KPIS };
     }
     const items = await this.getStockItems(filters);
+
+    // Sin datos para la selección consultada: "sin datos" (null), no cero.
+    if (items.length === 0) {
+      return { ...NO_DATA_KPIS };
+    }
+
     const availableUnits = items.reduce((a, b) => a + b.available, 0);
     const blockedUnits = items.reduce((a, b) => a + b.blocked, 0);
     const totalPhysicalUnits = items.reduce((a, b) => a + b.onHand, 0);
     const reservedUnits = items.reduce((a, b) => a + b.reserved, 0);
 
+    // KPI por SKU sin ocultar el stock bajo de una ubicación por el saldo de
+    // otra (hallazgo TAC-06).
+    const bySku = new Map<string, { totalAvailable: number; anyLow: boolean }>();
+    for (const item of items) {
+      const aggregate = bySku.get(item.sku) ?? {
+        totalAvailable: 0,
+        anyLow: false,
+      };
+      aggregate.totalAvailable += item.available;
+      if (item.status === "STOCK_BAJO") aggregate.anyLow = true;
+      bySku.set(item.sku, aggregate);
+    }
+
+    let skusAvailable = 0;
+    let skusLowStock = 0;
+    let skusOutOfStock = 0;
+    for (const aggregate of bySku.values()) {
+      if (aggregate.totalAvailable === 0) skusOutOfStock += 1;
+      else if (aggregate.anyLow) skusLowStock += 1;
+      else skusAvailable += 1;
+    }
+
+    const allowedSkus = new Set(bySku.keys());
+    const relatedTransfers = this.transfers.filter((t) => allowedSkus.has(t.sku));
+    const inTransit = relatedTransfers.filter(
+      (t) => t.status === "EN_TRANSITO",
+    ).length;
+    const partiallyReceived = relatedTransfers.filter(
+      (t) => t.status === "RECIBIDO_PARCIAL",
+    ).length;
+    const discrepancies = relatedTransfers.filter(
+      (t) => t.status === "COMPLETADO_CON_DISCREPANCIA",
+    ).length;
+
     return {
       availableUnits,
       blockedUnits,
       totalPhysicalUnits,
-      totalVendibleSkus: items.length,
-      skusAvailable: items.filter((i) => i.status === "DISPONIBLE").length,
-      skusLowStock: items.filter((i) => i.status === "STOCK_BAJO").length,
-      skusOutOfStock: items.filter((i) => i.status === "AGOTADO").length,
+      totalVendibleSkus: bySku.size,
+      skusAvailable,
+      skusLowStock,
+      skusOutOfStock,
       reservedUnits,
-      totalPendingTransfers: this.transfers.filter((t) => t.status === "EN_TRANSITO").length,
-      transfersInTransit: this.transfers.filter((t) => t.status === "EN_TRANSITO").length,
-      transfersPartiallyReceived: 0,
-      transfersWithDiscrepancy: 0,
+      totalPendingTransfers: inTransit + partiallyReceived,
+      transfersInTransit: inTransit,
+      transfersPartiallyReceived: partiallyReceived,
+      transfersWithDiscrepancy: discrepancies,
     };
   }
 
@@ -460,6 +508,38 @@ export class AlternateInventoryRepository implements InventoryRepository {
         });
       }
     }
+
+    // Alertas de discrepancia derivadas del traslado (destino), sin depender
+    // del saldo filtrado del destino (hallazgo TAC-07).
+    const search = filters?.search?.toLowerCase().trim();
+    for (const transfer of this.transfers) {
+      if (transfer.status !== "COMPLETADO_CON_DISCREPANCIA") continue;
+      if (
+        filters?.locationId &&
+        filters.locationId !== "all" &&
+        transfer.targetLocationId !== filters.locationId
+      ) {
+        continue;
+      }
+      if (
+        search &&
+        !transfer.sku.toLowerCase().includes(search) &&
+        !transfer.productName.toLowerCase().includes(search)
+      ) {
+        continue;
+      }
+      if (alerts.some((a) => a.transferId === transfer.id)) continue;
+      alerts.push({
+        id: `alt-disc-${transfer.id}`,
+        severity: "error",
+        title: `Discrepancia en recepción de traslado ${transfer.transferCode}`,
+        message: `Traslado ${transfer.transferCode} cerrado con ${transfer.quantityPending} unidades faltantes no recibidas para SKU ${transfer.sku}.`,
+        actionLabel: "Ver traslados",
+        targetRoute: "/inventario/traslados",
+        transferId: transfer.id,
+      });
+    }
+
     return alerts;
   }
 
@@ -503,6 +583,12 @@ export class AlternateInventoryRepository implements InventoryRepository {
   }
 
   async getCategories(): Promise<InventoryCategoryOption[]> {
+    this.record("getCategories");
+    if (this.audit.failCategories) {
+      throw new Error(
+        "Error controlado en AlternateInventoryRepository.getCategories",
+      );
+    }
     const categories = new Map<string, InventoryCategoryOption>();
     for (const item of this.stock) {
       if (!categories.has(item.categoryName)) {
@@ -521,6 +607,12 @@ export class AlternateInventoryRepository implements InventoryRepository {
   }
 
   async getBrands(): Promise<InventoryBrandOption[]> {
+    this.record("getBrands");
+    if (this.audit.failBrands) {
+      throw new Error(
+        "Error controlado en AlternateInventoryRepository.getBrands",
+      );
+    }
     const brands = new Map<string, InventoryBrandOption>();
     for (const item of this.stock) {
       if (!brands.has(item.brandName)) {
