@@ -1,45 +1,77 @@
-import { comboFixtures, priceFixtures, productFixtures } from "../mocks/comboFixtures";
-import { ComboError, type Combo, type ComboPayload, type ComboQuery, type CombosCatalogPort, type CombosPricingPort, type CombosRepository } from "../types/combos";
+import { comboFixtures, priceFixtures, productDetails, productFixtures } from "../mocks/comboFixtures";
+import { effectivePublicMinor } from "../services/comboRules";
+import { validateMockComboPayload } from "../services/validateMockComboPayload";
+import {
+  ComboError,
+  type Combo,
+  type ComboPayload,
+  type ComboQuery,
+  type CombosCatalogPort,
+  type CombosPricingPort,
+  type CombosRepository,
+  type ProductDetail,
+  type ProductSummary,
+  type SkuPrice,
+} from "../types/combos";
 
 const clone = <T,>(value: T): T => structuredClone(value);
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException("La consulta fue cancelada.", "AbortError");
+}
+
+export interface MockCombosOptions {
+  catalog?: ProductSummary[];
+  productDetails?: ProductDetail[];
+  prices?: SkuPrice[];
+  failProductSearches?: number;
+  failVariantDetails?: string[];
+}
 
 export class MockCombosRepository implements CombosRepository, CombosCatalogPort, CombosPricingPort {
   private combos: Combo[] = clone(comboFixtures);
   private listErrorDelivered = false;
+  private readonly catalog: ProductSummary[];
+  private readonly details: ProductDetail[];
+  private readonly prices: SkuPrice[];
+  private readonly failedVariantDetails: Set<string>;
+  private productSearchFailuresRemaining: number;
 
-  async list(query: ComboQuery): Promise<{ items: Combo[]; page: number; pageSize: number; total: number }> {
+  constructor(options: MockCombosOptions = {}) {
+    this.catalog = clone(options.catalog ?? productFixtures);
+    this.details = clone(options.productDetails ?? productDetails);
+    this.prices = clone(options.prices ?? priceFixtures);
+    this.failedVariantDetails = new Set(options.failVariantDetails ?? []);
+    this.productSearchFailuresRemaining = options.failProductSearches ?? 0;
+  }
+
+  async list(query: ComboQuery, signal?: AbortSignal): Promise<{ items: Combo[]; page: number; pageSize: number; total: number }> {
+    throwIfAborted(signal);
     if (query.scenario === "list-error" && !this.listErrorDelivered) {
+      await Promise.resolve();
+      throwIfAborted(signal);
       this.listErrorDelivered = true;
       throw new ComboError("unknown", "No se pudieron consultar los combos.");
+    }
+    if (!Number.isSafeInteger(query.page) || query.page < 1 || !Number.isSafeInteger(query.pageSize) || query.pageSize < 1) {
+      throw new ComboError("unknown", "La página solicitada no es válida.");
     }
     const all = query.scenario === "list-empty" ? [] : this.combos.filter((item) => query.status === "TODOS" || item.status === query.status);
     const start = (query.page - 1) * query.pageSize;
     return { items: clone(all.slice(start, start + query.pageSize)), page: query.page, pageSize: query.pageSize, total: all.length };
   }
 
-  async getById(id: string): Promise<Combo | null> {
+  async getById(id: string, signal?: AbortSignal): Promise<Combo | null> {
+    throwIfAborted(signal);
     return clone(this.combos.find((item) => item.id === id) ?? null);
   }
 
   async create(payload: ComboPayload, scenario?: string): Promise<Combo> {
-    if (scenario === "server-price-rejected") throw new ComboError("price_invalid", "El precio del combo no cumple la regla económica.");
-    const combo: Combo = {
-      id: `combo-${this.combos.length + 1}`,
-      name: payload.name,
-      description: payload.description,
-      status: "ACTIVO",
-      priceMinor: payload.priceMinor,
-      version: 1,
-      components: payload.components.map((item) => {
-        const source = productFixtures.flatMap((product) => [
-          ...(!product.hasVariants && product.baseSku ? [{ sku: product.baseSku, name: product.name }] : []),
-          ...product.variants.map((variant) => ({ sku: variant.sku, name: product.name })),
-        ]).find((candidate) => candidate.sku === item.sku);
-        const price = priceFixtures.find((candidate) => candidate.sku === item.sku);
-        return { sku: item.sku, productName: source?.name ?? item.sku, quantity: item.quantity, regularUnitMinor: price?.regularMinor ?? null, publicUnitMinor: price?.publicMinor ?? null };
-      }),
-      availability: { verifiable: false, quantity: null, freshness: "INCOMPLETA", calculatedAt: null },
-    };
+    if (scenario === "server-price-rejected") {
+      throw new ComboError("price_invalid", "El precio del combo no cumple la regla económica.");
+    }
+    validateMockComboPayload(payload, this.catalog, this.details, this.prices, this.combos.map((combo) => combo.id));
+    const combo = this.buildCombo(payload, `combo-${this.combos.length + 1}`, 1, "ACTIVO");
     this.combos.unshift(combo);
     return clone(combo);
   }
@@ -48,14 +80,20 @@ export class MockCombosRepository implements CombosRepository, CombosCatalogPort
     const current = this.combos.find((item) => item.id === id);
     if (!current) throw new ComboError("not_found", "No se encontró el combo.");
     if (scenario === "version-conflict" || payload.version !== current.version) {
-      throw new ComboError("version_conflict", "Este combo cambió desde que comenzaste a editarlo.", clone(current));
+      const latest = { ...clone(current), name: `${current.name} (actualizado en servidor)`, version: current.version + 1 };
+      if (scenario === "version-conflict") {
+        this.combos = this.combos.map((item) => item.id === id ? latest : item);
+      }
+      throw new ComboError("version_conflict", "Este combo cambió desde que comenzaste a editarlo.", clone(latest));
     }
-    if (scenario === "server-price-rejected") throw new ComboError("price_invalid", "El precio del combo no cumple la regla económica.");
-    const updated = await this.create({ ...payload, version: undefined });
-    this.combos = this.combos.filter((item) => item.id !== updated.id);
-    const replacement = { ...updated, id, version: current.version + 1, status: current.status, availability: current.availability };
-    this.combos = this.combos.map((item) => item.id === id ? replacement : item);
-    return clone(replacement);
+    if (scenario === "server-price-rejected") {
+      throw new ComboError("price_invalid", "El precio del combo no cumple la regla económica.");
+    }
+    validateMockComboPayload(payload, this.catalog, this.details, this.prices, this.combos.map((combo) => combo.id));
+    const updated = this.buildCombo(payload, current.id, current.version + 1, current.status);
+    updated.availability = clone(current.availability);
+    this.combos = this.combos.map((item) => item.id === id ? updated : item);
+    return clone(updated);
   }
 
   async deactivate(id: string): Promise<Combo> {
@@ -66,7 +104,55 @@ export class MockCombosRepository implements CombosRepository, CombosCatalogPort
     return clone(updated);
   }
 
-  async listProducts() { return clone(productFixtures); }
-  async getProduct(productId: string) { return clone(productFixtures.find((item) => item.productId === productId) ?? null); }
-  async readCurrent(skus: string[]) { return clone(priceFixtures.filter((item) => skus.includes(item.sku))); }
+  async listProducts(query: string, signal?: AbortSignal): Promise<ProductSummary[]> {
+    throwIfAborted(signal);
+    if (this.productSearchFailuresRemaining > 0) {
+      this.productSearchFailuresRemaining -= 1;
+      throw new ComboError("unavailable", "No se pudo consultar el catálogo.");
+    }
+    const normalized = query.trim().toLocaleLowerCase("es-PE");
+    return clone(this.catalog.filter((product) => product.active && product.name.toLocaleLowerCase("es-PE").includes(normalized)));
+  }
+
+  async getProduct(productId: string, signal?: AbortSignal): Promise<ProductDetail | null> {
+    throwIfAborted(signal);
+    if (this.failedVariantDetails.has(productId)) {
+      this.failedVariantDetails.delete(productId);
+      throw new ComboError("unavailable", "No se pudo consultar el detalle de variantes.");
+    }
+    return clone(this.details.find((item) => item.productId === productId && item.active) ?? null);
+  }
+
+  async readCurrent(skus: string[], signal?: AbortSignal): Promise<SkuPrice[]> {
+    throwIfAborted(signal);
+    return clone(this.prices.filter((item) => item.channelId === null && skus.includes(item.sku)));
+  }
+
+  private buildCombo(payload: ComboPayload, id: string, version: number, status: Combo["status"]): Combo {
+    const components = payload.components.map((item) => {
+      const product = this.catalog.find((candidate) =>
+        candidate.hasVariants
+          ? this.details.find((detail) => detail.productId === candidate.productId)?.variants.some((variant) => variant.sku === item.sku)
+          : candidate.baseSku === item.sku,
+      );
+      const price = this.prices.find((candidate) => candidate.sku === item.sku && candidate.channelId === null);
+      return {
+        sku: item.sku,
+        productName: product?.name ?? item.sku,
+        quantity: item.quantity,
+        regularUnitMinor: price?.regularMinor ?? null,
+        publicUnitMinor: price ? effectivePublicMinor(price) : null,
+      };
+    });
+    return {
+      id,
+      name: payload.name.trim(),
+      description: payload.description,
+      status,
+      priceMinor: payload.priceMinor,
+      version,
+      components,
+      availability: { verifiable: false, quantity: null, freshness: "INCOMPLETA", calculatedAt: null },
+    };
+  }
 }

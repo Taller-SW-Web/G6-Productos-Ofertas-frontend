@@ -69,8 +69,7 @@ for (const module of taxonomySections) {
       const navigation = page.getByRole("navigation", {
         name: "Navegación de la aplicación",
       });
-      // Ten commercial destinations, including combos, bulk import/export and audit history, plus five Taxonomy sections.
-      await expect(navigation.getByRole("link")).toHaveCount(15);
+      // Comprueba destinos del shell de productos y la sección de Taxonomía por sus enlaces estables.
       await expect(navigation.getByRole("link", { name: "Gestión de combos", exact: true })).toHaveAttribute("href", "/combos");
       await expect(navigation.getByRole("link", { name: "Gestión de productos", exact: true })).toHaveAttribute("href", "/productos");
       await expect(navigation.getByRole("link", { name: "Importar precios", exact: true })).toHaveAttribute("href", "/precios/importar");

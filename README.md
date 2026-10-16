@@ -110,6 +110,12 @@ Fuentes MK-014: revisión inicial Docs `78a923bbc6bada31b39b3d386331f90a4f812b31
 
 **Limitaciones contractuales y de simulación XLSX:** La importación y descarga XLSX completas requieren integración con el servicio backend (`bulk-svc`). En el navegador, la validación XLSX es una revisión preliminar de contenedor (verificación del directorio central ZIP y entradas canónicas OOXML como `[Content_Types].xml` y `xl/`) sin descomprimir hojas completas ni emitir veredictos comerciales. Los lotes XLSX cuyo recuento de filas es desconocido para el cliente se mantienen en estado `PROCESSING` con aviso de verificación pendiente, sin fingir transiciones terminales `COMPLETED` ni inventar resultados de filas.
 
+**MK-002 — Gestión de combos (`MOCK_INTEGRATED`):** implementa S01–S04 como vistas administrativas con puertos tipados y adapters en memoria. Rutas: `/combos` (S01), `/combos/nuevo` (S02 crear), `/combos/:comboId/editar` (S02 editar), `/combos/:comboId` (S03) y `/combos/:comboId/no-disponible` (S04). Se pueden crear, consultar, editar y desactivar combos en la sesión; recargar reinicia los cambios.
+
+Validación local: `npm run test:unit:combos` y `npm run test:smoke:combos`. Vitest usa un worker; el smoke ejecuta Chromium headless a 1440×900, con un worker, sin reintentos, video, capturas ni traces rutinarios.
+
+No hay provider HTTP real ni persistencia comercial. En modo `api`, la integración permanece cerrada y no cae a fixtures. La referencia consultada es OpenAPI `0.6.0-rc.1` en Docs `master@c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b`: las operaciones administrativas de Combos están marcadas `provisional-internal`; `combos:leer`, `catalogo:leer` y `precios:leer` siguen pendientes de registro de scopes en Seguridad. La disponibilidad se representa como información de fixture, sin consultar ni reservar stock. Las lecturas de Pricing de la demo son globales en PEN; si no existe oferta efectiva, la comparación usa el precio regular. Los productos, ofertas, versiones y estados no se sincronizan con otros módulos. El component spec de MK-002 permanece **En revisión**: esta entrega no declara aprobación UX, homologación ni integración API.
+
 | Ruta | Alcance |
 |---|---|
 | `/precios` | S01: selección producto/SKU, consulta local, herencia/override, fallback global y estados |

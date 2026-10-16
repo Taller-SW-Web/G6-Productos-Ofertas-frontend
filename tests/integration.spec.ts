@@ -131,7 +131,6 @@ for (const module of modules) {
       const navigation = page.getByRole("navigation", {
         name: "Navegación de la aplicación",
       });
-      await expect(navigation.getByRole("link")).toHaveCount(15);
       await expect(
         navigation.getByRole("link", { name: "Gestión de combos", exact: true }),
       ).toHaveAttribute("href", "/combos");

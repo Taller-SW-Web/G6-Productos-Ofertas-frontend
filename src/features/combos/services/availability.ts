@@ -2,6 +2,14 @@ import type { Combo } from "../types/combos";
 
 export type AvailabilityMessage = { label: string; semantic: "neutral" | "info" | "warning" };
 
+export function hasVerifiedPositiveAvailability(combo: Combo): boolean {
+  return combo.status === "ACTIVO" &&
+    combo.availability.verifiable &&
+    combo.availability.freshness === "ACTUALIZADA" &&
+    combo.availability.quantity !== null &&
+    combo.availability.quantity > 0;
+}
+
 export function availabilityMessage(combo: Combo): AvailabilityMessage {
   if (combo.status === "INACTIVO") return { label: "No disponible para nuevas ventas", semantic: "neutral" };
   const { availability } = combo;

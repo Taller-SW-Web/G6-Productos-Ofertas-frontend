@@ -1,76 +1,189 @@
 import { describe, expect, it } from "vitest";
-import { availabilityMessage } from "./availability";
-import { compareComboPrice, parseMoneyMinor, resolveProductSkus, validateComposition } from "./comboRules";
+import { availabilityMessage, hasVerifiedPositiveAvailability } from "./availability";
+import { compareComboPrice, parseMoneyMinor, resolveProductSkus, toComparisonComponents, validateComposition } from "./comboRules";
+import { parseComboPage } from "./parseComboPage";
+import { RequestIdentity } from "./requestIdentity";
+import { draftFromCombo, keepDraftAfterVersionConflict } from "./drafts";
 import { MockCombosRepository } from "../adapters/mockCombosRepository";
-import { productFixtures, priceFixtures } from "../mocks/comboFixtures";
-import { ComboError } from "../types/combos";
-import type { Combo, ComboDraft } from "../types/combos";
+import { comboFixtures, priceFixtures, productDetails } from "../mocks/comboFixtures";
+import { ComboError, type Combo, type ComboPayload, type SkuPrice } from "../types/combos";
 
 const components = [
   { sku: "INKA-BAND-01", productName: "Bandas", quantity: 1 },
   { sku: "INKA-MAT-01", productName: "Mat", quantity: 1 },
 ];
-const draft: ComboDraft = { name: "Prueba", description: "", components, price: "120.00" };
-const simpleProduct = productFixtures[0]!;
-const variantProduct = productFixtures[4]!;
-const firstComponent = components[0]!;
-const secondComponent = components[1]!;
+const validPayload: ComboPayload = {
+  name: "Combo de prueba",
+  description: null,
+  components,
+  priceMinor: 12000,
+};
+const base: Combo = {
+  id: "c",
+  name: "Combo",
+  description: null,
+  status: "ACTIVO",
+  priceMinor: 1000,
+  version: 1,
+  components: [],
+  availability: { verifiable: true, quantity: 0, freshness: "ACTUALIZADA", calculatedAt: null },
+};
 
-describe("resolución producto a SKU", () => {
-  it("usa sku_base del producto simple y exige SKU explícito para variantes", () => {
-    expect(resolveProductSkus(simpleProduct)).toEqual(["INKA-BAND-01"]);
-    expect(resolveProductSkus(variantProduct)).toEqual(["INKA-BAND-02", "INKA-BAND-03"]);
-    expect(resolveProductSkus({ ...simpleProduct, active: false })).toEqual([]);
+describe("resolución de producto a SKU", () => {
+  it("usa sku_base para producto simple y requiere detalle para seleccionar una variante", () => {
+    expect(resolveProductSkus(productDetails[0]!)).toEqual(["INKA-BAND-01"]);
+    expect(resolveProductSkus(productDetails.at(-1)!)).toEqual(["INKA-BAND-02", "INKA-BAND-03"]);
+    expect(resolveProductSkus({ ...productDetails[0]!, active: false })).toEqual([]);
+  });
+
+  it("busca solo productos activos y recupera un error al consultar variantes", async () => {
+    const repository = new MockCombosRepository({ failProductSearches: 1, failVariantDetails: ["product-bands-variant"] });
+    await expect(repository.listProducts("bandas")).rejects.toMatchObject({ kind: "unavailable" });
+    expect(await repository.listProducts("bandas")).toHaveLength(2);
+    await expect(repository.getProduct("product-bands-variant")).rejects.toMatchObject({ kind: "unavailable" });
+    expect((await repository.getProduct("product-bands-variant"))?.variants.map((variant) => variant.sku)).toEqual(["INKA-BAND-02", "INKA-BAND-03"]);
   });
 });
 
-describe("validación de composición", () => {
+describe("composición y precio preventivo", () => {
   it("requiere dos SKU distintos y cantidades enteras positivas", () => {
-    expect(validateComposition({ components: [firstComponent] })).toContain("Agrega al menos dos SKU vendibles.");
-    expect(validateComposition({ components: [firstComponent, { ...secondComponent, sku: firstComponent.sku }] })).toContain("Cada SKU debe aparecer una sola vez.");
-    expect(validateComposition({ components: [firstComponent, { ...secondComponent, quantity: 1.5 }] })).toContain("La cantidad de cada componente debe ser un entero igual o mayor que 1.");
-    expect(validateComposition(draft)).toEqual([]);
+    expect(validateComposition({ components: [components[0]!] })).toContain("Agrega al menos dos SKU vendibles.");
+    expect(validateComposition({ components: [components[0]!, { ...components[1]!, sku: components[0]!.sku }] })).toContain("Cada SKU debe aparecer una sola vez.");
+    expect(validateComposition({ components: [components[0]!, { ...components[1]!, quantity: 1.5 }] })).toContain("La cantidad de cada componente debe ser un entero igual o mayor que 1.");
   });
-});
 
-describe("comparación económica en centavos", () => {
-  it("usa enteros para comparar las sumas regular y pública vigentes", () => {
+  it("compara importes enteros y usa el precio regular cuando no hay oferta vigente", () => {
+    const noOfferComponents = [
+      { sku: "INKA-BAND-02", productName: "Bandas Pro", quantity: 1 },
+      { sku: "INKA-ROPE-01", productName: "Cuerda", quantity: 1 },
+    ];
+    const noOfferPrices = priceFixtures.filter((item) => noOfferComponents.some((component) => component.sku === item.sku));
+    const comparison = compareComboPrice(toComparisonComponents(noOfferComponents, noOfferPrices), "120.00", noOfferPrices);
     expect(parseMoneyMinor("120,05")).toBe(12005);
-    expect(compareComboPrice(components.map((item) => ({ ...item, regularUnitMinor: 0, publicUnitMinor: 0 })), "120.00", priceFixtures)).toMatchObject({ status: "ready", regularMinor: 16980, publicMinor: 14980, valid: true });
+    expect(comparison).toMatchObject({ status: "ready", regularMinor: 13980, publicMinor: 12980, valid: true });
   });
 
-  it("rechaza superar cualquiera de las dos sumas y no inventa precio ante falta de Pricing", () => {
-    expect(compareComboPrice(components.map((item) => ({ ...item, regularUnitMinor: 0, publicUnitMinor: 0 })), "170.00", priceFixtures)).toMatchObject({ valid: false, reason: "El precio debe ser menor que la suma de precios regulares." });
-    expect(compareComboPrice(components.map((item) => ({ ...item, regularUnitMinor: 0, publicUnitMinor: 0 })), "150.00", priceFixtures)).toMatchObject({ valid: false, reason: "El precio debe ser menor que la suma de precios públicos vigentes." });
-    expect(compareComboPrice(components.map((item) => ({ ...item, regularUnitMinor: 0, publicUnitMinor: 0 })), "100.00", [])).toMatchObject({ status: "unavailable" });
-    expect(compareComboPrice(components.map((item) => ({ ...item, regularUnitMinor: 0, publicUnitMinor: 0 })), "0", priceFixtures)).toMatchObject({ valid: false });
-  });
-});
-
-describe("disponibilidad informativa", () => {
-  const base: Combo = {
-    id: "c", name: "Combo", description: null, status: "ACTIVO", priceMinor: 1000, version: 1,
-    components: [], availability: { verifiable: true, quantity: 0, freshness: "ACTUALIZADA", calculatedAt: null },
-  };
-  it("separa agotado, inactivo, null, incompleto y desactualizado", () => {
-    expect(availabilityMessage(base).label).toBe("Agotado actualmente");
-    expect(availabilityMessage({ ...base, status: "INACTIVO" }).label).toBe("No disponible para nuevas ventas");
-    expect(availabilityMessage({ ...base, availability: { ...base.availability, quantity: null } }).label).toBe("No se puede confirmar la disponibilidad actual.");
-    expect(availabilityMessage({ ...base, availability: { ...base.availability, quantity: 4, freshness: "INCOMPLETA" } }).label).toBe("Disponibilidad incompleta");
-    expect(availabilityMessage({ ...base, availability: { ...base.availability, freshness: "DESACTUALIZADA" } }).label).toBe("Disponibilidad desactualizada");
+  it("rechaza superar la suma regular o pública y no inventa una comparación sin Pricing", () => {
+    const mapped = toComparisonComponents(components, priceFixtures);
+    expect(compareComboPrice(mapped, "170.00", priceFixtures)).toMatchObject({ valid: false, reason: "El precio debe ser menor que la suma de precios regulares." });
+    expect(compareComboPrice(mapped, "150.00", priceFixtures)).toMatchObject({ valid: false, reason: "El precio debe ser menor que la suma de precios públicos vigentes." });
+    expect(compareComboPrice(mapped, "100.00", [])).toMatchObject({ status: "unavailable" });
+    expect(compareComboPrice(mapped, "0", priceFixtures)).toMatchObject({ valid: false });
   });
 });
 
-describe("adapter mock", () => {
-  it("lista, crea, actualiza, desactiva y reporta el conflicto de versión conservando la versión actual", async () => {
+describe("estados de S04", () => {
+  it("distingue disponibilidad positiva, agotada, inactiva y desconocida", () => {
+    const positive = { ...base, availability: { ...base.availability, quantity: 4 } };
+    const zero = { ...base, availability: { ...base.availability, quantity: 0 } };
+    const inactive = { ...positive, status: "INACTIVO" as const };
+    const unknown = { ...positive, availability: { ...positive.availability, verifiable: false, quantity: null } };
+    expect(hasVerifiedPositiveAvailability(positive)).toBe(true);
+    expect(hasVerifiedPositiveAvailability(zero)).toBe(false);
+    expect(hasVerifiedPositiveAvailability(inactive)).toBe(false);
+    expect(hasVerifiedPositiveAvailability(unknown)).toBe(false);
+    expect(availabilityMessage(zero).label).toBe("Agotado actualmente");
+    expect(availabilityMessage(inactive).label).toBe("No disponible para nuevas ventas");
+    expect(availabilityMessage(unknown).label).toBe("No se puede confirmar la disponibilidad actual.");
+    expect(hasVerifiedPositiveAvailability({ ...positive, availability: { ...positive.availability, freshness: "DESACTUALIZADA" } })).toBe(false);
+    expect(hasVerifiedPositiveAvailability({ ...positive, availability: { ...positive.availability, freshness: "INCOMPLETA" } })).toBe(false);
+  });
+});
+
+describe("validación definitiva del adapter mock", () => {
+  it("crea una composición válida y devuelve el código canónico para composiciones inválidas", async () => {
     const repository = new MockCombosRepository();
-    expect((await repository.list({ status: "TODOS", page: 1, pageSize: 5 })).total).toBe(3);
-    const created = await repository.create({ name: "Combo prueba", description: null, components: [{ sku: "INKA-BAND-01", quantity: 1 }, { sku: "INKA-MAT-01", quantity: 1 }], priceMinor: 10000 });
-    expect(created.status).toBe("ACTIVO");
-    const updated = await repository.update(created.id, { name: "Combo prueba editado", description: null, components: [{ sku: "INKA-BAND-01", quantity: 1 }, { sku: "INKA-MAT-01", quantity: 1 }], priceMinor: 9000, version: created.version });
-    expect(updated.version).toBe(created.version + 1);
-    await expect(repository.update(updated.id, { name: "x", description: null, components: [], priceMinor: 1000, version: updated.version }, "version-conflict")).rejects.toMatchObject({ kind: "version_conflict", currentVersion: { id: updated.id } });
-    await expect(repository.create({ name: "x", description: null, components: [], priceMinor: 1000 }, "server-price-rejected")).rejects.toBeInstanceOf(ComboError);
-    expect((await repository.deactivate(updated.id)).status).toBe("INACTIVO");
+    expect((await repository.create(validPayload)).status).toBe("ACTIVO");
+    await expect(repository.create({ ...validPayload, components: [components[0]!] })).rejects.toMatchObject({ code: "COMBO_COMPONENTES_INSUFICIENTES" });
+    await expect(repository.create({ ...validPayload, components: [components[0]!, { ...components[1]!, sku: components[0]!.sku }] })).rejects.toMatchObject({ code: "COMBO_COMPONENTE_DUPLICADO" });
+    await expect(repository.create({ ...validPayload, components: [components[0]!, { ...components[1]!, sku: "combo-entrenamiento" }] })).rejects.toMatchObject({ code: "COMBO_ANIDADO_NO_PERMITIDO" });
+    await expect(repository.create({ ...validPayload, components: [components[0]!, { ...components[1]!, quantity: 1.2 }] })).rejects.toMatchObject({ code: "CANTIDAD_INVALIDA" });
+    await expect(repository.create({ ...validPayload, components: [components[0]!, { ...components[1]!, sku: "SKU-UNKNOWN" }] })).rejects.toMatchObject({ code: "SKU_NO_ENCONTRADO" });
+    await expect(repository.create({ ...validPayload, priceMinor: 0 })).rejects.toMatchObject({ code: "COMBO_PRECIO_INVALIDO" });
+    await expect(repository.create({ ...validPayload, priceMinor: 14980 })).rejects.toMatchObject({ code: "COMBO_PRECIO_INVALIDO" });
+    await expect(repository.create({ ...validPayload, priceMinor: 17000 })).rejects.toMatchObject({ code: "COMBO_PRECIO_INVALIDO" });
+  });
+
+  it("rechaza monedas, alcances y vigencias incompatibles", async () => {
+    const usdPrice = { ...priceFixtures[0]!, currency: "USD" };
+    const nonGlobalPrice = { ...priceFixtures[0]!, channelId: "retail" as never };
+    const expiredPrice = { ...priceFixtures[0]!, validUntil: "2020-10-02T00:00:00Z" };
+    for (const prices of [
+      [usdPrice, ...priceFixtures.slice(1)],
+      [nonGlobalPrice, ...priceFixtures.slice(1)],
+      [expiredPrice, ...priceFixtures.slice(1)],
+    ] as SkuPrice[][]) {
+      const repository = new MockCombosRepository({ prices });
+      await expect(repository.create(validPayload)).rejects.toMatchObject({ kind: "pricing_unavailable" });
+    }
+  });
+
+  it("rechaza SKU de producto inactivo aunque el SKU exista", async () => {
+    const inactiveCatalog = productDetails.map((product) => ({ ...product, active: product.productId !== "product-band" }));
+    const repository = new MockCombosRepository({ catalog: inactiveCatalog, productDetails: inactiveCatalog });
+    await expect(repository.create(validPayload)).rejects.toMatchObject({ code: "SKU_INACTIVO" });
+  });
+
+  it("rechaza una edición inválida sin modificar la versión guardada", async () => {
+    const repository = new MockCombosRepository();
+    const created = await repository.create(validPayload);
+    const before = await repository.getById(created.id);
+    await expect(repository.update(created.id, { ...validPayload, priceMinor: 14980, version: created.version })).rejects.toMatchObject({ code: "COMBO_PRECIO_INVALIDO" });
+    expect(await repository.getById(created.id)).toEqual(before);
+  });
+
+  it("mantiene el borrador local y expone la versión conflictiva sin sustituirla", async () => {
+    const repository = new MockCombosRepository();
+    const original = await repository.getById("combo-entrenamiento");
+    const localDraft = draftFromCombo(original ?? undefined);
+    localDraft.name = "Nombre local";
+    localDraft.price = "120.00";
+    const conflict = await repository.update("combo-entrenamiento", { ...validPayload, version: original!.version }, "version-conflict").catch((reason: unknown) => reason);
+    expect(conflict).toMatchObject({ kind: "version_conflict", currentVersion: { version: original!.version + 1 } });
+    const captured = keepDraftAfterVersionConflict(localDraft, conflict instanceof ComboError ? conflict.currentVersion : undefined);
+    const currentVersion = captured.currentVersion;
+    expect(captured.draft).toMatchObject({ name: "Nombre local", price: "120.00" });
+    expect(currentVersion?.version).toBe(original!.version + 1);
+  });
+
+  it("crea un borrador independiente al cambiar entre dos combos", () => {
+    const first = draftFromCombo(comboFixtures[0]);
+    const second = draftFromCombo(comboFixtures[1]);
+    first.name = "Borrador de la primera entidad";
+    expect(second.name).toBe("Kit yoga diario");
+    expect(second.components.map((item) => item.sku)).toEqual(["INKA-MAT-01", "INKA-BLOCK-02"]);
+  });
+});
+
+describe("protección frente a respuestas fuera de orden", () => {
+  it("solo permite aplicar el resultado de la consulta más reciente", async () => {
+    let resolveOlder!: (value: string) => void;
+    let resolveNewer!: (value: string) => void;
+    const older = new Promise<string>((resolve) => { resolveOlder = resolve; });
+    const newer = new Promise<string>((resolve) => { resolveNewer = resolve; });
+    const identity = new RequestIdentity();
+    const oldId = identity.begin();
+    const newId = identity.begin();
+    let visible = "";
+    const apply = async (request: Promise<string>, requestId: number) => {
+      const value = await request;
+      if (identity.isCurrent(requestId)) visible = value;
+    };
+    const oldWork = apply(older, oldId);
+    const newWork = apply(newer, newId);
+    resolveNewer("filtro vigente");
+    await newWork;
+    resolveOlder("filtro anterior");
+    await oldWork;
+    expect(visible).toBe("filtro vigente");
+  });
+});
+
+describe("paginación de S01", () => {
+  it("normaliza entradas vacías, inválidas, infinitas o fuera de rango a la primera página", () => {
+    for (const value of [null, "", "0", "-2", "1.5", "Infinity", "9007199254740992", "abc"]) {
+      expect(parseComboPage(value)).toBe(1);
+    }
+    expect(parseComboPage("3")).toBe(3);
   });
 });

@@ -1,8 +1,9 @@
 import type {
   ComboDraft,
   ComboComponent,
-  ProductCandidate,
+  ProductDetail,
   SkuPrice,
+  ComponentDraft,
 } from "../types/combos";
 
 export type ComparisonResult =
@@ -33,10 +34,14 @@ export function formatMoney(minor: number | null, currency = "PEN"): string {
   }).format(minor / 100);
 }
 
-export function resolveProductSkus(product: ProductCandidate): string[] {
+export function resolveProductSkus(product: ProductDetail): string[] {
   if (!product.active) return [];
   if (product.hasVariants) return product.variants.filter((item) => item.active).map((item) => item.sku);
   return product.baseSku ? [product.baseSku] : [];
+}
+
+export function effectivePublicMinor(price: SkuPrice): number | null {
+  return price.offerMinor ?? price.regularMinor;
 }
 
 export function validateComposition(draft: Pick<ComboDraft, "components">) {
@@ -64,11 +69,12 @@ export function compareComboPrice(
   let publicMinor = 0;
   for (const component of components) {
     const price = bySku.get(component.sku);
-    if (!price || price.regularMinor === null || price.publicMinor === null) {
+    const publicMinorForSku = price ? effectivePublicMinor(price) : null;
+    if (!price || price.regularMinor === null || publicMinorForSku === null) {
       return { status: "unavailable", reason: "No se pudo confirmar el precio vigente de todos los componentes." };
     }
     regularMinor += price.regularMinor * component.quantity;
-    publicMinor += price.publicMinor * component.quantity;
+    publicMinor += publicMinorForSku * component.quantity;
   }
   const comboMinor = parseMoneyMinor(proposedPrice);
   if (!Number.isSafeInteger(regularMinor) || !Number.isSafeInteger(publicMinor)) {
@@ -96,8 +102,6 @@ export function toComparisonComponents(draft: ComponentDraft[], prices: SkuPrice
   return draft.map((item) => ({
     ...item,
     regularUnitMinor: priceBySku.get(item.sku)?.regularMinor ?? null,
-    publicUnitMinor: priceBySku.get(item.sku)?.publicMinor ?? null,
+    publicUnitMinor: priceBySku.get(item.sku) ? effectivePublicMinor(priceBySku.get(item.sku)!) : null,
   }));
 }
-
-import type { ComponentDraft } from "../types/combos";

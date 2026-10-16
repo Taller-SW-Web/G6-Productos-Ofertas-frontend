@@ -41,12 +41,15 @@ export interface ComboQuery {
   scenario?: string;
 }
 
-export interface ProductCandidate {
+export interface ProductSummary {
   productId: string;
   name: string;
   hasVariants: boolean;
   active: boolean;
   baseSku: string | null;
+}
+
+export interface ProductDetail extends ProductSummary {
   variants: { sku: string; label: string; active: boolean }[];
 }
 
@@ -66,8 +69,13 @@ export interface ComboDraft {
 export interface SkuPrice {
   sku: string;
   regularMinor: number | null;
-  publicMinor: number | null;
-  currency: "PEN";
+  offerMinor: number | null;
+  currency: string;
+  channelId: string | null;
+  priceVersion: number;
+  validityId: string;
+  validFrom: string;
+  validUntil: string | null;
 }
 
 export interface ComboPayload {
@@ -87,8 +95,8 @@ export interface CombosRepository {
 }
 
 export interface CombosCatalogPort {
-  listProducts(signal?: AbortSignal): Promise<ProductCandidate[]>;
-  getProduct(productId: string, signal?: AbortSignal): Promise<ProductCandidate | null>;
+  listProducts(query: string, signal?: AbortSignal): Promise<ProductSummary[]>;
+  getProduct(productId: string, signal?: AbortSignal): Promise<ProductDetail | null>;
 }
 
 export interface CombosPricingPort {
@@ -96,6 +104,8 @@ export interface CombosPricingPort {
 }
 
 export class ComboError extends Error {
+  public readonly code: string;
+
   constructor(
     public readonly kind:
       | "unavailable"
@@ -103,7 +113,11 @@ export class ComboError extends Error {
       | "price_invalid"
       | "version_conflict"
       | "duplicate_sku"
+      | "nested_combo"
       | "invalid_components"
+      | "invalid_quantity"
+      | "sku_invalid"
+      | "sku_not_found"
       | "pricing_unavailable"
       | "unknown",
     message: string,
@@ -111,5 +125,19 @@ export class ComboError extends Error {
   ) {
     super(message);
     this.name = "ComboError";
+    this.code = {
+      unavailable: "SERVICIO_NO_DISPONIBLE",
+      not_found: "COMBO_NO_ENCONTRADO",
+      price_invalid: "COMBO_PRECIO_INVALIDO",
+      version_conflict: "VERSION_CONFLICT",
+      duplicate_sku: "COMBO_COMPONENTE_DUPLICADO",
+      nested_combo: "COMBO_ANIDADO_NO_PERMITIDO",
+      invalid_components: "COMBO_COMPONENTES_INSUFICIENTES",
+      invalid_quantity: "CANTIDAD_INVALIDA",
+      sku_invalid: "SKU_INACTIVO",
+      sku_not_found: "SKU_NO_ENCONTRADO",
+      pricing_unavailable: "SERVICIO_NO_DISPONIBLE",
+      unknown: "ERROR_INTERNO",
+    }[kind];
   }
 }
