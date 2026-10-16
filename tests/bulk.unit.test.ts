@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mockBulkRepository } from "../src/features/bulk/adapters/mockBulkRepository";
-import { createBulkRepository } from "../src/features/bulk/services/bulkService";
+import { BulkRepositoryError, createBulkRepository } from "../src/features/bulk/services/bulkService";
 import { canRequestImportReport } from "../src/features/bulk/services/bulkRepository";
 import { canMockProvideImportReport } from "../src/features/bulk/services/reportAvailability";
 import { isBulkProviderConfigured } from "../src/features/bulk/services/bulkProviderStatus";
 import { getQueuedBatchDescription, getUnknownRowCountDescription } from "../src/features/bulk/components/batchStatusMessages";
 import { isExportSnapshotStale, selectBatchQueryView } from "../src/features/bulk/hooks/bulkQueryState";
-import { LatestTaskCoordinator, runSingleFlight } from "../src/features/bulk/utils/asyncGuards";
+import { getDownloadFailureMessage, getUnavailableDownloadMessage } from "../src/features/bulk/services/downloadMessages";
+import { AdmissionCoordinator, LatestTaskCoordinator, runSingleFlight } from "../src/features/bulk/utils/asyncGuards";
 import { checkLocalFile, parseCsvSafely } from "../src/features/bulk/utils/localFileCheck";
 import { getGenuineMinimalXlsxArrayBuffer } from "./fixtures/genuineXlsxFixture";
 import { mockBatches } from "../src/features/bulk/mocks/bulkFixtures";
@@ -170,6 +171,14 @@ describe("Bulk mock repository and global data mode", () => {
     expect(isBulkProviderConfigured("mock", null)).toBe(true);
   });
 
+  it("does not describe API download failures as mock limitations", () => {
+    expect(getUnavailableDownloadMessage("mock", "exportación", "XLSX")).toContain("modo mock");
+    expect(getUnavailableDownloadMessage("api", "exportación", "XLSX")).toContain("provider API configurado");
+    expect(getUnavailableDownloadMessage("api", "plantilla", "CSV")).toContain("provider API configurado");
+    expect(getDownloadFailureMessage(new BulkRepositoryError("Sin conexión", "communication"), "exportación"))
+      .toContain("Error de comunicación");
+  });
+
   it("uses the latest completed batch query and discards stale responses", () => {
     const batch = mockBatches["batch-partial"]!;
     const staleResponse = { key: '["batch-partial",0]', state: { status: "success" as const, batch } };
@@ -246,6 +255,28 @@ describe("Bulk mock repository and global data mode", () => {
     coordinator.cancel();
     expect(fileB.signal.aborted).toBe(true);
     expect(fileB.isCurrent()).toBe(false);
+  });
+
+  it("allows a new admission after acceptance and ignores a response from an older selection", () => {
+    const coordinator = new AdmissionCoordinator<{ name: string }>();
+    const firstFile = { name: "primero.csv" };
+    coordinator.select(firstFile);
+    const firstAdmission = coordinator.begin(firstFile);
+    expect(firstAdmission).not.toBeNull();
+    expect(coordinator.begin(firstFile)).toBeNull();
+    expect(coordinator.finish(firstAdmission!, "accepted")).toBe(true);
+    expect(coordinator.status).toBe("accepted");
+    expect(coordinator.begin(firstFile)).toBeNull();
+
+    const lateAdmission = coordinator.begin(firstFile);
+    expect(lateAdmission).toBeNull();
+    const secondFile = { name: "segundo.csv" };
+    coordinator.select(secondFile);
+    expect(coordinator.finish(firstAdmission!, "uncertain")).toBe(false);
+    expect(coordinator.status).toBe("ready");
+    const secondAdmission = coordinator.begin(secondFile);
+    expect(secondAdmission).not.toBeNull();
+    expect(coordinator.begin(secondFile)).toBeNull();
   });
 });
 

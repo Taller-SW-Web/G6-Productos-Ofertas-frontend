@@ -20,6 +20,63 @@ export interface LatestTask {
   isCurrent: () => boolean;
 }
 
+export type AdmissionStatus = "idle" | "ready" | "pending" | "accepted" | "uncertain";
+
+export interface AdmissionTask<T> {
+  id: number;
+  value: T;
+  isCurrent: () => boolean;
+}
+
+interface AdmissionOperation<T> {
+  id: number;
+  value: T;
+  status: AdmissionStatus;
+}
+
+/** Tracks the current user intent without cancelling an admission already sent to a provider. */
+export class AdmissionCoordinator<T> {
+  private nextId = 0;
+  private operation: AdmissionOperation<T> | null = null;
+
+  select(value: T | null): AdmissionStatus {
+    this.nextId++;
+    this.operation = value === null
+      ? null
+      : { id: this.nextId, value, status: "ready" };
+    return this.status;
+  }
+
+  get status(): AdmissionStatus {
+    return this.operation?.status ?? "idle";
+  }
+
+  begin(value: T): AdmissionTask<T> | null {
+    const operation = this.operation;
+    if (
+      !operation ||
+      operation.value !== value ||
+      operation.status === "pending" ||
+      operation.status === "accepted" ||
+      operation.status === "uncertain"
+    ) {
+      return null;
+    }
+    operation.status = "pending";
+    return {
+      id: operation.id,
+      value,
+      isCurrent: () => this.operation === operation,
+    };
+  }
+
+  finish(task: AdmissionTask<T>, status: "ready" | "accepted" | "uncertain"): boolean {
+    if (!task.isCurrent() || this.operation?.id !== task.id) return false;
+    this.operation.status = status;
+    return true;
+  }
+}
+
 export class LatestTaskCoordinator {
   private version = 0;
   private controller: AbortController | null = null;

@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button, Group, Stack } from "@mantine/core";
 import {
@@ -21,14 +21,22 @@ export function BulkReviewPage() {
   const navigate = useNavigate();
   const bulkRepository = useBulkRepository();
   const isSubmittingRef = useRef(false);
+  const pageIsActiveRef = useRef(true);
   const {
     selectedFile,
     fileCheck,
-    submitting,
-    setSubmitting,
+    admissionStatus,
+    beginAdmission,
+    finishAdmission,
     submissionError,
-    setSubmissionError,
   } = useBulkUploadContext();
+
+  useEffect(() => {
+    pageIsActiveRef.current = true;
+    return () => {
+      pageIsActiveRef.current = false;
+    };
+  }, []);
 
   // If page is accessed directly without selecting a file
   if (!selectedFile || !fileCheck) {
@@ -63,30 +71,38 @@ export function BulkReviewPage() {
   }
 
   const handleConfirmImport = async () => {
-    if (submitting) return;
+    if (admissionStatus === "pending") return;
+    const task = beginAdmission(selectedFile);
+    if (!task) return;
     await runSingleFlight(isSubmittingRef, async () => {
-      setSubmitting(true);
-      setSubmissionError(null);
       try {
         const batch = await bulkRepository.createImport(selectedFile, {
           detectedRows: fileCheck.detectedRows,
         });
-        // Navigate to tracking screen S03
-        navigate(`/carga-masiva/importaciones/${batch.batch_id}`);
+        const isCurrentAdmission = finishAdmission(task, "accepted");
+        if (isCurrentAdmission && pageIsActiveRef.current && task.isCurrent()) {
+          // Navigate only when this review screen still owns the current operation.
+          navigate(`/carga-masiva/importaciones/${batch.batch_id}`);
+        }
       } catch (err: unknown) {
-        setSubmitting(false);
         const message =
           err instanceof Error
             ? err.message
             : "El servicio no pudo admitir el lote de importación.";
         const category = err instanceof BulkRepositoryError ? err.category : "unknown";
-        setSubmissionError({ category, message });
+        const status = category === "communication" || category === "unknown"
+          ? "uncertain"
+          : "ready";
+        finishAdmission(task, status, { category, message });
       }
     });
   };
 
   const hasBlockingErrors = !fileCheck.valid;
-  const admissionUnknown = submissionError?.category === "unknown";
+  const admissionPending = admissionStatus === "pending";
+  const admissionUncertain = admissionStatus === "uncertain";
+  const admissionAlreadyAccepted = admissionStatus === "accepted";
+  const admissionBlocked = admissionPending || admissionUncertain || admissionAlreadyAccepted;
 
   return (
     <>
@@ -105,15 +121,15 @@ export function BulkReviewPage() {
               to="/carga-masiva"
               variant="outline"
               leftSection={<IconArrowLeft size={18} stroke={2} aria-hidden="true" />}
-              disabled={submitting}
+              disabled={admissionPending}
             >
               Cambiar archivo
             </Button>
             <Button
               leftSection={<IconCheck size={18} stroke={2} aria-hidden="true" />}
               onClick={handleConfirmImport}
-              loading={submitting}
-              disabled={submitting || hasBlockingErrors || admissionUnknown}
+              loading={admissionPending}
+              disabled={admissionBlocked || hasBlockingErrors}
             >
               Confirmar importación
             </Button>
@@ -136,9 +152,15 @@ export function BulkReviewPage() {
             }
           >
             {submissionError.message}
-            {submissionError.category === "unknown" && (
-              <div>Consulta el lote antes de intentar enviar el archivo otra vez.</div>
+            {admissionUncertain && (
+              <div>La admisión no quedó confirmada. Consulta el estado con el servicio antes de iniciar otra operación.</div>
             )}
+          </FeedbackAlert>
+        )}
+
+        {admissionAlreadyAccepted && (
+          <FeedbackAlert semantic="success" title="Archivo ya admitido">
+            Este archivo ya fue admitido. Selecciona un archivo nuevo para iniciar otra importación.
           </FeedbackAlert>
         )}
 
@@ -149,15 +171,15 @@ export function BulkReviewPage() {
             component={Link}
             to="/carga-masiva"
             variant="outline"
-            disabled={submitting}
+            disabled={admissionPending}
           >
             Volver
           </Button>
           <Button
             leftSection={<IconCheck size={18} stroke={2} aria-hidden="true" />}
             onClick={handleConfirmImport}
-            loading={submitting}
-            disabled={submitting || hasBlockingErrors || admissionUnknown}
+            loading={admissionPending}
+            disabled={admissionBlocked || hasBlockingErrors}
           >
             Confirmar importación
           </Button>

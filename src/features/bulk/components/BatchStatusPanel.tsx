@@ -128,9 +128,11 @@ export function BatchStatusPanel({
             label="Filas con fallos"
             value={batch.failed_rows}
             description={
-              batch.needs_reconciliation
-                ? "Requieren reconciliación"
-                : "Sin fallos registrados"
+              batch.failed_rows === 0
+                ? "Sin fallos registrados"
+                : batch.needs_reconciliation
+                  ? "Fallos registrados; requieren reconciliación"
+                  : "Fallos registrados; no hay reconciliación pendiente"
             }
           />
         </SimpleGrid>

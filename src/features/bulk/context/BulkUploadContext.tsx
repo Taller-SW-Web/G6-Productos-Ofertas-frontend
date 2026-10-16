@@ -10,7 +10,12 @@ import {
 import type { LocalFileCheckResult } from "../types/bulk";
 import type { BulkFailureCategory } from "../services/bulkService";
 import { checkLocalFile } from "../utils/localFileCheck";
-import { LatestTaskCoordinator } from "../utils/asyncGuards";
+import {
+  AdmissionCoordinator,
+  type AdmissionStatus,
+  type AdmissionTask,
+  LatestTaskCoordinator,
+} from "../utils/asyncGuards";
 
 export interface BulkSubmissionError {
   category: BulkFailureCategory;
@@ -23,10 +28,14 @@ interface BulkUploadContextValue {
   checking: boolean;
   setSelectedFile: (file: File | null) => Promise<void>;
   clearSelection: () => void;
-  submitting: boolean;
-  setSubmitting: (submitting: boolean) => void;
+  admissionStatus: AdmissionStatus;
+  beginAdmission: (file: File) => AdmissionTask<File> | null;
+  finishAdmission: (
+    task: AdmissionTask<File>,
+    status: "ready" | "accepted" | "uncertain",
+    error?: BulkSubmissionError | null,
+  ) => boolean;
   submissionError: BulkSubmissionError | null;
-  setSubmissionError: (error: BulkSubmissionError | null) => void;
 }
 
 const BulkUploadContext = createContext<BulkUploadContextValue | null>(null);
@@ -35,10 +44,14 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
   const [selectedFile, setFileState] = useState<File | null>(null);
   const [fileCheck, setFileCheck] = useState<LocalFileCheckResult | null>(null);
   const [checking, setChecking] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  const [admissionStatus, setAdmissionStatus] = useState<AdmissionStatus>("idle");
   const [submissionError, setSubmissionError] =
     useState<BulkSubmissionError | null>(null);
 
+  const admissionCoordinatorRef = useRef<AdmissionCoordinator<File> | null>(null);
+  if (admissionCoordinatorRef.current == null) {
+    admissionCoordinatorRef.current = new AdmissionCoordinator<File>();
+  }
   const validationCoordinatorRef = useRef<LatestTaskCoordinator | null>(null);
   if (validationCoordinatorRef.current == null) {
     validationCoordinatorRef.current = new LatestTaskCoordinator();
@@ -47,6 +60,9 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
   const setSelectedFile = useCallback(async (file: File | null) => {
     const coordinator = validationCoordinatorRef.current;
     if (!coordinator) return;
+    const admissionCoordinator = admissionCoordinatorRef.current;
+    admissionCoordinator?.select(file);
+    setAdmissionStatus(admissionCoordinator?.status ?? "idle");
     setSubmissionError(null);
 
     if (!file) {
@@ -79,11 +95,30 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
 
   const clearSelection = useCallback(() => {
     validationCoordinatorRef.current?.cancel();
+    admissionCoordinatorRef.current?.select(null);
     setFileState(null);
     setFileCheck(null);
     setChecking(false);
     setSubmissionError(null);
-    setSubmitting(false);
+    setAdmissionStatus("idle");
+  }, []);
+
+  const beginAdmission = useCallback((file: File) => {
+    const task = admissionCoordinatorRef.current?.begin(file) ?? null;
+    if (task) setAdmissionStatus(admissionCoordinatorRef.current?.status ?? "idle");
+    return task;
+  }, []);
+
+  const finishAdmission = useCallback((
+    task: AdmissionTask<File>,
+    status: "ready" | "accepted" | "uncertain",
+    error: BulkSubmissionError | null = null,
+  ) => {
+    const coordinator = admissionCoordinatorRef.current;
+    if (!coordinator?.finish(task, status)) return false;
+    setAdmissionStatus(coordinator.status);
+    setSubmissionError(error);
+    return true;
   }, []);
 
   return (
@@ -94,10 +129,10 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
         checking,
         setSelectedFile,
         clearSelection,
-        submitting,
-        setSubmitting,
+        admissionStatus,
+        beginAdmission,
+        finishAdmission,
         submissionError,
-        setSubmissionError,
       }}
     >
       {children}

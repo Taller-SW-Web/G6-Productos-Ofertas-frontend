@@ -112,7 +112,9 @@ export function ExportJobPanel({
 
               {isProcessing && (
                 <FeedbackAlert semantic="info" title="Consolidando catálogo">
-                  Extrayendo snapshot de Catálogo, Pricing e Inventario. Pulse &quot;Actualizar estado&quot; para consultar el estado.
+                  {dataMode === "mock"
+                    ? "La demostración simula la consolidación del snapshot. Pulse &quot;Actualizar estado&quot; para consultar el estado."
+                    : "El provider informó que está consolidando el catálogo. Pulse &quot;Actualizar estado&quot; para consultar el estado."}
                 </FeedbackAlert>
               )}
 
@@ -129,7 +131,7 @@ export function ExportJobPanel({
                       ? `${job.file_name ?? "catalogo_exportado.csv"}${dataMode === "mock" ? " · Archivo de demostración listo para descargar." : ""}`
                       : dataMode === "mock"
                         ? "La demostración no genera libros XLSX ni renombra un CSV como XLSX."
-                        : "El trabajo terminó y el archivo está disponible según el provider API configurado."}
+                        : "El provider informó que el trabajo terminó. Solicita el archivo mediante la acción de descarga."}
                 </FeedbackAlert>
               )}
 

@@ -5,8 +5,12 @@ import type {
   BulkImportBatch,
 } from "../types/bulk";
 import { canRequestImportReport, type DownloadResource } from "../services/bulkRepository";
+import {
+  getDownloadFailureMessage,
+  getUnavailableDownloadMessage,
+} from "../services/downloadMessages";
 import { triggerDownload } from "../utils/downloadAsset";
-import { useBulkRepository } from "./useBulkRepository";
+import { useBulkRepository, useBulkRepositorySelection } from "./useBulkRepository";
 import {
   isExportSnapshotStale,
   selectBatchQueryView,
@@ -142,7 +146,7 @@ type ExportQueryState =
   | { exportId: string; revision: number; status: "error"; message: string };
 
 export function useBulkDownloads(initialExportId?: string) {
-  const repository = useBulkRepository();
+  const { mode, repository } = useBulkRepositorySelection();
   const [exportJobState, setExportJobState] = useState<{
     routeExportId?: string;
     job: BulkExportJob;
@@ -309,22 +313,14 @@ export function useBulkDownloads(initialExportId?: string) {
       if (resource) {
         triggerDownload(resource);
       } else {
-        setError(
-          visibleJob.format === "XLSX"
-            ? "La exportación XLSX terminó, pero el modo mock no genera un libro descargable."
-            : "El archivo de exportación no está disponible en este momento.",
-        );
+        setError(getUnavailableDownloadMessage(mode, "exportación", visibleJob.format));
       }
     } catch (err: unknown) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Error al descargar el archivo de exportación.",
-      );
+      setError(getDownloadFailureMessage(err, "exportación"));
     } finally {
       setDownloadingExport(false);
     }
-  }, [repository, visibleJob]);
+  }, [mode, repository, visibleJob]);
 
   const downloadTemplate = useCallback(
     async (format: BulkExportFormat) => {
@@ -335,27 +331,20 @@ export function useBulkDownloads(initialExportId?: string) {
         if (resource) {
           triggerDownload(resource);
         } else {
-          setError(
-            format === "XLSX"
-              ? "No existe una plantilla XLSX descargable en el modo mock."
-              : "La plantilla solicitada no está disponible.",
-          );
+          setError(getUnavailableDownloadMessage(mode, "plantilla", format));
         }
       } catch (err: unknown) {
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Error al obtener la plantilla solicitada.",
-        );
+        setError(getDownloadFailureMessage(err, "plantilla"));
       } finally {
         setDownloadingTemplate(false);
       }
     },
-    [repository],
+    [mode, repository],
   );
 
   return {
     exportJob: visibleJob,
+    dataMode: mode,
     submittingExport,
     refreshingJob,
     downloadingExport,

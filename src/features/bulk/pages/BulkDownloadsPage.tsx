@@ -1,10 +1,9 @@
-import { useContext, useState } from "react";
+import { useState } from "react";
 import { Button, Group, Radio, Stack } from "@mantine/core";
 import {
   IconArrowLeft,
   IconDownload,
 } from "@tabler/icons-react";
-import { DataModeContext } from "../../../app/config/DataModeContext";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   FeedbackAlert,
@@ -16,13 +15,13 @@ import { useBulkDownloads } from "../hooks/useBulkFlow";
 import type { BulkExportFormat } from "../types/bulk";
 
 export function BulkDownloadsPage() {
-  const dataMode = useContext(DataModeContext);
   const [searchParams] = useSearchParams();
   const initialExportId = searchParams.get("export_id") ?? undefined;
   const [templateFormat, setTemplateFormat] = useState<BulkExportFormat>("CSV");
 
   const {
     exportJob,
+    dataMode,
     submittingExport,
     refreshingJob,
     downloadingExport,
@@ -84,7 +83,7 @@ export function BulkDownloadsPage() {
           </FeedbackAlert>
         )}
         {error && (
-          <FeedbackAlert semantic="error" title="Observación en la descarga">
+          <FeedbackAlert semantic="error" title="No se completó la descarga o consulta">
             {error}
           </FeedbackAlert>
         )}
@@ -100,14 +99,20 @@ export function BulkDownloadsPage() {
           description="Estructura de referencia para preparar archivos de importación masiva"
         >
           <Stack gap="md">
-            <FeedbackAlert semantic="info" title="Disponibilidad de plantillas oficiales">
-              La plantilla oficial estará disponible cuando se habilite el servicio de carga masiva. Para pruebas y demostración se ofrece el archivo CSV de muestra.
+            <FeedbackAlert semantic="info" title="Disponibilidad de plantillas">
+              {dataMode === "mock"
+                ? "La demostración ofrece una muestra CSV y no incluye una plantilla XLSX descargable."
+                : "La disponibilidad de cada plantilla depende de la respuesta del provider API configurado."}
             </FeedbackAlert>
 
             <Group justify="space-between" align="flex-end" wrap="wrap" gap="md">
               <Radio.Group
                 label="Formato de plantilla"
-                description="La muestra CSV es ficticia; el modo mock no incluye una plantilla XLSX."
+                description={
+                  dataMode === "mock"
+                    ? "La muestra CSV es ficticia; el modo mock no incluye una plantilla XLSX."
+                    : "La solicitud se envía al provider API configurado para el formato seleccionado."
+                }
                 value={templateFormat}
                 onChange={(value) => setTemplateFormat(value as BulkExportFormat)}
               >
@@ -139,7 +144,7 @@ export function BulkDownloadsPage() {
           submitting={submittingExport}
           refreshing={refreshingJob}
           downloading={downloadingExport}
-          dataMode={dataMode ?? "mock"}
+          dataMode={dataMode}
         />
       </Stack>
     </>
