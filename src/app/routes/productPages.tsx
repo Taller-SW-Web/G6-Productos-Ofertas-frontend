@@ -331,5 +331,3 @@ export const InventoryDashboardPage = lazy(() =>
     }),
   ),
 );
-
-

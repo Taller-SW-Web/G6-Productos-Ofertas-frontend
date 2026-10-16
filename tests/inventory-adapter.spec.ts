@@ -1,4 +1,4 @@
-﻿import { test, expect } from "@playwright/test";
+import { test, expect } from "@playwright/test";
 
 test.describe("P2: Independencia de mocks con AlternateInventoryRepository", () => {
   test("Lectura de stock autoritativo desde repositorio alternativo (sin mocks)", async ({

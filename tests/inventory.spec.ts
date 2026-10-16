@@ -557,5 +557,3 @@ test.describe("MK-016/P1: Alertas por ubicación - deduplicación correcta", () 
     await page.getByRole("button", { name: "Limpiar" }).click();
   });
 });
-
-

@@ -1,4 +1,4 @@
-﻿import assert from "node:assert/strict";
+import assert from "node:assert/strict";
 import { chromium } from "playwright";
 
 const mode = process.argv[2];

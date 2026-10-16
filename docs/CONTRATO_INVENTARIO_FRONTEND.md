@@ -1,7 +1,7 @@
 # Contrato Frontend — Módulo de Inventario (MK-015 / MK-016)
 
-**Versión de referencia:** `1.1.0`  
-**Repositorio oficial de especificaciones y contratos:** `Taller-SW-Web/G6-Productos-Ofertas-docs`  
+**Versión de referencia:** `1.1.0`
+**Repositorio oficial de especificaciones y contratos:** `Taller-SW-Web/G6-Productos-Ofertas-docs`
 **Documentos contractuales de referencia:**
 - `requisitos/specs/SPEC-015-control-stock-disponibilidad.md` (Control de stock, umbrales y recepciones de traslados)
 - `requisitos/specs/SPEC-016-dashboard-alertas-stock.md` (Dashboard analítico, indicadores clave y alertas)
@@ -112,4 +112,4 @@ La conformidad de este contrato se valida mediante los siguientes comandos. Los 
 | `npm test` | Suite completa Playwright: 14 pruebas de idempotencia/contrato (`tests/inventory-idempotency.spec.ts`), 6 pruebas de independencia de mocks en harness (`tests/inventory-adapter.spec.ts`) y 22 pruebas E2E de flujos y navegación (`tests/inventory.spec.ts`). |
 | `node scripts/verify-production.mjs <mock\|api>` | Verificación en preview de producción (`1440 × 900`) para ambos modos sin errores ni carga de mocks en modo `api`. |
 
-> **Regla de evidencia:** no declarar `PASS` sin haber ejecutado el comando correspondiente y obtenido salida libre de errores. Si no se ejecutó, registrar `NO EJECUTADO`.
+> **Regla de evidencia:** no declarar `PASS` sin haber ejecutado el comando correspondiente y obtenido salida libre de errores. Si no se ejecutó, registrar `NO EJECUTADO`.
