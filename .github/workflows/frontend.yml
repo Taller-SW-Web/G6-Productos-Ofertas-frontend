@@ -34,6 +34,7 @@ jobs:
             sleep 1
           done
           node scripts/verify-production.mjs mock
+          node scripts/vercel-smoke.mjs http://127.0.0.1:5174
       - run: npm test
       - name: Verify API mode without mock fallback
         run: |

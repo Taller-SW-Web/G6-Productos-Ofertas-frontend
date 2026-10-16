@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { evidencePath } from "./support/evidence";
 import {
   decimalLess,
   localInstant,
@@ -53,7 +54,7 @@ async function noOverflow(page: Page) {
 async function capture(page: Page, path: string) {
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.evaluate(() => window.scrollTo(0, 0));
-  await page.screenshot({ path, fullPage: true, animations: "disabled" });
+  await page.screenshot({ path: evidencePath(path.slice(path.lastIndexOf("/") + 1)), fullPage: true, animations: "disabled" });
 }
 
 test("MK-013-S01: fresh readings enable contextual actions; stale/empty readings do not", async ({

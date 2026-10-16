@@ -69,7 +69,11 @@ for (const module of taxonomySections) {
       const navigation = page.getByRole("navigation", {
         name: "Navegación de la aplicación",
       });
-      await expect(navigation.getByRole("link")).toHaveCount(10);
+      // Twelve commercial destinations, including bulk import/export, audit history and inventory, plus five Taxonomy sections.
+      await expect(navigation.getByRole("link")).toHaveCount(17);
+      await expect(navigation.getByRole("link", { name: "Gestión de productos", exact: true })).toHaveAttribute("href", "/productos");
+      await expect(navigation.getByRole("link", { name: "Importar precios", exact: true })).toHaveAttribute("href", "/precios/importar");
+      await expect(navigation.getByRole("link", { name: "Historial de precios", exact: true })).toHaveAttribute("href", "/precios/auditoria");
       await expect(
         navigation.getByText("TAXONOMÍA", { exact: true }),
       ).toBeVisible();

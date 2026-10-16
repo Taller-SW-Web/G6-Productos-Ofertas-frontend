@@ -1,8 +1,11 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { test, expect } from "@playwright/test";
 import { MockInventoryAdapter } from "../src/features/inventory/adapters/mockInventoryAdapter";
 import { AlternateInventoryRepository } from "./adapters/alternateInventoryRepository";
 import { InventoryError } from "../src/features/inventory/services/inventoryErrors";
 import type { ReceiveTransferPayload } from "../src/features/inventory/services/inventoryTypes";
+
+const { describe, beforeEach } = test;
+const it = test;
 
 describe("P1: Idempotencia y validaciones de operaciones", () => {
   let mockAdapter: MockInventoryAdapter;
@@ -42,7 +45,7 @@ describe("P1: Idempotencia y validaciones de operaciones", () => {
 
       try {
         await mockAdapter.receiveTransfer(payload);
-        expect.unreachable("Debió lanzar InventoryError");
+        throw new Error("Debió lanzar InventoryError");
       } catch (err) {
         expect(err).toBeInstanceOf(InventoryError);
         const error = err as InventoryError;
@@ -80,7 +83,7 @@ describe("P1: Idempotencia y validaciones de operaciones", () => {
 
       try {
         await mockAdapter.receiveTransfer(payload);
-        expect.unreachable("Debió lanzar InventoryError");
+        throw new Error("Debió lanzar InventoryError");
       } catch (err) {
         expect(err).toBeInstanceOf(InventoryError);
         const error = err as InventoryError;
@@ -245,7 +248,7 @@ describe("P1: Idempotencia y validaciones de operaciones", () => {
       // Verificar que el error tiene código IDEMPOTENCY_CONFLICT
       try {
         await mockAdapter.receiveTransfer(payload2);
-        expect.unreachable("Debió lanzar IDEMPOTENCY_CONFLICT");
+        throw new Error("Debió lanzar IDEMPOTENCY_CONFLICT");
       } catch (err) {
         expect(err).toBeInstanceOf(InventoryError);
         const error = err as InventoryError;
@@ -285,7 +288,7 @@ describe("P1: Idempotencia y validaciones de operaciones", () => {
 
       try {
         await mockAdapter.receiveTransfer(payload2);
-        expect.unreachable("Debió lanzar TRASLADO_NO_RECIBIBLE");
+        throw new Error("Debió lanzar TRASLADO_NO_RECIBIBLE");
       } catch (err) {
         expect(err).toBeInstanceOf(InventoryError);
         const error = err as InventoryError;
@@ -316,7 +319,7 @@ describe("P1: Idempotencia y validaciones de operaciones", () => {
           operationId: "not-a-uuid",
           receivedAt: new Date().toISOString(),
         });
-        expect.unreachable("Debió lanzar InventoryError");
+        throw new Error("Debió lanzar InventoryError");
       } catch (err) {
         expect(err).toBeInstanceOf(InventoryError);
         const error = err as InventoryError;
@@ -347,7 +350,7 @@ describe("P1: Idempotencia y validaciones de operaciones", () => {
           receivedAt: new Date().toISOString(),
           note: "X".repeat(501),
         });
-        expect.unreachable("Debió lanzar InventoryError");
+        throw new Error("Debió lanzar InventoryError");
       } catch (err) {
         expect(err).toBeInstanceOf(InventoryError);
         const error = err as InventoryError;
@@ -508,7 +511,7 @@ describe("P1: Idempotencia y validaciones de operaciones", () => {
           operationId,
           receivedAt: new Date().toISOString(),
         });
-        expect.unreachable("Debió lanzar IDEMPOTENCY_CONFLICT");
+        throw new Error("Debió lanzar IDEMPOTENCY_CONFLICT");
       } catch (err) {
         expect(err).toBeInstanceOf(InventoryError);
         const error = err as InventoryError;
@@ -546,7 +549,7 @@ describe("P1: Idempotencia y validaciones de operaciones", () => {
 
       try {
         await alternateRepo.receiveTransfer(payload2);
-        expect.unreachable("Debió lanzar TRASLADO_NO_RECIBIBLE");
+        throw new Error("Debió lanzar TRASLADO_NO_RECIBIBLE");
       } catch (err) {
         expect(err).toBeInstanceOf(InventoryError);
         const error = err as InventoryError;

@@ -1,14 +1,15 @@
 # Guía de implementación Frontend React — Productos y Ofertas
 
 > **Ubicación de destino:** `frontend/docs/GUIA_IMPLEMENTACION_FRONTEND_REACT.md`  
-> **Estado:** guía de ejecución para la futura aplicación frontend productiva. Su existencia no implica que el proyecto React esté inicializado ni que sus funcionalidades estén implementadas.  
+> **Contexto histórico:** esta guía nació como plan de ejecución de una futura aplicación. Las referencias a una inicialización pendiente, a un stack objetivo y a la revisión de Foundation describen esos momentos; no describen por sí solas el estado actual del repositorio.
+> **Estado vigente:** Frontend ya contiene una aplicación React. Esta guía mantiene instrucciones de implementación; para el estado actual de rutas y capacidades, consulta [README.md](../README.md), [AGENTS.md](../AGENTS.md) y `package.json`. Las instrucciones de trabajo vigentes se encuentran en `AGENTS.md`; esta guía las complementa.
 > **Ámbito:** Frontend de **Productos y Ofertas** del proyecto Taller de Construcción de Software Web.  
-> **Stack objetivo:** React, TypeScript, Vite, Mantine y Tabler Icons; comprobar en `package.json` qué está realmente instalado.  
+> **Stack:** consulta `package.json` para las versiones instaladas; la lista de esta guía expresa las tecnologías usadas, no versiones objetivo.
 > **Alcance UX vigente:** **Web Desktop**, revisión de referencia a **1440 px**. No exigir variantes mobile/tablet sin decisión expresa.
 
-> **Implementación disponible:** consultar [COMPONENTES_FOUNDATION.md](COMPONENTES_FOUNDATION.md) para las APIs y rutas reales de la base y [VALIDACION_FOUNDATION.md](VALIDACION_FOUNDATION.md) para resultados. Los ejemplos/estructuras objetivo de esta guía no implican que todos los MK estén implementados.
+> **Inventario y evidencia:** consultar [COMPONENTES_FOUNDATION.md](COMPONENTES_FOUNDATION.md) para las APIs y rutas reales de la base y [VALIDACION_FOUNDATION.md](VALIDACION_FOUNDATION.md) para resultados de su revisión. Los ejemplos/estructuras objetivo de esta guía no implican que todos los MK estén implementados.
 
-> **Revisión vigente de Foundation:** DESIGN 1.1.0, Docs `master` en `be5c2db16aca6d6d18b3005a2da4205f724038e3`, ruta `ux/mockups/DESIGN.md`. El shell, la navegación y los registros de rutas de producto/demostración viven en módulos separados de `src/app/`. La base auditada de Frontend es `ceee9d2`; la aprobación de las correcciones sigue requiriendo revisión humana independiente.
+> **Antecedente de revisión de Foundation:** en aquella revisión se consultó DESIGN 1.1.0 de Docs `master` en `be5c2db16aca6d6d18b3005a2da4205f724038e3`; la base auditada de Frontend fue `ceee9d2`. Estos SHAs y el resultado de esa revisión son contexto histórico, no referencias automáticas a HEAD o a la última versión normativa. El shell, la navegación y los registros de rutas de producto/demostración viven en módulos separados de `src/app/`; la aprobación de correcciones requiere revisión humana independiente.
 
 ---
 
@@ -41,7 +42,7 @@ G6-Productos-Ofertas/                # Carpeta contenedora; NO crear aquí otro 
 │   ├── AGENTS.md
 │   ├── docs/
 │   │   └── GUIA_IMPLEMENTACION_FRONTEND_REACT.md
-│   └── src/                   # Solo cuando se inicialice la aplicación
+│   └── src/                   # Aplicación React/TypeScript
 ├── backend/                   # Repositorio independiente
 │   └── .git/
 └── docs/                      # Repositorio independiente
@@ -79,7 +80,7 @@ Si `../docs` no existe: comprobar directorio actual y permisos; si el agente sol
 
 ### 1.3 Referencia documental oficial
 
-- Repositorio: <https://github.com/Taller-SW-Web/Productos-y-Ofertas-docs>
+- Repositorio: <https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs>
 - Rama documental habitual: `master`; comprobar SHA actual cuando se consume una fuente.
 - Design System: `../docs/ux/mockups/DESIGN.md`
 - UX transversal: `../docs/ux/mockups/ux/`
