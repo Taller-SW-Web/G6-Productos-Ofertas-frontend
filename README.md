@@ -120,6 +120,8 @@ Los reportes técnicos y las capturas que corresponden a auditorías concretas e
 
 ## Documentación relacionada
 
+Despliegue nativo GitHub → Vercel: [configuración inicial, bootstrap, smoke y operación](docs/DESPLIEGUE_VERCEL.md). El [registro de validación](docs/VALIDACION_VERCEL.md) distingue aprovisionamiento, permisos y comprobaciones pendientes de producción.
+
 | Tipo | Fuente |
 |---|---|
 | Instrucciones del repositorio y agentes | [AGENTS.md](AGENTS.md) |

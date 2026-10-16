@@ -9,3 +9,4 @@ playwright-report/
 *.log
 MK-003/
 MK-004/
+.vercel/
