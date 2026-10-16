@@ -29,6 +29,7 @@ repository.audit.failReceive = params.get("fail-receive") === "1";
 repository.audit.empty = params.get("empty") === "1";
 repository.audit.failCategories = params.get("fail-categories") === "1";
 repository.audit.failBrands = params.get("fail-brands") === "1";
+repository.audit.failLocations = params.get("fail-locations") === "1";
 
 // Inyectar el repositorio alternativo en el singleton
 resetInventoryRepository(repository);

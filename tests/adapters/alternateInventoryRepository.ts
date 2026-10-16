@@ -24,6 +24,7 @@ export interface AlternateInventoryAudit {
   empty: boolean;
   failCategories: boolean;
   failBrands: boolean;
+  failLocations: boolean;
 }
 
 // Indicadores "sin datos": se usan cuando no hay datos para la selección, para
@@ -120,6 +121,7 @@ export class AlternateInventoryRepository implements InventoryRepository {
     empty: false,
     failCategories: false,
     failBrands: false,
+    failLocations: false,
   };
 
   private stock: StockItem[] = JSON.parse(JSON.stringify(alternateInventoryStock));
@@ -712,6 +714,11 @@ export class AlternateInventoryRepository implements InventoryRepository {
   }
 
   async getLocations(): Promise<InventoryLocationOption[]> {
+    if (this.audit.failLocations) {
+      throw new Error(
+        "Error controlado en AlternateInventoryRepository.getLocations",
+      );
+    }
     const locations = new Map<string, InventoryLocationOption>();
     for (const item of this.stock) {
       if (!locations.has(item.locationName)) {

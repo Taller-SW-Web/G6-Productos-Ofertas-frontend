@@ -10,6 +10,8 @@ import type { ReceiveTransferPayload } from "../src/features/inventory/services/
 //   TAC-10 (P1) KPI por ubicación: agotado en una, disponible en otra.
 //   TAC-11 (P1) Coherencia entre alerta y contador de discrepancias.
 //   TAC-12 (P2) Reintentar filtros sin recargar la página.
+//   TAC-13 (P2) Aclarar que los estados por SKU no son mutuamente excluyentes.
+//   TAC-14 (P2) Incluir el error de ubicaciones en el aviso parcial y reintentarlo.
 
 const { describe, beforeEach } = test;
 const it = test;
@@ -34,7 +36,7 @@ function reception(
   };
 }
 
-describe("Auditoría MK-016 · regresiones TAC-06…TAC-12", () => {
+describe("Auditoría MK-016 · regresiones TAC-06…TAC-14", () => {
   describe("TAC-06 (P1) · KPI por SKU en varias ubicaciones", () => {
     let adapter: MockInventoryAdapter;
 
@@ -262,6 +264,70 @@ describe("Auditoría MK-016 · regresiones TAC-06…TAC-12", () => {
       await categoryFilter.click();
       await expect(
         page.getByRole("option", { name: "Calzado", exact: true }),
+      ).toBeVisible();
+      await page.keyboard.press("Escape");
+    });
+  });
+
+  describe("TAC-13 (P2) · Estados por SKU no excluyentes", () => {
+    it("aclara que un SKU puede contarse en varios estados y superar los SKU únicos", async ({
+      page,
+    }: {
+      page: Page;
+    }) => {
+      await page.goto(
+        "/tests/harness/inventory-adapter.html?path=/inventario/dashboard",
+      );
+
+      await expect(
+        page.getByRole("heading", { name: "Resumen de indicadores clave" }),
+      ).toBeVisible();
+      // La nota debe explicar que los conteos por estado pueden solaparse.
+      await expect(page.getByText(/no son excluyentes/i)).toBeVisible();
+      await expect(
+        page.getByText(/puede superar el total de SKU únicos/i),
+      ).toBeVisible();
+    });
+  });
+
+  describe("TAC-14 (P2) · Error de ubicaciones en el aviso parcial", () => {
+    it("incluye ubicaciones en el aviso y las recupera al reintentar", async ({
+      page,
+    }: {
+      page: Page;
+    }) => {
+      await page.goto(
+        "/tests/harness/inventory-adapter.html?path=/inventario/dashboard&fail-locations=1",
+      );
+
+      const notice = page.getByText(
+        "No se pudieron cargar algunas opciones de filtro",
+      );
+      await expect(notice).toBeVisible();
+      // El aviso nombra explícitamente la fuente que falló.
+      await expect(page.getByText(/^Ubicaciones:/)).toBeVisible();
+      // Y no inventa errores de las fuentes que sí cargaron.
+      await expect(page.getByText(/^Categorías:/)).toHaveCount(0);
+      await expect(page.getByText(/^Marcas:/)).toHaveCount(0);
+
+      // La fuente deja de fallar y el usuario reintenta sin recargar.
+      await page.evaluate(() => {
+        const audit = (
+          window as unknown as { inventoryAudit: Record<string, boolean> }
+        ).inventoryAudit;
+        audit.failLocations = false;
+      });
+      await page.getByRole("button", { name: "Reintentar filtros" }).click();
+
+      // Se recuperan las ubicaciones; el aviso desaparece.
+      await expect(notice).toHaveCount(0);
+      const locationFilter = page.getByRole("combobox", {
+        name: "Filtrar por ubicación",
+      });
+      await expect(locationFilter).toBeEnabled();
+      await locationFilter.click();
+      await expect(
+        page.getByRole("option", { name: "Tienda Cusco Imperial", exact: true }),
       ).toBeVisible();
       await page.keyboard.press("Escape");
     });
