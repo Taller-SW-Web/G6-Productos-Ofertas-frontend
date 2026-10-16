@@ -1,11 +1,11 @@
 # Contrato Frontend — Módulo de Inventario (MK-015 / MK-016)
 
-**Versión de referencia:** `1.1.0`
+**Versión de referencia:** `1.2.0`
 **Repositorio oficial de especificaciones y contratos:** `Taller-SW-Web/G6-Productos-Ofertas-docs`
 **Documentos contractuales de referencia:**
 - `requisitos/specs/SPEC-015-control-stock-disponibilidad.md` (Control de stock, umbrales y recepciones de traslados)
 - `requisitos/specs/SPEC-016-dashboard-alertas-stock.md` (Dashboard analítico, indicadores clave y alertas)
-- `contratos/http/openapi.yaml` (OpenAPI 0.5.0 canónico)
+- `contratos/http/openapi.yaml` (OpenAPI `0.6.0-rc.1` canónico)
 - `ux/mockups/DESIGN.md` (Directrices de diseño visual y accesibilidad)
 - `contratos/http/catalogo-errores.md` (Catálogo canónico de errores de la plataforma)
 
@@ -59,19 +59,21 @@ El frontend de inventario implementa el patrón de puertos y adaptadores (Arquit
 
 | Operación / Recurso | Endpoint OpenAPI / Fuente | Estado | Estado de Integración | Brechas y Tratamiento |
 |---|---|---|---|---|
-| **Existencias de stock** (`getStockItems`) | `GET /inventario/disponibilidad` (L3611) | **PREPARADO** (Adaptador) / **IMPLEMENTADO** (Mock & Alternate) | `BLOCKED_CONTRACT` para HTTP directo | El endpoint `/inventario/disponibilidad` exige arreglo de `skus` (1..100) y no acepta paginación general ni filtros por categoría/marca/estado. Nombres de producto y categoría no vienen en `DisponibilidadStock`; se resuelven vía catálogo. `stock_version` ausente en el esquema HTTP. |
+| **Existencias de stock** (`getStockItems`) | `GET /inventario/disponibilidad` (L3611) | **PREPARADO** (Adaptador) / **IMPLEMENTADO** (Mock & Alternate) | `BLOCKED_CONTRACT` para HTTP directo | El endpoint `/inventario/disponibilidad` exige arreglo de `skus` (1..100) y no acepta paginación general ni filtros por categoría/marca/estado. Nombres de producto y categoría no vienen en `DisponibilidadStock`; se resuelven vía catálogo. En `0.6.0-rc.1` el esquema añade `blocked` y `status` (consumidos por el adapter), pero continúa sin exponer nombres ni `stock_version`. |
 | **Detalle de saldo por SKU** (`getStockDetail`) | `GET /inventario/disponibilidad?skus={sku}&location_id={loc}` | **PREPARADO** / **IMPLEMENTADO** | `BLOCKED_CONTRACT` para HTTP | Requiere joins de catálogo para nombres legibles y versión de stock. |
-| **Configuración de umbrales** (`getThresholds`) | `GET /inventario/umbrales` (L17073) | **PREPARADO** / **IMPLEMENTADO** | Listo para conectar | Mapeo exacto con `UmbralInventario`: `{ umbralGlobal, overrides }`. |
-| **Actualizar umbral global** (`updateGlobalThreshold`) | `PUT /inventario/umbrales/global` (L17176) | **PREPARADO** / **IMPLEMENTADO** | Listo para conectar | Valida entero positivo o cero. Código de error: `VALIDACION`. |
-| **Actualizar umbral por SKU** (`updateSkuThreshold`) | `PUT /inventario/umbrales/skus/{sku}` (L17305) | **PREPARADO** / **IMPLEMENTADO** | Listo para conectar | Valida entero positivo y SKU válido. |
-| **Bandeja de traslados** (`getTransfers`) | `GET /inventario/traslados` (L19191) | **PREPARADO** / **IMPLEMENTADO** | `BLOCKED_CONTRACT` nombres | `TrasladoInventario` carece de nombres de ubicación y producto; frontend resuelve presentación mediante catálogos. |
-| **Confirmar recepción de traslado** (`receiveTransfer`) | `POST /inventario/traslados/{id}/recepciones` (L19354) | **PREPARADO** / **IMPLEMENTADO** | Listo para conectar | Cumple RFC UUID para `operation_id`, validación de `note <= 500`, rechazo con `VALIDACION` y detección de `IDEMPOTENCY_CONFLICT` (409). Cierre con discrepancia emite alerta operativa. |
-| **KPIs del Dashboard** (`getDashboardKpis`) | `GET /inventario/dashboard` (L17574) | **PREPARADO** / **IMPLEMENTADO** | `BLOCKED_CONTRACT` campos faltantes | El esquema actual carece de `blockedUnits` totales y conteos de traslados pendientes (`inTransit`, `partiallyReceived`, `withDiscrepancy`). El frontend los deriva con precisión desde los datos autoritativos. |
-| **Alertas operativas de stock** (`getDashboardAlerts`) | *Derivado en Frontend / BFF* | **IMPLEMENTADO** (Dinámico) | `BLOCKED_CONTRACT` backend | No existe endpoint `/inventario/alertas` en OpenAPI 0.5.0. El frontend calcula dinámicamente las alertas sobre saldos y traslados activos, eliminando automáticamente alertas resueltas. |
+| **Configuración de umbrales** (`getThresholds`) | `GET /inventario/umbrales` (L17585) | **PREPARADO** / **IMPLEMENTADO** | Listo para conectar | Mapeo exacto con `UmbralInventario`: `{ umbralGlobal, overrides }`. |
+| **Actualizar umbral global** (`updateGlobalThreshold`) | `PUT /inventario/umbrales/global` (L17688) | **PREPARADO** / **IMPLEMENTADO** | Listo para conectar | Valida entero positivo o cero. Código de error: `VALIDACION`. |
+| **Actualizar umbral por SKU** (`updateSkuThreshold`) | `PUT /inventario/umbrales/skus/{sku}` (L17817) | **PREPARADO** / **IMPLEMENTADO** | Listo para conectar | Valida entero positivo y SKU válido. |
+| **Bandeja de traslados** (`getTransfers`) | `GET /inventario/traslados` (L19703) | **PREPARADO** / **IMPLEMENTADO** | `BLOCKED_CONTRACT` nombres | `TrasladoInventario` carece de nombres de ubicación y producto; frontend resuelve presentación mediante catálogos. |
+| **Confirmar recepción de traslado** (`receiveTransfer`) | `POST /inventario/traslados/{id}/recepciones` (L19866) | **PREPARADO** / **IMPLEMENTADO** | Listo para conectar | Cumple RFC UUID para `operation_id`, validación de `note <= 500`, rechazo con `VALIDACION` y detección de `IDEMPOTENCY_CONFLICT` (409). Cierre con discrepancia emite alerta operativa. |
+| **KPIs del Dashboard** (`getDashboardKpis`) | `GET /inventario/dashboard` (L18086) | **PREPARADO** / **IMPLEMENTADO** | `BLOCKED_CONTRACT` campos faltantes | El esquema actual carece de `blockedUnits` totales y conteos de traslados pendientes (`inTransit`, `partiallyReceived`, `withDiscrepancy`). El frontend los deriva con precisión desde los datos autoritativos. |
+| **Alertas operativas de stock** (`getDashboardAlerts`) | *Derivado en Frontend / BFF* | **IMPLEMENTADO** (Dinámico) | `BLOCKED_CONTRACT` backend | No existe endpoint `/inventario/alertas` en OpenAPI `0.6.0-rc.1`. El frontend calcula dinámicamente las alertas sobre saldos y traslados activos, eliminando automáticamente alertas resueltas. |
 | **Distribución por ubicación** (`getLocationDistribution`) | Campo `porUbicacion` en `/inventario/dashboard` | **PREPARADO** / **IMPLEMENTADO** | Listo para conectar | Mapeo directo por `locationId`. |
 | **Catálogo de categorías** (`getCategories`) | `GET /categorias` (L20140) | **PREPARADO** / **IMPLEMENTADO** | Listo para conectar | Integrado en `useInventoryFilterOptions` mediante `Promise.allSettled`. |
 | **Catálogo de marcas** (`getBrands`) | `GET /marcas` (L20160) | **PREPARADO** / **IMPLEMENTADO** | Listo para conectar | Integrado en `useInventoryFilterOptions` mediante `Promise.allSettled`. |
-| **Catálogo de ubicaciones** (`getLocations`) | *Sin endpoint en OpenAPI 0.5.0* | **BLOCKED_CONTRACT** | `BLOCKED_CONTRACT` | Owner: Inventory (`inventory.locations` es interno). Se mantiene catálogo tipado temporal en frontend. Su ausencia no bloquea categorías ni marcas gracias al aislamiento con `Promise.allSettled`. |
+| **Catálogo de ubicaciones** (`getLocations`) | *Sin endpoint en OpenAPI `0.6.0-rc.1`* | **BLOCKED_CONTRACT** | `BLOCKED_CONTRACT` | Owner: Inventory (`inventory.locations` es interno). Se mantiene catálogo tipado temporal en frontend. Su ausencia no bloquea categorías ni marcas gracias al aislamiento con `Promise.allSettled`. |
+
+> **Novedades de `0.6.0-rc.1` fuera de alcance del mock:** el contrato incorpora `GET /inventario/disponibilidad/comercial` y `GET /inventario/operaciones/{operationId}`. Inventario no las integra (pertenecen a disponibilidad comercial y a la consulta de operaciones); se registran aquí para evitar su uso especulativo.
 
 ---
 
@@ -79,7 +81,7 @@ El frontend de inventario implementa el patrón de puertos y adaptadores (Arquit
 
 - **IMPLEMENTADO:** Funcionalidad completa en cliente, hooks, validaciones, mapeos, herramientas dev y pruebas automatizadas (Playwright).
 - **PREPARADO:** Adaptador HTTP tipado (`ApiInventoryAdapter`, `ApiInventoryCatalogAdapter`) y mappers preparados para consumir los endpoints tan pronto como backend los habilite en el entorno integrado.
-- **BLOCKED_CONTRACT:** Ausencia de endpoint, brecha de esquema o atributos faltantes en el contrato oficial OpenAPI 0.5.0. No se inventan endpoints ni estructuras ficticias; se aísla y documenta formalmente.
+- **BLOCKED_CONTRACT:** Ausencia de endpoint, brecha de esquema o atributos faltantes en el contrato oficial OpenAPI `0.6.0-rc.1`. No se inventan endpoints ni estructuras ficticias; se aísla y documenta formalmente.
 
 ---
 
@@ -109,7 +111,7 @@ La conformidad de este contrato se valida mediante los siguientes comandos. Los 
 | `npm run lint` | Cero advertencias ni errores bajo ESLint y reglas de hooks React 19. |
 | `$env:VITE_DATA_MODE = 'mock'; npm run build` | Compilación exitosa del bundle de demostración (`VITE_DATA_MODE=mock`). |
 | `$env:VITE_DATA_MODE = 'api'; npm run build` | Compilación exitosa del bundle de producción (`VITE_DATA_MODE=api`). |
-| `npm test` | Suite completa Playwright: 14 pruebas de idempotencia/contrato (`tests/inventory-idempotency.spec.ts`), 6 pruebas de independencia de mocks en harness (`tests/inventory-adapter.spec.ts`) y 22 pruebas E2E de flujos y navegación (`tests/inventory.spec.ts`). |
+| `npm test` | Suite completa Playwright (49 pruebas): 14 de idempotencia/contrato (`tests/inventory-idempotency.spec.ts`), 12 sobre el harness de independencia de mocks — 6 de sustitución de repositorio y 6 de reintentos/idempotencia/estado del modal (`tests/inventory-adapter.spec.ts`) y 23 E2E de flujos y navegación (`tests/inventory.spec.ts`). |
 | `node scripts/verify-production.mjs <mock\|api>` | Verificación en preview de producción (`1440 × 900`) para ambos modos sin errores ni carga de mocks en modo `api`. |
 
 > **Regla de evidencia:** no declarar `PASS` sin haber ejecutado el comando correspondiente y obtenido salida libre de errores. Si no se ejecutó, registrar `NO EJECUTADO`.
