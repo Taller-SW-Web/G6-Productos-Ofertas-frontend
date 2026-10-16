@@ -270,7 +270,9 @@ export function InventoryDashboardPage() {
 
         {isRevisionMode && <DevScenarioSelector />}
 
-        {(catalogErrors.categories || catalogErrors.brands) && (
+        {(catalogErrors.categories ||
+          catalogErrors.brands ||
+          catalogErrors.locations) && (
           <FeedbackAlert
             semantic="warning"
             title="No se pudieron cargar algunas opciones de filtro"
@@ -289,6 +291,9 @@ export function InventoryDashboardPage() {
             )}
             {catalogErrors.brands && (
               <Text size="sm">Marcas: {catalogErrors.brands}</Text>
+            )}
+            {catalogErrors.locations && (
+              <Text size="sm">Ubicaciones: {catalogErrors.locations}</Text>
             )}
             <Text size="sm" mt={4}>
               Los filtros que sí cargaron siguen operativos.
