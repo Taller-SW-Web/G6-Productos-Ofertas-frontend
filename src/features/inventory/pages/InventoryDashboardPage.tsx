@@ -65,6 +65,7 @@ export function InventoryDashboardPage() {
     locations,
     loading: catalogLoading,
     errors: catalogErrors,
+    reload: reloadCatalogOptions,
   } = useInventoryFilterOptions();
 
   const [selectedItem, setSelectedItem] = useState<StockItem | null>(null);
@@ -273,6 +274,15 @@ export function InventoryDashboardPage() {
           <FeedbackAlert
             semantic="warning"
             title="No se pudieron cargar algunas opciones de filtro"
+            actions={
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={reloadCatalogOptions}
+              >
+                Reintentar filtros
+              </Button>
+            }
           >
             {catalogErrors.categories && (
               <Text size="sm">Categorías: {catalogErrors.categories}</Text>

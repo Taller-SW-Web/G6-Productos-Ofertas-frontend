@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getInventoryRepository } from "../services/inventoryProvider";
 import type {
   InventoryBrandOption,
@@ -12,7 +12,7 @@ import {
 
 // Errores por fuente de catálogo: permiten distinguir un fallo parcial
 // (categorías o marcas no disponibles) de un fallo total, sin ocultar las
-// opciones que sí cargaron (hallazgo TAC-09).
+// opciones que sí cargaron y permitiendo reintentar (hallazgos TAC-09 y TAC-12).
 export interface InventoryFilterOptionErrors {
   categories?: string;
   brands?: string;
@@ -30,11 +30,19 @@ export function useInventoryFilterOptions() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [errors, setErrors] = useState<InventoryFilterOptionErrors>({});
+  const [reloadKey, setReloadKey] = useState(0);
+
+  // Permite reintentar la carga de catálogos sin recargar la página,
+  // conservando las opciones que ya se habían cargado correctamente.
+  const reload = useCallback(() => {
+    setReloadKey((key) => key + 1);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadOptions() {
+      setLoading(true);
       try {
         // Usar el repositorio real para obtener catálogos, respetando VITE_DATA_MODE global
         const repo = getInventoryRepository();
@@ -112,7 +120,7 @@ export function useInventoryFilterOptions() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadKey]);
 
-  return { categories, brands, locations, loading, error, errors };
+  return { categories, brands, locations, loading, error, errors, reload };
 }
