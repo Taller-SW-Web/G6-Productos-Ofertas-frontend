@@ -1,4 +1,5 @@
 import { priceRecords, priceTargets, targetNames } from "../mocks/prices";
+import { readMockPricingTargets } from "../../catalog/adapters/mockCatalogConsumers";
 import {
   mockReports,
   partialBatch,
@@ -100,7 +101,10 @@ export function createMockPricingRepository(clock: Clock): PricingRepository {
   return {
     async listTargets(signal) {
       signal.throwIfAborted();
-      return structuredClone(priceTargets);
+      const current = await readMockPricingTargets(signal);
+      // Keep the independent historical Pricing examples, without matching names
+      // or fabricating a price for a Catalog identity that has no Pricing record.
+      return [...structuredClone(priceTargets.filter(target => !current.some(row => row.id === target.id))), ...current];
     },
     async read(query, signal) {
       signal.throwIfAborted();

@@ -14,6 +14,8 @@ import { createPricingRuntime } from "./features/pricing/services/pricingService
 import { PricingProvider } from "./features/pricing/components/PricingProvider";
 import { resolveDataMode } from "./app/config/dataMode";
 import { DataModeContext } from "./app/config/DataModeContext";
+import { CatalogServicesContext } from "./features/catalog/services/CatalogServicesContext";
+import { getCatalogServices } from "./features/catalog/services/catalogServices";
 
 const root = createRoot(document.getElementById("root")!);
 async function start() {
@@ -30,9 +32,11 @@ async function start() {
         forceColorScheme="light"
       >
         <DataModeContext.Provider value={mode}>
-          <PricingProvider runtime={runtime}>
-            <App />
-          </PricingProvider>
+          <CatalogServicesContext.Provider value={getCatalogServices(mode)}>
+            <PricingProvider runtime={runtime}>
+              <App />
+            </PricingProvider>
+          </CatalogServicesContext.Provider>
         </DataModeContext.Provider>
       </MantineProvider>
     </StrictMode>,

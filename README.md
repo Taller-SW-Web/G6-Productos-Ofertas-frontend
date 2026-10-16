@@ -74,6 +74,15 @@ La tabla resume lo que muestran el código y la configuración de esta rama; la 
 
 Los detalles, limitaciones y estados pendientes por feature están en [AUDITORIA_MK013.md](docs/AUDITORIA_MK013.md), [AUDITORIA_CATALOGO_MK003_MK004.md](docs/AUDITORIA_CATALOGO_MK003_MK004.md), [AVANCE_FRONTEND_CUEVA.md](docs/AVANCE_FRONTEND_CUEVA.md) y [VALIDACION_MK014.md](docs/VALIDACION_MK014.md). Consulta esos informes antes de inferir alcance de una operación o estado de integración.
 
+La revisión [Catálogo/SKU, issue #35](docs/ISSUE_35_CATALOGO.md) actualiza la composición
+del demo: categorías/marcas editables provienen de Taxonomía; los nombres se resuelven
+por ID y los SKU comparten un espacio de unicidad entre productos y variantes.
+Pricing y Promociones leen la identidad/estado de los registros de Catálogo de la misma
+sesión. Pricing no crea un precio vigente a partir del precio inicial: un objetivo sin
+registro muestra «Sin precio aplicable». Se conservan las referencias históricas sin
+mapearlas por nombre; migración de IDs/roles oficiales y revisión entre owners siguen
+pendientes. Ver el informe para fuentes fijadas, pruebas, límites y evidencia de esta revisión.
+
 ## Arquitectura
 
 `src/` organiza la aplicación por capa y feature:
