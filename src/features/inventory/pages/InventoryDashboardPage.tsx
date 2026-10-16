@@ -56,6 +56,7 @@ export function InventoryDashboardPage() {
     stockItems,
     loading,
     error,
+    refetch,
   } = useInventoryDashboard(filters);
 
   const {
@@ -230,7 +231,7 @@ export function InventoryDashboardPage() {
             <Button
               size="xs"
               variant="outline"
-              onClick={handleResetFilters}
+              onClick={refetch}
             >
               Reintentar
             </Button>
@@ -276,7 +277,7 @@ export function InventoryDashboardPage() {
             alerts={alerts}
             loading={loading}
             error={error}
-            onRetry={handleResetFilters}
+            onRetry={refetch}
           />
         </div>
 
@@ -289,7 +290,7 @@ export function InventoryDashboardPage() {
             kpis={kpis}
             loading={loading}
             error={error}
-            onRetry={handleResetFilters}
+            onRetry={refetch}
           />
         </div>
 
@@ -298,7 +299,7 @@ export function InventoryDashboardPage() {
           distribution={distribution}
           loading={loading}
           error={error}
-          onRetry={handleResetFilters}
+          onRetry={refetch}
         />
 
         {/* Zona 5: Tabla analítica de inventario */}

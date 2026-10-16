@@ -9,6 +9,9 @@ import type {
 export function useInventoryStock(filters: StockFiltersQuery) {
   const revision = useInventoryChangeSignal();
   const { search, category, brand, locationId, status } = filters;
+  // Token de recarga explícito: permite reintentar una consulta fallida sin
+  // depender de que cambien los filtros (si ya estaban vacíos, no habría refetch).
+  const [reloadToken, setReloadToken] = useState(0);
   const requestKey = JSON.stringify([
     search,
     category,
@@ -16,6 +19,7 @@ export function useInventoryStock(filters: StockFiltersQuery) {
     locationId,
     status,
     revision,
+    reloadToken,
   ]);
 
   const [response, setResponse] = useState<{
@@ -54,5 +58,10 @@ export function useInventoryStock(filters: StockFiltersQuery) {
   const items = isCurrent ? response.items : [];
   const error = isCurrent ? response.error : null;
 
-  return { items, loading, error };
+  return {
+    items,
+    loading,
+    error,
+    refetch: () => setReloadToken((token) => token + 1),
+  };
 }

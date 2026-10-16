@@ -33,7 +33,7 @@ export function StockControlPage() {
     [params],
   );
 
-  const { items, loading, error } = useInventoryStock(filters);
+  const { items, loading, error, refetch } = useInventoryStock(filters);
   const { locations, loading: catalogLoading } = useInventoryFilterOptions();
   const [selectedItem, setSelectedItem] = useState<StockItem | null>(null);
 
@@ -198,7 +198,7 @@ export function StockControlPage() {
             <Button
               size="xs"
               variant="outline"
-              onClick={handleResetFilters}
+              onClick={refetch}
             >
               Reintentar consulta
             </Button>

@@ -12,6 +12,8 @@ import type {
 export function useInventoryDashboard(filters: DashboardFiltersQuery) {
   const revision = useInventoryChangeSignal();
   const { search, category, brand, locationId, status } = filters;
+  // Token de recarga explícito para reintentos reales sin alterar los filtros.
+  const [reloadToken, setReloadToken] = useState(0);
   const requestKey = JSON.stringify([
     search,
     category,
@@ -19,6 +21,7 @@ export function useInventoryDashboard(filters: DashboardFiltersQuery) {
     locationId,
     status,
     revision,
+    reloadToken,
   ]);
 
   const [response, setResponse] = useState<{
@@ -111,5 +114,6 @@ export function useInventoryDashboard(filters: DashboardFiltersQuery) {
     stockItems,
     loading,
     error,
+    refetch: () => setReloadToken((token) => token + 1),
   };
 }
