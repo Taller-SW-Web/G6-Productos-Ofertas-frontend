@@ -10,12 +10,26 @@ import {
   normalizeBrandId,
 } from "../mappings/catalogMappings";
 
+// Errores por fuente de catálogo: permiten distinguir un fallo parcial
+// (categorías o marcas no disponibles) de un fallo total, sin ocultar las
+// opciones que sí cargaron (hallazgo TAC-09).
+export interface InventoryFilterOptionErrors {
+  categories?: string;
+  brands?: string;
+  locations?: string;
+}
+
+function describeError(reason: unknown, fallback: string): string {
+  return reason instanceof Error ? reason.message : fallback;
+}
+
 export function useInventoryFilterOptions() {
   const [categories, setCategories] = useState<InventoryCategoryOption[]>([]);
   const [brands, setBrands] = useState<InventoryBrandOption[]>([]);
   const [locations, setLocations] = useState<InventoryLocationOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<InventoryFilterOptionErrors>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -35,28 +49,49 @@ export function useInventoryFilterOptions() {
 
         if (cancelled) return;
 
+        const nextErrors: InventoryFilterOptionErrors = {};
+
         if (catResult.status === "fulfilled") {
           const normalizedCategories = catResult.value.map(
             (cat) => ({ ...cat, id: normalizeCategoryId(cat.id) }),
           );
           setCategories(normalizedCategories);
+        } else {
+          // Fallo parcial: se registra para avisar en la UI sin romper el resto.
+          nextErrors.categories = describeError(
+            catResult.reason,
+            "No se pudieron cargar las categorías.",
+          );
         }
+
         if (brandResult.status === "fulfilled") {
           const normalizedBrands = brandResult.value.map(
             (brand) => ({ ...brand, id: normalizeBrandId(brand.id) }),
           );
           setBrands(normalizedBrands);
+        } else {
+          nextErrors.brands = describeError(
+            brandResult.reason,
+            "No se pudieron cargar las marcas.",
+          );
         }
+
         if (locResult.status === "fulfilled") {
           setLocations(locResult.value);
         } else {
           // Registra como BLOCKED_CONTRACT informativo si falla
           // pero no aborta el render de la página ni de otros catálogos.
+          nextErrors.locations = describeError(
+            locResult.reason,
+            "No se pudieron cargar las ubicaciones.",
+          );
           console.warn(
             "[inventory] Catálogo de ubicaciones en BLOCKED_CONTRACT:",
             locResult.reason,
           );
         }
+
+        setErrors(nextErrors);
       } catch (err: unknown) {
         if (!cancelled) {
           setError(
@@ -79,5 +114,5 @@ export function useInventoryFilterOptions() {
     };
   }, []);
 
-  return { categories, brands, locations, loading, error };
+  return { categories, brands, locations, loading, error, errors };
 }

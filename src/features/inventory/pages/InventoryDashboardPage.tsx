@@ -64,6 +64,7 @@ export function InventoryDashboardPage() {
     brands,
     locations,
     loading: catalogLoading,
+    errors: catalogErrors,
   } = useInventoryFilterOptions();
 
   const [selectedItem, setSelectedItem] = useState<StockItem | null>(null);
@@ -267,6 +268,23 @@ export function InventoryDashboardPage() {
         </FeedbackAlert>
 
         {isRevisionMode && <DevScenarioSelector />}
+
+        {(catalogErrors.categories || catalogErrors.brands) && (
+          <FeedbackAlert
+            semantic="warning"
+            title="No se pudieron cargar algunas opciones de filtro"
+          >
+            {catalogErrors.categories && (
+              <Text size="sm">Categorías: {catalogErrors.categories}</Text>
+            )}
+            {catalogErrors.brands && (
+              <Text size="sm">Marcas: {catalogErrors.brands}</Text>
+            )}
+            <Text size="sm" mt={4}>
+              Los filtros que sí cargaron siguen operativos.
+            </Text>
+          </FeedbackAlert>
+        )}
 
         {/* Zona 2: Alertas activas */}
         <div>
