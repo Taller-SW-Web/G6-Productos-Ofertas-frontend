@@ -27,12 +27,12 @@ async function selectScope(page: Page) {
     .click();
   await page
     .getByRole("checkbox", {
-      name: "Producto completo: Running Essential",
+      name: "Producto completo: Camisa Oxford Manga Larga",
       exact: true,
     })
     .check();
   await page
-    .getByRole("checkbox", { name: /SKU específico: RUN-PRO-42/ })
+    .getByRole("checkbox", { name: /SKU específico: CAS-COR-001/ })
     .check();
   await page
     .getByRole("button", { name: "Confirmar alcance", exact: true })
@@ -53,10 +53,10 @@ test("MK-006 S01/S05: typed filters and detail retain list context", async ({
   ).toBeVisible();
   await expect(
     page.getByRole("region", { name: "Alcance de productos y SKU" }),
-  ).toContainText("Running Essential");
+  ).toContainText("Camisa Oxford Manga Larga");
   await expect(
     page.getByRole("region", { name: "Alcance de productos y SKU" }),
-  ).toContainText("RUN-PRO-42");
+  ).toContainText("CAS-COR-001");
   await page
     .getByRole("link", { name: "Volver al listado", exact: true })
     .click();
@@ -105,13 +105,13 @@ test("MK-006 S02/S04: validate discount/channels and preserve draft and typed sc
     .click();
   await page
     .getByRole("checkbox", {
-      name: "Producto completo: Running Essential",
+      name: "Producto completo: Camisa Oxford Manga Larga",
       exact: true,
     })
     .uncheck();
   await page
     .getByRole("checkbox", {
-      name: "Producto completo: Gorra deportiva Inka Shield",
+      name: "Producto completo: Casaca Cortaviento Trail",
       exact: true,
     })
     .check();
@@ -119,7 +119,7 @@ test("MK-006 S02/S04: validate discount/channels and preserve draft and typed sc
     .getByRole("link", { name: "Cancelar selección", exact: true })
     .click();
   const scope = page.getByRole("region", { name: "Canales y alcance" });
-  await expect(scope).toContainText("Producto completo: Running Essential");
+  await expect(scope).toContainText("Producto completo: Camisa Oxford Manga Larga");
   await expect(scope).not.toContainText("Producto completo: Gorra");
   await page
     .getByRole("button", { name: "Crear promoción", exact: true })
@@ -131,10 +131,10 @@ test("MK-006 S02/S04: validate discount/channels and preserve draft and typed sc
     name: "Alcance de productos y SKU",
   });
   await expect(savedScope).toContainText(
-    "Producto completo: Running Essential",
+    "Producto completo: Camisa Oxford Manga Larga",
   );
-  await expect(savedScope).not.toContainText("SKU-RUN-ESS-40");
-  await expect(savedScope).toContainText("SKU específico: RUN-PRO-42");
+  await expect(savedScope).not.toContainText("CAM-OXF-BLA-M");
+  await expect(savedScope).toContainText("SKU específico: CAS-COR-001");
 });
 test("MK-006 S03/S06: allowed modality is revalidated and activation history survives deactivation", async ({
   page,
@@ -318,7 +318,7 @@ test("MK-006: desktop evidence for all six views", async ({ page }) => {
     else if (file === "s04")
       await expect(
         page.getByRole("checkbox", {
-          name: "Producto completo: Running Essential",
+          name: "Producto completo: Camisa Oxford Manga Larga",
         }),
       ).toBeVisible();
     expect(

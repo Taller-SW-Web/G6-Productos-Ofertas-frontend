@@ -74,6 +74,24 @@ La tabla resume lo que muestran el código y la configuración de esta rama; la 
 
 Los detalles, limitaciones y estados pendientes por feature están en [AUDITORIA_MK013.md](docs/AUDITORIA_MK013.md), [AUDITORIA_CATALOGO_MK003_MK004.md](docs/AUDITORIA_CATALOGO_MK003_MK004.md), [AVANCE_FRONTEND_CUEVA.md](docs/AVANCE_FRONTEND_CUEVA.md) y [VALIDACION_MK014.md](docs/VALIDACION_MK014.md). Consulta esos informes antes de inferir alcance de una operación o estado de integración.
 
+En la aplicación mock, Promociones y Recomendaciones consultan el mismo servicio
+de Catálogo que Productos/Variantes mediante
+`promotions/adapters/catalogPromotionRepository.ts`. Las ediciones, activaciones y
+desactivaciones se reflejan al abrir sus selectores durante la misma sesión; el
+guardado revalida productos y SKU activos. Los productos completos conservan su
+ID y los SKU específicos su código. No se calcula stock ni se obtiene un precio
+de referencia. Las reglas y campañas de muestra usan referencias explícitas al
+catálogo inicial; la lectura no sustituye referencias ausentes por otros productos.
+Los cupones consultan el nombre y la vigencia actuales de su promoción asociada,
+conservando sus límites y usos.
+
+`getPromotionRuntime("mock")` compone esta demostración integrada mediante
+`createCatalogMockPromotionServices(getCatalogServices("mock"))`. La factory
+`createMockPromotionServices` conserva la demostración aislada para pruebas con
+puertos/fixtures inyectados. No existe fallback desde el catálogo integrado al
+aislado ni desde API a mock. El [reporte de corrección #36](docs/CORRECCIONES_CUEVA_36.md)
+registra reproducción, pruebas y revisiones aún pendientes para #7/#8/#9.
+
 ## Arquitectura
 
 `src/` organiza la aplicación por capa y feature:
