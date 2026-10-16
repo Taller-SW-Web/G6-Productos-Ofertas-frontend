@@ -419,7 +419,7 @@ export class MockInventoryAdapter implements InventoryRepository {
           title: `Quiebre de stock: ${item.productName}`,
           message: `${item.productName} (${item.sku}) en ${item.locationName} no tiene unidades disponibles.`,
           actionLabel: "Ver detalle",
-          targetRoute: `/inventario?search=${item.sku}`,
+          targetRoute: `/inventario?search=${item.sku}&locationId=${item.locationId}`,
           sku: item.sku,
           locationId: item.locationId,
         });
@@ -430,7 +430,7 @@ export class MockInventoryAdapter implements InventoryRepository {
           title: `Stock bajo: ${item.productName}`,
           message: `${item.productName} (${item.sku}) en ${item.locationName} tiene ${item.available} unidades, debajo del umbral de ${effectiveThreshold}.`,
           actionLabel: "Ver detalle",
-          targetRoute: `/inventario?search=${item.sku}`,
+          targetRoute: `/inventario?search=${item.sku}&locationId=${item.locationId}`,
           sku: item.sku,
           locationId: item.locationId,
         });

@@ -443,8 +443,9 @@ export class AlternateInventoryRepository implements InventoryRepository {
           title: `Quiebre de stock: ${item.sku}`,
           message: `${item.productName} sin unidades disponibles.`,
           actionLabel: "Ver detalle",
-          targetRoute: `/inventario?search=${item.sku}`,
+          targetRoute: `/inventario?search=${item.sku}&locationId=${item.locationId}`,
           sku: item.sku,
+          locationId: item.locationId,
         });
       } else if (item.status === "STOCK_BAJO") {
         alerts.push({
@@ -453,8 +454,9 @@ export class AlternateInventoryRepository implements InventoryRepository {
           title: `Stock bajo: ${item.sku}`,
           message: `${item.productName} tiene existencias por debajo del umbral.`,
           actionLabel: "Ver detalle",
-          targetRoute: `/inventario?search=${item.sku}`,
+          targetRoute: `/inventario?search=${item.sku}&locationId=${item.locationId}`,
           sku: item.sku,
+          locationId: item.locationId,
         });
       }
     }

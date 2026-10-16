@@ -230,8 +230,9 @@ export const initialAlerts: InventoryAlert[] = [
     message:
       "Medias Compresión Pro (MED-CP-U-BLK) tiene 0 unidades disponibles en Almacén Central Lima.",
     actionLabel: "Revisar saldo",
-    targetRoute: "/inventario?sku=MED-CP-U-BLK",
+    targetRoute: "/inventario?search=MED-CP-U-BLK&locationId=ALM-CEN",
     sku: "MED-CP-U-BLK",
+    locationId: "ALM-CEN",
   },
   {
     id: "alt-03",
@@ -240,8 +241,9 @@ export const initialAlerts: InventoryAlert[] = [
     message:
       "Polo Running Dry-Fit (POL-RUN-L-BLU) en Tienda San Isidro cuenta con 8 unidades (umbral: 10).",
     actionLabel: "Revisar saldo",
-    targetRoute: "/inventario?sku=POL-RUN-L-BLU",
+    targetRoute: "/inventario?search=POL-RUN-L-BLU&locationId=RET-SAN",
     sku: "POL-RUN-L-BLU",
+    locationId: "RET-SAN",
   },
 ];
 
