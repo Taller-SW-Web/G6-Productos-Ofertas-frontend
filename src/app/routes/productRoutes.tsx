@@ -59,8 +59,17 @@ import {
   BulkProgressPage,
   BulkResultPage,
   BulkDownloadsPage,
+  CombosListPage,
+  ComboFormPage,
+  ComboDetailPage,
+  ComboUnavailablePage,
 } from "./productPages";
 export const productRoutes: RouteObject[] = [
+  { path: "/combos", element: <CombosListPage /> },
+  { path: "/combos/nuevo", element: <ComboFormPage /> },
+  { path: "/combos/:comboId/editar", element: <ComboFormPage /> },
+  { path: "/combos/:comboId/no-disponible", element: <ComboUnavailablePage /> },
+  { path: "/combos/:comboId", element: <ComboDetailPage /> },
   { path: "/productos", element: <ProductsPage /> },
   { path: "/productos/nuevo", element: <ProductCreatePage /> },
   { path: "/productos/:productId", element: <ProductDetailPage /> },
