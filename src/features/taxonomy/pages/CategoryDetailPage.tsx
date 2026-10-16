@@ -169,8 +169,8 @@ function CategoryDetailContent({
               <Button variant="outline" onClick={reiniciar}>
                 Entendido
               </Button>
-              <Button variant="outline" onClick={() => navigate("/categorias")}>
-                Volver al árbol
+              <Button variant="outline" onClick={() => navigate(`/categorias/${detalle.padreId}`)}>
+                Ir a la categoría padre
               </Button>
             </Group>
           }
