@@ -434,6 +434,31 @@ test.describe("MK-016: Dashboard analítico y alertas de inventario (Issue #18)"
       page.getByText("No se encontraron SKUs para los criterios seleccionados"),
     ).toBeVisible();
   });
+
+  test("MK-016/P1: El enlace de la alerta conserva SKU y ubicación específica", async ({
+    page,
+  }) => {
+    await page.goto("/inventario/dashboard");
+
+    const alert = page
+      .locator('[role="alert"], [role="status"]')
+      .filter({ hasText: "Stock bajo: Polo Running Dry-Fit" });
+    const detailLink = alert.getByRole("link", { name: "Ver detalle" });
+
+    await expect(detailLink).toHaveAttribute("href", /search=POL-RUN-L-BLU/);
+    await expect(detailLink).toHaveAttribute("href", /locationId=RET-SAN/);
+
+    await detailLink.click();
+
+    // La navegación es cliente: esperar a que el dashboard haya desmontado por
+    // completo antes de consultar la tabla de stock (evita solapamiento).
+    await expect(page).toHaveURL(/locationId=RET-SAN/);
+    await expect(
+      page.getByRole("heading", { name: "Dashboard analítico y alertas de stock" }),
+    ).toHaveCount(0);
+    await expect(page.getByRole("cell", { name: "POL-RUN-L-BLU" })).toBeVisible();
+    await expect(page.getByRole("cell", { name: "ZAP-TRL-40-BLK" })).toHaveCount(0);
+  });
 });
 
 test.describe("NAV-INV: Navegación lateral de Inventario (Issue #24)", () => {
