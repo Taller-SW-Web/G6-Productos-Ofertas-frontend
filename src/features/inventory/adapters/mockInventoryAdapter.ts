@@ -60,6 +60,79 @@ export class MockInventoryAdapter implements InventoryRepository {
     return val.toUpperCase().replace(/[\s-]+/g, "_").trim();
   }
 
+  // Catálogo SKU -> categoría/marca para resolver los filtros de traslados, que
+  // no traen esos atributos en el propio traslado.
+  private buildSkuCatalog(): Map<
+    string,
+    { categoryName: string; brandName: string }
+  > {
+    const catalog = new Map<
+      string,
+      { categoryName: string; brandName: string }
+    >();
+    for (const item of this.stockItems) {
+      if (!catalog.has(item.sku)) {
+        catalog.set(item.sku, {
+          categoryName: item.categoryName,
+          brandName: item.brandName,
+        });
+      }
+    }
+    return catalog;
+  }
+
+  // Criterio único de filtrado de traslados para el dashboard: destino, búsqueda
+  // y categoría/marca por catálogo. Lo usan alertas y KPIs de traslado para no
+  // contradecirse (hallazgo TAC-11).
+  private matchesTransferFilters(
+    transfer: TransferItem,
+    filters: DashboardFiltersQuery | undefined,
+    catalog: Map<string, { categoryName: string; brandName: string }>,
+  ): boolean {
+    if (
+      filters?.locationId &&
+      filters.locationId !== "all" &&
+      transfer.targetLocationId !== filters.locationId
+    ) {
+      return false;
+    }
+
+    const search = filters?.search?.toLowerCase().trim();
+    if (
+      search &&
+      !transfer.sku.toLowerCase().includes(search) &&
+      !transfer.productName.toLowerCase().includes(search)
+    ) {
+      return false;
+    }
+
+    const catalogEntry = catalog.get(transfer.sku);
+
+    if (filters?.category && filters.category !== "all") {
+      const target = this.normalizeKey(filters.category);
+      if (
+        !catalogEntry ||
+        (catalogEntry.categoryName !== filters.category &&
+          this.normalizeKey(catalogEntry.categoryName) !== target)
+      ) {
+        return false;
+      }
+    }
+
+    if (filters?.brand && filters.brand !== "all") {
+      const target = this.normalizeKey(filters.brand);
+      if (
+        !catalogEntry ||
+        (catalogEntry.brandName !== filters.brand &&
+          this.normalizeKey(catalogEntry.brandName) !== target)
+      ) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
   private getOrCreateDestinationStockItem(transfer: TransferItem): StockItem {
     const existing = this.stockItems.find(
       (s) => s.sku === transfer.sku && s.locationId === transfer.targetLocationId,
@@ -333,88 +406,92 @@ export class MockInventoryAdapter implements InventoryRepository {
       status: filters?.status,
     });
 
-    // Sin datos de inventario para la selección consultada: los indicadores son
-    // "sin datos" (null), nunca cero. El cero real queda para cuando el dato
-    // existe y vale 0 (hallazgo TAC-08).
-    if (items.length === 0) {
-      return {
-        availableUnits: null,
-        blockedUnits: null,
-        totalPhysicalUnits: null,
-        totalVendibleSkus: null,
-        skusAvailable: null,
-        skusLowStock: null,
-        skusOutOfStock: null,
-        reservedUnits: null,
-        totalPendingTransfers: null,
-        transfersInTransit: null,
-        transfersPartiallyReceived: null,
-        transfersWithDiscrepancy: null,
-      };
+    // SALDOS: "sin datos" (null) cuando la selección no devuelve filas de stock.
+    // El cero real queda reservado para cuando el dato existe y vale 0 (TAC-08).
+    const hasStockData = items.length > 0;
+
+    let availableUnits: number | null = null;
+    let blockedUnits: number | null = null;
+    let totalPhysicalUnits: number | null = null;
+    let totalVendibleSkus: number | null = null;
+    let skusAvailable: number | null = null;
+    let skusLowStock: number | null = null;
+    let skusOutOfStock: number | null = null;
+    let reservedUnits: number | null = null;
+
+    if (hasStockData) {
+      availableUnits = items.reduce((acc, i) => acc + i.available, 0);
+      blockedUnits = items.reduce((acc, i) => acc + i.blocked, 0);
+      totalPhysicalUnits = items.reduce((acc, i) => acc + i.onHand, 0);
+      reservedUnits = items.reduce((acc, i) => acc + i.reserved, 0);
+
+      // KPIs por SKU coherentes con las alertas por ubicación: el SKU cuenta en
+      // CADA estado para el que tenga al menos una ubicación, sin sumar saldos
+      // que oculten el estado de otra (hallazgos TAC-06 y TAC-10).
+      const availableSkus = new Set<string>();
+      const lowStockSkus = new Set<string>();
+      const outOfStockSkus = new Set<string>();
+      const allSkus = new Set<string>();
+
+      for (const item of items) {
+        allSkus.add(item.sku);
+        if (item.status === "AGOTADO") outOfStockSkus.add(item.sku);
+        else if (item.status === "STOCK_BAJO") lowStockSkus.add(item.sku);
+        else availableSkus.add(item.sku);
+      }
+
+      totalVendibleSkus = allSkus.size;
+      skusAvailable = availableSkus.size;
+      skusLowStock = lowStockSkus.size;
+      skusOutOfStock = outOfStockSkus.size;
     }
 
-    const availableUnits = items.reduce((acc, i) => acc + i.available, 0);
-    const blockedUnits = items.reduce((acc, i) => acc + i.blocked, 0);
-    const totalPhysicalUnits = items.reduce((acc, i) => acc + i.onHand, 0);
-    const reservedUnits = items.reduce((acc, i) => acc + i.reserved, 0);
+    // TRASLADOS: mismos criterios que las alertas de discrepancia (destino,
+    // búsqueda y catálogo del SKU), independientes del stock filtrado, para que
+    // alerta y contador nunca se contradigan (hallazgo TAC-11). "Sin datos" solo
+    // cuando no existe catálogo de traslados.
+    const hasTransferData = this.transfers.length > 0;
 
-    // KPIs por SKU cuando el mismo SKU existe en varias ubicaciones: se clasifica
-    // por ubicación y NUNCA se agrega el saldo de otras ubicaciones para ocultar
-    // el stock bajo de una (hallazgo TAC-06).
-    //   AGOTADO    -> sin unidades disponibles en ninguna de sus ubicaciones
-    //   STOCK_BAJO -> al menos una ubicación está bajo umbral (0 < available <= umbral)
-    //   DISPONIBLE -> ninguna ubicación está baja y tiene saldo
-    const bySku = new Map<string, { totalAvailable: number; anyLow: boolean }>();
-    for (const item of items) {
-      const aggregate = bySku.get(item.sku) ?? {
-        totalAvailable: 0,
-        anyLow: false,
-      };
-      aggregate.totalAvailable += item.available;
-      if (item.status === "STOCK_BAJO") aggregate.anyLow = true;
-      bySku.set(item.sku, aggregate);
-    }
+    let totalPendingTransfers: number | null = null;
+    let transfersInTransit: number | null = null;
+    let transfersPartiallyReceived: number | null = null;
+    let transfersWithDiscrepancy: number | null = null;
 
-    let skusAvailable = 0;
-    let skusLowStock = 0;
-    let skusOutOfStock = 0;
-    for (const aggregate of bySku.values()) {
-      if (aggregate.totalAvailable === 0) skusOutOfStock += 1;
-      else if (aggregate.anyLow) skusLowStock += 1;
-      else skusAvailable += 1;
-    }
-
-    const allowedSkus = new Set(bySku.keys());
-    let relatedTransfers = this.transfers.filter((t) => allowedSkus.has(t.sku));
-    if (filters?.locationId && filters.locationId !== "all") {
-      relatedTransfers = relatedTransfers.filter(
-        (t) => t.targetLocationId === filters.locationId,
+    if (hasTransferData) {
+      const skuCatalog = this.buildSkuCatalog();
+      const relatedTransfers = this.transfers.filter((transfer) =>
+        this.matchesTransferFilters(transfer, filters, skuCatalog),
       );
-    }
 
-    const inTransit = relatedTransfers.filter(
-      (t) => t.status === "EN_TRANSITO",
-    ).length;
-    const partial = relatedTransfers.filter(
-      (t) => t.status === "RECIBIDO_PARCIAL",
-    ).length;
-    const discrepancies = relatedTransfers.filter(
-      (t) => t.status === "COMPLETADO_CON_DISCREPANCIA",
-    ).length;
+      const inTransit = relatedTransfers.filter(
+        (t) => t.status === "EN_TRANSITO",
+      ).length;
+      const partial = relatedTransfers.filter(
+        (t) => t.status === "RECIBIDO_PARCIAL",
+      ).length;
+      const discrepancies = relatedTransfers.filter(
+        (t) => t.status === "COMPLETADO_CON_DISCREPANCIA",
+      ).length;
+
+      totalPendingTransfers = inTransit + partial;
+      transfersInTransit = inTransit;
+      transfersPartiallyReceived = partial;
+      transfersWithDiscrepancy = discrepancies;
+    }
 
     return {
       availableUnits,
       blockedUnits,
       totalPhysicalUnits,
-      totalVendibleSkus: bySku.size,
+      totalVendibleSkus,
       skusAvailable,
       skusLowStock,
       skusOutOfStock,
       reservedUnits,
-      totalPendingTransfers: inTransit + partial,
-      transfersInTransit: inTransit,
-      transfersPartiallyReceived: partial,
-      transfersWithDiscrepancy: discrepancies,
+      totalPendingTransfers,
+      transfersInTransit,
+      transfersPartiallyReceived,
+      transfersWithDiscrepancy,
     };
   }
 
@@ -464,68 +541,17 @@ export class MockInventoryAdapter implements InventoryRepository {
     }
 
     // 2. Alertas de discrepancias en traslados cerrados. No dependen del saldo
-    // filtrado del destino: una recepción con merma y cierre final puede no dejar
-    // saldo en la ubicación destino y la discrepancia debe mostrarse igual
-    // (hallazgo TAC-07). El filtro de ubicación se aplica sobre el destino del
-    // traslado y categoría/marca se resuelven por catálogo del SKU.
-    const skuCatalog = new Map<
-      string,
-      { categoryName: string; brandName: string }
-    >();
-    for (const item of this.stockItems) {
-      if (!skuCatalog.has(item.sku)) {
-        skuCatalog.set(item.sku, {
-          categoryName: item.categoryName,
-          brandName: item.brandName,
-        });
-      }
-    }
-    const search = filters?.search?.toLowerCase().trim();
+    // filtrado del destino (una merma con cierre final puede no dejar saldo allí)
+    // y usan los MISMOS criterios que el KPI de discrepancias para no
+    // contradecirse (hallazgos TAC-07 y TAC-11).
+    const skuCatalog = this.buildSkuCatalog();
 
     for (const transfer of this.transfers) {
       if (transfer.status !== "COMPLETADO_CON_DISCREPANCIA") continue;
+      if (!this.matchesTransferFilters(transfer, filters, skuCatalog)) continue;
 
-      if (
-        filters?.locationId &&
-        filters.locationId !== "all" &&
-        transfer.targetLocationId !== filters.locationId
-      ) {
-        continue;
-      }
-
-      if (
-        search &&
-        !transfer.sku.toLowerCase().includes(search) &&
-        !transfer.productName.toLowerCase().includes(search)
-      ) {
-        continue;
-      }
-
-      const catalogEntry = skuCatalog.get(transfer.sku);
-      if (filters?.category && filters.category !== "all") {
-        const target = this.normalizeKey(filters.category);
-        if (
-          !catalogEntry ||
-          (catalogEntry.categoryName !== filters.category &&
-            this.normalizeKey(catalogEntry.categoryName) !== target)
-        ) {
-          continue;
-        }
-      }
-      if (filters?.brand && filters.brand !== "all") {
-        const target = this.normalizeKey(filters.brand);
-        if (
-          !catalogEntry ||
-          (catalogEntry.brandName !== filters.brand &&
-            this.normalizeKey(catalogEntry.brandName) !== target)
-        ) {
-          continue;
-        }
-      }
-
-      // Evitar duplicados
       const existingAlert = alerts.find(
-        (a) => a.transferId === transfer.id && a.severity === "error"
+        (a) => a.transferId === transfer.id && a.severity === "error",
       );
       if (!existingAlert) {
         alerts.push({
