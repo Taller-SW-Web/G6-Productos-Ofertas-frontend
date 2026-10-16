@@ -7,6 +7,9 @@ import type { ReceiveTransferPayload } from "../src/features/inventory/services/
 //   TAC-07 (P1) Alerta de discrepancia por destino con merma sin saldo.
 //   TAC-08 (P2) Distinguir KPI "sin datos" (null) de valor real cero (0).
 //   TAC-09 (P2) Mostrar errores parciales de categorías/marcas en los filtros.
+//   TAC-10 (P1) KPI por ubicación: agotado en una, disponible en otra.
+//   TAC-11 (P1) Coherencia entre alerta y contador de discrepancias.
+//   TAC-12 (P2) Reintentar filtros sin recargar la página.
 
 const { describe, beforeEach } = test;
 const it = test;
@@ -14,6 +17,8 @@ const it = test;
 const OPERATION_IDS = {
   tac06: "123e4567-e89b-12d3-a456-426614174000",
   tac07: "123e4567-e89b-12d3-a456-426614174001",
+  tac10: "123e4567-e89b-12d3-a456-426614174002",
+  tac11: "123e4567-e89b-12d3-a456-426614174003",
 } as const;
 
 function reception(
@@ -29,7 +34,7 @@ function reception(
   };
 }
 
-describe("Auditoría MK-016 · regresiones TAC-06…TAC-09", () => {
+describe("Auditoría MK-016 · regresiones TAC-06…TAC-12", () => {
   describe("TAC-06 (P1) · KPI por SKU en varias ubicaciones", () => {
     let adapter: MockInventoryAdapter;
 
@@ -56,7 +61,39 @@ describe("Auditoría MK-016 · regresiones TAC-06…TAC-09", () => {
 
       // No debe ocultarse el stock bajo de RET-SAN por el saldo de ALM-CEN.
       expect(after.skusLowStock).toBe((before.skusLowStock ?? 0) + 1);
-      expect(after.skusAvailable).toBe((before.skusAvailable ?? 0) - 1);
+      // El mismo SKU sigue disponible en ALM-CEN (coherencia por ubicación).
+      expect(after.skusAvailable).toBe(before.skusAvailable);
+    });
+  });
+
+  describe("TAC-10 (P1) · KPI por ubicación: agotado en una, disponible en otra", () => {
+    let adapter: MockInventoryAdapter;
+
+    beforeEach(() => {
+      adapter = new MockInventoryAdapter();
+    });
+
+    it("cuenta el SKU como agotado donde no tiene saldo sin ocultar su disponibilidad en otra", async () => {
+      const before = await adapter.getDashboardKpis();
+
+      // En RET-SAN se recibe como bloqueado: el físico sube pero el disponible
+      // queda en 0 (AGOTADO allí). En ALM-CEN el SKU sigue disponible.
+      await adapter.receiveTransfer(
+        reception({
+          transferId: "tr-002",
+          quantityReceived: 5,
+          disposition: "REINGRESAR_BLOQUEADO",
+          finalReceipt: false,
+          operationId: OPERATION_IDS.tac10,
+        }),
+      );
+
+      const after = await adapter.getDashboardKpis();
+
+      // Coherente con la alerta "Quiebre de stock" por ubicación.
+      expect(after.skusOutOfStock).toBe((before.skusOutOfStock ?? 0) + 1);
+      // Y el SKU no se oculta donde sí tiene stock.
+      expect(after.skusAvailable).toBe(before.skusAvailable);
     });
   });
 
@@ -86,6 +123,38 @@ describe("Auditoría MK-016 · regresiones TAC-06…TAC-09", () => {
     });
   });
 
+  describe("TAC-11 (P1) · Coherencia entre alerta y contador de discrepancias", () => {
+    let adapter: MockInventoryAdapter;
+
+    beforeEach(() => {
+      adapter = new MockInventoryAdapter();
+    });
+
+    it("el contador coincide con la alerta al filtrar por el destino, sin 0 ni 'sin datos'", async () => {
+      await adapter.receiveTransfer(
+        reception({
+          transferId: "tr-002",
+          quantityReceived: 10,
+          disposition: "CONFIRMAR_MERMA",
+          finalReceipt: true,
+          operationId: OPERATION_IDS.tac11,
+        }),
+      );
+
+      const filters = { locationId: "RET-SAN" };
+      const alerts = await adapter.getDashboardAlerts(filters);
+      const kpis = await adapter.getDashboardKpis(filters);
+
+      const discrepancyAlerts = alerts.filter(
+        (alert) => alert.transferId === "tr-002",
+      );
+
+      expect(discrepancyAlerts.length).toBe(1);
+      // El KPI no puede ser 0 ni "sin datos" si la alerta está visible.
+      expect(kpis.transfersWithDiscrepancy).toBe(discrepancyAlerts.length);
+    });
+  });
+
   describe("TAC-08 (P2) · KPI sin datos vs valor real cero", () => {
     let adapter: MockInventoryAdapter;
 
@@ -93,12 +162,14 @@ describe("Auditoría MK-016 · regresiones TAC-06…TAC-09", () => {
       adapter = new MockInventoryAdapter();
     });
 
-    it("devuelve null (sin datos) cuando no hay datos para la selección", async () => {
+    it("devuelve null (sin datos) en los saldos cuando no hay datos para la selección", async () => {
       const kpis = await adapter.getDashboardKpis({ search: "SKU-INEXISTENTE-XYZ" });
 
       expect(kpis.availableUnits).toBeNull();
       expect(kpis.skusLowStock).toBeNull();
-      expect(kpis.transfersWithDiscrepancy).toBeNull();
+      // El catálogo de traslados sí existe: su contador es un cero real, no "sin datos".
+      expect(kpis.transfersWithDiscrepancy).toBe(0);
+      expect(kpis.transfersInTransit).toBe(0);
     });
 
     it("devuelve 0 (cero real) cuando el dato existe y vale cero", async () => {
@@ -148,6 +219,49 @@ describe("Auditoría MK-016 · regresiones TAC-06…TAC-09", () => {
       await locationFilter.click();
       await expect(
         page.getByRole("option", { name: "Tienda Cusco Imperial", exact: true }),
+      ).toBeVisible();
+      await page.keyboard.press("Escape");
+    });
+  });
+
+  describe("TAC-12 (P2) · Reintento de filtros sin recargar", () => {
+    it("permite reintentar categorías/marcas y recupera las opciones conservando los filtros", async ({
+      page,
+    }: {
+      page: Page;
+    }) => {
+      await page.goto(
+        "/tests/harness/inventory-adapter.html?path=/inventario/dashboard&fail-categories=1&fail-brands=1",
+      );
+
+      const notice = page.getByText(
+        "No se pudieron cargar algunas opciones de filtro",
+      );
+      await expect(notice).toBeVisible();
+
+      // Antes del reintento, el filtro que sí cargó sigue utilizable.
+      await expect(
+        page.getByRole("combobox", { name: "Filtrar por ubicación" }),
+      ).toBeEnabled();
+
+      // Las fuentes dejan de fallar y el usuario reintenta sin recargar.
+      await page.evaluate(() => {
+        const audit = (
+          window as unknown as { inventoryAudit: Record<string, boolean> }
+        ).inventoryAudit;
+        audit.failCategories = false;
+        audit.failBrands = false;
+      });
+      await page.getByRole("button", { name: "Reintentar filtros" }).click();
+
+      // Se recuperan categorías y marcas; el aviso desaparece.
+      await expect(notice).toHaveCount(0);
+      const categoryFilter = page.getByRole("combobox", {
+        name: "Filtrar por categoría",
+      });
+      await categoryFilter.click();
+      await expect(
+        page.getByRole("option", { name: "Calzado", exact: true }),
       ).toBeVisible();
       await page.keyboard.press("Escape");
     });
