@@ -101,6 +101,7 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
   const [padreId, setPadreId] = useState<string | null>(detalle.padreId ?? null);
   const [descripcion, setDescripcion] = useState(detalle.descripcion ?? "");
   const [orden, setOrden] = useState<number>(detalle.orden);
+  const [imagenUrl, setImagenUrl] = useState<string>(detalle.imagen ?? "");
   const [nombreError, setNombreError] = useState<string | null>(null);
 
   const padres = useMemo(() => {
@@ -142,6 +143,7 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
       padreId: padreId ?? undefined,
       descripcion: descripcion.trim() || undefined,
       orden,
+      imagen: imagenUrl.trim() || undefined,
     });
   };
 
@@ -160,6 +162,7 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
       padreId: padreId ?? undefined,
       descripcion: descripcion.trim() || undefined,
       orden,
+      imagen: imagenUrl.trim() || undefined,
     });
   };
 
@@ -215,6 +218,13 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
                   onChange={(value) =>
                     setOrden(typeof value === "number" ? value : 1)
                   }
+                />
+                <TextInput
+                  label="Imagen (URL)"
+                  placeholder="https://ejemplo.com/imagen.png"
+                  value={imagenUrl}
+                  disabled={phase === "guardando"}
+                  onChange={(e) => setImagenUrl(e.currentTarget.value)}
                 />
                 <Textarea
                   label="Descripción (opcional)"

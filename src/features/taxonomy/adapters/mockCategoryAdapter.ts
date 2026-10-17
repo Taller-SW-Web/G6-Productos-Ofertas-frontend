@@ -77,6 +77,24 @@ const store: RegistroCategoria[] = [
     estado: "Verificando baja",
     productosActivos: 0,
   },
+  {
+    id: "inactiva-raiz",
+    nombre: "Inactiva Raiz",
+    slug: "inactiva-raiz",
+    padreId: null,
+    orden: 3,
+    estado: "Inactivo",
+    productosActivos: 3,
+  },
+  {
+    id: "hija-padre-inactivo",
+    nombre: "Hija Padre Inactivo",
+    slug: "hija-padre-inactivo",
+    padreId: "inactiva-raiz",
+    orden: 1,
+    estado: "Inactivo",
+    productosActivos: 0,
+  },
 ];
 
 const esperar = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

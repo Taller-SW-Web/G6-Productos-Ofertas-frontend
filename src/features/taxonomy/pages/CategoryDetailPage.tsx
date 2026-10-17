@@ -166,12 +166,16 @@ function CategoryDetailContent({
           title="Reactivación bloqueada"
           actions={
             <Group gap="sm">
-              <Button variant="outline" onClick={reiniciar}>
-                Entendido
-              </Button>
-              <Button variant="outline" onClick={() => navigate(`/categorias/${detalle.padreId}`)}>
-                Ir a la categoría padre
-              </Button>
+              <Button variant="outline" onClick={reiniciar}>Entendido</Button>
+              {detalle.padreId && state.result.bloqueos.some((b) => b.tipo === "padre") ? (
+                <Button variant="outline" onClick={() => navigate(`/categorias/${detalle.padreId}`)}>
+                  Ir a la categoría padre
+                </Button>
+              ) : !detalle.padreId ? (
+                <Button variant="outline" onClick={() => navigate("/categorias")}>
+                  Volver al árbol
+                </Button>
+              ) : null}
             </Group>
           }
         >

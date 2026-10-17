@@ -30,19 +30,34 @@ import { useCategoryTree } from "../hooks/useCategoryTree";
 import { estadoSemantic } from "../services/estadoSemantic";
 import type { CategoryNode } from "../types";
 
+const STORAGE_KEY = "taxonomy_tree_colapsados";
+
 // MK-008-S01: listado / árbol de categorías en `/categorias`.
 export function CategoryTreePage() {
   const navigate = useNavigate();
   const { state } = useCategoryTree();
   const [busqueda, setBusqueda] = useState<string>("");
-  const [colapsados, setColapsados] = useState<string[]>([]);
+  const [colapsados, setColapsados] = useState<string[]>(() => {
+    try {
+      const guardado = sessionStorage.getItem(STORAGE_KEY);
+      return guardado ? (JSON.parse(guardado) as string[]) : [];
+    } catch {
+      return [];
+    }
+  });
 
   const alternar = (id: string) => {
-    setColapsados((actual) =>
-      actual.includes(id)
+    setColapsados((actual) => {
+      const siguiente = actual.includes(id)
         ? actual.filter((item) => item !== id)
-        : [...actual, id],
-    );
+        : [...actual, id];
+      try {
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(siguiente));
+      } catch {
+        // ignorar fallo de almacenamiento
+      }
+      return siguiente;
+    });
   };
 
   const arbol = useMemo<CategoryNode[]>(

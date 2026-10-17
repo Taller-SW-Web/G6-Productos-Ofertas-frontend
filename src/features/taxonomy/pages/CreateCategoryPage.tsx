@@ -8,6 +8,7 @@ import {
   Text,
   Textarea,
   TextInput,
+  NumberInput,
 } from "@mantine/core";
 import {
   ConfirmDialog,
@@ -31,6 +32,8 @@ export function CreateCategoryPage() {
   const [nombre, setNombre] = useState("");
   const [padreId, setPadreId] = useState<string | null>(null);
   const [descripcion, setDescripcion] = useState("");
+  const [orden, setOrden] = useState<number>(0);
+  const [imagenUrl, setImagenUrl] = useState<string>("");
   const [nombreError, setNombreError] = useState<string | null>(null);
 
   const padres = useMemo(
@@ -71,6 +74,8 @@ export function CreateCategoryPage() {
       slug: slug.trim(),
       padreId: padreId ?? undefined,
       descripcion: descripcion.trim() || undefined,
+      orden,
+      imagen: imagenUrl.trim() || undefined,
     });
   };
 
@@ -140,6 +145,20 @@ export function CreateCategoryPage() {
                     nothingFoundMessage="Sin categorías disponibles"
                     disabled={phase === "comprobando"}
                     onChange={(value) => setPadreId(value)}
+                  />
+                  <NumberInput
+                    label="Orden"
+                    min={0}
+                    value={orden}
+                    disabled={phase === "comprobando"}
+                    onChange={(value) => setOrden(typeof value === "number" ? value : 0)}
+                  />
+                  <TextInput
+                    label="Imagen (URL)"
+                    placeholder="https://example.com/imagen.png"
+                    value={imagenUrl}
+                    disabled={phase === "comprobando"}
+                    onChange={(e) => setImagenUrl(e.currentTarget.value)}
                   />
                   <Textarea
                     label="Descripción (opcional)"
