@@ -23,8 +23,17 @@ interface MockRecommendationState {
   sequence: number;
 }
 
+function isRecommendationRecord(value: unknown): value is RecommendationView {
+  return isRecord(value) && typeof value.id === "string" && typeof value.name === "string" && typeof value.status === "string";
+}
+
 function isMockRecommendationState(value: unknown): value is MockRecommendationState {
-  return isRecord(value) && Array.isArray(value.records) && typeof value.sequence === "number";
+  return (
+    isRecord(value) &&
+    Array.isArray(value.records) &&
+    value.records.every(isRecommendationRecord) &&
+    typeof value.sequence === "number"
+  );
 }
 
 export function createMockRecommendationRepository(
@@ -41,7 +50,10 @@ export function createMockRecommendationRepository(
     : fixtures.map((item) => structuredClone(item));
   let sequence = restored ? restored.sequence : 0;
   const persist = () => {
-    saveMockState("promotions-recommendations", { records, sequence } satisfies MockRecommendationState);
+    // A non-persistent instance (persist: false) must never touch `localStorage`.
+    if (persistEnabled) {
+      saveMockState("promotions-recommendations", { records, sequence } satisfies MockRecommendationState);
+    }
     publishMockChange("promotions-recommendations");
     publishMockChange("promotions");
   };

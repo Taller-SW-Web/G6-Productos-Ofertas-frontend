@@ -33,11 +33,34 @@ interface MockPricingState {
   sequence: number;
 }
 
+function isPriceRecord(value: unknown): value is PriceView {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.regular === "string" &&
+    typeof value.currency === "string" &&
+    typeof value.version === "number" &&
+    typeof value.validFrom === "string"
+  );
+}
+
+function isScheduleRecord(value: unknown): value is ScheduleView {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.targetId === "string" &&
+    typeof value.start === "string" &&
+    typeof value.amount === "string"
+  );
+}
+
 function isMockPricingState(value: unknown): value is MockPricingState {
   return (
     isRecord(value) &&
     Array.isArray(value.records) &&
+    value.records.every(isPriceRecord) &&
     Array.isArray(value.schedules) &&
+    value.schedules.every(isScheduleRecord) &&
     typeof value.sequence === "number"
   );
 }
@@ -54,12 +77,18 @@ export function createMockPricingRepository(
   const records = restored ? restored.records : structuredClone(priceRecords);
   let targets = structuredClone(priceTargets);
   const names = { ...targetNames };
+  // A non-persistent instance (persist: false) must never touch `localStorage`;
+  // it still notifies in-session listeners so local tests keep working.
   const persist = () => {
-    saveMockState("pricing", { records, schedules, sequence } satisfies MockPricingState);
+    if (persistEnabled) {
+      saveMockState("pricing", { records, schedules, sequence } satisfies MockPricingState);
+    }
     publishMockChange("pricing");
   };
-  async function refreshTargets(signal: AbortSignal) {
-    const current = await readMockPricingTargets(signal);
+  async function refreshTargets(signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    if (!persistEnabled) return;
+    const current = await readMockPricingTargets(signal ?? new AbortController().signal);
     const identities = new Map(current.map(target => [target.id,
       targets.find(existing => existing.kind === target.kind &&
         (target.kind === "product" ? existing.productId === target.productId :

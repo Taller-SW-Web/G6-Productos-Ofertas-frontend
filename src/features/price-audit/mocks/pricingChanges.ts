@@ -15,10 +15,22 @@ interface MockPricingAuditState {
   sequence: number;
 }
 
+function isAuditEntryRecord(value: unknown): value is AuditEntry {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.sku === "string" &&
+    typeof value.productId === "string" &&
+    typeof value.priceType === "string" &&
+    typeof value.at === "string"
+  );
+}
+
 function isMockPricingAuditState(value: unknown): value is MockPricingAuditState {
   return (
     isRecord(value) &&
     Array.isArray(value.entries) &&
+    value.entries.every(isAuditEntryRecord) &&
     typeof value.sequence === "number"
   );
 }
@@ -33,8 +45,11 @@ export function createMockPricingAudit(options: { persist?: boolean } = {}) {
   const entries: AuditEntry[] = restored ? restored.entries : [];
   let sequence = restored ? restored.sequence : 0;
 
+  // A non-persistent instance (persist: false) must never touch `localStorage`.
   function persist() {
-    saveMockState("price-audit", { entries, sequence } satisfies MockPricingAuditState);
+    if (persistEnabled) {
+      saveMockState("price-audit", { entries, sequence } satisfies MockPricingAuditState);
+    }
     publishMockChange("price-audit");
   }
 

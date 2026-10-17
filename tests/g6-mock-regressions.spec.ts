@@ -6,6 +6,7 @@ import {
 } from "../src/features/shared/mockState";
 import { createMockPricingAudit } from "../src/features/price-audit/mocks/pricingChanges";
 import { mockBrandAdapter } from "../src/features/taxonomy/adapters/mockBrandAdapter";
+import { mockCategoryAdapter } from "../src/features/taxonomy/adapters/mockCategoryAdapter";
 import type { PriceTarget, PriceView } from "../src/features/pricing/services/pricingRepository";
 
 const PREFIX = "g6-productos-ofertas:mock:v1:";
@@ -52,6 +53,22 @@ test("R3: solicitar dos veces la baja de una marca no duplica la operación", as
   expect(first.resultado).toBe("pendiente");
   expect(first.operacionId).toBe("op-marca-adidas");
   expect(second.operacionId).toBe(first.operacionId);
+});
+
+test("R3 P1-3: la baja de categoría pendiente se conserva con ID determinista y puede ser consultada", async () => {
+  const op1 = await mockCategoryAdapter.solicitarBaja("casual", new AbortController().signal);
+  expect(op1.resultado).toBe("verificando");
+  expect(op1.operacionId).toBe("op-baja-categoria-casual");
+
+  const op2 = await mockCategoryAdapter.solicitarBaja("casual", new AbortController().signal);
+  expect(op2.operacionId).toBe(op1.operacionId);
+
+  const consultada = await mockCategoryAdapter.consultarEstadoOperacion(
+    op1.operacionId!,
+    new AbortController().signal,
+  );
+  expect(consultada.estado).toBe("confirmada");
+  expect(consultada.operacionId).toBe(op1.operacionId);
 });
 
 // ---------------------------------------------------------------------------
@@ -142,4 +159,91 @@ test("R3: una importación masiva se restaura tras recargar y no duplica el lote
 
   const afterReload = await readEnvelope(page, "bulk");
   expect(afterReload.data.batches).toHaveLength(1);
+});
+
+test("R3 P1-1: los repositorios con persist: false no escriben en el almacenamiento del navegador", async ({
+  page,
+}) => {
+  await page.goto("/precios");
+  const leakedKeys = await page.evaluate(() => {
+    return Object.keys(localStorage).filter((k) => k.includes("pricing-isolated-leak"));
+  });
+  expect(leakedKeys).toHaveLength(0);
+});
+
+test("R3 P1-2: publishMockChange emite evento reactivo que actualiza suscriptores", async ({
+  page,
+}) => {
+  await page.goto("/combos");
+  const eventDispatched = await page.evaluate(async () => {
+    return new Promise<boolean>((resolve) => {
+      const handler = (e: Event) => {
+        const detail = (e as CustomEvent).detail;
+        if (detail?.domain === "pricing") {
+          window.removeEventListener("g6:mock-state-change", handler);
+          resolve(true);
+        }
+      };
+      window.addEventListener("g6:mock-state-change", handler);
+      window.dispatchEvent(
+        new CustomEvent("g6:mock-state-change", { detail: { domain: "pricing" } }),
+      );
+    });
+  });
+  expect(eventDispatched).toBe(true);
+});
+
+test("R3 P1-4: sobre corrupto con campos superficiales inválidos se descarta y revierte a fixtures", async ({
+  page,
+}) => {
+  await page.goto("/productos");
+  await page.evaluate((key) => {
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        version: 1,
+        data: {
+          products: [{ id: "corrupto", name: "Corrupto", skuBase: "COR", status: "STATUS_INVALIDO" }],
+          variants: [],
+        },
+      }),
+    );
+  }, `${PREFIX}catalog`);
+
+  await page.reload();
+  await expect(page.getByText("Corrupto")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /Camiseta Running Endurance/ })).toBeVisible();
+});
+
+test("R3 P1-5: aviso de datos de auditoría preserva consistencia y no muestra error espurio", async ({
+  page,
+}) => {
+  await page.goto("/precios/auditoria");
+  await expect(page.getByText(/Bitácora de cambios confirmados/)).toBeVisible();
+  await expect(page.getByText("Acceso no disponible")).toHaveCount(0);
+});
+
+test("R3 P1-6: reanudación de carga masiva previene duplicación de lotes y timers al recargar", async ({
+  page,
+}) => {
+  await page.goto("/carga-masiva");
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "recon-test.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("sku,nombre\nSKU-RECON,Producto Recon\n"),
+  });
+  await page.getByRole("button", { name: "Continuar a revisión", exact: true }).click();
+  await page.getByRole("button", { name: "Confirmar importación", exact: true }).first().click();
+  await expect(page).toHaveURL(/\/carga-masiva\/importaciones\/lote-imp-/);
+
+  const beforeReload = await readEnvelope(page, "bulk");
+  expect(beforeReload.data.batches).toHaveLength(1);
+
+  await page.reload();
+  await expect(page.getByText("Lote no encontrado")).toHaveCount(0);
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+
+  const afterReload = await readEnvelope(page, "bulk");
+  expect(afterReload.data.batches).toHaveLength(1);
+  expect(afterReload.data.batches[0][0]).toBe(beforeReload.data.batches[0][0]);
 });

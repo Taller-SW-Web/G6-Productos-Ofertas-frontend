@@ -37,7 +37,10 @@ export function createPromotionHistory(
   >();
 
   function persist() {
-    saveMockState("promotions-history", Object.fromEntries(facts) as PromotionHistoryState);
+    // A non-persistent instance (persist: false) must never touch `localStorage`.
+    if (persistEnabled) {
+      saveMockState("promotions-history", Object.fromEntries(facts) as PromotionHistoryState);
+    }
     publishMockChange("promotions-history");
     publishMockChange("promotions");
   }

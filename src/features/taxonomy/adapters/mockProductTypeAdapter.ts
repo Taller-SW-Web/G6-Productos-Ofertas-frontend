@@ -68,10 +68,22 @@ const storeFixtures: RegistroTipoProducto[] = [
   },
 ];
 
+const isProductType = (value: unknown): value is RegistroTipoProducto => {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.tipoProductoId === "string" &&
+    typeof row.nombre === "string" &&
+    (row.estado === "Activo" || row.estado === "Inactivo") &&
+    typeof row.schemaVersion === "number" &&
+    Array.isArray(row.asociadas)
+  );
+};
+
 // Demo state restored from the current-browser session when available; otherwise a
 // fresh clone of the fixtures. Cross-tab writes rehydrate this same array in place.
-const store: RegistroTipoProducto[] = loadMockArray("taxonomy-product-types", storeFixtures);
-syncMockArrayOnExternalChange("taxonomy-product-types", store);
+const store: RegistroTipoProducto[] = loadMockArray("taxonomy-product-types", storeFixtures, isProductType);
+syncMockArrayOnExternalChange("taxonomy-product-types", store, isProductType);
 
 const persist = () => persistMockArray("taxonomy-product-types", store);
 

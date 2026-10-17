@@ -41,12 +41,32 @@ interface MockInventoryState {
   processedOperationKeys: [string, string][];
 }
 
+function isStockItemRecord(value: unknown): value is StockItem {
+  return (
+    isRecord(value) &&
+    typeof value.sku === "string" &&
+    typeof value.locationId === "string" &&
+    typeof value.onHand === "number"
+  );
+}
+
+function isTransferRecord(value: unknown): value is TransferItem {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.transferCode === "string" &&
+    typeof value.status === "string"
+  );
+}
+
 function isMockInventoryState(value: unknown): value is MockInventoryState {
   return (
     isRecord(value) &&
     Array.isArray(value.stockItems) &&
+    value.stockItems.every(isStockItemRecord) &&
     isRecord(value.thresholds) &&
     Array.isArray(value.transfers) &&
+    value.transfers.every(isTransferRecord) &&
     Array.isArray(value.alerts) &&
     Array.isArray(value.processedOperations) &&
     Array.isArray(value.processedOperationKeys)

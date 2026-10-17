@@ -84,10 +84,21 @@ const storeFixtures: RegistroCaracteristica[] = [
   },
 ];
 
+const isCharacteristic = (value: unknown): value is RegistroCaracteristica => {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.id === "string" &&
+    typeof row.nombre === "string" &&
+    (row.tipo === "TEXTO" || row.tipo === "NUMERICO" || row.tipo === "LISTA") &&
+    (row.estado === "Activo" || row.estado === "Inactivo")
+  );
+};
+
 // Demo state restored from the current-browser session when available; otherwise a
 // fresh clone of the fixtures. Cross-tab writes rehydrate this same array in place.
-const store: RegistroCaracteristica[] = loadMockArray("taxonomy-characteristics", storeFixtures);
-syncMockArrayOnExternalChange("taxonomy-characteristics", store);
+const store: RegistroCaracteristica[] = loadMockArray("taxonomy-characteristics", storeFixtures, isCharacteristic);
+syncMockArrayOnExternalChange("taxonomy-characteristics", store, isCharacteristic);
 
 const persist = () => persistMockArray("taxonomy-characteristics", store);
 

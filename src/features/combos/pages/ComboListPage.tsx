@@ -9,6 +9,7 @@ import { formatMoney } from "../services/comboRules";
 import { parseComboPage } from "../services/parseComboPage";
 import { RequestIdentity } from "../services/requestIdentity";
 import type { Combo, ComboPage, ComboStatus } from "../types/combos";
+import { useMockStateRevision } from "../../shared/useMockStateRevision";
 
 type ListState =
   | { key: string; status: "loading" }
@@ -20,6 +21,7 @@ export function ComboListPage() {
   const [params, setParams] = useSearchParams();
   const [state, setState] = useState<ListState>({ key: "", status: "loading" });
   const [refresh, setRefresh] = useState(0);
+  const revision = useMockStateRevision(["combos"]);
   const [deactivationTarget, setDeactivationTarget] = useState<Combo | null>(null);
   const [deactivating, setDeactivating] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
@@ -29,7 +31,7 @@ export function ComboListPage() {
   const rawStatus = params.get("estado");
   const status: ComboStatus | "TODOS" = rawStatus === "ACTIVO" || rawStatus === "INACTIVO" ? rawStatus : "TODOS";
   const scenario = params.get("scenario") ?? undefined;
-  const queryKey = JSON.stringify([status, page, scenario, refresh]);
+  const queryKey = JSON.stringify([status, page, scenario, refresh, revision]);
 
   useEffect(() => {
     if (rawPage !== null && rawPage !== String(page)) {

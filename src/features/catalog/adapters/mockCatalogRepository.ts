@@ -41,11 +41,33 @@ interface MockCatalogState {
   variants: VariantDetailView[];
 }
 
+function isCatalogProduct(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === "string" &&
+    typeof value.name === "string" &&
+    typeof value.skuBase === "string" &&
+    (value.status === "ACTIVO" || value.status === "INACTIVO" || value.status === "BORRADOR")
+  );
+}
+
+function isCatalogVariant(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.variantId === "string" &&
+    typeof value.productId === "string" &&
+    typeof value.sku === "string" &&
+    (value.status === "ACTIVA" || value.status === "INACTIVA" || value.status === "BORRADOR")
+  );
+}
+
 function isMockCatalogState(value: unknown): value is MockCatalogState {
   return (
     isRecord(value) &&
     Array.isArray(value.products) &&
-    Array.isArray(value.variants)
+    value.products.every(isCatalogProduct) &&
+    Array.isArray(value.variants) &&
+    value.variants.every(isCatalogVariant)
   );
 }
 

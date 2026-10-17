@@ -25,8 +25,22 @@ import {
 
 const clone = <T,>(value: T): T => structuredClone(value);
 
+function isCombo(value: unknown): value is Combo {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === "string" &&
+    typeof value.name === "string" &&
+    typeof value.sku === "string" &&
+    (value.status === "ACTIVO" || value.status === "INACTIVO") &&
+    Array.isArray(value.components) &&
+    value.components.every(
+      (c) => isRecord(c) && typeof c.sku === "string" && typeof c.quantity === "number",
+    )
+  );
+}
+
 function isComboArray(value: unknown): value is Combo[] {
-  return Array.isArray(value) && value.every(isRecord);
+  return Array.isArray(value) && value.every(isCombo);
 }
 
 function throwIfAborted(signal?: AbortSignal): void {

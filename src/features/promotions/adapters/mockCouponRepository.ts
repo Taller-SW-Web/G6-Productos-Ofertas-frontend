@@ -26,8 +26,17 @@ interface MockCouponState {
   sequence: number;
 }
 
+function isCouponRecord(value: unknown): value is CouponView {
+  return isRecord(value) && typeof value.id === "string" && typeof value.code === "string" && typeof value.status === "string";
+}
+
 function isMockCouponState(value: unknown): value is MockCouponState {
-  return isRecord(value) && Array.isArray(value.records) && typeof value.sequence === "number";
+  return (
+    isRecord(value) &&
+    Array.isArray(value.records) &&
+    value.records.every(isCouponRecord) &&
+    typeof value.sequence === "number"
+  );
 }
 
 export function createMockCouponRepository(
@@ -44,7 +53,10 @@ export function createMockCouponRepository(
   const records = restored ? restored.records : fixtures.map((item) => structuredClone(item));
   let sequence = restored ? restored.sequence : 0;
   const persist = () => {
-    saveMockState("promotions-coupons", { records, sequence } satisfies MockCouponState);
+    // A non-persistent instance (persist: false) must never touch `localStorage`.
+    if (persistEnabled) {
+      saveMockState("promotions-coupons", { records, sequence } satisfies MockCouponState);
+    }
     publishMockChange("promotions-coupons");
     publishMockChange("promotions");
   };

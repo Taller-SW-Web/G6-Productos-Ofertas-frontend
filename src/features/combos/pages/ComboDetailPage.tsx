@@ -13,6 +13,7 @@ import {
 import { RequestIdentity } from "../services/requestIdentity";
 import { EmptyState, FeedbackAlert, PageHeader, SectionCard, ConfirmDialog, StatusBadge } from "../../../components/shared";
 import type { Combo, ComboAvailability as ComboAvailabilityInfo, SkuPrice } from "../types/combos";
+import { useMockStateRevision } from "../../shared/useMockStateRevision";
 
 type DetailState =
   | { key: string; status: "loading" }
@@ -82,8 +83,10 @@ function ComboDetailForId({ comboId, unavailable }: { comboId: string; unavailab
   // Keyed reads: a result only applies to the exact request it answered. When the
   // key changes the derived view is "loading" without a synchronous setState in an
   // effect (avoids cascading renders flagged by react-hooks/set-state-in-effect).
-  const priceKey = JSON.stringify([comboId, componentsKey, priceRetry, scenario]);
-  const availabilityKey = JSON.stringify([comboId, componentsKey, comboStatus, availabilityRetry, scenario]);
+  const pricingRevision = useMockStateRevision(["pricing"]);
+  const inventoryRevision = useMockStateRevision(["inventory", "catalog"]);
+  const priceKey = JSON.stringify([comboId, componentsKey, priceRetry, scenario, pricingRevision]);
+  const availabilityKey = JSON.stringify([comboId, componentsKey, comboStatus, availabilityRetry, scenario, inventoryRevision]);
   const priceResult: PriceState =
     combo && priceState.key === priceKey ? priceState : { key: priceKey, status: "loading" };
   const availabilityResult: AvailabilityState =

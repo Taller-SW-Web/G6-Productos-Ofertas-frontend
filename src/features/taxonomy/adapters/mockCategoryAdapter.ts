@@ -84,10 +84,23 @@ const storeFixtures: RegistroCategoria[] = [
   },
 ];
 
+const isCategory = (value: unknown): value is RegistroCategoria => {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.id === "string" &&
+    typeof row.nombre === "string" &&
+    typeof row.slug === "string" &&
+    (row.padreId === null || typeof row.padreId === "string") &&
+    typeof row.orden === "number" &&
+    (row.estado === "Activo" || row.estado === "Inactivo" || row.estado === "Verificando baja")
+  );
+};
+
 // Demo state restored from the current-browser session when available; otherwise a
 // fresh clone of the fixtures. Cross-tab writes rehydrate this same array in place.
-const store: RegistroCategoria[] = loadMockArray("taxonomy-categories", storeFixtures);
-syncMockArrayOnExternalChange("taxonomy-categories", store);
+const store: RegistroCategoria[] = loadMockArray("taxonomy-categories", storeFixtures, isCategory);
+syncMockArrayOnExternalChange("taxonomy-categories", store, isCategory);
 
 const persist = () => persistMockArray("taxonomy-categories", store);
 
@@ -150,15 +163,33 @@ const aDetalle = (registro: RegistroCategoria): CategoryDetail => {
   };
 };
 
-// BLOCKED_CONTRACT: no hay contrato OpenAPI confirmado para el sondeo del resultado
-// de una baja asíncrona (202). Este registro mantiene las operaciones pendientes en
-// memoria para que la UI pueda consultar su estado sin inventar un endpoint HTTP.
+// Las operaciones de baja pendientes se persisten con su identificador y estado;
+// al recargar el usuario puede consultar o finalizar la misma operación sin que se
+// genere un identificador nuevo.
 interface OperacionBajaCategoria {
+  operacionId: string;
   categoriaId: string;
   estado: "pendiente" | "confirmada";
 }
 
-const operacionesBaja = new Map<string, OperacionBajaCategoria>();
+const isOperacionBajaCategoria = (value: unknown): value is OperacionBajaCategoria => {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.operacionId === "string" &&
+    typeof row.categoriaId === "string" &&
+    (row.estado === "pendiente" || row.estado === "confirmada")
+  );
+};
+
+const operacionesBaja: OperacionBajaCategoria[] = loadMockArray(
+  "taxonomy-category-baja",
+  [],
+  isOperacionBajaCategoria,
+);
+syncMockArrayOnExternalChange("taxonomy-category-baja", operacionesBaja, isOperacionBajaCategoria);
+
+const persistCategoriaBaja = () => persistMockArray("taxonomy-category-baja", operacionesBaja);
 
 // Deterministic local states used only for review. The repository contract does not
 // accept scenarios; reviewers change these values to reproduce error or edge cases
@@ -372,11 +403,18 @@ export const mockCategoryAdapter: CategoryRepository = {
 
     registro.estado = "Verificando baja";
     const operacionId = `op-baja-categoria-${id}`;
-    operacionesBaja.set(operacionId, {
-      categoriaId: id,
-      estado: "pendiente",
-    });
+    const op = operacionesBaja.find((item) => item.operacionId === operacionId);
+    if (op) {
+      op.estado = "pendiente";
+    } else {
+      operacionesBaja.push({
+        operacionId,
+        categoriaId: id,
+        estado: "pendiente",
+      });
+    }
     persist();
+    persistCategoriaBaja();
     return {
       resultado: "verificando",
       categoria: aDetalle(registro),
@@ -392,7 +430,7 @@ export const mockCategoryAdapter: CategoryRepository = {
     await esperar(400);
     signal?.throwIfAborted();
 
-    const operacion = operacionesBaja.get(operacionId);
+    const operacion = operacionesBaja.find((item) => item.operacionId === operacionId);
     if (!operacion) {
       throw new Error("No se encontró la operación de baja solicitada.");
     }
@@ -405,6 +443,7 @@ export const mockCategoryAdapter: CategoryRepository = {
       operacion.estado = "confirmada";
       registro.estado = "Inactivo";
       persist();
+      persistCategoriaBaja();
       return {
         operacionId,
         estado: "confirmada",

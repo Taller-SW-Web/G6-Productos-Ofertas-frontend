@@ -58,16 +58,49 @@ const storeFixtures: RegistroMarca[] = [
   },
 ];
 
+const isBrand = (value: unknown): value is RegistroMarca => {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.marcaId === "string" &&
+    typeof row.nombre === "string" &&
+    (row.estado === "Activo" || row.estado === "Inactivo") &&
+    typeof row.version === "number"
+  );
+};
+
 // Demo state restored from the current-browser session when available; otherwise a
 // fresh clone of the fixtures. Cross-tab writes rehydrate this same array in place.
-const store: RegistroMarca[] = loadMockArray("taxonomy-brands", storeFixtures);
-syncMockArrayOnExternalChange("taxonomy-brands", store);
+const store: RegistroMarca[] = loadMockArray("taxonomy-brands", storeFixtures, isBrand);
+syncMockArrayOnExternalChange("taxonomy-brands", store, isBrand);
 
 const persist = () => persistMockArray("taxonomy-brands", store);
 
-const operacionesBaja: OperacionBaja[] = [
+const operacionesBajaFixtures: OperacionBaja[] = [
   { operacionId: "op-marca-adidas", marcaId: "adidas", estado: "verificando" },
 ];
+
+// Las operaciones de baja pendientes se persisten con su identificador y estado;
+// al recargar el usuario puede consultar o finalizar la misma operación sin que se
+// genere un identificador nuevo.
+const isOperacionBaja = (value: unknown): boolean => {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.operacionId === "string" &&
+    typeof row.marcaId === "string" &&
+    (row.estado === "verificando" || row.estado === "completada" || row.estado === "no-concluyente")
+  );
+};
+
+const operacionesBaja: OperacionBaja[] = loadMockArray(
+  "taxonomy-brand-baja",
+  operacionesBajaFixtures,
+  isOperacionBaja,
+);
+syncMockArrayOnExternalChange("taxonomy-brand-baja", operacionesBaja, isOperacionBaja);
+
+const persistBaja = () => persistMockArray("taxonomy-brand-baja", operacionesBaja);
 
 const esperar = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -203,6 +236,7 @@ export const mockBrandAdapter: BrandRepository = {
         marcaId: id,
         estado: "verificando",
       });
+      persistBaja();
     }
     return {
       resultado: "pendiente",
@@ -221,6 +255,7 @@ export const mockBrandAdapter: BrandRepository = {
     }
     if (op.marcaId === "adidas" && op.estado === "verificando") {
       op.estado = "completada";
+      persistBaja();
       const r = store.find((item) => item.marcaId === op.marcaId);
       if (r) {
         r.estado = "Inactivo";
@@ -241,6 +276,7 @@ export const mockBrandAdapter: BrandRepository = {
       };
     }
     op.estado = "no-concluyente";
+    persistBaja();
     return {
       resultado: "no-concluyente",
       mensaje: "La verificación no fue concluyente. La marca conserva su estado actual.",

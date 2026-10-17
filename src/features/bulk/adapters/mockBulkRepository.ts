@@ -36,6 +36,8 @@ export const DEMO_CONFIG = {
 const dynamicBatches: Map<string, BulkImportBatch> = new Map();
 const dynamicExports: Map<string, BulkExportJob> = new Map();
 const activeTimers: Set<ReturnType<typeof setTimeout>> = new Set();
+const activeBatchSimulations: Set<string> = new Set();
+const activeExportSimulations: Set<string> = new Set();
 const resumingBatches = new Set<string>();
 
 let batchSequence = 1000;
@@ -50,11 +52,25 @@ interface MockBulkState {
   createImportCallCount: number;
 }
 
+function isBatchEntry(entry: unknown): boolean {
+  if (!Array.isArray(entry) || entry.length !== 2) return false;
+  const [id, batch] = entry;
+  return typeof id === "string" && isRecord(batch) && typeof batch.batch_id === "string" && typeof batch.status === "string";
+}
+
+function isExportEntry(entry: unknown): boolean {
+  if (!Array.isArray(entry) || entry.length !== 2) return false;
+  const [id, job] = entry;
+  return typeof id === "string" && isRecord(job) && typeof job.export_id === "string" && typeof job.status === "string";
+}
+
 function isMockBulkState(value: unknown): value is MockBulkState {
   return (
     isRecord(value) &&
     Array.isArray(value.batches) &&
+    value.batches.every(isBatchEntry) &&
     Array.isArray(value.exports) &&
+    value.exports.every(isExportEntry) &&
     typeof value.batchSequence === "number" &&
     typeof value.exportSequence === "number" &&
     typeof value.createImportCallCount === "number"
@@ -92,7 +108,11 @@ function hydrateBulkStateFromStorage(): void {
   // In-flight work lost its timers on reload: reschedule it deterministically.
   for (const [id, batch] of dynamicBatches) {
     if (batch.status === "QUEUED" || batch.status === "PROCESSING") {
-      scheduleImportSimulation(id);
+      if (batch.needs_reconciliation || batch.rows?.some((r) => r.needs_reconciliation)) {
+        scheduleResumeSimulation(id);
+      } else {
+        scheduleImportSimulation(id);
+      }
     }
   }
   for (const [id, job] of dynamicExports) {
@@ -112,7 +132,8 @@ function deepCloneExport(job: BulkExportJob): BulkExportJob {
 }
 
 function scheduleImportSimulation(batchId: string) {
-  if (!DEMO_CONFIG.AUTO_ADVANCE) return;
+  if (!DEMO_CONFIG.AUTO_ADVANCE || activeBatchSimulations.has(batchId)) return;
+  activeBatchSimulations.add(batchId);
 
   const t1 = setTimeout(() => {
     activeTimers.delete(t1);
@@ -130,6 +151,7 @@ function scheduleImportSimulation(batchId: string) {
 
   const t2 = setTimeout(() => {
     activeTimers.delete(t2);
+    activeBatchSimulations.delete(batchId);
     const batch = dynamicBatches.get(batchId);
     if (batch && (batch.status === "PROCESSING" || batch.status === "QUEUED")) {
       const total = typeof batch.total_rows === "number" ? batch.total_rows : null;
@@ -195,7 +217,8 @@ function applyReconciliationCompletion(batch: BulkImportBatch) {
 }
 
 function scheduleResumeSimulation(batchId: string) {
-  if (!DEMO_CONFIG.AUTO_ADVANCE) return;
+  if (!DEMO_CONFIG.AUTO_ADVANCE || activeBatchSimulations.has(batchId)) return;
+  activeBatchSimulations.add(batchId);
 
   const t1 = setTimeout(() => {
     activeTimers.delete(t1);
@@ -210,6 +233,7 @@ function scheduleResumeSimulation(batchId: string) {
 
   const t2 = setTimeout(() => {
     activeTimers.delete(t2);
+    activeBatchSimulations.delete(batchId);
     const batch = dynamicBatches.get(batchId);
     if (batch && (batch.status === "PROCESSING" || batch.status === "QUEUED")) {
       applyReconciliationCompletion(batch);
@@ -220,7 +244,8 @@ function scheduleResumeSimulation(batchId: string) {
 }
 
 function scheduleExportSimulation(exportId: string) {
-  if (!DEMO_CONFIG.AUTO_ADVANCE) return;
+  if (!DEMO_CONFIG.AUTO_ADVANCE || activeExportSimulations.has(exportId)) return;
+  activeExportSimulations.add(exportId);
 
   const t1 = setTimeout(() => {
     activeTimers.delete(t1);
@@ -235,6 +260,7 @@ function scheduleExportSimulation(exportId: string) {
 
   const t2 = setTimeout(() => {
     activeTimers.delete(t2);
+    activeExportSimulations.delete(exportId);
     const job = dynamicExports.get(exportId);
     if (job && (job.status === "PROCESSING" || job.status === "QUEUED")) {
       job.status = "COMPLETED";
@@ -609,6 +635,8 @@ export const mockBulkRepository: BulkRepository & {
       clearTimeout(t);
     }
     activeTimers.clear();
+    activeBatchSimulations.clear();
+    activeExportSimulations.clear();
   },
 
   resetMockState() {
@@ -616,6 +644,8 @@ export const mockBulkRepository: BulkRepository & {
       clearTimeout(t);
     }
     activeTimers.clear();
+    activeBatchSimulations.clear();
+    activeExportSimulations.clear();
     dynamicBatches.clear();
     dynamicExports.clear();
     resumingBatches.clear();

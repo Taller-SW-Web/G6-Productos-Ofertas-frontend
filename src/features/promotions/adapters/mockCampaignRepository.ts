@@ -24,8 +24,17 @@ interface MockCampaignState {
   sequence: number;
 }
 
+function isCampaignRecord(value: unknown): value is CampaignView {
+  return isRecord(value) && typeof value.id === "string" && typeof value.name === "string" && typeof value.status === "string";
+}
+
 function isMockCampaignState(value: unknown): value is MockCampaignState {
-  return isRecord(value) && Array.isArray(value.records) && typeof value.sequence === "number";
+  return (
+    isRecord(value) &&
+    Array.isArray(value.records) &&
+    value.records.every(isCampaignRecord) &&
+    typeof value.sequence === "number"
+  );
 }
 
 export function createMockCampaignRepository(
@@ -44,7 +53,10 @@ export function createMockCampaignRepository(
   const records = restored ? restored.records : fixtures.map((item) => structuredClone(item));
   let sequence = restored ? restored.sequence : 0;
   const persist = () => {
-    saveMockState("promotions-campaigns", { records, sequence } satisfies MockCampaignState);
+    // A non-persistent instance (persist: false) must never touch `localStorage`.
+    if (persistEnabled) {
+      saveMockState("promotions-campaigns", { records, sequence } satisfies MockCampaignState);
+    }
     publishMockChange("promotions-campaigns");
     publishMockChange("promotions");
   };
