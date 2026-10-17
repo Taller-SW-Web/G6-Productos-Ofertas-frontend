@@ -1,4 +1,8 @@
-import type { CategoryRepository } from "../services/categoryRepository";
+import {
+  CategorySlugConflictError,
+  type CategoryRepository,
+} from "../services/categoryRepository";
+import { generarSlug } from "../services/slug";
 import type {
   BloqueoDependencia,
   CategoryDetail,
@@ -20,6 +24,29 @@ interface RegistroCategoria {
   // exercise the deactivation/reactivation review flows.
   productosActivos?: number;
 }
+
+type EscenarioDetalle = "default" | "no-encontrado" | "error";
+type EscenarioSlug =
+  | "default"
+  | "slug-sin-colision"
+  | "slug-con-colision"
+  | "slug-carrera-409";
+type EscenarioBaja =
+  | "default"
+  | "rechazada-subcategorias"
+  | "rechazada-productos"
+  | "rechazada-asincrona"
+  | "pendiente-prolongado"
+  | "error-consulta"
+  | "error";
+type EscenarioReactivacion = "default" | "bloqueada" | "error";
+type CategoryMockScenarios = {
+  detalle: EscenarioDetalle;
+  slug: EscenarioSlug;
+  baja: EscenarioBaja;
+  reactivacion: EscenarioReactivacion;
+  arbol: "default" | "empty" | "error";
+};
 
 const store: RegistroCategoria[] = [
   {
@@ -110,6 +137,24 @@ const store: RegistroCategoria[] = [
 
 const esperar = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// H-06: test isolation. The adapter keeps a module-level mutable store; tests that
+// create/move categories must be able to restore the pristine baseline so they do
+// not leak state into one another. Not part of the CategoryRepository contract.
+const estadoInicial: RegistroCategoria[] = store.map((item) => ({ ...item }));
+
+export const __resetCategoryStore = (): void => {
+  store.length = 0;
+  store.push(...estadoInicial.map((item) => ({ ...item })));
+  __resetCategoryMockScenarios();
+};
+
+// SPEC-008 / MK-008: la taxonomía admite como máximo dos niveles (raíz y
+// subcategoría). Crear o mover una categoría a un tercer nivel (nieta) rompería
+// el árbol y la navegación, por lo que el adaptador lo rechaza explícitamente.
+const MAX_NIVELES_CATEGORIA = 2;
+const MENSAJE_MAX_NIVELES =
+  "No se permiten más de dos niveles de categorías (raíz y subcategoría).";
+
 // LOP-01 / LOP-04: single internal ID per category. Catálogo can send external
 // aliases (CAT-CALZADO), so every id that takes part in a parent/child relation
 // is normalized to the canonical Taxonomy ID before it is stored or compared.
@@ -197,7 +242,7 @@ const aDetalle = (registro: RegistroCategoria): CategoryDetail => {
 // memoria para que la UI pueda consultar su estado sin inventar un endpoint HTTP.
 interface OperacionBajaCategoria {
   categoriaId: string;
-  estado: "pendiente" | "confirmada";
+  estado: "pendiente" | "confirmada" | "rechazada";
 }
 
 const operacionesBaja = new Map<string, OperacionBajaCategoria>();
@@ -205,25 +250,25 @@ const operacionesBaja = new Map<string, OperacionBajaCategoria>();
 // Deterministic local states used only for review. The repository contract does not
 // accept scenarios; reviewers change these values to reproduce error or edge cases
 // without touching pages, hooks or the service contract.
-type EscenarioDetalle = "default" | "no-encontrado" | "error";
-type EscenarioSlug =
-  | "default"
-  | "slug-sin-colision"
-  | "slug-con-colision"
-  | "slug-carrera-409";
-type EscenarioBaja = "default" | "rechazada-subcategorias" | "rechazada-productos" | "error";
-type EscenarioReactivacion = "default" | "bloqueada" | "error";
-
-const MOCK: {
-  detalle: EscenarioDetalle;
-  slug: EscenarioSlug;
-  baja: EscenarioBaja;
-  reactivacion: EscenarioReactivacion;
-} = {
+const DEFAULT_MOCK_SCENARIOS: CategoryMockScenarios = {
   detalle: "default",
   slug: "default",
   baja: "default",
   reactivacion: "default",
+  arbol: "default",
+};
+const MOCK: CategoryMockScenarios = { ...DEFAULT_MOCK_SCENARIOS };
+
+// Test/review controls for deterministic local adapter scenarios. They are not
+// part of CategoryRepository and do not select a different application data mode.
+export const __setCategoryMockScenarios = (
+  scenarios: Partial<CategoryMockScenarios>,
+): void => {
+  Object.assign(MOCK, scenarios);
+};
+
+export const __resetCategoryMockScenarios = (): void => {
+  Object.assign(MOCK, DEFAULT_MOCK_SCENARIOS);
 };
 
 // Mock adapter: returns deterministic fixtures, never a real backend response.
@@ -232,6 +277,10 @@ export const mockCategoryAdapter: CategoryRepository = {
     signal?.throwIfAborted();
     await esperar(400);
     signal?.throwIfAborted();
+    if (MOCK.arbol === "error") {
+      throw new Error("No se pudo cargar el árbol de categorías. Inténtalo de nuevo.");
+    }
+    if (MOCK.arbol === "empty") return { nodos: [], colapsadosPorId: [] };
     return { nodos: hijasDe(null).map(aNodo), colapsadosPorId: [] };
   },
 
@@ -249,10 +298,12 @@ export const mockCategoryAdapter: CategoryRepository = {
     return registro ? aDetalle(registro) : null;
   },
 
-  async comprobarSlug(slug, signal) {
+  async proponerSlug(nombre, signal) {
     signal?.throwIfAborted();
     await esperar(300);
     signal?.throwIfAborted();
+
+    const slug = generarSlug(nombre);
 
     if (MOCK.slug === "slug-sin-colision") {
       return { slug, disponible: true };
@@ -276,10 +327,23 @@ export const mockCategoryAdapter: CategoryRepository = {
     await esperar(400);
     signal?.throwIfAborted();
 
-    if (MOCK.slug === "slug-carrera-409" || slugEnUso(input.slug)) {
-      throw new Error(
-        "El slug ya está en uso. Elige la alternativa sugerida o modifica el slug.",
-      );
+    if (MOCK.slug === "slug-carrera-409") {
+      // Simulate a concurrent writer exactly once. The next resolution sees
+      // the occupied slug and returns the deterministic alternative.
+      MOCK.slug = "default";
+      store.push({
+        id: `reserva-concurrente-${input.slug}`,
+        nombre: "Categoría creada en otra operación",
+        slug: input.slug,
+        padreId: null,
+        orden: store.length + 1,
+        estado: "Activo",
+        productosActivos: 0,
+      });
+      throw new CategorySlugConflictError();
+    }
+    if (slugEnUso(input.slug)) {
+      throw new CategorySlugConflictError();
     }
 
     const padreId = input.padreId
@@ -294,6 +358,11 @@ export const mockCategoryAdapter: CategoryRepository = {
         throw new Error(
           "No se puede crear una categoría activa bajo una categoría padre inactiva.",
         );
+      }
+      // The parent must be a root category: a child parent would place the new
+      // category on a third level.
+      if (nivelDe(padreId) + 1 >= MAX_NIVELES_CATEGORIA) {
+        throw new Error(MENSAJE_MAX_NIVELES);
       }
     }
 
@@ -365,6 +434,18 @@ export const mockCategoryAdapter: CategoryRepository = {
       if (registro.estado === "Activo" && padre.estado !== "Activo") {
         throw new Error(
           "No se puede asignar como padre a una categoría inactiva.",
+        );
+      }
+      // The new parent must be a root: a child parent would place the moved
+      // category on a third level.
+      if (nivelDe(padreId) + 1 >= MAX_NIVELES_CATEGORIA) {
+        throw new Error(MENSAJE_MAX_NIVELES);
+      }
+      // Moving a category that already has children under any parent would push
+      // those children to a third level, so it is rejected.
+      if (hijasDe(registro.id).length > 0) {
+        throw new Error(
+          "No puedes mover una categoría con subcategorías bajo otra categoría: se superarían los dos niveles permitidos.",
         );
       }
     }
@@ -466,7 +547,7 @@ export const mockCategoryAdapter: CategoryRepository = {
     const operacionId = `op-baja-categoria-${id}`;
     operacionesBaja.set(operacionId, {
       categoriaId: id,
-      estado: "pendiente",
+      estado: MOCK.baja === "rechazada-asincrona" ? "rechazada" : "pendiente",
     });
     return {
       resultado: "verificando",
@@ -490,6 +571,29 @@ export const mockCategoryAdapter: CategoryRepository = {
     const registro = hallar(operacion.categoriaId);
     if (!registro) {
       throw new Error("La categoría ya no está disponible.");
+    }
+
+    if (MOCK.baja === "error-consulta") {
+      throw new Error("No se pudo consultar la verificación de dependencias.");
+    }
+
+    if (operacion.estado === "rechazada") {
+      registro.estado = "Activo";
+      return {
+        operacionId,
+        estado: "rechazada",
+        mensaje: "La verificación encontró productos activos asociados. La categoría continúa activa.",
+        categoria: aDetalle(registro),
+      };
+    }
+
+    if (operacion.estado === "pendiente" && MOCK.baja === "pendiente-prolongado") {
+      return {
+        operacionId,
+        estado: "pendiente",
+        mensaje: "La verificación continúa pendiente. La categoría no se ha desactivado.",
+        categoria: aDetalle(registro),
+      };
     }
 
     if (operacion.estado === "pendiente") {

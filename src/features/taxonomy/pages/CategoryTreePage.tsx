@@ -19,6 +19,7 @@ import {
 } from "@tabler/icons-react";
 import {
   EntityTable,
+  FeedbackAlert,
   FilterBar,
   PageHeader,
   SearchField,
@@ -35,7 +36,7 @@ const STORAGE_KEY = "taxonomy_tree_colapsados";
 // MK-008-S01: listado / árbol de categorías en `/categorias`.
 export function CategoryTreePage() {
   const navigate = useNavigate();
-  const { state } = useCategoryTree();
+  const { state, reload } = useCategoryTree();
   const [busqueda, setBusqueda] = useState<string>("");
   const [colapsados, setColapsados] = useState<string[]>(() => {
     try {
@@ -99,6 +100,7 @@ export function CategoryTreePage() {
                   ? `Expandir ${nodo.nombre}`
                   : `Contraer ${nodo.nombre}`
               }
+              aria-expanded={!colapsados.includes(nodo.id)}
               onClick={() => alternar(nodo.id)}
             >
               {colapsados.includes(nodo.id) ? (
@@ -217,15 +219,29 @@ export function CategoryTreePage() {
             />
           </Box>
         </FilterBar>
-        <EntityTable
-          caption="Árbol de categorías"
-          columns={columnas}
-          rows={filas}
-          rowKey={(nodo) => nodo.id}
-          state={tablaState}
-          minWidth={900}
-          empty={vacio}
-        />
+        {state.status === "error" ? (
+          <FeedbackAlert
+            semantic="error"
+            title="No se pudo cargar el árbol"
+            actions={
+              <Button variant="outline" onClick={reload}>
+                Reintentar consulta
+              </Button>
+            }
+          >
+            {state.message}
+          </FeedbackAlert>
+        ) : (
+          <EntityTable
+            caption="Árbol de categorías"
+            columns={columnas}
+            rows={filas}
+            rowKey={(nodo) => nodo.id}
+            state={tablaState}
+            minWidth={900}
+            empty={vacio}
+          />
+        )}
       </Stack>
     </>
   );

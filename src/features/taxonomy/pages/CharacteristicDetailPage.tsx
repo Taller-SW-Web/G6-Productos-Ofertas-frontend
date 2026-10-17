@@ -12,10 +12,12 @@ import {
   IconSettings,
 } from "@tabler/icons-react";
 import {
+  EntityTable,
   FeedbackAlert,
   PageHeader,
   SectionCard,
   StatusBadge,
+  type TableColumn,
 } from "../../../components/shared";
 import { CampoDato } from "../components/CampoDato";
 import { useCharacteristicDetail } from "../hooks/useCharacteristicDetail";
@@ -27,6 +29,31 @@ import {
   etiquetaTipoCaracteristica,
 } from "../services/characteristicPresentation";
 import { estadoCaracteristicaSemantic } from "../services/estadoSemantic";
+import type { CharacteristicValue } from "../types";
+
+const columnasValores: TableColumn<CharacteristicValue>[] = [
+  {
+    key: "identificador",
+    header: "Identificador",
+    width: 220,
+    render: (valor) => valor.valorId,
+  },
+  {
+    key: "nombre",
+    header: "Valor permitido",
+    render: (valor) => valor.nombre,
+  },
+  {
+    key: "estado",
+    header: "Estado",
+    width: 140,
+    render: (valor) => (
+      <StatusBadge semantic={estadoCaracteristicaSemantic[valor.estado]}>
+        {valor.estado}
+      </StatusBadge>
+    ),
+  },
+];
 
 export function CharacteristicDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -42,7 +69,7 @@ export function CharacteristicDetailPage() {
 
 function CharacteristicDetailLoader({ id }: { id: string }) {
   const navigate = useNavigate();
-  const { state } = useCharacteristicDetail(id);
+  const { state, reload } = useCharacteristicDetail(id);
 
   if (state.status === "loading") {
     return (
@@ -58,9 +85,12 @@ function CharacteristicDetailLoader({ id }: { id: string }) {
         semantic="error"
         title="No se pudo cargar la característica"
         actions={
-          <Button variant="outline" onClick={() => navigate("/caracteristicas")}>
-            Volver al listado
-          </Button>
+          <Group gap="sm">
+            <Button variant="outline" onClick={reload}>Reintentar consulta</Button>
+            <Button variant="outline" onClick={() => navigate("/caracteristicas")}>
+              Volver al listado
+            </Button>
+          </Group>
         }
       >
         {state.message}
@@ -130,6 +160,9 @@ function CharacteristicDetailLoader({ id }: { id: string }) {
         <SectionCard title="Datos generales">
           <Stack gap="sm">
             <CampoDato etiqueta="Nombre">{detalle.nombre}</CampoDato>
+            <CampoDato etiqueta="Identificador de característica">
+              {detalle.id}
+            </CampoDato>
             <CampoDato etiqueta="Tipo">
               {etiquetaTipoCaracteristica[detalle.tipo]}
             </CampoDato>
@@ -149,6 +182,25 @@ function CharacteristicDetailLoader({ id }: { id: string }) {
             )}
           </Stack>
         </SectionCard>
+        {esLista && (
+          <SectionCard
+            title="Valores permitidos"
+            description="La etiqueta puede cambiar sin alterar el identificador estable de cada valor."
+          >
+            <EntityTable
+              caption="Valores permitidos e identificadores"
+              columns={columnasValores}
+              rows={detalle.valores ?? []}
+              rowKey={(valor) => valor.valorId}
+              state={{ status: "success" }}
+              minWidth={620}
+              empty={{
+                title: "Sin valores permitidos",
+                description: "Esta característica LISTA aún no tiene valores definidos.",
+              }}
+            />
+          </SectionCard>
+        )}
         <Group justify="flex-end">
           <Button variant="outline" onClick={() => navigate("/caracteristicas")}>
             Volver al listado

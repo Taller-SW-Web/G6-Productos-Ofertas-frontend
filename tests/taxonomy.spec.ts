@@ -1,9 +1,13 @@
-import { expect, test } from "@playwright/test";
+﻿import { expect, test } from "@playwright/test";
 import { brandService } from "../src/features/taxonomy/services/brandService";
 import { categoryService } from "../src/features/taxonomy/services/categoryService";
 import { characteristicService } from "../src/features/taxonomy/services/characteristicService";
 import { productTypeService } from "../src/features/taxonomy/services/productTypeService";
 import { seoService } from "../src/features/taxonomy/services/seoService";
+import { __resetBrandStore } from "../src/features/taxonomy/adapters/mockBrandAdapter";
+import { __resetCategoryStore } from "../src/features/taxonomy/adapters/mockCategoryAdapter";
+import { __resetCharacteristicStore } from "../src/features/taxonomy/adapters/mockCharacteristicAdapter";
+import { __resetProductTypeStore } from "../src/features/taxonomy/adapters/mockProductTypeAdapter";
 import {
   SeoConflictError,
   type SeoRepository,
@@ -19,6 +23,20 @@ type Equal<X, Y> = (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y
   ? true
   : false;
 type Assert<T extends true> = T;
+
+test.beforeEach(() => {
+  __resetBrandStore();
+  __resetCategoryStore();
+  __resetCharacteristicStore();
+  __resetProductTypeStore();
+});
+
+test.afterEach(() => {
+  __resetBrandStore();
+  __resetCategoryStore();
+  __resetCharacteristicStore();
+  __resetProductTypeStore();
+});
 
 test("crea un tipo de producto y permite consultar su detalle de inmediato", async () => {
   const creado = await productTypeService.crear({
@@ -284,3 +302,27 @@ test("rechaza crear una categoría cuyo slug es un alias reservado", async () =>
     }),
   ).rejects.toThrow(/reservado/i);
 });
+
+test("rechaza crear una categoría de tercer nivel (máximo dos niveles)", async () => {
+  await expect(
+    categoryService.crear({
+      nombre: "Nieto QA",
+      slug: `nieto-qa-${Date.now()}`,
+      padreId: "running",
+    }),
+  ).rejects.toThrow(/dos niveles/i);
+});
+
+test("rechaza mover una categoría con subcategorías bajo otra categoría (superaría dos niveles)", async () => {
+  await expect(
+    categoryService.actualizar({
+      id: "calzado",
+      nombre: "Calzado",
+      slug: "calzado",
+      padreId: "ropa",
+      orden: 1,
+    }),
+  ).rejects.toThrow(/dos niveles|superarían|subcategorías/i);
+});
+
+

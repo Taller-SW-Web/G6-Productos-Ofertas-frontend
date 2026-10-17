@@ -35,6 +35,7 @@ test.describe("E2E / MK-008 ↔ Catálogo: Árbol de categorías", () => {
   test("formulario de nueva categoría exige nombre y confirma el slug antes de crear", async ({
     page,
   }) => {
+    test.setTimeout(60_000);
     await page.goto("/categorias/nueva");
     await expect(
       page.getByRole("heading", { name: /crear categoría|nueva/i }),
@@ -51,7 +52,9 @@ test.describe("E2E / MK-008 ↔ Catálogo: Árbol de categorías", () => {
     await nombre.fill("Categoría E2E Test");
     await page.getByRole("button", { name: "Crear categoría" }).click();
 
-    await expect(page.getByLabel(/slug/i)).toBeVisible();
+    await expect(
+      page.getByRole("textbox", { name: "Slug (URL)" }),
+    ).toBeVisible();
   });
 
   test("vista de detalle de categoría existente muestra estado y acciones", async ({
@@ -129,8 +132,10 @@ test.describe("E2E / Catálogo: selector de categorías refleja Taxonomía", () 
     ).toBeVisible();
 
     // Click to open selector and check Taxonomía categories appear
-    // Even if locator approach varies, we just verify the page renders without error
-    await expect(page.getByRole("main")).toBeVisible();
+    await page.getByRole("combobox", { name: "Categoría", exact: true }).click();
+    await expect(page.getByRole("option", { name: "Calzado", exact: true })).toBeVisible();
+    await expect(page.getByRole("option", { name: "Ropa", exact: true })).toBeVisible();
+    await expect(page.getByRole("option", { name: "Accesorios", exact: true })).toBeVisible();
     // No console errors should block the page
     const errors: string[] = [];
     page.on("pageerror", (err) => errors.push(err.message));

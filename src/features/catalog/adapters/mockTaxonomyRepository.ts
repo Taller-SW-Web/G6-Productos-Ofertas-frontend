@@ -42,6 +42,17 @@ export const PRODUCT_TYPE_ID_MAP: Record<string, string> = {
   // Coordinación pendiente con Poma (H-03).
 };
 
+// MK-010 / MK-004: confirmed equivalence between Taxonomía characteristic IDs and
+// the Catalog schema characteristic IDs. Taxonomía expresses Color and Talla as
+// `color`/`talla`; the Catalog attribute schema (fixtures) uses `CAR-COLOR`/
+// `CAR-TALLA`. Without this map the fixture reference is not found and the
+// `esIdentificadora` flag is lost, which breaks variant identification in MK-004.
+// Only confirmed same-concept equivalences belong here; never infer from names.
+export const CHARACTERISTIC_ID_MAP: Record<string, string> = {
+  color: "CAR-COLOR",
+  talla: "CAR-TALLA",
+};
+
 // ---------------------------------------------------------------------------
 // Helper: flatten CategoryNode tree into a flat list, translating IDs.
 // ---------------------------------------------------------------------------
@@ -240,8 +251,11 @@ export class MockTaxonomyRepository implements TaxonomyRepository {
 
         // H-02: carry esIdentificadora from fixture if Taxonomía doesn't
         // express it (the field belongs to the Catalog schema contract, not
-        // the Taxonomía characteristic model).
-        const fixtureRef = fixtureByCharId.get(characteristic.id);
+        // the Taxonomía characteristic model). Resolve the fixture through the
+        // confirmed Taxonomía → Catalog characteristic ID equivalence.
+        const fixtureRef = fixtureByCharId.get(
+          CHARACTERISTIC_ID_MAP[characteristic.id] ?? characteristic.id,
+        );
         const esIdentificadora = fixtureRef?.esIdentificadora ?? false;
 
         return {

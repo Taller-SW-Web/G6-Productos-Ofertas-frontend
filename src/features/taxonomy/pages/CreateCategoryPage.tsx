@@ -19,10 +19,9 @@ import {
 import { SufijoResaltado } from "../components/SufijoResaltado";
 import { useCategoryTree } from "../hooks/useCategoryTree";
 import { useCreateCategory } from "../hooks/useCreateCategory";
-import type { CategoryNode } from "../types";
 
 // MK-008-S02: crear categoría en `/categorias/nueva`.
-// MK-008-S02-C: confirmación de slug SEO (mismo flujo; ruta `/categorias/confirmar-slug`).
+// MK-008-S02-C: confirmación de slug SEO como diálogo en el mismo flujo.
 export function CreateCategoryPage() {
   const navigate = useNavigate();
   const { state: treeState } = useCategoryTree();
@@ -37,22 +36,25 @@ export function CreateCategoryPage() {
   const [imagenUrl, setImagenUrl] = useState<string>("");
   const [nombreError, setNombreError] = useState<string | null>(null);
 
+  // SPEC-008 / MK-008: la taxonomía admite como máximo dos niveles. Por eso el
+  // padre de una nueva categoría solo puede ser una categoría raíz (nivel 1);
+  // nunca una subcategoría, que daría lugar a un tercer nivel.
   const padres = useMemo(() => {
     if (treeState.status !== "success") return [];
-    const opciones: { value: string; label: string }[] = [];
-    const recorrer = (nodos: CategoryNode[], profundidad: number) => {
-      for (const nodo of nodos) {
-        if (nodo.estado === "Activo") {
-          opciones.push({
-            value: nodo.id,
-            label: `${"— ".repeat(profundidad)}${nodo.nombre}`,
-          });
-          if (nodo.hijas?.length) recorrer(nodo.hijas, profundidad + 1);
-        }
-      }
-    };
-    recorrer(treeState.nodos, 0);
-    return opciones;
+    return treeState.nodos
+      .filter((raiz) => raiz.estado === "Activo")
+      .flatMap((raiz) => [
+        {
+          value: raiz.id,
+          label: raiz.nombre,
+          disabled: false,
+        },
+        ...(raiz.hijas ?? []).map((hija) => ({
+          value: hija.id,
+          label: `${raiz.nombre} / ${hija.nombre} (no puede ser padre: máximo dos niveles)`,
+          disabled: true,
+        })),
+      ]);
   }, [treeState]);
 
   const modalAbierto =
@@ -72,6 +74,7 @@ export function CreateCategoryPage() {
   const handleConfirmar = () => {
     if (
       !slugCheck ||
+      (!slugCheck.disponible && slug !== slugCheck.alternativo) ||
       phase === "comprobando" ||
       phase === "guardando"
     ) {
@@ -147,6 +150,7 @@ export function CreateCategoryPage() {
                   />
                   <Select
                     label="Categoría padre (opcional)"
+                    description="Solo dos niveles: la nueva categoría será raíz o subcategoría de una categoría raíz."
                     placeholder="Categoría raíz"
                     data={padres}
                     value={padreId}
@@ -255,8 +259,8 @@ export function CreateCategoryPage() {
               <TextInput
                 label="Slug (URL)"
                 value={slug}
+                readOnly
                 disabled={phase === "guardando"}
-                onChange={(event) => setSlug(event.currentTarget.value)}
               />
             </>
           )}

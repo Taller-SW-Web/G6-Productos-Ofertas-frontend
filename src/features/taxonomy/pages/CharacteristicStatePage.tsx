@@ -23,7 +23,7 @@ export function CharacteristicStatePage() {
 
 function CharacteristicStateLoader({ id }: { id: string }) {
   const navigate = useNavigate();
-  const { state } = useCharacteristicDetail(id);
+  const { state, reload } = useCharacteristicDetail(id);
 
   if (state.status === "loading") {
     return (
@@ -39,9 +39,12 @@ function CharacteristicStateLoader({ id }: { id: string }) {
         semantic="error"
         title="No se pudo cargar la característica"
         actions={
-          <Button variant="outline" onClick={() => navigate("/caracteristicas")}>
-            Volver al listado
-          </Button>
+          <Group gap="sm">
+            <Button variant="outline" onClick={reload}>Reintentar consulta</Button>
+            <Button variant="outline" onClick={() => navigate("/caracteristicas")}>
+              Volver al listado
+            </Button>
+          </Group>
         }
       >
         {state.message}
@@ -179,8 +182,9 @@ function CharacteristicStateContent({
               </FeedbackAlert>
               <Text size="sm" c="dimmed">
                 El identificador de la característica se conserva. La
-                desactivación no elimina sus valores, solo impide su uso en
-                nuevos esquemas (simulado).
+                desactivación no elimina sus valores ni altera asociaciones
+                históricas; en la demostración deja de estar disponible para
+                nuevas asociaciones y capturas de valores.
               </Text>
               <Group gap="sm">
                 <Button onClick={handleCambiarEstado} loading={procesando}>

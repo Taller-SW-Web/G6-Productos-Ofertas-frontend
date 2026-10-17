@@ -84,6 +84,14 @@ const operacionesBaja: OperacionBaja[] = [
   { operacionId: "op-marca-adidas", marcaId: "adidas", estado: "verificando" },
 ];
 
+// H-06: test isolation — snapshot/restore baseline store.
+const estadoInicialMarcas = store.map((item) => ({ ...item }));
+
+export const __resetBrandStore = (): void => {
+  store.length = 0;
+  store.push(...estadoInicialMarcas.map((item) => ({ ...item })));
+};
+
 const esperar = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const generarId = (nombre: string): string => {

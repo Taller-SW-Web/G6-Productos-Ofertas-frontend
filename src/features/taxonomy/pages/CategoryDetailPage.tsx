@@ -46,8 +46,8 @@ const columnasHijas: TableColumn<CategoryNode>[] = [
 ];
 
 // MK-008-S05: detalle de categoría en `/categorias/:id`.
-// MK-008-S05-R: reactivación de categoría (misma pantalla; ruta `/categorias/:id/reactivar`
-// disponible para deep-link; el botón Reactivar aparece según el estado).
+// MK-008-S05-R: bloqueo de reactivación dentro del detalle contextual; no añade
+// una ruta de deep-link sin el resultado previo de la operación.
 export function CategoryDetailPage() {
   const { id } = useParams<{ id: string }>();
   if (!id) {

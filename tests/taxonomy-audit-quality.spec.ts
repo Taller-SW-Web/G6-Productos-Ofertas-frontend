@@ -19,15 +19,30 @@ import { mockCategoryAdapter } from "../src/features/taxonomy/adapters/mockCateg
 import { mockBrandAdapter } from "../src/features/taxonomy/adapters/mockBrandAdapter";
 import { MockTaxonomyRepository } from "../src/features/catalog/adapters/mockTaxonomyRepository";
 import { mockCatalogRepository } from "../src/features/catalog/adapters/mockCatalogRepository";
-import { mockProductTypeAdapter } from "../src/features/taxonomy/adapters/mockProductTypeAdapter";
+import { __resetProductTypeStore, mockProductTypeAdapter } from "../src/features/taxonomy/adapters/mockProductTypeAdapter";
+import { __resetBrandStore } from "../src/features/taxonomy/adapters/mockBrandAdapter";
+import { __resetCategoryStore } from "../src/features/taxonomy/adapters/mockCategoryAdapter";
+import { __resetCharacteristicStore } from "../src/features/taxonomy/adapters/mockCharacteristicAdapter";
 
 // ---------------------------------------------------------------------------
-// H-06: Isolated repository instance per test group.
-// Each test creates its own MockTaxonomyRepository so mutations in one test
-// do not bleed into the adapter state of another.
-// Note: mockCategoryAdapter / mockBrandAdapter / mockProductTypeAdapter share
-// a module-level store. Tests that mutate them clean up via finally blocks.
+// H-06: Isolated repository instance per test group and per-test store reset.
+// Each test creates its own MockTaxonomyRepository. The shared in-memory stores
+// of the taxonomy adapters are reset before/after each test to prevent leakage.
 // ---------------------------------------------------------------------------
+
+test.beforeEach(() => {
+  __resetBrandStore();
+  __resetCategoryStore();
+  __resetCharacteristicStore();
+  __resetProductTypeStore();
+});
+
+test.afterEach(() => {
+  __resetBrandStore();
+  __resetCategoryStore();
+  __resetCharacteristicStore();
+  __resetProductTypeStore();
+});
 
 test.describe("H-04 / Persistencia de campos: orden e imagen", () => {
   test("crea categoría con orden e imagen; los preserva en consulta y edición", async () => {
@@ -275,9 +290,14 @@ test.describe("H-04 / Tipos y esquemas de atributos", () => {
     const talla = schema.find((s) => s.caracteristicaId === "talla");
     const color = schema.find((s) => s.caracteristicaId === "color");
 
-    // Both exist in the schema
+    // Both exist in the schema and preserve esIdentificadora from Catalog fixtures
     expect(talla).toBeDefined();
     expect(color).toBeDefined();
+    expect(talla?.esIdentificadora).toBe(true);
+    expect(color?.esIdentificadora).toBe(true);
+    const material = schema.find((s) => s.caracteristicaId === "material");
+    expect(material).toBeDefined();
+    expect(material?.esIdentificadora).toBe(false);
   });
 
   test("getAttributeSchema para TIP-* desconocido sin fixture retorna array vacío", async () => {
@@ -390,5 +410,25 @@ test.describe("H-06 / Aislamiento de stores entre tests", () => {
     const idsA = catsA.map((c) => c.id).sort();
     const idsB = catsB.map((c) => c.id).sort();
     expect(idsA).toEqual(idsB);
+  });
+});
+
+test.describe("H-04 / LOP-02 real: Taxonomía → Catálogo (selector de producto)", () => {
+  test("crear categoría en Taxonomía hace que aparezca en el selector de producto con estado correcto", async () => {
+    const repo = new MockTaxonomyRepository();
+    const slug = `seleccion-producto-${Date.now()}`;
+    const nombre = `Selector Producto ${Date.now()}`;
+
+    await mockCategoryAdapter.crear({ nombre, slug, orden: 9 });
+
+    const categorias = await repo.getCategories();
+    const nueva = categorias.find((c) => c.id === slug);
+    expect(nueva).toBeDefined();
+    expect(nueva?.nombre).toBe(nombre);
+    expect(nueva?.activo).toBe(true);
+
+    // No duplicate by id
+    const duplicados = categorias.filter((c) => c.id === slug);
+    expect(duplicados).toHaveLength(1);
   });
 });
