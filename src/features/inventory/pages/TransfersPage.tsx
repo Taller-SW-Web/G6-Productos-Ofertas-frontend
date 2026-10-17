@@ -196,16 +196,21 @@ export function TransfersPage() {
     {
       key: "actions",
       header: "Acción",
-      width: 140,
+      width: 180,
       align: "right",
       render: (row) => {
         const receivable = !isTerminalTransferStatus(row.status);
         return (
           <Button
-            size="xs"
-            variant={receivable ? "filled" : "light"}
+            size="sm"
+            variant={receivable ? "filled" : "outline"}
             disabled={!receivable}
-            leftSection={<IconChecklist size={14} />}
+            leftSection={<IconChecklist size={16} />}
+            aria-label={
+              receivable
+                ? `Recepcionar traslado ${row.transferCode}`
+                : `Traslado ${row.transferCode} cerrado`
+            }
             onClick={() => handleOpenReceptionModal(row)}
           >
             {receivable ? "Recepcionar" : "Cerrado"}

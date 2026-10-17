@@ -249,7 +249,6 @@ export function ProductsPage() {
           <Button
             component={Link}
             to="/productos/nuevo"
-            color="orange"
             leftSection={<IconPlus size={16} />}
           >
             Crear producto
@@ -278,7 +277,7 @@ export function ProductsPage() {
           semantic="error"
           title="Error al consultar productos"
           actions={
-            <Button size="xs" variant="outline" color="red" onClick={handleRetry}>
+            <Button size="xs" variant="outline" onClick={handleRetry}>
               Reintentar consulta
             </Button>
           }
@@ -307,7 +306,6 @@ export function ProductsPage() {
               <Button
                 component={Link}
                 to="/productos/nuevo"
-                color="orange"
                 size="xs"
                 leftSection={<IconPlus size={14} />}
               >

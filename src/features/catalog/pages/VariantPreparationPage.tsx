@@ -21,7 +21,7 @@ import {
   IconRefresh,
   IconX,
 } from "@tabler/icons-react";
-import { FeedbackAlert, PageHeader, SectionCard } from "../../../components/shared";
+import { FeedbackAlert, PageHeader, SectionCard, StatusBadge } from "../../../components/shared";
 import { useVariantPreparation } from "../hooks/useVariantPreparation";
 import { formatIdentifyingAttributes, isPhysicalProfileComplete } from "../services/catalogPresentation";
 
@@ -75,12 +75,12 @@ export function VariantPreparationPage() {
     variant?.inventoryStatus ??
     variant?.inventoryPreparationStatus ??
     "PENDING";
-  const prepColor =
+  const prepSemantic =
     inventoryStatus === "COMPLETED"
-      ? "green"
+      ? "success"
       : inventoryStatus === "REJECTED"
-        ? "red"
-        : "yellow";
+        ? "error"
+        : "warning";
 
   const hasCompletePhysical = isPhysicalProfileComplete(variant?.physicalProfile);
 
@@ -110,7 +110,7 @@ export function VariantPreparationPage() {
               Ficha del SKU
             </Button>
             <Button
-              variant="default"
+              variant="outline"
               size="sm"
               leftSection={<IconRefresh size={16} />}
               onClick={() => reload()}
@@ -119,7 +119,6 @@ export function VariantPreparationPage() {
             </Button>
             {canRetry && (
               <Button
-                color="orange"
                 size="sm"
                 loading={retrying}
                 leftSection={<IconRefresh size={16} />}
@@ -146,7 +145,7 @@ export function VariantPreparationPage() {
         )}
 
         {/* Identity & Status Card */}
-        <Paper p="md" withBorder>
+        <Paper p="lg" withBorder>
           <Group justify="space-between" align="center">
             <div>
               <Text size="xs" c="dimmed">
@@ -159,15 +158,15 @@ export function VariantPreparationPage() {
                 <Badge size="xs" variant="filled" color="dark">
                   {variant && formatIdentifyingAttributes(variant.identifyingAttributes)}
                 </Badge>
-                <Badge size="xs" color={prepColor}>
+                <StatusBadge semantic={prepSemantic}>
                   Inventario: {inventoryStatus}
-                </Badge>
-                <Badge size="xs" variant="outline">
+                </StatusBadge>
+                <StatusBadge>
                   Variante: {variant?.status}
-                </Badge>
+                </StatusBadge>
               </Group>
             </div>
-            <Paper p="xs" withBorder bg="var(--mantine-color-gray-0)">
+            <Paper p="xs" withBorder bg="var(--po-subtle)">
               <Text size="xs" c="dimmed">
                 Producto Padre:
               </Text>
@@ -222,7 +221,7 @@ export function VariantPreparationPage() {
                     </Text>
                     {canRetry && (
                       <Button
-                        color="red"
+                        variant="outline"
                         size="xs"
                         mt="xs"
                         loading={retrying}

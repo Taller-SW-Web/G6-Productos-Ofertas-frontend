@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
+  ActionIcon,
   Button,
   Select,
   Stack,
@@ -208,17 +209,18 @@ export function InventoryDashboardPage() {
     {
       key: "actions",
       header: "Acción",
-      width: 120,
+      width: 80,
       align: "right",
       render: (row) => (
-        <Button
-          size="xs"
-          variant="light"
-          leftSection={<IconEye size={14} />}
+        <ActionIcon
+          variant="subtle"
+          size={32}
+          aria-label="Ver detalle"
+          title={`Ver detalle de ${row.sku} en ${row.locationName}`}
           onClick={() => setSelectedItem(row)}
         >
-          Ver detalle
-        </Button>
+          <IconEye size={16} />
+        </ActionIcon>
       ),
     },
   ];

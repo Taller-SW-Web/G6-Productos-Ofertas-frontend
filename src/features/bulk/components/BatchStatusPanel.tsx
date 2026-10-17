@@ -56,11 +56,13 @@ export function BatchStatusPanel({
   // Semantic presentation for StatusBadge
   const statusSemantic = isSuccess
     ? "success"
-    : isPartial || isProcessing
-      ? "warning"
-      : isFailedGeneral
-        ? "error"
-        : "neutral";
+    : isProcessing
+      ? "info"
+      : isPartial
+        ? "warning"
+        : isFailedGeneral
+          ? "error"
+          : "neutral";
 
   const statusLabel = isSuccess
     ? "Completado"

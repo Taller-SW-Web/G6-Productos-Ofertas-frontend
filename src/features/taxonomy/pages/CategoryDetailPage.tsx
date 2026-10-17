@@ -210,7 +210,6 @@ function CategoryDetailContent({
             {esActivo ? (
               <Button
                 variant="outline"
-                color="danger"
                 leftSection={<IconPower size={16} stroke={2} aria-hidden="true" />}
                 onClick={() => navigate(`/categorias/${detalle.id}/desactivar`)}
               >

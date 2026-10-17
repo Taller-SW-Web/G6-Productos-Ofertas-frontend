@@ -164,7 +164,7 @@ export function VariantListPage() {
         actions={
           <Group gap="xs">
             <Button
-              variant="default"
+              variant="outline"
               size="sm"
               leftSection={<IconRefresh size={16} />}
               onClick={() => reload()}
@@ -184,7 +184,7 @@ export function VariantListPage() {
       />
 
       {/* Context banner */}
-      <Paper p="sm" withBorder mb="md" bg="var(--mantine-color-gray-0)">
+      <Paper p="sm" withBorder mb="md" bg="var(--po-subtle)">
         <Group justify="space-between" align="center">
           <div>
             <Text size="xs" c="dimmed">
@@ -201,18 +201,9 @@ export function VariantListPage() {
             <Text size="xs" c="dimmed">
               Precio inicial de Catálogo: <strong>{product?.priceInitial === undefined ? "No disponible" : `S/. ${product.priceInitial.toFixed(2)}`}</strong>. Precio vigente: consultar Pricing.
             </Text>
-            <Badge
-              size="sm"
-              color={
-                product?.status === "ACTIVO"
-                  ? "green"
-                  : product?.status === "BORRADOR"
-                    ? "blue"
-                    : "gray"
-              }
-            >
+            <StatusBadge semantic="neutral">
               Padre: {product?.status}
-            </Badge>
+            </StatusBadge>
           </Group>
         </Group>
       </Paper>
@@ -288,7 +279,7 @@ export function VariantListPage() {
         )
       ) : (
         <Paper withBorder>
-          <Table striped highlightOnHover verticalSpacing="sm">
+          <Table highlightOnHover verticalSpacing="sm">
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>SKU Comercial</Table.Th>
@@ -301,19 +292,12 @@ export function VariantListPage() {
             </Table.Thead>
             <Table.Tbody>
               {variants.map((v) => {
-                const prepColor =
+                const prepSemantic =
                   v.inventoryStatus === "COMPLETED"
-                    ? "green"
-                    : v.inventoryStatus === "REJECTED"
-                      ? "red"
-                      : "yellow";
-
-                const stateSemantic =
-                  v.status === "ACTIVA"
                     ? "success"
-                    : v.status === "BORRADOR"
-                      ? "info"
-                      : "neutral";
+                    : v.inventoryStatus === "REJECTED"
+                      ? "error"
+                      : "warning";
 
                 return (
                   <Table.Tr key={v.variantId}>
@@ -348,12 +332,12 @@ export function VariantListPage() {
                       )}
                     </Table.Td>
                     <Table.Td>
-                      <Badge size="xs" color={prepColor}>
+                      <StatusBadge semantic={prepSemantic}>
                         {v.inventoryStatus}
-                      </Badge>
+                      </StatusBadge>
                     </Table.Td>
                     <Table.Td>
-                      <StatusBadge semantic={stateSemantic}>
+                      <StatusBadge>
                         {v.status}
                       </StatusBadge>
                     </Table.Td>
@@ -365,6 +349,7 @@ export function VariantListPage() {
                           variant="subtle"
                           color="gray"
                           size="sm"
+                          aria-label={`Ver detalle de ${v.sku}`}
                           title="Ver detalle"
                         >
                           <IconEye size={16} />
@@ -373,15 +358,22 @@ export function VariantListPage() {
                           component={Link}
                           to={`/productos/${productId}/variantes/${v.variantId}/editar`}
                           variant="subtle"
-                          color="blue"
+                          color="gray"
                           size="sm"
+                          aria-label={`Editar variante ${v.sku}`}
                           title="Editar variante"
                         >
                           <IconEdit size={16} />
                         </ActionIcon>
                         <Menu position="bottom-end" shadow="md">
                           <Menu.Target>
-                            <ActionIcon variant="subtle" color="gray" size="sm">
+                            <ActionIcon
+                              variant="subtle"
+                              color="gray"
+                              size="sm"
+                              aria-label={`Más acciones para ${v.sku}`}
+                              title="Más acciones"
+                            >
                               <IconDotsVertical size={16} />
                             </ActionIcon>
                           </Menu.Target>
@@ -395,7 +387,6 @@ export function VariantListPage() {
                             </Menu.Item>
                             {v.status === "BORRADOR" && (
                               <Menu.Item
-                                color="teal"
                                 leftSection={<IconCheck size={14} />}
                                 onClick={() => handleActivateClick(v)}
                               >
@@ -404,7 +395,7 @@ export function VariantListPage() {
                             )}
                             {v.status === "ACTIVA" && (
                               <Menu.Item
-                                color="red"
+                                color="danger"
                                 leftSection={<IconPower size={14} />}
                                 onClick={() => handleDeactivateClick(v)}
                               >
@@ -413,7 +404,6 @@ export function VariantListPage() {
                             )}
                             {v.status === "INACTIVA" && (
                               <Menu.Item
-                                color="teal"
                                 leftSection={<IconRefresh size={14} />}
                                 onClick={() => handleReactivateClick(v)}
                               >

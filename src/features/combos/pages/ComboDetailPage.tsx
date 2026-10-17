@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Badge, Button, Group, Stack, Table, Text } from "@mantine/core";
+import { Button, Group, Stack, Table, Text } from "@mantine/core";
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { ComboAvailability } from "../components/ComboAvailability";
 import { useCombosRuntime } from "../hooks/useCombosRuntime";
@@ -11,7 +11,7 @@ import {
   isUnavailableForNewSales,
 } from "../services/availability";
 import { RequestIdentity } from "../services/requestIdentity";
-import { EmptyState, FeedbackAlert, PageHeader, SectionCard, ConfirmDialog } from "../../../components/shared";
+import { EmptyState, FeedbackAlert, PageHeader, SectionCard, ConfirmDialog, StatusBadge } from "../../../components/shared";
 import type { Combo, ComboAvailability as ComboAvailabilityInfo, SkuPrice } from "../types/combos";
 
 type DetailState =
@@ -185,7 +185,7 @@ function ComboDetailForId({ comboId, unavailable }: { comboId: string; unavailab
     <Stack mt="lg" gap="lg">
       <SectionCard title="Resumen comercial" description="El precio comercial guardado es independiente de las referencias de Pricing.">
         <Group gap="xl" wrap="wrap">
-          <div><Text size="sm" c="dimmed">Estado</Text><Badge variant="light" color="gray">{combo.status}</Badge></div>
+          <div><Text size="sm" c="dimmed">Estado</Text><StatusBadge>{combo.status}</StatusBadge></div>
           <div><Text size="sm" c="dimmed">Precio comercial guardado</Text><Text fw={600}>{formatMoney(combo.priceMinor)}</Text></div>
           <div><Text size="sm" c="dimmed">Disponibilidad estimada</Text><ComboAvailability combo={comboView} /></div>
         </Group>
