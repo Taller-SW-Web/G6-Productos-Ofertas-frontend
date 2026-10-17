@@ -101,6 +101,8 @@ export function BatchRowsTable({
 }: BatchRowsTableProps) {
   const [page, setPage] = useState(1);
   const pageSize = 10;
+  const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
 
   const columns: TableColumn<BulkImportRow>[] = [
     {
@@ -192,8 +194,8 @@ export function BatchRowsTable({
   ];
 
   const paginatedRows = rows.slice(
-    (page - 1) * pageSize,
-    page * pageSize,
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize,
   );
 
   return (
@@ -212,7 +214,7 @@ export function BatchRowsTable({
       pagination={
         rows.length > pageSize
           ? {
-              page,
+              page: currentPage,
               pageSize,
               total: rows.length,
               onChange: setPage,

@@ -262,6 +262,10 @@ Si un contrato necesario todavía está abierto, define un **modelo de presentac
 - declarar el frontend desplegado o las APIs integradas sin prueba real;
 - asignar decisiones empresariales o ownership entre módulos por cuenta propia.
 
+### Convención de mensajes de commit
+
+Redacta en español la descripción de todos los mensajes de commit nuevos. Se permiten prefijos técnicos de Conventional Commits, por ejemplo: `fix(bulk): corregir estados de consulta`. No reescribas commits ya publicados solo para traducirlos.
+
 Si encuentras una discrepancia en Docs, indica: `Ruta fuente`, `regla observada`, `problema`, `propuesta`, `owner de decisión`. **No la arregles silenciosamente desde este repositorio.**
 
 ## 12. Flujo de implementación (sin ensayo/error indiscriminado)

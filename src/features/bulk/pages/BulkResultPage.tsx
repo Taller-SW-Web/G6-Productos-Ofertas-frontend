@@ -31,7 +31,10 @@ export function BulkResultPage() {
     isNotFound,
     isStale,
     resuming,
+    resumeError,
     downloadingReport,
+    reportError,
+    reportAvailable,
     refreshBatch,
     resumeBatch,
     downloadReport,
@@ -75,12 +78,13 @@ export function BulkResultPage() {
             >
               Nueva carga masiva
             </Button>
-            {batch && isTerminal && batch.failed_rows > 0 && Boolean(batch.rows && batch.rows.some((r) => r.status === "FAILED")) && (
+            {batch && isTerminal && reportAvailable && (
               <Button
                 variant="outline"
                 leftSection={<IconDownload size={18} stroke={2} aria-hidden="true" />}
                 onClick={downloadReport}
                 loading={downloadingReport}
+                disabled={downloadingReport}
               >
                 Descargar reporte de errores
               </Button>
@@ -92,6 +96,7 @@ export function BulkResultPage() {
                 }
                 onClick={() => setConfirmResumeOpen(true)}
                 loading={resuming}
+                disabled={resuming || loading}
               >
                 Reanudar operaciones pendientes
               </Button>
@@ -125,6 +130,24 @@ export function BulkResultPage() {
                 Nota: Se muestra la última información confirmada del lote antes de producirse el error de conexión.
               </Text>
             )}
+          </FeedbackAlert>
+        )}
+
+        {reportError && (
+          <FeedbackAlert semantic="error" title="Reporte no disponible">
+            {reportError}
+          </FeedbackAlert>
+        )}
+
+        {batch && isTerminal && batch.failed_rows > 0 && !reportAvailable && (
+          <FeedbackAlert semantic="info" title="Reporte de errores no disponible">
+            No hay un recurso de reporte descargable para este lote. No se ofrece un archivo ficticio.
+          </FeedbackAlert>
+        )}
+
+        {resumeError && (
+          <FeedbackAlert semantic="error" title="No se pudo reanudar el lote">
+            {resumeError}
           </FeedbackAlert>
         )}
 

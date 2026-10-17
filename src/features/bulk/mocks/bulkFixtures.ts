@@ -505,6 +505,14 @@ export const mockExports: Record<string, BulkExportJob> = {
     file_size: 328,
     download_url: "mock://download/export-completed.csv",
   },
+  "export-completed-xlsx": {
+    export_id: "export-completed-xlsx",
+    status: "COMPLETED",
+    format: "XLSX",
+    created_at: "2026-10-10T11:40:00Z",
+    updated_at: "2026-10-10T11:42:00Z",
+    file_name: "catalogo_completo.xlsx",
+  },
   "export-failed": {
     export_id: "export-failed",
     status: "FAILED_GENERAL",
