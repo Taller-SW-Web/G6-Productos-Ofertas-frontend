@@ -35,7 +35,8 @@ export function SeoListPage() {
     {
       key: "acciones",
       header: "Acciones",
-      width: 140,
+      width: 80,
+      align: "right",
       render: (i) => (
         <ActionIcon
           aria-label={`Configurar SEO de ${i.nombre}`}

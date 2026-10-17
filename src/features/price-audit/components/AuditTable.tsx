@@ -80,7 +80,7 @@ export function AuditTable({
           to={`/precios/auditoria/asientos/${encodeURIComponent(entry.id)}${suffix}`}
           state={{ auditOpener: entry.id }}
           data-audit-id={entry.id}
-          aria-label={`Ver detalle del asiento ${entry.id}`}
+          aria-label={`Ver detalle de ${entry.id}`}
           title="Ver detalle"
         >
           <IconEye size={16} />
