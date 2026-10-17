@@ -48,7 +48,7 @@ export interface HttpPricingRepositoryDependencies {
     before: PriceView,
     after: PriceView,
     reason: string,
-  ) => void;
+  ) => void | Promise<void>;
 }
 
 const pageSize = 20;
@@ -59,7 +59,10 @@ function blocked(message: string): PricingFailure {
 
 function encoded(value: string): string {
   if (!value.trim()) {
-    throw new PricingFailure("error", "Pricing requiere un identificador válido.");
+    throw new PricingFailure(
+      "error",
+      "Pricing requiere un identificador válido.",
+    );
   }
   return encodeURIComponent(value);
 }
@@ -91,6 +94,8 @@ export function createHttpPricingRepository(
   const channelIds = dependencies.channelIds ?? {};
   const editableReads = new Map<string, PriceView>();
   const uncertainUpdates = new Set<string>();
+  const uncertainSchedules = new Set<string>();
+  const pendingWrites = new Set<string>();
 
   function scopeKey(targetId: string, channel: PriceChannel): string {
     return `${targetId}:${channel}`;
@@ -104,7 +109,9 @@ export function createHttpPricingRepository(
       );
     }
     try {
-      return validatePriceTargets(await dependencies.listCatalogTargets(signal));
+      return validatePriceTargets(
+        await dependencies.listCatalogTargets(signal),
+      );
     } catch (error) {
       if (signal.aborted || isAbort(error) || error instanceof PricingFailure)
         throw error;
@@ -155,8 +162,8 @@ export function createHttpPricingRepository(
     try {
       response = await transport.request(path, request);
     } catch (error) {
-      if (request.signal.aborted || isAbort(error)) throw error;
-      if (error instanceof PricingFailure) throw error;
+      if (!write && (request.signal.aborted || isAbort(error))) throw error;
+      if (!write && error instanceof PricingFailure) throw error;
       throw new PricingFailure(
         write ? "unknown" : "error",
         write
@@ -164,7 +171,16 @@ export function createHttpPricingRepository(
           : "Pricing no respondió a la consulta.",
       );
     }
-    if (response.ok) return response;
+    if (response.ok) {
+      const expected = request.method === "POST" ? 201 : 200;
+      if (response.status !== expected) {
+        throw new PricingFailure(
+          write ? "unknown" : "error",
+          "Pricing no devolvió la confirmación HTTP prevista por el contrato.",
+        );
+      }
+      return response;
+    }
 
     const code = await problemCode(response);
     if (response.status === 404 && code && absentCodes.includes(code))
@@ -207,7 +223,9 @@ export function createHttpPricingRepository(
     const response = await send(path, request, write, absentCodes);
     if (!response) return null;
     try {
-      return await response.json();
+      const body: unknown = await response.json();
+      if (body === null) throw new Error("Respuesta sin DTO");
+      return body;
     } catch {
       throw new PricingFailure(
         write ? "unknown" : "error",
@@ -223,17 +241,28 @@ export function createHttpPricingRepository(
     channel: PriceChannel,
     signal: AbortSignal,
   ): Promise<PriceView | null> {
+    if (target.kind === "product" && channel === "retail") {
+      throw blocked(
+        "El GET administrativo de producto no resuelve canal Retail. Se requiere un SKU legítimo o una operación contractual que confirme ese alcance.",
+      );
+    }
     const suffix =
-      target.kind === "variant" && channel === "retail"
-        ? "?canal=RETAIL"
-        : "";
+      target.kind === "variant" && channel === "retail" ? "?canal=RETAIL" : "";
     const response = await json(
       targetPath(target, suffix),
       { method: "GET", signal },
       false,
       ["PRECIO_NO_ENCONTRADO"],
     );
-    return response === null ? null : mapPriceDto(response, target, channelIds);
+    if (response === null) return null;
+    const price = mapPriceDto(response, target, channelIds);
+    if (channel === "global" && price.channel !== "global") {
+      throw new PricingFailure(
+        "error",
+        "Pricing devolvió un precio de otro canal.",
+      );
+    }
+    return price;
   }
 
   return {
@@ -318,6 +347,14 @@ export function createHttpPricingRepository(
       if (change.draft.offerAction === "ESTABLECER")
         body.precioOferta = requestMoney(change.draft.offer);
       if (change.draft.offerAction === "ELIMINAR") body.precioOferta = null;
+      const pendingKey = "update:" + key;
+      if (pendingWrites.has(pendingKey)) {
+        throw new PricingFailure(
+          "unknown",
+          "Hay un cambio pendiente de confirmación para este objetivo y canal.",
+        );
+      }
+      pendingWrites.add(pendingKey);
       try {
         const response = await json(
           targetPath(target),
@@ -329,10 +366,39 @@ export function createHttpPricingRepository(
           },
           true,
         );
-        const after = mapPriceDto(response, target, channelIds);
+        let after: PriceView;
+        try {
+          after = mapPriceDto(response, target, channelIds);
+          const expectedOffer =
+            change.draft.offerAction === "CONSERVAR"
+              ? before.offer
+              : change.draft.offerAction === "ELIMINAR"
+                ? null
+                : String(body.precioOferta);
+          if (
+            after.version <= before.version ||
+            after.channel !== change.target.channel ||
+            after.currency !== body.moneda ||
+            after.regular !== String(body.precioRegular) ||
+            after.offer !== expectedOffer ||
+            (target.kind === "variant" && after.origin !== "sku")
+          ) {
+            throw new Error("Confirmación incompatible");
+          }
+        } catch {
+          throw new PricingFailure(
+            "unknown",
+            "La respuesta no confirma el cambio solicitado. Consulta el precio antes de reintentar.",
+          );
+        }
         editableReads.set(key, after);
         try {
-          dependencies.onUpdated?.(target, before, after, change.draft.reason);
+          await dependencies.onUpdated?.(
+            target,
+            before,
+            after,
+            change.draft.reason,
+          );
         } catch {
           console.warn(
             "No se registró la auditoría de demostración tras confirmar el precio.",
@@ -343,6 +409,8 @@ export function createHttpPricingRepository(
         if (error instanceof PricingFailure && error.kind === "unknown")
           uncertainUpdates.add(key);
         throw error;
+      } finally {
+        pendingWrites.delete(pendingKey);
       }
     },
 
@@ -358,17 +426,27 @@ export function createHttpPricingRepository(
         false,
       );
       if (response === null) {
-        throw new PricingFailure("error", "Pricing no devolvió las programaciones.");
+        throw new PricingFailure(
+          "error",
+          "Pricing no devolvió las programaciones.",
+        );
       }
       return mapSchedulePageDto(response, target, page, pageSize, channelIds);
     },
 
-    async schedule(targetId, draft: ScheduleDraft, signal): Promise<ScheduleView> {
+    async schedule(
+      targetId,
+      draft: ScheduleDraft,
+      signal,
+    ): Promise<ScheduleView> {
       const target = await targetById(targetId, signal);
       const validFrom = localInstant(draft.start);
       const validUntil = draft.end ? localInstant(draft.end) : null;
       if (!validFrom || (draft.end && !validUntil)) {
-        throw new PricingFailure("error", "La vigencia no contiene una fecha válida.");
+        throw new PricingFailure(
+          "error",
+          "La vigencia no contiene una fecha válida.",
+        );
       }
       const body = {
         tipoPrecio: draft.kind,
@@ -379,23 +457,58 @@ export function createHttpPricingRepository(
         validUntil,
         motivoCambio: draft.reason,
       };
-      const response = await json(
-        targetPath(target, "/programaciones"),
-        {
-          method: "POST",
-          signal,
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(body),
-        },
-        true,
-      );
-      return mapScheduleDto(response, target, channelIds);
+      const key = scopeKey(targetId, draft.channel);
+      const pendingKey = "schedule:" + key;
+      if (uncertainSchedules.has(key) || pendingWrites.has(pendingKey)) {
+        throw new PricingFailure(
+          "unknown",
+          "Hay una programación pendiente de verificación. Consulta las programaciones antes de realizar otra escritura.",
+        );
+      }
+      pendingWrites.add(pendingKey);
+      try {
+        const response = await json(
+          targetPath(target, "/programaciones"),
+          {
+            method: "POST",
+            signal,
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          },
+          true,
+        );
+        try {
+          const created = mapScheduleDto(response, target, channelIds);
+          if (
+            created.channel !== draft.channel ||
+            created.currency !== draft.currency ||
+            created.kind !== draft.kind ||
+            created.amount !== String(body.importe) ||
+            Date.parse(created.start) !== Date.parse(body.validFrom) ||
+            (created.end === null ? null : Date.parse(created.end)) !==
+              (validUntil === null ? null : Date.parse(validUntil))
+          ) {
+            throw new Error("Confirmación incompatible");
+          }
+          return created;
+        } catch {
+          throw new PricingFailure(
+            "unknown",
+            "La respuesta no confirma la programación. Consulta su estado antes de reintentar.",
+          );
+        }
+      } catch (error) {
+        if (error instanceof PricingFailure && error.kind === "unknown")
+          uncertainSchedules.add(key);
+        throw error;
+      } finally {
+        pendingWrites.delete(pendingKey);
+      }
     },
 
     async readHistorical(query, at, signal) {
       const target = await targetById(query.targetId, signal);
-      const sku =
-        target.kind === "variant" ? target.sku : target.referenceSku;
+      const sku = target.kind === "variant" ? target.sku : target.referenceSku;
       if (!sku) {
         throw blocked(
           "El histórico requiere un SKU vendible resuelto por Catálogo para este objetivo.",
@@ -407,7 +520,10 @@ export function createHttpPricingRepository(
         ) ||
         !Number.isFinite(Date.parse(at))
       ) {
-        throw new PricingFailure("error", "El instante histórico no es válido.");
+        throw new PricingFailure(
+          "error",
+          "El instante histórico no es válido.",
+        );
       }
       const params = new URLSearchParams({ at });
       if (query.channel === "retail") params.set("canal", "RETAIL");
@@ -419,6 +535,17 @@ export function createHttpPricingRepository(
       );
       if (response === null) return null;
       const price = mapPriceDto(response, target, channelIds, sku);
+      const instant = Date.parse(at);
+      if (
+        (query.channel === "global" && price.channel !== "global") ||
+        instant < Date.parse(price.validFrom) ||
+        (price.validUntil !== null && instant >= Date.parse(price.validUntil))
+      ) {
+        throw new PricingFailure(
+          "error",
+          "Pricing devolvió una vigencia o canal que no corresponde a la consulta histórica.",
+        );
+      }
       if (!price.validityId) {
         throw new PricingFailure(
           "error",
@@ -443,7 +570,14 @@ export function createHttpPricingRepository(
         false,
         ["LOTE_NO_ENCONTRADO"],
       );
-      return response === null ? null : mapBatchDto(response);
+      if (response === null) return null;
+      const batch = mapBatchDto(response);
+      if (batch.id !== id)
+        throw new PricingFailure(
+          "error",
+          "Pricing devolvió un lote distinto del solicitado.",
+        );
+      return batch;
     },
 
     async report(id, signal): Promise<ReportFile> {
@@ -453,9 +587,17 @@ export function createHttpPricingRepository(
         false,
       );
       if (!response) {
-        throw new PricingFailure("error", "Pricing no devolvió el reporte solicitado.");
+        throw new PricingFailure(
+          "error",
+          "Pricing no devolvió el reporte solicitado.",
+        );
       }
-      if (!response.headers.get("content-type")?.toLowerCase().startsWith("text/csv")) {
+      if (
+        !response.headers
+          .get("content-type")
+          ?.toLowerCase()
+          .startsWith("text/csv")
+      ) {
         throw new PricingFailure(
           "error",
           "Pricing devolvió un formato de reporte distinto al CSV publicado.",
@@ -464,7 +606,10 @@ export function createHttpPricingRepository(
       try {
         return { data: await response.blob(), filename: "reporte-precios.csv" };
       } catch {
-        throw new PricingFailure("error", "No se pudo leer el reporte de Pricing.");
+        throw new PricingFailure(
+          "error",
+          "No se pudo leer el reporte de Pricing.",
+        );
       }
     },
   };

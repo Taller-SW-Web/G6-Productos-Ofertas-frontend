@@ -39,7 +39,9 @@ function requiredDate(source: Record<string, unknown>, key: string): string {
     !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(
       value,
     ) ||
-    !Number.isFinite(Date.parse(value))
+    !Number.isFinite(Date.parse(value)) ||
+    new Date(value.slice(0, 10) + "T00:00:00Z").toISOString().slice(0, 10) !==
+      value.slice(0, 10)
   )
     return invalidResponse();
   return value;
@@ -84,11 +86,7 @@ function requiredNullableDate(
 
 function version(source: Record<string, unknown>, key: string): number {
   const value = source[key];
-  if (
-    typeof value !== "number" ||
-    !Number.isSafeInteger(value) ||
-    value < 1
-  )
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1)
     return invalidResponse();
   return value;
 }
@@ -152,7 +150,10 @@ export function validatePriceTargets(value: unknown): PriceTarget[] {
     ids.add(id);
     if (target.kind === "product") {
       const referenceSku = target.referenceSku;
-      if (referenceSku !== undefined && (typeof referenceSku !== "string" || !referenceSku.trim()))
+      if (
+        referenceSku !== undefined &&
+        (typeof referenceSku !== "string" || !referenceSku.trim())
+      )
         return invalidResponse();
       return {
         id,
@@ -189,13 +190,11 @@ export function mapPriceDto(
   responseSku?: string,
 ): PriceView {
   const dto = record(value);
-  const productResponse = target.kind === "product" && responseSku === undefined;
-  const sku = responseSku ?? (target.kind === "variant" ? target.sku : undefined);
-  if (
-    productResponse
-      ? dto.product_id !== target.productId
-      : dto.sku !== sku
-  )
+  const productResponse =
+    target.kind === "product" && responseSku === undefined;
+  const sku =
+    responseSku ?? (target.kind === "variant" ? target.sku : undefined);
+  if (productResponse ? dto.product_id !== target.productId : dto.sku !== sku)
     return invalidResponse();
 
   const channelId = requiredNullableString(dto, "channel_id");
@@ -210,12 +209,23 @@ export function mapPriceDto(
   const regular = responseMoney(dto.precio_regular);
   const priceOffer = offer === null ? null : responseMoney(offer);
   const currency = requiredString(dto, "currency");
-  if (currency.length !== 3) return invalidResponse();
+  if (
+    currency.length !== 3 ||
+    currency.trim().length !== 3 ||
+    (priceOffer !== null && requestMoney(priceOffer) >= requestMoney(regular))
+  )
+    return invalidResponse();
 
   const validityId = productResponse
     ? undefined
     : requiredString(dto, "vigencia_id");
-  const displaySku = sku ?? (target.kind === "product" ? target.referenceSku : undefined);
+  const displaySku =
+    sku ?? (target.kind === "product" ? target.referenceSku : undefined);
+  const validFrom = requiredDate(dto, "valid_from");
+  const validUntil = requiredNullableDate(dto, "valid_until");
+  if (validUntil !== null && Date.parse(validUntil) <= Date.parse(validFrom))
+    return invalidResponse();
+  if (productResponse && channelId !== null) return invalidResponse();
 
   return {
     id: target.id,
@@ -227,8 +237,8 @@ export function mapPriceDto(
     version: version(dto, "price_version"),
     origin,
     channel: priceChannel(channelId, channelIds),
-    validFrom: requiredDate(dto, "valid_from"),
-    validUntil: requiredNullableDate(dto, "valid_until"),
+    validFrom,
+    validUntil,
     inherited: target.kind === "variant" && origin === "product",
     ...(validityId ? { validityId } : {}),
   };
@@ -258,6 +268,9 @@ export function mapScheduleDto(
     return invalidResponse();
   const channelId = requiredNullableString(dto, "channelId");
   const validUntil = requiredNullableDate(dto, "validUntil");
+  const validFrom = requiredDate(dto, "validFrom");
+  if (validUntil !== null && Date.parse(validUntil) <= Date.parse(validFrom))
+    return invalidResponse();
   const currency = requiredString(dto, "moneda");
   if (currency.length !== 3) return invalidResponse();
   return {
@@ -267,7 +280,7 @@ export function mapScheduleDto(
     amount: responseMoney(dto.importe),
     currency,
     channel: priceChannel(channelId, channelIds),
-    start: requiredDate(dto, "validFrom"),
+    start: validFrom,
     end: validUntil,
     status,
     version: version(dto, "priceVersion"),
@@ -295,7 +308,9 @@ export function mapSchedulePageDto(
     typeof totalPages !== "number" ||
     !Number.isSafeInteger(totalPages) ||
     totalPages !== Math.ceil(total / pageSize) ||
-    dto.items.length > pageSize
+    dto.items.length > pageSize ||
+    dto.items.length !==
+      Math.min(pageSize, Math.max(0, total - (page - 1) * pageSize))
   )
     return invalidResponse();
   return {
@@ -325,6 +340,11 @@ export function mapBatchDto(value: unknown): BatchView {
   };
   const rows = dto.rows;
   if (rows !== undefined && !Array.isArray(rows)) return invalidResponse();
+  const total = count("total_rows");
+  const completed = count("completed_rows");
+  const failed = count("failed_rows");
+  if (completed > total || failed > total - completed) return invalidResponse();
+  const rowIds = new Set<string>();
   return {
     id: requiredString(dto, "batch_id"),
     status,
@@ -332,9 +352,9 @@ export function mapBatchDto(value: unknown): BatchView {
       typeof dto.allow_partial === "boolean"
         ? dto.allow_partial
         : invalidResponse(),
-    total: count("total_rows"),
-    completed: count("completed_rows"),
-    failed: count("failed_rows"),
+    total,
+    completed,
+    failed,
     ...(rows === undefined
       ? {}
       : {
@@ -353,12 +373,19 @@ export function mapBatchDto(value: unknown): BatchView {
             const detail = row.detail;
             if (
               (sku !== undefined && sku !== null && typeof sku !== "string") ||
-              (code !== undefined && code !== null && typeof code !== "string") ||
-              (detail !== undefined && detail !== null && typeof detail !== "string")
+              (code !== undefined &&
+                code !== null &&
+                typeof code !== "string") ||
+              (detail !== undefined &&
+                detail !== null &&
+                typeof detail !== "string")
             )
               return invalidResponse();
+            const id = requiredString(row, "row_id");
+            if (rowIds.has(id)) return invalidResponse();
+            rowIds.add(id);
             return {
-              id: requiredString(row, "row_id"),
+              id,
               sku: sku ?? null,
               status: rowStatus,
               code: code ?? null,
