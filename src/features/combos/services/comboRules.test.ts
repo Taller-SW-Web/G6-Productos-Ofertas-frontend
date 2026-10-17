@@ -28,6 +28,7 @@ import { parseComboPage } from "./parseComboPage";
 import { RequestIdentity } from "./requestIdentity";
 import {
   ComboError,
+  type Combo,
   type ComboPayload,
   type CombosCatalogPort,
   type StockReading,
@@ -43,11 +44,14 @@ function makeAvailability(snapshot: Record<string, StockReading> = stockFixtures
   return new MockCombosAvailabilityAdapter({ snapshot });
 }
 
+const DEMO_NOW_MS = Date.parse("2026-10-17T12:00:00.000Z");
+
 function makeRepository(overrides: Partial<MockCombosDependencies> = {}) {
   return new MockCombosRepository({
     catalog: makeCatalog(),
     pricing: new MockCombosPricingAdapter(),
     availability: makeAvailability(),
+    now: () => DEMO_NOW_MS,
     ...overrides,
   });
 }
@@ -410,6 +414,133 @@ describe("COM-03 · disponibilidad informativa sin inventar stock", () => {
     const inactive = { ...comboWith(available.availability), status: "INACTIVO" as const };
     expect(isUnavailableForNewSales(inactive)).toBe(true);
     expect(availabilityMessageText(inactive)).toBe("La definición administrativa se conserva y no se ofrece para nuevas ventas.");
+  });
+});
+
+describe("COM-03 · prioridad de disponibilidad y recomputo autoritativo", () => {
+  const readings = readingMap({
+    OK: { sku: "OK", stock: 5, stale: false, locationsCompatible: true },
+    ZERO: { sku: "ZERO", stock: 0, stale: false, locationsCompatible: true },
+    STALE: { sku: "STALE", stock: 5, stale: true, locationsCompatible: true },
+  });
+
+  it("nunca considera vendible una identidad de componente no resuelta", () => {
+    expect(calculateInformativeAvailability("ACTIVO", [{ sku: "OK", quantity: 1, active: null }], readings))
+      .toMatchObject({ state: "NO_VERIFICABLE", quantity: null, verifiable: false, freshness: "NO_VERIFICABLE" });
+  });
+
+  it("respeta el orden: inactivo > vacío > identidad no resuelta > inactivo componente > cantidad inválida", () => {
+    // Combo inactivo gana incluso con componentes en problemas.
+    expect(calculateInformativeAvailability(
+      "INACTIVO",
+      [{ sku: "OK", quantity: 0, active: null }, { sku: "OK", quantity: 1, active: false }],
+      readings,
+    )).toMatchObject({ state: "COMBO_INACTIVO" });
+    // Sin componentes -> incompleta, antes de evaluar identidades.
+    expect(calculateInformativeAvailability("ACTIVO", [], readings)).toMatchObject({ state: "INCOMPLETA" });
+    // Identidad no resuelta (null) gana sobre componente inactivo (false) y cantidad inválida.
+    expect(calculateInformativeAvailability(
+      "ACTIVO",
+      [{ sku: "OK", quantity: 0, active: null }, { sku: "OK", quantity: 1, active: false }],
+      readings,
+    )).toMatchObject({ state: "NO_VERIFICABLE" });
+    // Componente inactivo confirmado gana sobre cantidad inválida.
+    expect(calculateInformativeAvailability(
+      "ACTIVO",
+      [{ sku: "OK", quantity: 1.5, active: false }],
+      readings,
+    )).toMatchObject({ state: "COMPONENTE_INACTIVO" });
+    // Cantidad inválida gana sobre una lectura ausente.
+    expect(calculateInformativeAvailability(
+      "ACTIVO",
+      [{ sku: "DESCONOCIDO", quantity: 0, active: true }],
+      readings,
+    )).toMatchObject({ state: "NO_VERIFICABLE" });
+  });
+
+  it("no publica un resultado positivo, cero ni desactualizado si falta una lectura", () => {
+    // La lectura incompleta se decide antes de la desactualizada y del cero confirmado.
+    expect(calculateInformativeAvailability(
+      "ACTIVO",
+      [active("STALE"), active("DESCONOCIDO")],
+      readings,
+    )).toMatchObject({ state: "INCOMPLETA", quantity: null, verifiable: false });
+    // Con lecturas completas pero desactualizadas se conserva el estimado, nunca un positivo verificado.
+    expect(calculateInformativeAvailability(
+      "ACTIVO",
+      [active("STALE"), active("OK")],
+      readings,
+    )).toMatchObject({ state: "DESACTUALIZADA", quantity: 5, verifiable: true, freshness: "DESACTUALIZADA" });
+    // La desactualizada se decide antes del cero confirmado: no se degrada a AGOTADO.
+    expect(calculateInformativeAvailability(
+      "ACTIVO",
+      [active("STALE"), active("ZERO")],
+      readings,
+    )).toMatchObject({ state: "DESACTUALIZADA", quantity: 0, verifiable: true, freshness: "DESACTUALIZADA" });
+  });
+
+  it("recomputa la disponibilidad en list() y getById() desde los puertos inyectados", async () => {
+    const staleSeed: Combo = {
+      id: "combo-seed",
+      name: "Seed desactualizado",
+      description: null,
+      status: "ACTIVO",
+      priceMinor: 1000,
+      version: 1,
+      components: [{ sku: "SKU-INEXISTENTE", productName: "Falso", quantity: 1, regularUnitMinor: 100, publicUnitMinor: 100 }],
+      // Un snapshot semilla no confiable: no debe publicarse tal cual.
+      availability: { state: "DISPONIBLE", verifiable: true, quantity: 999, freshness: "ACTUALIZADA", calculatedAt: "2000-01-01T00:00:00.000Z", reason: null },
+    };
+    const repository = makeRepository({ seed: [staleSeed] });
+    expect(await repository.getById("combo-seed")).toMatchObject({
+      availability: { state: "NO_VERIFICABLE", quantity: null, verifiable: false },
+    });
+    const listed = await repository.list({ status: "TODOS", page: 1, pageSize: 10 });
+    // Conserva identidad, componentes, precio, versión y estado; solo recalcula la disponibilidad.
+    expect(listed.items.find((item) => item.id === "combo-seed")).toMatchObject({
+      id: "combo-seed",
+      priceMinor: 1000,
+      version: 1,
+      status: "ACTIVO",
+      availability: { state: "NO_VERIFICABLE", quantity: null, verifiable: false },
+    });
+  });
+
+  it("nunca convierte un saldo desconocido en cero al recomputar", async () => {
+    const seed: Combo = {
+      ...comboFixtures[0]!,
+      id: "combo-unknown-stock",
+      components: [{ sku: "CAS-COR-001", productName: "Casaca", quantity: 1, regularUnitMinor: null, publicUnitMinor: null }],
+    };
+    const unknownStock = makeRepository({
+      seed: [seed],
+      availability: {
+        async readStocks() {
+          return [{ sku: "CAS-COR-001", stock: null, stale: false, locationsCompatible: true }];
+        },
+      },
+    });
+    expect((await unknownStock.getById("combo-unknown-stock"))?.availability)
+      .toMatchObject({ state: "INCOMPLETA", quantity: null, verifiable: false });
+  });
+
+  it("propaga el fallo de un puerto en lugar de publicar un snapshot obsoleto", async () => {
+    const failingCatalog = makeRepository({
+      catalog: {
+        async listProducts() { return []; },
+        async getProduct() { return null; },
+        async resolveSkus() { throw new Error("Catálogo no disponible."); },
+      },
+    });
+    await expect(failingCatalog.getById("combo-001")).rejects.toThrow("Catálogo no disponible.");
+    await expect(failingCatalog.list({ status: "TODOS", page: 1, pageSize: 10 })).rejects.toThrow("Catálogo no disponible.");
+
+    const failingAvailability = makeRepository({
+      availability: {
+        async readStocks() { throw new Error("Inventario no disponible."); },
+      },
+    });
+    await expect(failingAvailability.getById("combo-001")).rejects.toThrow("Inventario no disponible.");
   });
 });
 

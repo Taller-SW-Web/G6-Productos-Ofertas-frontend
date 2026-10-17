@@ -126,3 +126,33 @@ test("COM-05: conflicto de versión, diff, conservación del borrador y segundo 
   await expect(page.getByRole("heading", { name: "Propuesta local conservada" })).toBeVisible();
   await expect(page).toHaveURL(/\/combos\/combo-001$/);
 });
+
+test("COM-02: las referencias vigentes del detalle provienen de Pricing (override y herencia)", async ({ page }) => {
+  // Dúo Oxford: CAM-OXF-BLA-M (hereda base 139.90/129.90) + CAM-OXF-AZU-L (override 149.90/sin oferta).
+  // La suma pública vigente solo existe si Pricing resolvió ambas referencias; el histórico no la tenía.
+  await page.goto("/combos/combo-002");
+  await expect(page.getByRole("heading", { name: "Dúo Oxford" })).toBeVisible();
+  await expect(page.getByText("Referencias vigentes confirmadas")).toBeVisible();
+  await expect(page.getByText("2 / 2", { exact: true })).toBeVisible();
+  await expect(page.getByText(/289[.,]80/).first()).toBeVisible();
+  await expect(page.getByText(/279[.,]80/).first()).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("COM-03: la disponibilidad informativa no se presenta como verificación inventada", async ({ page }) => {
+  await page.goto("/combos/combo-001?scenario=detail-incomplete");
+  await expect(page.getByRole("heading", { name: "Conjunto Trail Esencial" })).toBeVisible();
+  await expect(page.getByText("Disponibilidad incompleta").first()).toBeVisible();
+
+  await page.goto("/combos/combo-001?scenario=detail-unverifiable");
+  await expect(page.getByText("Disponibilidad no verificable").first()).toBeVisible();
+
+  await page.goto("/combos/combo-001?scenario=detail-component-inactive");
+  await expect(page.getByText("Componente inactivo").first()).toBeVisible();
+
+  await page.goto("/combos/combo-001?scenario=detail-stale");
+  await expect(page.getByText("Desactualizada (4 combos estimados)").first()).toBeVisible();
+
+  await page.goto("/combos/combo-001?scenario=detail-active-zero");
+  await expect(page.getByText("Agotado (0 confirmado)").first()).toBeVisible();
+});

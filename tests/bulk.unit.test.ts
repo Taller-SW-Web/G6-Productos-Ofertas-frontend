@@ -5,12 +5,19 @@ import { canRequestImportReport } from "../src/features/bulk/services/bulkReposi
 import { canMockProvideImportReport } from "../src/features/bulk/services/reportAvailability";
 import { isBulkProviderConfigured } from "../src/features/bulk/services/bulkProviderStatus";
 import { getQueuedBatchDescription, getUnknownRowCountDescription } from "../src/features/bulk/components/batchStatusMessages";
-import { isExportSnapshotStale, selectBatchQueryView } from "../src/features/bulk/hooks/bulkQueryState";
+import {
+  canDownloadExport,
+  canResumeBatch,
+  hasReconcilableOperations,
+  isExportSnapshotStale,
+  resumeBatchWhenAllowed,
+  selectBatchQueryView,
+} from "../src/features/bulk/hooks/bulkQueryState";
 import { getDownloadFailureMessage, getUnavailableDownloadMessage } from "../src/features/bulk/services/downloadMessages";
 import { AdmissionCoordinator, LatestTaskCoordinator, runSingleFlight } from "../src/features/bulk/utils/asyncGuards";
 import { checkLocalFile, parseCsvSafely } from "../src/features/bulk/utils/localFileCheck";
 import { getGenuineMinimalXlsxArrayBuffer } from "./fixtures/genuineXlsxFixture";
-import { mockBatches } from "../src/features/bulk/mocks/bulkFixtures";
+import { mockBatches, mockExports } from "../src/features/bulk/mocks/bulkFixtures";
 
 function fileWithBytes(name: string, bytes: Uint8Array) {
   const copy = new Uint8Array(bytes.byteLength);
@@ -432,5 +439,110 @@ describe("Bulk local file checks", () => {
     controller.abort();
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
     expect(cancelled).toBe(true);
+  });
+});
+
+describe("Bulk reconciliation gating and export download eligibility", () => {
+  beforeEach(() => mockBulkRepository.resetMockState?.());
+  afterEach(() => mockBulkRepository.resetMockState?.());
+
+  const partial = mockBatches["batch-partial"]!;
+  const baseEligibility = {
+    loading: false,
+    error: null,
+    isStale: false,
+    isNotFound: false,
+    resuming: false,
+  };
+
+  it("detects reconcilable work from rows or aggregate counters without inventing pending operations", () => {
+    expect(hasReconcilableOperations(partial)).toBe(true);
+    expect(hasReconcilableOperations(mockBatches["batch-completed"]!)).toBe(false);
+    expect(hasReconcilableOperations(mockBatches["batch-failed-general"]!)).toBe(false);
+    // Row detail absent: fall back to aggregate counters.
+    expect(hasReconcilableOperations({ ...partial, rows: [], needs_reconciliation: true, failed_rows: 3 })).toBe(true);
+    expect(hasReconcilableOperations({ ...partial, rows: [], needs_reconciliation: false, failed_rows: 3 })).toBe(false);
+    // Row detail present but no failed row flagged for reconciliation.
+    expect(hasReconcilableOperations({
+      ...partial,
+      rows: [{
+        row_id: 1,
+        sku: "A",
+        nombre: "A",
+        status: "FAILED",
+        applied_domains: [],
+        failed_domain: "CATALOGO",
+        needs_reconciliation: false,
+        steps: [],
+      }],
+    })).toBe(false);
+  });
+
+  it("only permits resume for a current, error-free, terminal batch with reconcilable work", () => {
+    expect(canResumeBatch({ batch: partial, ...baseEligibility })).toBe(true);
+    expect(canResumeBatch({ batch: partial, ...baseEligibility, loading: true })).toBe(false);
+    expect(canResumeBatch({ batch: partial, ...baseEligibility, error: "offline" })).toBe(false);
+    expect(canResumeBatch({ batch: partial, ...baseEligibility, isStale: true })).toBe(false);
+    expect(canResumeBatch({ batch: partial, ...baseEligibility, isNotFound: true })).toBe(false);
+    expect(canResumeBatch({ batch: partial, ...baseEligibility, resuming: true })).toBe(false);
+    expect(canResumeBatch({ batch: undefined, ...baseEligibility })).toBe(false);
+    expect(canResumeBatch({ batch: mockBatches["batch-completed"]!, ...baseEligibility })).toBe(false);
+    expect(canResumeBatch({ batch: mockBatches["batch-failed-general"]!, ...baseEligibility })).toBe(false);
+    expect(canResumeBatch({ batch: mockBatches["batch-processing"]!, ...baseEligibility })).toBe(false);
+    expect(canResumeBatch({ batch: mockBatches["batch-queued"]!, ...baseEligibility })).toBe(false);
+    expect(canResumeBatch({
+      batch: {
+        ...partial,
+        rows: [{
+          row_id: 1,
+          sku: "A",
+          nombre: "A",
+          status: "FAILED",
+          applied_domains: [],
+          failed_domain: "CATALOGO",
+          needs_reconciliation: false,
+          steps: [],
+        }],
+      },
+      ...baseEligibility,
+    })).toBe(false);
+  });
+
+  it("does not issue a resume write when the batch is not eligible", async () => {
+    let writes = 0;
+    const resume = async () => { writes++; return "ok"; };
+
+    const skipped = resumeBatchWhenAllowed(false, resume);
+    expect(skipped).toBeUndefined();
+    expect(writes).toBe(0);
+
+    const executed = resumeBatchWhenAllowed(true, resume);
+    await expect(executed).resolves.toBe("ok");
+    expect(writes).toBe(1);
+  });
+
+  it("refuses a repository-level resume for batches without pending work", async () => {
+    await expect(mockBulkRepository.resumeImport("batch-failed-general")).rejects.toThrow(
+      "no contiene operaciones pendientes",
+    );
+    await expect(mockBulkRepository.resumeImport("batch-queued")).rejects.toThrow(
+      "ya se encuentra en proceso",
+    );
+  });
+
+  it("exposes downloads only for a current completed job with a real artifact", () => {
+    const completedCsv = mockExports["export-completed"]!;
+    expect(canDownloadExport({ job: completedCsv, isStale: false, dataMode: "mock" })).toBe(true);
+    expect(canDownloadExport({ job: completedCsv, isStale: true, dataMode: "mock" })).toBe(false);
+    // Mock XLSX never has a genuine artifact.
+    expect(canDownloadExport({ job: mockExports["export-completed-xlsx"]!, isStale: false, dataMode: "mock" })).toBe(false);
+    // Non-terminal jobs never download.
+    expect(canDownloadExport({ job: mockExports["export-queued"]!, isStale: false, dataMode: "mock" })).toBe(false);
+    expect(canDownloadExport({ job: mockExports["export-processing"]!, isStale: false, dataMode: "mock" })).toBe(false);
+    expect(canDownloadExport({ job: mockExports["export-failed"]!, isStale: false, dataMode: "mock" })).toBe(false);
+    // In API mode the provider owns the resource.
+    expect(canDownloadExport({ job: mockExports["export-completed-xlsx"]!, isStale: false, dataMode: "api" })).toBe(true);
+    expect(canDownloadExport({ job: mockExports["export-failed"]!, isStale: false, dataMode: "api" })).toBe(false);
+    expect(canDownloadExport({ job: undefined, isStale: false, dataMode: "mock" })).toBe(false);
   });
 });
