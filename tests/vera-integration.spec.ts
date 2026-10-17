@@ -80,46 +80,25 @@ test("VER-02: isolated Pricing targets do not fabricate prices for Catalog/Combo
   expect(await combos.readCurrent(["CAS-COR-001"], signal)).toEqual(before);
 });
 
-test("VER-02-B: live PricingCombosAdapter pattern reflects pricing updates into Combos without stale snapshots", async () => {
+test("VER-02-B: Pricing rereads confirmed edits preserving decimal strings; real Combos integration pending", async () => {
   const pricing = createMockPricingRepository({ now: () => demoNow });
   const signal = new AbortController().signal;
-
-  // Patrón live de PricingCombosAdapter (Castilla PR #43): lee directamente de PricingRepository
-  const liveCombosAdapter = {
-    async readCurrent(skus: string[], s?: AbortSignal) {
-      const activeSignal = s ?? new AbortController().signal;
-      const targets = await pricing.listTargets(activeSignal);
-      const result: Array<{ sku: string; regularMinor: number; offerMinor: number | null }> = [];
-      for (const sku of skus) {
-        const target = targets.find((t) => (t.kind === "product" ? t.referenceSku === sku : t.sku === sku));
-        if (!target) continue;
-        const snapshot = await pricing.read({ targetId: target.id, channel: "global" }, activeSignal);
-        if (!snapshot) continue;
-        const regularMinor = Math.round(Number(snapshot.price.regular) * 100);
-        const offerMinor = snapshot.price.offer ? Math.round(Number(snapshot.price.offer) * 100) : null;
-        result.push({ sku, regularMinor, offerMinor });
-      }
-      return result;
-    },
-  };
-
-  const initial = await liveCombosAdapter.readCurrent(["ZAP-TRL-EXP"], signal);
-  expect(initial).toHaveLength(1);
-  expect(initial[0]).toMatchObject({ sku: "ZAP-TRL-EXP", regularMinor: 24990, offerMinor: 21990 });
-
-  await pricing.update(
+  const target = { targetId: "base", channel: "global" as const };
+  const initial = (await pricing.read(target, signal))!;
+  expect(initial.price).toMatchObject({ regular: "249.90", offer: "219.90" });
+  const saved = await pricing.update(
     {
-      target: { targetId: "base", channel: "global" },
-      version: 4,
-      draft: { regular: "289.90", offerAction: "ELIMINAR", offer: "", currency: "PEN", reason: "Actualización para combos" },
+      target,
+      version: initial.price.version,
+      draft: { regular: "289.90000000000000000001", offerAction: "ELIMINAR", offer: "", currency: "PEN", reason: "Relectura de Pricing" },
     },
     signal,
   );
 
-  const updated = await liveCombosAdapter.readCurrent(["ZAP-TRL-EXP"], signal);
-  expect(updated).toHaveLength(1);
-  expect(updated[0]).toMatchObject({ sku: "ZAP-TRL-EXP", regularMinor: 28990, offerMinor: null });
-  expect(await liveCombosAdapter.readCurrent(["SKU-INEXISTENTE"], signal)).toEqual([]);
+  const updated = await pricing.read(target, signal);
+  expect(updated?.price).toEqual(saved);
+  expect(updated?.price).toMatchObject({ regular: "289.90000000000000000001", offer: null, version: initial.price.version + 1 });
+  expect(await pricing.read({ targetId: "objetivo-inexistente", channel: "global" }, signal)).toBeNull();
 });
 
 test("VER-03: missing API providers fail closed for both features", async () => {

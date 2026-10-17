@@ -70,17 +70,21 @@ Tras la auditoría técnica del PR #46, se aplicaron las siguientes correcciones
 
 3. **Integración con Combos (Castilla PR #43):**
    - Se mantiene la prueba `VER-02` que comprueba el aislamiento de los fixtures base frente a SKUs de Catálogo/Combos.
-   - Se añadió la prueba de regresión `VER-02-B: live PricingCombosAdapter pattern reflects pricing updates into Combos without stale snapshots`, validando que cuando Combos consulta el repositorio de Pricing en vivo, cualquier edición de precios confirmada se propaga de inmediato a Combos en unidades menores exactas.
+   - La VER-02-B añadida en `9315210` imitaba el adapter pendiente de #43 y redondeaba importes con `Math.round(Number(...))`. Ese resultado no acredita interoperabilidad real; se retira esa afirmación y la imitación.
+   - VER-02-B ahora comprueba exclusivamente la relectura de Pricing tras edición, conservación de decimales, retiro de oferta, versión y objetivo inexistente. Se conservan las demás regresiones, incluida VER-05. La regresión contra la clase real de Castilla queda pendiente de integrar #43; casos y fuente consultada en [coordinación API](COORDINACION_PRICING_API.md#4-compatibilidad-y-regresiones-pendientes).
 
 4. **Compatibilidad con Catálogo (Poma PR #40):**
-   - Se verificó la coexistencia en `createDemoPricingRuntime.ts`: Vera modifica `service` (inyectando `mockPricingAudit.record`), mientras que Poma modifica `updates` (añadiendo suscripción a `mockCatalogRepository.subscribe`).
-   - Ambas implementaciones son ortogonales y se integran limpiamente sin sobrescribirse.
+   - Se retira la garantía de coexistencia: #40 sigue sin integrar y no se ha probado el árbol combinado. Modificar propiedades diferentes (`service`/`updates`) no demuestra compatibilidad semántica.
+   - Estado: PENDIENTE DE VALIDACIÓN tras integración autorizada. Comprobar identidad, selección reactiva, callback de auditoría, refresco/desuscripción y suites de ambos owners sobre el árbol combinado.
 
 5. **Demo híbrida y coordinación de API de Precios:**
-   - Se formalizó la delimitación en `docs/COORDINACION_PRICING_API.md`: Pricing preparado para API real (con fail-closed en `unavailableApiPricingRepository` mientras Castilla coordina la infraestructura HTTP central) y Auditoría en mock simulado en memoria.
-   - Sin pantallas de login, tokens JWT inventados ni rutas no publicadas en OpenAPI 0.6.0.
+   - Objetivo pendiente: Pricing por API real y Auditoría simulada. Hoy solo `createDemoPricingRuntime` conecta `mockPricingAudit.record` con el repositorio mock; un provider API no alimenta automáticamente ese registro. Auditoría sigue el modo global y falla cerrada en `api` sin provider, salvo inyección explícita de su contexto.
+   - Se documentan con Castilla el punto de notificación posterior a confirmación y la inyección explícita de `AuditRuntimeContext`, junto con procedencia de datos, errores y pruebas pendientes. No se cambia `main.tsx`, Gateway ni composition root; no se implementan login/JWT.
+   - Matriz contrastada con [OpenAPI oficial 0.6.0-rc.1](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/contratos/http/openapi.yaml), Docs `master@c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b`: PATCH SKU/producto, parámetro `at`, reporte de importación CSV, firmas reales del puerto y `x-status` por operación. No se infiere operatividad en Gateway ni se inventan scopes.
 
-## Validaciones
+## Validaciones históricas de `9315210` (anteriores a estas correcciones)
+
+La [CI #39014334064](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/39014334064) registra la revisión anterior: 60 unitarias, 292 E2E, builds y verificaciones mock/API. No se reutiliza como PASS de la HEAD posterior; en particular, el antiguo VER-02-B no demostraba interoperabilidad real.
 
 - `npm ci`: PASS, Node 22.21.0/npm 10.9.4, 207 paquetes instalados, cero vulnerabilidades informadas.
 - `npx playwright test tests/vera-integration.spec.ts --reporter=line`: 6 PASS (VER-01, VER-01/03, VER-02, VER-02-B, VER-03, VER-05), 8.0 s.
@@ -93,6 +97,25 @@ Tras la auditoría técnica del PR #46, se aplicaron las siguientes correcciones
 - `node scripts/verify-production.mjs api http://127.0.0.1:5174`: PASS, 53 vistas, providers ausentes explícitos y cero carga de mocks.
 - `VITE_DATA_MODE=mock npm run build`: PASS, build de producción restablecido a mock para desarrollo/demo.
 
+## Revalidación de las correcciones documentales y VER-02-B
+
+Base de esta ronda: `vera@9315210f318a035e134b22c30b6ed86e16dd675e`, árbol inicialmente limpio; `origin/master@081065c86ac7e75f2d072f16b280373af1978d63`. Se preservan el callback validado y el timeout de CI de 30 minutos. No se integran #40/#43, no se crean ramas ni se hace merge o force push.
+
+Archivos modificados en esta ronda: `tests/vera-integration.spec.ts` (retirar el doble de Combos y conservar la regresión válida de Pricing); `docs/COORDINACION_PRICING_API.md` (matriz oficial, límites de demo híbrida y plan de validación con Castilla/Poma); este informe (retirar garantías no demostradas y separar evidencia histórica de actual).
+
+- `npm run typecheck`: PASS.
+- `npm run lint`: PASS.
+- `npm test`: 36 unitarias de Combos + 24 de Bulk, PASS.
+- `npx playwright test tests/vera-integration.spec.ts --reporter=line`: 6 PASS, 10.6 s. El warning de VER-05 es el fallo deliberado del callback; el guardado y la lectura posterior pasan.
+- `npx playwright test --list`: 292 casos en 30 archivos. Es inventario, no ejecución de la suite completa; no se elimina ninguna prueba ni se añaden skips.
+- `VITE_DATA_MODE=mock npm run build`: PASS, 3.54 s de Vite.
+- `VITE_DATA_MODE=api npm run build`: PASS, 2.51 s de Vite.
+- Build final restablecido a `mock`: PASS, 2.42 s de Vite. No se cambia la configuración de Production.
+- Visual 1440×900: detalle del asiento de la ejecución focalizada inspeccionado; modal y datos legibles. El recorrido conserva captura de listado y comprobación de no overflow en `test-results/`; no se modifica la UI ni la evidencia histórica.
+- `git diff --check`: PASS. Sin cambios de runtime, callback, composición raíz, Gateway, contratos, autenticación, dependencias, rutas ni workflow en esta ronda.
+
+La suite completa y las verificaciones de producción mock/API y smoke se vuelven a ejecutar en la CI de la HEAD final. El resultado vigente, BASE/HEAD y candidato se registran en [Checks del PR #46](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/46/checks) y en su descripción; los resultados históricos anteriores no sustituyen esta comprobación. Un PASS de este árbol no prueba los árboles combinados pendientes con #40/#43 ni la demo híbrida con HTTP real.
+
 ## Matriz de verificación
 
 - [x] Fuentes y revisión Docs verificadas; pantallas/rutas reales identificadas.
@@ -102,8 +125,10 @@ Tras la auditoría técnica del PR #46, se aplicaron las siguientes correcciones
 - [x] Sin HTTP nuevo en componentes, HEX arbitrarios, contratos, roles/scopes o estados externos inventados.
 - [x] No se editaron Docs ni Backend; delimitación de demo híbrida documentada.
 - [x] Robustez de callback `onUpdated` comprobada y regresión VER-05 agregada.
-- [x] Integración live con Combos comprobada y regresión VER-02-B agregada.
-- [x] Compatibilidad con Catálogo (Poma PR #40) asegurada sin sobreescritura.
+- [x] Imitación de adapter retirada; VER-02-B limitada al comportamiento real de Pricing.
+- [ ] Interoperabilidad con la implementación real de Combos: pendiente tras integrar #43.
+- [ ] Compatibilidad con Catálogo/Poma: pendiente de probar el árbol combinado con #40.
+- [ ] Demo híbrida API real + Auditoría simulada: punto de integración documentado, cableado y pruebas con Castilla pendientes.
 - [ ] Revisión técnica humana y aprobación UX: pendientes de reauditoría en PR #46.
 
 Estado de entrega: **MOCK_INTEGRATED / MOCK_ONLY** (Demo híbrida documentada), sin API_INTEGRATED ni VALIDATED.
