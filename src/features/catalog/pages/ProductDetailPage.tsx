@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import {
   Alert,
-  Badge,
   Box,
   Button,
   Card,
@@ -155,7 +154,6 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
 
             {p.status === "BORRADOR" && (
               <Button
-                color="orange"
                 onClick={() => setActivateOpened(true)}
                 leftSection={<IconCheck size={16} />}
               >
@@ -165,7 +163,6 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
 
             {p.status === "INACTIVO" && (
               <Button
-                color="orange"
                 onClick={() => setActivateOpened(true)}
                 leftSection={<IconCheck size={16} />}
               >
@@ -175,7 +172,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
 
             {p.status === "ACTIVO" && (
               <Button
-                color="red"
+                color="danger"
                 variant="outline"
                 onClick={() => setDeactivateOpened(true)}
                 leftSection={<IconPower size={16} />}
@@ -331,7 +328,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
                       Aún no se han configurado variantes para este producto padre.
                     </Text>
                   ) : (
-                    <Table striped highlightOnHover withTableBorder>
+                    <Table highlightOnHover>
                       <Table.Thead>
                         <Table.Tr>
                           <Table.Th>SKU Vendible</Table.Th>
@@ -359,17 +356,20 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
                               <Text size="xs">{v.attributesSummary}</Text>
                             </Table.Td>
                             <Table.Td>
-                              <Badge size="xs" color={v.status === "ACTIVA" ? "green" : "gray"}>
-                                {v.status}
-                              </Badge>
+                              <StatusBadge>{v.status}</StatusBadge>
                             </Table.Td>
                             <Table.Td>
-                              <Badge
-                                size="xs"
-                                color={v.preparationStatus === "COMPLETED" ? "green" : "yellow"}
+                              <StatusBadge
+                                semantic={
+                                  v.preparationStatus === "COMPLETED"
+                                    ? "success"
+                                    : v.preparationStatus === "REJECTED"
+                                      ? "error"
+                                      : "warning"
+                                }
                               >
                                 {v.preparationStatus}
-                              </Badge>
+                              </StatusBadge>
                             </Table.Td>
                           </Table.Tr>
                         ))}
@@ -408,7 +408,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
         <Box style={{ flex: "0 0 320px", width: 320, maxWidth: "100%" }}>
           <Stack gap="xl">
             {/* Image Preview Card */}
-            <Card withBorder radius="md" p="md">
+            <Card withBorder radius="md" p="lg">
               <Text size="sm" fw={600} mb="xs">
                 Imagen de publicación
               </Text>
@@ -418,11 +418,10 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
                   alt={p.name}
                   radius="sm"
                   h={240}
-                  fit="cover"
-                  fallbackSrc="https://placehold.co/400x300?text=Sin+imagen"
+                  fit="contain"
                 />
               ) : (
-                <Stack align="center" justify="center" h={180} bg="gray.1" style={{ borderRadius: 8 }}>
+                <Stack align="center" justify="center" h={180} bg="var(--po-subtle)" style={{ borderRadius: 8 }}>
                   <Text size="xs" c="dimmed">
                     Sin imagen registrada
                   </Text>
@@ -431,7 +430,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
             </Card>
 
             {/* Quick Preparation Status Card */}
-            <Card withBorder radius="md" p="md">
+            <Card withBorder radius="md" p="lg">
               <Group justify="space-between" mb="xs">
                 <Text size="sm" fw={600}>
                   Estado de preparación
@@ -439,7 +438,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
                 <Button
                   component={Link}
                   to={`/productos/${p.id}/preparacion`}
-                  size="compact-xs"
+                  size="sm"
                   variant="subtle"
                 >
                   Detalle
@@ -449,42 +448,38 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
               <Stack gap="xs">
                 <Group justify="space-between">
                   <Text size="xs">Pricing:</Text>
-                  <Badge
-                    size="xs"
-                    color={
+                  <StatusBadge
+                    semantic={
                       p.preparation.pricing.status === "COMPLETED"
-                        ? "green"
+                        ? "success"
                         : p.preparation.pricing.status === "REJECTED"
-                          ? "red"
-                          : "yellow"
+                          ? "error"
+                          : "warning"
                     }
                   >
                     {p.preparation.pricing.status}
-                  </Badge>
+                  </StatusBadge>
                 </Group>
 
                 {!p.hasVariants ? (
                   <Group justify="space-between">
                     <Text size="xs">Inventario SKU:</Text>
-                    <Badge
-                      size="xs"
-                      color={
+                    <StatusBadge
+                      semantic={
                         p.preparation.inventario?.status === "COMPLETED"
-                          ? "green"
+                          ? "success"
                           : p.preparation.inventario?.status === "REJECTED"
-                            ? "red"
-                            : "yellow"
+                            ? "error"
+                            : "warning"
                       }
                     >
                       {p.preparation.inventario?.status || "PENDING"}
-                    </Badge>
+                    </StatusBadge>
                   </Group>
                 ) : (
                   <Group justify="space-between">
                     <Text size="xs">Inventario:</Text>
-                    <Badge size="xs" color="blue">
-                      Por variante en MK-004
-                    </Badge>
+                    <StatusBadge>Por variante en MK-004</StatusBadge>
                   </Group>
                 )}
               </Stack>

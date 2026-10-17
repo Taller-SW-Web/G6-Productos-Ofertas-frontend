@@ -5,13 +5,14 @@ import {
   Box,
   Button,
   Group,
+  Menu,
   Stack,
   Text,
-  UnstyledButton,
 } from "@mantine/core";
 import {
   IconChevronDown,
   IconChevronRight,
+  IconDotsVertical,
   IconEye,
   IconPencil,
   IconPlus,
@@ -96,11 +97,9 @@ export function CategoryTreePage() {
             <Box w={28} aria-hidden="true" />
           )}
           <Box style={{ paddingLeft: nodo.nivel * 16 }}>
-            <UnstyledButton onClick={() => navigate(`/categorias/${nodo.id}`)}>
-              <Text size="sm" fw={nodo.nivel === 0 ? 600 : 400}>
-                {nodo.nombre}
-              </Text>
-            </UnstyledButton>
+            <Text size="sm" fw={nodo.nivel === 0 ? 600 : 400}>
+              {nodo.nombre}
+            </Text>
           </Box>
         </Group>
       ),
@@ -125,32 +124,47 @@ export function CategoryTreePage() {
     {
       key: "acciones",
       header: "Acciones",
-      width: 160,
+      width: 120,
       align: "right",
       render: (nodo) => (
         <Group gap="xs" justify="flex-end" wrap="nowrap">
           <ActionIcon
-            variant="subtle"
-            aria-label={`Ver ${nodo.nombre}`}
+            aria-label={`Ver detalle de ${nodo.nombre}`}
+            title="Ver detalle"
             onClick={() => navigate(`/categorias/${nodo.id}`)}
           >
             <IconEye size={16} stroke={2} aria-hidden="true" />
           </ActionIcon>
-          <ActionIcon
-            variant="subtle"
-            aria-label={`Editar ${nodo.nombre}`}
-            onClick={() => navigate(`/categorias/${nodo.id}/editar`)}
-          >
-            <IconPencil size={16} stroke={2} aria-hidden="true" />
-          </ActionIcon>
-          <ActionIcon
-            variant="subtle"
-            aria-label={`Desactivar ${nodo.nombre}`}
-            disabled={nodo.estado !== "Activo"}
-            onClick={() => navigate(`/categorias/${nodo.id}/desactivar`)}
-          >
-            <IconPower size={16} stroke={2} aria-hidden="true" />
-          </ActionIcon>
+          <Menu position="bottom-end" shadow="md">
+            <Menu.Target>
+              <ActionIcon
+                aria-label={`Más acciones de ${nodo.nombre}`}
+                title="Más acciones"
+              >
+                <IconDotsVertical size={16} />
+              </ActionIcon>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Item
+                leftSection={
+                  <IconPencil size={16} stroke={2} aria-hidden="true" />
+                }
+                onClick={() => navigate(`/categorias/${nodo.id}/editar`)}
+              >
+                Editar
+              </Menu.Item>
+              <Menu.Item
+                color="danger"
+                disabled={nodo.estado !== "Activo"}
+                leftSection={
+                  <IconPower size={16} stroke={2} aria-hidden="true" />
+                }
+                onClick={() => navigate(`/categorias/${nodo.id}/desactivar`)}
+              >
+                Desactivar
+              </Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
         </Group>
       ),
     },

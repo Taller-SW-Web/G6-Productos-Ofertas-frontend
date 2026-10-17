@@ -1,5 +1,6 @@
 import { Button, Group, SimpleGrid, Stack, Text } from "@mantine/core";
 import { IconRefresh, IconArrowRight, IconRotateClockwise } from "@tabler/icons-react";
+import { useContext } from "react";
 import { Link } from "react-router-dom";
 import {
   FeedbackAlert,
@@ -7,7 +8,12 @@ import {
   SectionCard,
   StatusBadge,
 } from "../../../components/shared";
+import { DataModeContext } from "../../../app/config/DataModeContext";
 import type { BulkImportBatch } from "../types/bulk";
+import {
+  getQueuedBatchDescription,
+  getUnknownRowCountDescription,
+} from "./batchStatusMessages";
 
 export interface BatchStatusPanelProps {
   batch: BulkImportBatch;
@@ -15,6 +21,9 @@ export interface BatchStatusPanelProps {
   onResume?: () => void;
   refreshing?: boolean;
   resuming?: boolean;
+  // Explicit eligibility for the resume action. When omitted, callers that opt
+  // into resume keep the legacy terminal+reconciliation rule.
+  canResume?: boolean;
   showDetailsLink?: boolean;
 }
 
@@ -24,24 +33,36 @@ export function BatchStatusPanel({
   onResume,
   refreshing = false,
   resuming = false,
+  canResume,
   showDetailsLink = false,
 }: BatchStatusPanelProps) {
+  const dataMode = useContext(DataModeContext);
+  if (!dataMode) throw new Error("El estado de carga masiva requiere DataModeContext.");
   const isTerminal =
     batch.status === "COMPLETED" || batch.status === "FAILED_GENERAL";
-  const isPartial = batch.status === "COMPLETED" && batch.failed_rows > 0;
-  const isSuccess = batch.status === "COMPLETED" && batch.failed_rows === 0;
+  const isPartial =
+    batch.status === "COMPLETED" &&
+    (batch.failed_rows > 0 || batch.needs_reconciliation);
+  const isSuccess =
+    batch.status === "COMPLETED" &&
+    batch.failed_rows === 0 &&
+    !batch.needs_reconciliation;
   const isFailedGeneral = batch.status === "FAILED_GENERAL";
   const isProcessing = batch.status === "PROCESSING";
   const isQueued = batch.status === "QUEUED";
+  const resumeEligible =
+    canResume ?? (isTerminal && batch.needs_reconciliation);
 
   // Semantic presentation for StatusBadge
   const statusSemantic = isSuccess
     ? "success"
-    : isPartial || isProcessing
-      ? "warning"
-      : isFailedGeneral
-        ? "error"
-        : "neutral";
+    : isProcessing
+      ? "info"
+      : isPartial
+        ? "warning"
+        : isFailedGeneral
+          ? "error"
+          : "neutral";
 
   const statusLabel = isSuccess
     ? "Completado"
@@ -83,10 +104,11 @@ export function BatchStatusPanel({
       }
     >
       <Stack gap="lg">
-        {/* Subtle demo indicator */}
-        <Text size="xs" c="dimmed">
-          Modo demostración · Datos simulados de importación masiva
-        </Text>
+        {dataMode === "mock" && (
+          <Text size="xs" c="dimmed">
+            Modo demostración · Datos simulados de importación masiva
+          </Text>
+        )}
 
         {/* KPI Metrics */}
         <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
@@ -96,7 +118,7 @@ export function BatchStatusPanel({
             description={
               typeof batch.total_rows === "number"
                 ? "Filas declaradas en el lote"
-                : "Recuento no verificado en cliente (XLSX)"
+                : "Recuento no informado o no verificado"
             }
           />
           <MetricCard
@@ -114,9 +136,11 @@ export function BatchStatusPanel({
             label="Filas con fallos"
             value={batch.failed_rows}
             description={
-              batch.needs_reconciliation
-                ? "Requieren reconciliación"
-                : "Sin fallos registrados"
+              batch.failed_rows === 0
+                ? "Sin fallos registrados"
+                : batch.needs_reconciliation
+                  ? "Fallos registrados; requieren reconciliación"
+                  : "Fallos registrados; no hay reconciliación pendiente"
             }
           />
         </SimpleGrid>
@@ -153,7 +177,7 @@ export function BatchStatusPanel({
             semantic="warning"
             title="Lote en procesamiento — Verificación dependiente del proveedor"
           >
-            El archivo XLSX fue recibido y admitido en cola, pero la demostración local no puede verificar su contenido interno ni confirmar su resultado final sin la integración real con el servicio bulk-svc. El estado permanece en procesamiento para no generar resultados ficticios. Puede iniciar una nueva carga o volver a la selección de archivos.
+            {getUnknownRowCountDescription(dataMode)}
           </FeedbackAlert>
         )}
 
@@ -164,8 +188,8 @@ export function BatchStatusPanel({
         )}
 
         {isQueued && typeof batch.total_rows === "number" && (
-          <FeedbackAlert semantic="info" title="Solicitud admitida en cola">
-            La importación ha sido admitida por el proveedor (202 Accepted) y está a la espera de un hilo de procesamiento.
+          <FeedbackAlert semantic="info" title="Solicitud en cola">
+            {getQueuedBatchDescription(dataMode)}
           </FeedbackAlert>
         )}
 
@@ -215,10 +239,10 @@ export function BatchStatusPanel({
         )}
 
         {/* Action buttons */}
-        {((onResume && isTerminal && batch.needs_reconciliation) ||
+        {((onResume && resumeEligible) ||
           (showDetailsLink && isTerminal)) && (
           <Group justify="flex-end" gap="sm">
-            {onResume && isTerminal && batch.needs_reconciliation && (
+            {onResume && resumeEligible && (
               <Button
                 variant="outline"
                 leftSection={<IconRotateClockwise size={18} stroke={2} aria-hidden="true" />}

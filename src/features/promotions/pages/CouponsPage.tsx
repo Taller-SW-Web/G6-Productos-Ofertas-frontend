@@ -1,8 +1,8 @@
 import { usePromotionServices } from "../hooks/usePromotionServices";
 import { PromotionDataNotice } from "../components/PromotionDataNotice";
 import { Link, useSearchParams } from "react-router-dom";
-import { Button, Group, Select, Stack, Text } from "@mantine/core";
-import { IconEye } from "@tabler/icons-react";
+import { ActionIcon, Button, Group, Menu, Select, Stack, Text } from "@mantine/core";
+import { IconDotsVertical, IconEdit, IconEye } from "@tabler/icons-react";
 import {
   EntityTable,
   FeedbackAlert,
@@ -81,28 +81,37 @@ export function CouponsPage() {
     {
       key: "actions",
       header: "Acciones",
-      width: 180,
+      width: 120,
+      align: "right",
       render: (row) => (
-        <Group gap="xs">
-          <Button
+        <Group gap="xs" justify="flex-end" wrap="nowrap">
+          <ActionIcon
             component={Link}
             to={`/cupones/${row.id}?${params.toString()}`}
-            variant="subtle"
-            size="sm"
-            leftSection={<IconEye size={16} stroke={2} aria-hidden="true" />}
             aria-label={`Ver detalle de ${row.code}`}
+            title="Ver detalle"
           >
-            Ver detalle
-          </Button>
-          <Button
-            component={Link}
-            to={`/cupones/${row.id}/editar?${params}`}
-            variant="subtle"
-            size="sm"
-            aria-label={`Editar ${row.code}`}
-          >
-            Editar
-          </Button>
+            <IconEye size={16} stroke={2} aria-hidden="true" />
+          </ActionIcon>
+          <Menu position="bottom-end" shadow="md">
+            <Menu.Target>
+              <ActionIcon
+                aria-label={`Más acciones de ${row.code}`}
+                title="Más acciones"
+              >
+                <IconDotsVertical size={16} />
+              </ActionIcon>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Item
+                component={Link}
+                to={`/cupones/${row.id}/editar?${params}`}
+                leftSection={<IconEdit size={16} stroke={2} aria-hidden="true" />}
+              >
+                Editar
+              </Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
         </Group>
       ),
     },

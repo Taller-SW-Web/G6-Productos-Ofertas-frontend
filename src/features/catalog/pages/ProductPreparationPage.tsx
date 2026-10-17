@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import {
   Alert,
-  Badge,
   Button,
   Card,
   Group,
@@ -27,6 +26,7 @@ import {
   FeedbackAlert,
   PageHeader,
   SectionCard,
+  StatusBadge,
 } from "../../../components/shared";
 import { useProductDetail } from "../hooks/useProductDetail";
 import { useProductPreparation } from "../hooks/useProductPreparation";
@@ -126,7 +126,6 @@ export function ProductPreparationPage() {
 
             {p.status === "BORRADOR" && (
               <Button
-                color="orange"
                 onClick={() => setActivateOpened(true)}
                 leftSection={<IconCheck size={16} />}
               >
@@ -164,18 +163,17 @@ export function ProductPreparationPage() {
                   Preparación en Pricing
                 </Text>
               </Group>
-              <Badge
-                size="md"
-                color={
+              <StatusBadge
+                semantic={
                   prep.pricing.status === "COMPLETED"
-                    ? "green"
+                    ? "success"
                     : prep.pricing.status === "REJECTED"
-                      ? "red"
-                      : "yellow"
+                      ? "error"
+                      : "warning"
                 }
               >
                 {preparationStatusLabel(prep.pricing.status)}
-              </Badge>
+              </StatusBadge>
             </Group>
 
             <Stack gap="sm">
@@ -211,8 +209,7 @@ export function ProductPreparationPage() {
                   {prep.pricing.manualRetryAllowed && (
                     <Button
                       size="xs"
-                      color="orange"
-                      variant="light"
+                      variant="outline"
                       loading={prepState.retrying}
                       onClick={() => prepState.retry("PRICING")}
                       leftSection={<IconRefresh size={14} />}
@@ -234,23 +231,20 @@ export function ProductPreparationPage() {
                 </Text>
               </Group>
               {!p.hasVariants && prep.inventario && (
-                <Badge
-                  size="md"
-                  color={
+                <StatusBadge
+                  semantic={
                     prep.inventario.status === "COMPLETED"
-                      ? "green"
+                      ? "success"
                       : prep.inventario.status === "REJECTED"
-                        ? "red"
-                        : "yellow"
+                        ? "error"
+                        : "warning"
                   }
                 >
                   {preparationStatusLabel(prep.inventario.status)}
-                </Badge>
+                </StatusBadge>
               )}
               {p.hasVariants && (
-                <Badge size="md" color="blue">
-                  Por variante
-                </Badge>
+                <StatusBadge>Por variante</StatusBadge>
               )}
             </Group>
 
@@ -289,8 +283,7 @@ export function ProductPreparationPage() {
                       {prep.inventario.manualRetryAllowed && (
                         <Button
                           size="xs"
-                          color="orange"
-                          variant="light"
+                          variant="outline"
                           loading={prepState.retrying}
                           onClick={() => prepState.retry("INVENTARIO")}
                           leftSection={<IconRefresh size={14} />}

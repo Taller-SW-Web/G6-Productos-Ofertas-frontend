@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Box, Button, Stack, Text } from "@mantine/core";
-import { IconPlus } from "@tabler/icons-react";
+import { ActionIcon, Box, Button, Stack, Text } from "@mantine/core";
+import { IconEye, IconPlus } from "@tabler/icons-react";
 import {
   EntityTable,
   FilterBar,
@@ -40,12 +40,7 @@ export function ProductTypeListPage() {
       key: "nombre",
       header: "Tipo de producto",
       render: (item) => (
-        <Text
-          size="sm"
-          fw={600}
-          style={{ cursor: "pointer", textDecoration: "underline" }}
-          onClick={() => navigate(`/tipos-producto/${item.tipoProductoId}`)}
-        >
+        <Text size="sm" fw={600}>
           {item.nombre}
         </Text>
       ),
@@ -76,6 +71,21 @@ export function ProductTypeListPage() {
       width: 140,
       align: "right",
       render: (item) => <Text size="sm">{item.schemaVersion}</Text>,
+    },
+    {
+      key: "acciones",
+      header: "Acciones",
+      width: 80,
+      align: "right",
+      render: (item) => (
+        <ActionIcon
+          aria-label={`Ver detalle de ${item.nombre}`}
+          title="Ver detalle"
+          onClick={() => navigate(`/tipos-producto/${item.tipoProductoId}`)}
+        >
+          <IconEye size={16} stroke={2} aria-hidden="true" />
+        </ActionIcon>
+      ),
     },
   ];
 

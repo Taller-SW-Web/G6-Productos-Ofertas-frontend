@@ -10,6 +10,7 @@ import type {
   PricingRepository,
   PriceView,
   PriceChannel,
+  PriceTarget,
 } from "../services/pricingRepository";
 import type { Clock } from "../services/pricingRuntime";
 import {
@@ -18,7 +19,10 @@ import {
   validateSchedule,
 } from "../services/pricingValidation";
 
-export function createMockPricingRepository(clock: Clock): PricingRepository {
+export function createMockPricingRepository(
+  clock: Clock,
+  onUpdated?: (target: PriceTarget, before: PriceView, after: PriceView, reason: string) => void,
+): PricingRepository {
   const records = structuredClone(priceRecords);
   const schedules = structuredClone(scheduleFixtures);
   let sequence = schedules.length;
@@ -104,7 +108,16 @@ export function createMockPricingRepository(clock: Clock): PricingRepository {
       const current = await readMockPricingTargets(signal);
       // Keep the independent historical Pricing examples, without matching names
       // or fabricating a price for a Catalog identity that has no Pricing record.
-      return [...structuredClone(priceTargets.filter(target => !current.some(row => row.id === target.id))), ...current];
+      const published = priceTargets.filter(target => !current.some(row => row.id === target.id));
+      // Keep an already published Pricing target for the same Catalog product/SKU.
+      // Its target ID and existing price remain intact; new Catalog identities get no price.
+      const additional = current.filter(row => !published.some(target =>
+        target.productId === row.productId && target.kind === row.kind &&
+        (target.kind === "product" && row.kind === "product"
+          ? target.referenceSku === row.referenceSku
+          : target.kind === "variant" && row.kind === "variant" && target.sku === row.sku),
+      ));
+      return [...structuredClone(published), ...additional];
     },
     async read(query, signal) {
       signal.throwIfAborted();
@@ -179,6 +192,14 @@ export function createMockPricingRepository(clock: Clock): PricingRepository {
         )
           row.validUntil = clock.now();
       records.push(saved);
+      try {
+        onUpdated?.(target, current, saved, change.draft.reason);
+      } catch (error) {
+        console.warn(
+          "Fallo en la notificación onUpdated tras guardar el precio:",
+          error,
+        );
+      }
       return structuredClone(saved);
     },
     async listSchedules(targetId, page, signal) {

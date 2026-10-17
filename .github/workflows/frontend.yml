@@ -8,7 +8,7 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       VITE_DATA_MODE: mock # This workflow validates the explicit demonstration build.
     steps:
@@ -35,7 +35,7 @@ jobs:
           done
           node scripts/verify-production.mjs mock
           node scripts/vercel-smoke.mjs http://127.0.0.1:5174
-      - run: npm test
+      - run: npm run test:ci
       - name: Verify API mode without mock fallback
         run: |
           VITE_DATA_MODE=api npm run build

@@ -62,7 +62,7 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
         description="El SKU es la identidad comercial única de la variante. Si se deja en blanco al crear, Catálogo lo generará automáticamente."
       >
         <Stack gap="md">
-          <Paper p="sm" withBorder bg="var(--mantine-color-gray-0)">
+          <Paper p="sm" withBorder bg="var(--po-subtle)">
             <Group justify="space-between" align="center">
               <div>
                 <Text size="xs" c="dimmed">

@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { FeedbackAlert } from "../../../components/shared";
+import { ContextNote } from "../../../components/shared";
 import { useAuditRuntime } from "../services/AuditRuntimeContext";
 
 export function AuditDataNotice() {
@@ -8,9 +8,9 @@ export function AuditDataNotice() {
   return (
     <>
       {runtime.notice && (
-        <FeedbackAlert semantic="info" title="Datos de demostración">
+        <ContextNote title="Datos de demostración">
           {runtime.notice}
-        </FeedbackAlert>
+        </ContextNote>
       )}
       {Tools && (
         <Suspense fallback={null}>

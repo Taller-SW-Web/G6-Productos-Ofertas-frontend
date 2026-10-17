@@ -1,4 +1,4 @@
-import { FeedbackAlert } from "../../../components/shared";
+import { ContextNote } from "../../../components/shared";
 import { useContext } from "react";
 import { DataModeContext } from "../../../app/config/DataModeContext";
 
@@ -28,8 +28,6 @@ export function PromotionDataNotice({
 }) {
   if (useContext(DataModeContext) !== "mock") return null;
   return (
-    <FeedbackAlert semantic="info" title="Datos de demostración">
-      {messages[kind]}
-    </FeedbackAlert>
+    <ContextNote title="Datos de demostración">{messages[kind]}</ContextNote>
   );
 }

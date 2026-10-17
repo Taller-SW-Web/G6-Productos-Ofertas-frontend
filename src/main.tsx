@@ -16,6 +16,8 @@ import { resolveDataMode } from "./app/config/dataMode";
 import { DataModeContext } from "./app/config/DataModeContext";
 import { CatalogServicesContext } from "./features/catalog/services/CatalogServicesContext";
 import { getCatalogServices } from "./features/catalog/services/catalogServices";
+import { createCombosRuntime } from "./features/combos/services/combosService";
+import { CombosProvider } from "./features/combos/components/CombosProvider";
 
 const root = createRoot(document.getElementById("root")!);
 async function start() {
@@ -24,6 +26,7 @@ async function start() {
     import.meta.env.DEV,
   );
   const runtime = await createPricingRuntime(mode);
+  const combosRuntime = await createCombosRuntime(mode, runtime);
   root.render(
     <StrictMode>
       <MantineProvider
@@ -34,7 +37,9 @@ async function start() {
         <DataModeContext.Provider value={mode}>
           <CatalogServicesContext.Provider value={getCatalogServices(mode)}>
             <PricingProvider runtime={runtime}>
-              <App />
+              <CombosProvider mode={mode} runtime={combosRuntime}>
+                <App />
+              </CombosProvider>
             </PricingProvider>
           </CatalogServicesContext.Provider>
         </DataModeContext.Provider>

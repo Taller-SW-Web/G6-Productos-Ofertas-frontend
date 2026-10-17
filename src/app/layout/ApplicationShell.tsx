@@ -29,8 +29,8 @@ export function ApplicationShell() {
           <Text size="sm">Productos y Ofertas</Text>
         </Group>
       </AppShell.Header>
-      <AppShell.Navbar p="md" bg="var(--po-surface)">
-        <Stack gap="lg" h="100%">
+      <AppShell.Navbar p="md" bg="var(--po-surface)" className={classes.navbar}>
+        <Stack gap="lg">
           <Text fw={600} size="sm">
             Navegación
           </Text>

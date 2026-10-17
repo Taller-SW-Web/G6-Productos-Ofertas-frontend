@@ -92,7 +92,6 @@ export function ProductCreatePage() {
           <Group justify="flex-start" gap="md" mt="md">
             <Button
               type="submit"
-              color="orange"
               loading={submitting}
               disabled={!schemaConfirmed || loadingMasters}
               leftSection={<IconDeviceFloppy size={16} />}

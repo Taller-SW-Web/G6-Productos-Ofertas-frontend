@@ -5,10 +5,12 @@ import {
   Box,
   Button,
   Group,
+  Menu,
   Stack,
   Text,
 } from "@mantine/core";
 import {
+  IconDotsVertical,
   IconEye,
   IconListDetails,
   IconPencil,
@@ -97,33 +99,49 @@ export function CharacteristicListPage() {
     {
       key: "acciones",
       header: "Acciones",
-      width: 170,
+      width: 120,
       align: "right",
       render: (item) => (
         <Group gap="xs" justify="flex-end" wrap="nowrap">
           <ActionIcon
-            variant="subtle"
             aria-label={`Ver detalle de ${item.nombre}`}
+            title="Ver detalle"
             onClick={() => navigate(`/caracteristicas/${item.id}`)}
           >
             <IconEye size={16} stroke={2} aria-hidden="true" />
           </ActionIcon>
-          <ActionIcon
-            variant="subtle"
-            aria-label={`Editar ${item.nombre}`}
-            onClick={() => navigate(`/caracteristicas/${item.id}/editar`)}
-          >
-            <IconPencil size={16} stroke={2} aria-hidden="true" />
-          </ActionIcon>
-          {item.tipo === "LISTA" && (
+          <Menu position="bottom-end" shadow="md">
+            <Menu.Target>
               <ActionIcon
-                variant="subtle"
-                aria-label={`Administrar valores de ${item.nombre}`}
-                onClick={() => navigate(`/caracteristicas/${item.id}/valores`)}
+                aria-label={`Más acciones de ${item.nombre}`}
+                title="Más acciones"
               >
-                <IconListDetails size={16} stroke={2} aria-hidden="true" />
+                <IconDotsVertical size={16} />
               </ActionIcon>
-          )}
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Item
+                leftSection={
+                  <IconPencil size={16} stroke={2} aria-hidden="true" />
+                }
+                onClick={() => navigate(`/caracteristicas/${item.id}/editar`)}
+              >
+                Editar
+              </Menu.Item>
+              {item.tipo === "LISTA" && (
+                <Menu.Item
+                  leftSection={
+                    <IconListDetails size={16} stroke={2} aria-hidden="true" />
+                  }
+                  onClick={() =>
+                    navigate(`/caracteristicas/${item.id}/valores`)
+                  }
+                >
+                  Administrar valores
+                </Menu.Item>
+              )}
+            </Menu.Dropdown>
+          </Menu>
         </Group>
       ),
     },

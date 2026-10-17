@@ -13,3 +13,9 @@
   height: 44px;
   object-fit: contain;
 }
+.navbar {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+}
