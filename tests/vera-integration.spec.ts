@@ -27,6 +27,7 @@ test("VER-01/04: confirmed mock edit survives module navigation and appears in a
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: evidencePath("ver-01-listado-1440.png"), fullPage: true });
   await page.reload();
+  await expect(page.getByRole("table")).toBeVisible();
   await expect(page.getByRole("row").filter({ hasText: "ZAP-TRL-EXP" })).toHaveCount(0);
 });
 
@@ -86,4 +87,3 @@ test("VER-03: missing API providers fail closed for both features", async () => 
   await expect(audit.repository.list({ ...emptyFilters, page: 1, size: 20 }, signal)).rejects.toMatchObject({ kind: "configuration" });
   await expect(pricing.service.listTargets(signal)).rejects.toMatchObject({ kind: "configuration" });
 });
-

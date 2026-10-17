@@ -337,7 +337,7 @@ try {
     await page.getByRole("link", { name: "Historial de precios", exact: true }).click();
     await page.getByRole("row").filter({ hasText: "ZAP-TRL-EXP" }).getByRole("link", { name: /Ver detalle/ }).click();
     const detail = page.getByRole("dialog");
-    await detail.waitFor();
+    await detail.getByText(/VER-01 producción simulada/).waitFor();
     assert.match(await detail.innerText(), /VER-01 producción simulada/);
     assert.match(await detail.innerText(), /demo-pricing/);
     await page.getByRole("button", { name: "Volver al historial", exact: true }).click();
