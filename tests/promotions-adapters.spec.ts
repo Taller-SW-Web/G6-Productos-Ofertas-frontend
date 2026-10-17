@@ -27,7 +27,7 @@ const query = { status: "all", kind: "all", page: 1, pageSize: 100 } as const;
 
 test("composición global: api sin provider falla y no sustituye fallos por mocks", () => {
   expect(() => createPromotionRuntime("api")).toThrow(
-    "El provider API de Promotions no está configurado",
+    "La administración de promociones no está disponible",
   );
   expect(() =>
     createPromotionRuntime("api", {
@@ -52,8 +52,8 @@ test("composición global: los cuatro puertos API se inyectan juntos sin escenar
 const campaign = (name: string): CampaignDraft => ({
   ...structuredClone(campaignFixtures[0]!.configuration),
   name,
-  productIds: ["PROD-OXF-001"],
-  skus: ["CAM-OXF-BLA-M"],
+  productIds: ["PROD-RUN-001"],
+  skus: ["CAM-RUN-BLA-M"],
   mode: "coupon",
   status: "inactive",
 });
@@ -264,7 +264,7 @@ test("composición: sustituir Recomendaciones no modifica los otros servicios; i
   ).toBeNull();
   expect(
     (await services.catalog.products(signal())).some(
-      (item) => item.id === "PROD-OXF-001",
+      (item) => item.id === "PROD-RUN-001",
     ),
   ).toBe(true);
 });

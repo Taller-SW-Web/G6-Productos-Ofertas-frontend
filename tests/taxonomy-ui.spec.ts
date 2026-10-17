@@ -65,7 +65,7 @@ for (const module of taxonomySections) {
       ).toHaveCount(0);
       await expect(
         page.getByText("Datos de demostración", { exact: true }),
-      ).toBeVisible();
+      ).toHaveCount(0);
       const navigation = page.getByRole("navigation", {
         name: "Navegación de la aplicación",
       });

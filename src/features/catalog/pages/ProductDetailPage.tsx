@@ -312,7 +312,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
                     variant="outline"
                     rightSection={<IconExternalLink size={14} />}
                   >
-                    Gestionar variantes (MK-004)
+                    Gestionar variantes
                   </Button>
                 }
               >
@@ -479,7 +479,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
                 ) : (
                   <Group justify="space-between">
                     <Text size="xs">Inventario:</Text>
-                    <StatusBadge>Por variante en MK-004</StatusBadge>
+                    <StatusBadge>Por variante</StatusBadge>
                   </Group>
                 )}
               </Stack>

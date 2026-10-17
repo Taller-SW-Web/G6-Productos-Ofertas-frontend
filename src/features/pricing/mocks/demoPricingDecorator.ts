@@ -110,7 +110,7 @@ export function decorateDemoRepository(
       if (scenario === "unreadable")
         throw new PricingFailure(
           "error",
-          "Archivo no analizable en el escenario ficticio. No hay prevalidación ni lote creado.",
+          "No se pudo analizar el archivo. La importación no fue iniciada.",
         );
       // The envelope still crosses the port. No file schema or bytes are inferred.
       if (scenario === "valid" || scenario === "rows") {

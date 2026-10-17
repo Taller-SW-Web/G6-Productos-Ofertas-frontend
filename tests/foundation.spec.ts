@@ -227,7 +227,7 @@ test("commercial shell and navigation do not display foundation copy or demo gro
   await expect(nav.getByText("Consultar precios")).toBeVisible();
 
   // Commercial page notices and buttons
-  await expect(page.getByText("Datos de demostración", { exact: true })).toBeVisible();
+  await expect(page.getByText("Datos de demostración", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Piloto con datos ficticios")).not.toBeVisible();
   await expect(page.getByRole("button", { name: "Componentes de carga masiva" })).not.toBeVisible();
   await expect(page.getByRole("button", { name: "Revisar edición de precio" })).not.toBeVisible();

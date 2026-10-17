@@ -530,7 +530,7 @@ test("MK-014: missing API and failed factories never fall back; ports and consum
   page.on("request", (request) => loaded.push(request.url()));
   await mount(page, "/precios/auditoria", 1, true);
   await expect(page.getByRole("alert")).toContainText(
-    "adapter API de auditoría de precios no está configurado",
+    "La consulta del historial de precios no está disponible",
   );
   await expect(page.getByRole("table")).toHaveCount(0);
   expect(

@@ -45,27 +45,27 @@ export const priceTargets: PriceTarget[] = [
     referenceSku: "CAS-COR-001",
   },
   {
-    id: "combo-oxf-base",
-    label: "Camisa Oxford Manga Larga · Producto base",
-    productId: "PROD-OXF-001",
+    id: "combo-run-base",
+    label: "Camiseta Running Endurance · Producto base",
+    productId: "PROD-RUN-001",
     kind: "product",
-    referenceSku: "CAM-OXF",
+    referenceSku: "CAM-RUN",
   },
   {
-    id: "combo-oxf-bla-m",
-    label: "Color: Blanco · Talla: M — CAM-OXF-BLA-M",
-    productId: "PROD-OXF-001",
+    id: "combo-run-bla-m",
+    label: "Color: Blanco · Talla: M — CAM-RUN-BLA-M",
+    productId: "PROD-RUN-001",
     kind: "variant",
-    sku: "CAM-OXF-BLA-M",
-    productTargetId: "combo-oxf-base",
+    sku: "CAM-RUN-BLA-M",
+    productTargetId: "combo-run-base",
   },
   {
-    id: "combo-oxf-azu-l",
-    label: "Color: Azul Índigo · Talla: L — CAM-OXF-AZU-L",
-    productId: "PROD-OXF-001",
+    id: "combo-run-azu-l",
+    label: "Color: Azul Índigo · Talla: L — CAM-RUN-AZU-L",
+    productId: "PROD-RUN-001",
     kind: "variant",
-    sku: "CAM-OXF-AZU-L",
-    productTargetId: "combo-oxf-base",
+    sku: "CAM-RUN-AZU-L",
+    productTargetId: "combo-run-base",
   },
 ];
 export const targetNames: Record<string, string> = {
@@ -74,9 +74,9 @@ export const targetNames: Record<string, string> = {
   variant41: "Talla 41 · Negro",
   override42: "Talla 42 · Negro",
   "combo-casaca": "Casaca Cortaviento Trail",
-  "combo-oxf-base": "Camisa Oxford Manga Larga",
-  "combo-oxf-bla-m": "Color: Blanco · Talla: M",
-  "combo-oxf-azu-l": "Color: Azul Índigo · Talla: L",
+  "combo-run-base": "Camiseta Running Endurance",
+  "combo-run-bla-m": "Color: Blanco · Talla: M",
+  "combo-run-azu-l": "Color: Azul Índigo · Talla: L",
 };
 export const priceRecords: PriceView[] = [
   {
@@ -146,9 +146,9 @@ export const priceRecords: PriceView[] = [
     inherited: false,
   },
   {
-    // Base reference for PROD-OXF-001. The Blanco variant inherits this record.
-    id: "combo-oxf-base",
-    name: targetNames["combo-oxf-base"]!,
+    // Base reference for PROD-RUN-001. The Blanco variant inherits this record.
+    id: "combo-run-base",
+    name: targetNames["combo-run-base"]!,
     regular: "139.90",
     offer: "129.90",
     currency: "PEN",
@@ -161,9 +161,9 @@ export const priceRecords: PriceView[] = [
   },
   {
     // Own override for the Azul variant; it does not inherit the base offer.
-    id: "combo-oxf-azu-l",
-    name: targetNames["combo-oxf-azu-l"]!,
-    sku: "CAM-OXF-AZU-L",
+    id: "combo-run-azu-l",
+    name: targetNames["combo-run-azu-l"]!,
+    sku: "CAM-RUN-AZU-L",
     regular: "149.90",
     offer: null,
     currency: "PEN",

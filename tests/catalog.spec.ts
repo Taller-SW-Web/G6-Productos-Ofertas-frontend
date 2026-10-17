@@ -19,15 +19,15 @@ test.describe("MK-003 Gestión de productos (CRUD principal)", () => {
     ).toBeVisible();
 
     // Verify initial items
-    await expect(page.getByText("Camisa Oxford Manga Larga")).toBeVisible();
+    await expect(page.getByText("Camiseta Running Endurance")).toBeVisible();
     await expect(page.getByText("Mochila Deportiva Endurance")).toBeVisible();
 
     // Search filter
     const searchInput = page.getByPlaceholder(
       "Buscar por nombre, SKU base o descripción...",
     );
-    await searchInput.fill("Oxford");
-    await expect(page.getByText("Camisa Oxford Manga Larga")).toBeVisible();
+    await searchInput.fill("Running");
+    await expect(page.getByText("Camiseta Running Endurance")).toBeVisible();
     await expect(page.getByText("Mochila Deportiva Endurance")).toHaveCount(0);
 
     // Clear search
@@ -70,7 +70,7 @@ test.describe("MK-003 Gestión de productos (CRUD principal)", () => {
 
     // Recover from error
     await page.getByRole("button", { name: "Reintentar consulta" }).click();
-    await expect(page.getByText("Camisa Oxford Manga Larga")).toBeVisible();
+    await expect(page.getByText("Camiseta Running Endurance")).toBeVisible();
     await noPageOverflow(page);
   });
 
@@ -116,12 +116,12 @@ test.describe("MK-003 Gestión de productos (CRUD principal)", () => {
     await page.goto("/productos/nuevo?modoRevision=1&escenario=create-duplicate-sku");
     await page.getByLabel("Nombre del producto").fill("Producto Duplicado");
     await page.getByLabel("Descripción comercial").fill("Descripción de prueba.");
-    await page.getByLabel("SKU Base").fill("CAM-OXF");
+    await page.getByLabel("SKU Base").fill("CAM-RUN");
     await page.getByLabel("Precio base inicial (S/.)").fill("99");
 
     await page.getByRole("button", { name: "Guardar borrador" }).click();
     await expect(
-      page.getByText("El SKU base \"CAM-OXF\" ya está registrado en el catálogo."),
+      page.getByText("El SKU base \"CAM-RUN\" ya está registrado en el catálogo."),
     ).toBeVisible();
 
     // Form inputs must remain preserved
@@ -191,9 +191,9 @@ test.describe("MK-003 Gestión de productos (CRUD principal)", () => {
     ).toBeVisible();
 
     // 2. Parent product in ACTIVO
-    await page.goto("/productos/PROD-OXF-001");
+    await page.goto("/productos/PROD-RUN-001");
     await expect(
-      page.getByRole("heading", { name: "Camisa Oxford Manga Larga" }),
+      page.getByRole("heading", { name: "Camiseta Running Endurance" }),
     ).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Desactivar" }),
@@ -202,7 +202,7 @@ test.describe("MK-003 Gestión de productos (CRUD principal)", () => {
       page.getByText("Variantes y SKUs Vendibles"),
     ).toBeVisible();
     await expect(
-      page.getByRole("link", { name: "Gestionar variantes (MK-004)" }),
+      page.getByRole("link", { name: "Gestionar variantes" }),
     ).toBeVisible();
     await noPageOverflow(page);
   });
@@ -272,7 +272,7 @@ test.describe("MK-003 Gestión de productos (CRUD principal)", () => {
   test("S07: confirmación de desactivación (baja lógica) y preservación de variantes", async ({
     page,
   }) => {
-    await page.goto("/productos/PROD-OXF-001");
+    await page.goto("/productos/PROD-RUN-001");
     await page.getByRole("button", { name: "Desactivar" }).click();
 
     const dialog = page.getByRole("dialog");
@@ -332,7 +332,7 @@ test.describe("MK-003 Gestión de productos (CRUD principal)", () => {
     await noPageOverflow(page);
 
     // S04 Detalle de producto
-    await page.goto("/productos/PROD-OXF-001");
+    await page.goto("/productos/PROD-RUN-001");
     await page.waitForLoadState("networkidle");
     await page.screenshot({
       path: evidencePath("mk003-s04-detalle-1440.png"),
@@ -357,7 +357,7 @@ test.describe("MK-003 Gestión de productos (CRUD principal)", () => {
     await noPageOverflow(page);
 
     // S07 Desactivar diálogo
-    await page.goto("/productos/PROD-OXF-001?dialog=desactivar");
+    await page.goto("/productos/PROD-RUN-001?dialog=desactivar");
     await page.waitForSelector("role=dialog");
     await page.screenshot({
       path: evidencePath("mk003-s07-desactivar-1440.png"),

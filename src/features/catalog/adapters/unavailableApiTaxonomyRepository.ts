@@ -4,7 +4,7 @@ import type { TaxonomyRepository } from "../services/taxonomyRepository";
 export function createUnavailableApiTaxonomyRepository(): TaxonomyRepository {
   async function unavailable(): Promise<never> {
     throw new Error(
-      "El adapter API de Taxonomía no está configurado. No se utilizarán datos simulados como sustitución.",
+      "La consulta de categorías, marcas y tipos de producto no está disponible.",
     );
   }
 

@@ -44,10 +44,9 @@ export class PricingCombosAdapter implements CombosPricingPort {
     if (signal?.aborted) throw new DOMException("La consulta fue cancelada.", "AbortError");
     const activeSignal = signal ?? new AbortController().signal;
     const targets = await this.pricing.listTargets(activeSignal);
-    const result: SkuPrice[] = [];
-    for (const sku of skus) {
+    const result = await Promise.all(skus.map(async sku => {
       const matches = targets.filter((target) => targetMatchesSku(target, sku));
-      if (matches.length === 0) continue;
+      if (matches.length === 0) return null;
       if (matches.length > 1) {
         throw new ComboError(
           "pricing_unavailable",
@@ -58,10 +57,10 @@ export class PricingCombosAdapter implements CombosPricingPort {
       const snapshot = await this.pricing.read({ targetId: target.id, channel: "global" }, activeSignal);
       // A target without an effective price at the demo clock is omitted, never
       // invented as zero: consumers detect the gap by the missing SKU.
-      if (!snapshot) continue;
-      result.push(this.toSkuPrice(target, sku, snapshot));
-    }
-    return result;
+      if (!snapshot) return null;
+      return this.toSkuPrice(target, sku, snapshot);
+    }));
+    return result.filter((price): price is SkuPrice => price !== null);
   }
 
   private toSkuPrice(target: PriceTarget, sku: string, snapshot: PriceSnapshot): SkuPrice {

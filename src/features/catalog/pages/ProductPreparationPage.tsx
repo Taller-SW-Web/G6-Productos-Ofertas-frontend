@@ -309,7 +309,7 @@ export function ProductPreparationPage() {
                     variant="outline"
                     rightSection={<IconExternalLink size={14} />}
                   >
-                    Gestionar inventario de variantes (MK-004)
+                    Gestionar inventario de variantes
                   </Button>
                 </Stack>
               )}

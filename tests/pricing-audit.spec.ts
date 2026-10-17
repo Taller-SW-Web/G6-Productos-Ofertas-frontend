@@ -1,3 +1,4 @@
+import { gotoPricingReview } from "./support/pricingReview";
 import { test, expect, type Page } from "@playwright/test";
 import { evidencePath } from "./support/evidence";
 import { readFileSync, readdirSync } from "node:fs";
@@ -12,7 +13,7 @@ import { alternateIds } from "./adapters/alternatePricingRepository";
 
 const clock = { now: () => "2026-10-17T12:00:00Z" };
 async function mount(page: Page, path = "/precios", missing = false) {
-  await page.goto(
+  await gotoPricingReview(page,
     "/tests/harness/pricing-adapter.html?" +
       new URLSearchParams({ path, missing: missing ? "1" : "0" }),
   );
@@ -283,7 +284,7 @@ test("H12: missing API and failed alternate reads never fall back to the mock", 
 }) => {
   await mount(page, "/precios", true);
   await expect(page.getByRole("alert")).toContainText(
-    "adapter API de Pricing no está configurado",
+    "Esta función no está disponible en el modo actual",
   );
   await expect(
     page.getByRole("combobox", { name: "Producto o SKU" }),

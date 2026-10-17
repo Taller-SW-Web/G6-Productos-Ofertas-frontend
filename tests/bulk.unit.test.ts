@@ -168,20 +168,24 @@ describe("Bulk mock repository and global data mode", () => {
     expect(canRequestImportReport(apiRepository, mockBatches["batch-failed-general"]!)).toBe(true);
   });
 
-  it("keeps mock/API status messages tied to the global mode, not the filename", () => {
-    expect(getQueuedBatchDescription("mock")).toContain("demostración mock");
-    expect(getQueuedBatchDescription("api")).toContain("provider configurado");
-    expect(getUnknownRowCountDescription("mock")).not.toContain("XLSX");
-    expect(getUnknownRowCountDescription("api")).not.toContain("XLSX");
+  it("uses neutral commercial wording for batch status messages", () => {
+    for (const mode of ["mock", "api"] as const) {
+      expect(getQueuedBatchDescription(mode)).toContain("solicitud está en cola");
+      expect(getUnknownRowCountDescription(mode)).toContain("total de filas");
+      expect(getQueuedBatchDescription(mode)).not.toMatch(/mock|demostración|provider/i);
+      expect(getUnknownRowCountDescription(mode)).not.toMatch(/mock|demostración|provider/i);
+    }
     expect(isBulkProviderConfigured("api", null)).toBe(false);
     expect(isBulkProviderConfigured("api", mockBulkRepository)).toBe(true);
     expect(isBulkProviderConfigured("mock", null)).toBe(true);
   });
 
-  it("does not describe API download failures as mock limitations", () => {
-    expect(getUnavailableDownloadMessage("mock", "exportación", "XLSX")).toContain("modo mock");
-    expect(getUnavailableDownloadMessage("api", "exportación", "XLSX")).toContain("provider API configurado");
-    expect(getUnavailableDownloadMessage("api", "plantilla", "CSV")).toContain("provider API configurado");
+  it("uses concise download messages without implementation details", () => {
+    for (const mode of ["mock", "api"] as const) {
+      expect(getUnavailableDownloadMessage(mode, "exportación", "XLSX")).toContain("archivo solicitado");
+      expect(getUnavailableDownloadMessage(mode, "plantilla", "CSV")).toContain("no está disponible");
+      expect(getUnavailableDownloadMessage(mode, "plantilla", "CSV")).not.toMatch(/mock|provider|demostración/i);
+    }
     expect(getDownloadFailureMessage(new BulkRepositoryError("Sin conexión", "communication"), "exportación"))
       .toContain("Error de comunicación");
   });

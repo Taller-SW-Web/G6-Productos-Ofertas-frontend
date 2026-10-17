@@ -19,7 +19,7 @@ export function RecommendationSelectorPage() {
   const existing = new Set(form.draft.candidates.map((item) => item.productId));
   const options = products.filter(
     (item) =>
-      !existing.has(item.id) &&
+      item.active && !existing.has(item.id) &&
       !(
         form.draft.originType === "product" && item.id === form.draft.originId
       ) &&

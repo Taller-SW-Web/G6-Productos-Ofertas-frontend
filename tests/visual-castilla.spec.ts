@@ -209,59 +209,26 @@ const NOTE_ROUTES = [
   "/precios/auditoria",
 ] as const;
 
-const DEMO_NOTICE_ROUTES = [
-  "/categorias",
-  "/promociones",
-  "/precios",
-  "/precios/auditoria",
-] as const;
-
-test("VIS-T02 · notices stay neutral (Inter 14, secondary, no bubble) and real alerts survive", async ({
+test("VIS-T02 · commercial routes omit developer notices and preserve real alerts", async ({
   page,
 }) => {
   test.setTimeout(150_000);
 
   for (const route of NOTE_ROUTES) {
     await gotoAndReady(page, route);
-    const note = page.locator('[role="note"]');
-    await expect(note).toHaveCount(1);
-
-    // Text remains visible and uses the neutral secondary role.
-    await expect(note).toBeVisible();
-    await expect(note).toHaveCSS("font-family", /Inter/);
-    await expect(note).toHaveCSS("font-size", "14px");
-    await expect(note).toHaveCSS("color", "rgb(73, 80, 87)");
-    // No light-blue bubble: no background, border, shadow, radius or padding.
-    await expect(note).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-    await expect(note).toHaveCSS("border-top-width", "0px");
-    await expect(note).toHaveCSS("border-bottom-width", "0px");
-    await expect(note).toHaveCSS("box-shadow", "none");
-    await expect(note).toHaveCSS("border-top-left-radius", "0px");
-    await expect(note).toHaveCSS("padding-top", "0px");
-    await expect(note).toHaveCSS("padding-left", "0px");
-    // No large informational icon and not an Alert box.
-    await expect(note.locator("svg, img")).toHaveCount(0);
-    await expect(note).not.toHaveClass(/Alert-root/);
-    await expect(
-      note.locator(
-        "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' mantine-Alert-root ')]",
-      ),
-    ).toHaveCount(0);
-    expect((await note.evaluate((el) => el.tagName)).toLowerCase()).toBe("p");
-
-    if ((DEMO_NOTICE_ROUTES as readonly string[]).includes(route)) {
-      await expect(note).toContainText("Datos de demostración");
-    }
+    await expect(page.locator('[role="note"]')).toHaveCount(0);
+    await expect(page.getByText("Datos de demostración", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("combobox", { name: /Escenario|Respuesta ficticia/ })).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   }
 
-  // Genuine operational alerts must not disappear behind the neutral notice.
+  // Genuine operational alerts remain visible after removing developer notes.
   await gotoAndReady(page, "/inventario/dashboard");
   expect(
     await page.locator('[role="alert"], [role="status"]').count(),
   ).toBeGreaterThan(0);
   const noteOnDashboard = page.locator('[role="note"]');
-  await expect(noteOnDashboard).toBeVisible();
-  await expect(noteOnDashboard).not.toHaveAttribute("role", "alert");
+  await expect(noteOnDashboard).toHaveCount(0);
 
   await page.screenshot({
     path: test.info().outputPath("visual-T02-notice-dashboard.png"),

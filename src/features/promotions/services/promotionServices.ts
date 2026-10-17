@@ -46,7 +46,7 @@ export function createPromotionRuntime(
   if (mode !== "mock" && mode !== "api")
     throw new Error("VITE_DATA_MODE debe ser mock o api.");
   if (mode === "api" && !dependencies.api)
-    throw new Error("El provider API de Promotions no está configurado.");
+    throw new Error("La administración de promociones no está disponible.");
   const services =
     mode === "mock"
       ? createMockPromotionServices()

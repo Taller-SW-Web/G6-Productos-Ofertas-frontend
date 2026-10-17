@@ -101,7 +101,7 @@ export function ProductFormFields({
           <TextInput
             label="Nombre del producto"
             required
-            placeholder="Ej. Camisa Oxford Manga Larga"
+            placeholder="Ej. Camiseta Running Endurance"
             value={formData.nombre}
             onChange={(e) => updateField("nombre", e.currentTarget.value)}
             error={errors.nombre}
@@ -197,7 +197,7 @@ export function ProductFormFields({
               <TextInput
                 label="SKU Base"
                 required={!isEdit}
-                placeholder="Ej. CAM-OXF-001"
+                placeholder="Ej. CAM-RUN-001"
                 value={formData.skuBase}
                 onChange={(e) =>
                   updateField("skuBase", e.currentTarget.value.toUpperCase())
@@ -252,7 +252,7 @@ export function ProductFormFields({
       >
         {formData.tieneVariantes ? (
           <Alert icon={<IconInfoCircle size={16} />} color="blue" variant="light">
-            El producto padre con variantes no tiene perfil físico propio. Las dimensiones y peso se gestionan individualmente en cada variante en MK-004.
+            Las dimensiones y el peso se gestionan en cada variante.
           </Alert>
         ) : (
           <Stack gap="md">

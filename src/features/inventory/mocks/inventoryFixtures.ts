@@ -17,8 +17,8 @@ export const initialThresholds: ThresholdConfig = {
 
 export const initialStockItems: StockItem[] = [
   {
-    sku: "CAM-OXF-BLA-M",
-    productName: "Camisa Oxford Manga Larga",
+    sku: "CAM-RUN-BLA-M",
+    productName: "Camiseta Running Endurance",
     categoryName: "Ropa",
     brandName: "Inka Athletic",
     locationId: "ALM-CEN",
@@ -49,8 +49,8 @@ export const initialStockItems: StockItem[] = [
     updatedAt: "2026-10-17T12:00:00Z",
   },
   {
-    sku: "CAM-OXF-AZU-L",
-    productName: "Camisa Oxford Manga Larga",
+    sku: "CAM-RUN-AZU-L",
+    productName: "Camiseta Running Endurance",
     categoryName: "Ropa",
     brandName: "Inka Athletic",
     locationId: "ALM-CEN",
@@ -209,13 +209,13 @@ export const initialTransfers: TransferItem[] = [
     quantityPending: 5,
     status: "EN_TRANSITO",
     shippedAt: "2026-10-17T09:00:00Z",
-    notes: "Traslado de demostración para el flujo integrado de Combos.",
+    notes: "Reposición para el conjunto Trail Esencial.",
   },
   {
-    id: "tr-oxford-bla-m",
+    id: "tr-running-bla-m",
     transferCode: "TR-2026-101",
-    sku: "CAM-OXF-BLA-M",
-    productName: "Camisa Oxford Manga Larga",
+    sku: "CAM-RUN-BLA-M",
+    productName: "Camiseta Running Endurance",
     sourceLocationId: "ALM-NOR",
     sourceLocationName: "Almacén Norte Trujillo",
     targetLocationId: "ALM-CEN",
@@ -225,7 +225,7 @@ export const initialTransfers: TransferItem[] = [
     quantityPending: 5,
     status: "EN_TRANSITO",
     shippedAt: "2026-10-17T10:00:00Z",
-    notes: "Traslado de demostración para CAM-OXF-BLA-M.",
+    notes: "Reposición de camisetas para running.",
   },
   {
     id: "tr-001",
