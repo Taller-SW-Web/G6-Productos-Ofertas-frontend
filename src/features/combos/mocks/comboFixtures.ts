@@ -1,75 +1,100 @@
-import type { Combo, ProductDetail, ProductSummary, SkuPrice } from "../types/combos";
+import { calculateInformativeAvailability } from "../services/availability";
+import type { Combo, ComboStatus, StockReading, SkuPrice } from "../types/combos";
 
-const availability = (quantity: number | null, freshness: Combo["availability"]["freshness"] = "ACTUALIZADA", verifiable = true) => ({
-  verifiable,
-  quantity,
-  freshness,
-  calculatedAt: "2026-10-14T16:00:00-05:00",
-});
+// Demonstration combos. Every SKU below exists in the shared Catalog used by
+// MK-003/MK-004 (see src/features/catalog/mocks/catalogFixtures.ts):
+//   CAS-COR-001      simple, ACTIVE product
+//   CAM-OXF-BLA-M    active variant of PROD-OXF-001
+//   CAM-OXF-AZU-L    active variant of PROD-OXF-001
+// Combos never insert fictitious products into the shared Catalog.
 
-export const comboFixtures: Combo[] = [
-  {
-    id: "combo-entrenamiento",
-    name: "Set de entrenamiento esencial",
-    description: "Accesorios básicos para comenzar una rutina de fuerza.",
-    status: "ACTIVO",
-    priceMinor: 12990,
-    version: 3,
-    components: [
-      { sku: "INKA-BAND-01", productName: "Bandas de resistencia", quantity: 1, regularUnitMinor: 7990, publicUnitMinor: 6990 },
-      { sku: "INKA-MAT-01", productName: "Mat de entrenamiento", quantity: 1, regularUnitMinor: 8990, publicUnitMinor: 7990 },
-    ],
-    availability: availability(8),
-  },
-  {
-    id: "combo-yoga",
-    name: "Kit yoga diario",
-    description: "Mat y bloque para práctica diaria.",
-    status: "ACTIVO",
-    priceMinor: 11990,
-    version: 1,
-    components: [
-      { sku: "INKA-MAT-01", productName: "Mat de entrenamiento", quantity: 1, regularUnitMinor: 8990, publicUnitMinor: 7990 },
-      { sku: "INKA-BLOCK-02", productName: "Bloque de yoga", quantity: 2, regularUnitMinor: 2990, publicUnitMinor: 2490 },
-    ],
-    availability: availability(0),
-  },
-  {
-    id: "combo-resistencia",
-    name: "Pack resistencia Pro",
-    description: "Bandas y cuerda de salto.",
-    status: "INACTIVO",
-    priceMinor: 9990,
-    version: 2,
-    components: [
-      { sku: "INKA-BAND-02", productName: "Bandas Pro", quantity: 1, regularUnitMinor: 7990, publicUnitMinor: 7490 },
-      { sku: "INKA-ROPE-01", productName: "Cuerda de salto", quantity: 1, regularUnitMinor: 5990, publicUnitMinor: 4990 },
-    ],
-    availability: availability(null, "INCOMPLETA", false),
-  },
-];
-
-export const productFixtures: ProductSummary[] = [
-  { productId: "product-band", name: "Bandas de resistencia", hasVariants: false, active: true, baseSku: "INKA-BAND-01" },
-  { productId: "product-mat", name: "Mat de entrenamiento", hasVariants: false, active: true, baseSku: "INKA-MAT-01" },
-  { productId: "product-block", name: "Bloque de yoga", hasVariants: false, active: true, baseSku: "INKA-BLOCK-02" },
-  { productId: "product-rope", name: "Cuerda de salto", hasVariants: false, active: true, baseSku: "INKA-ROPE-01" },
-  { productId: "product-bands-variant", name: "Bandas Pro por resistencia", hasVariants: true, active: true, baseSku: null },
-];
-
-export const productDetails: ProductDetail[] = [
-  ...productFixtures.filter((product) => !product.hasVariants).map((product) => ({ ...product, variants: [] })),
-  { ...productFixtures[4]!, variants: [
-    { sku: "INKA-BAND-02", label: "Fuerte · INKA-BAND-02", active: true },
-    { sku: "INKA-BAND-03", label: "Ligera · INKA-BAND-03", active: true },
-  ] },
-];
+export const stockFixtures: Readonly<Record<string, StockReading>> = {
+  "CAS-COR-001": { sku: "CAS-COR-001", stock: 4, stale: false, locationsCompatible: true },
+  "CAM-OXF-BLA-M": { sku: "CAM-OXF-BLA-M", stock: 8, stale: false, locationsCompatible: true },
+  "CAM-OXF-AZU-L": { sku: "CAM-OXF-AZU-L", stock: 0, stale: false, locationsCompatible: true },
+  "CAM-OXF-NEG-S": { sku: "CAM-OXF-NEG-S", stock: 0, stale: false, locationsCompatible: true },
+};
 
 export const priceFixtures: SkuPrice[] = [
-  { sku: "INKA-BAND-01", regularMinor: 7990, offerMinor: 6990, currency: "PEN", channelId: null, priceVersion: 1, validityId: "vigencia-band-01", validFrom: "2020-10-01T00:00:00Z", validUntil: null },
-  { sku: "INKA-MAT-01", regularMinor: 8990, offerMinor: 7990, currency: "PEN", channelId: null, priceVersion: 1, validityId: "vigencia-mat-01", validFrom: "2020-10-01T00:00:00Z", validUntil: null },
-  { sku: "INKA-BLOCK-02", regularMinor: 2990, offerMinor: 2490, currency: "PEN", channelId: null, priceVersion: 1, validityId: "vigencia-block-02", validFrom: "2020-10-01T00:00:00Z", validUntil: null },
-  { sku: "INKA-ROPE-01", regularMinor: 5990, offerMinor: 4990, currency: "PEN", channelId: null, priceVersion: 1, validityId: "vigencia-rope-01", validFrom: "2020-10-01T00:00:00Z", validUntil: null },
-  { sku: "INKA-BAND-02", regularMinor: 7990, offerMinor: null, currency: "PEN", channelId: null, priceVersion: 1, validityId: "vigencia-band-02", validFrom: "2020-10-01T00:00:00Z", validUntil: null },
-  { sku: "INKA-BAND-03", regularMinor: 6990, offerMinor: 5990, currency: "PEN", channelId: null, priceVersion: 1, validityId: "vigencia-band-03", validFrom: "2020-10-01T00:00:00Z", validUntil: null },
+  { sku: "CAS-COR-001", regularMinor: 17900, offerMinor: 15900, currency: "PEN", channelId: null, priceVersion: 1, validityId: "vigencia-cas-cor-001", validFrom: "2020-10-01T00:00:00Z", validUntil: null },
+  { sku: "CAM-OXF-BLA-M", regularMinor: 13990, offerMinor: 12990, currency: "PEN", channelId: null, priceVersion: 1, validityId: "vigencia-cam-oxf-bla-m", validFrom: "2020-10-01T00:00:00Z", validUntil: null },
+  { sku: "CAM-OXF-AZU-L", regularMinor: 14990, offerMinor: null, currency: "PEN", channelId: null, priceVersion: 1, validityId: "vigencia-cam-oxf-azu-l", validFrom: "2020-10-01T00:00:00Z", validUntil: null },
+  { sku: "CAM-OXF-NEG-S", regularMinor: 13990, offerMinor: null, currency: "PEN", channelId: null, priceVersion: 1, validityId: "vigencia-cam-oxf-neg-s", validFrom: "2020-10-01T00:00:00Z", validUntil: null },
+  { sku: "ZAP-RUN-41", regularMinor: 24900, offerMinor: null, currency: "PEN", channelId: null, priceVersion: 1, validityId: "vigencia-zap-run-41", validFrom: "2020-10-01T00:00:00Z", validUntil: null },
 ];
+
+const CALCULATED_AT = "2026-10-14T16:00:00-05:00";
+
+function priceFor(sku: string): { regularUnitMinor: number | null; publicUnitMinor: number | null } {
+  const price = priceFixtures.find((candidate) => candidate.sku === sku);
+  return {
+    regularUnitMinor: price?.regularMinor ?? null,
+    publicUnitMinor: price ? price.offerMinor ?? price.regularMinor : null,
+  };
+}
+
+function component(sku: string, productName: string, quantity: number) {
+  return { sku, productName, quantity, ...priceFor(sku) };
+}
+
+interface ComboSeed {
+  id: string;
+  name: string;
+  description: string;
+  status: ComboStatus;
+  priceMinor: number;
+  version: number;
+  components: { sku: string; productName: string; quantity: number }[];
+}
+
+const seeds: ComboSeed[] = [
+  {
+    id: "combo-001",
+    name: "Conjunto Trail Esencial",
+    description: "Casaca cortaviento y camisa Oxford para salidas de media montaña.",
+    status: "ACTIVO",
+    priceMinor: 20990,
+    version: 3,
+    components: [
+      { sku: "CAS-COR-001", productName: "Casaca Cortaviento Trail", quantity: 1 },
+      { sku: "CAM-OXF-BLA-M", productName: "Camisa Oxford Manga Larga", quantity: 1 },
+    ],
+  },
+  {
+    id: "combo-002",
+    name: "Dúo Oxford",
+    description: "Dos camisas Oxford para rotación diaria.",
+    status: "ACTIVO",
+    priceMinor: 19990,
+    version: 1,
+    components: [
+      { sku: "CAM-OXF-BLA-M", productName: "Camisa Oxford Manga Larga", quantity: 1 },
+      { sku: "CAM-OXF-AZU-L", productName: "Camisa Oxford Manga Larga", quantity: 1 },
+    ],
+  },
+  {
+    id: "combo-003",
+    name: "Pack Urbano histórico",
+    description: "Combo descontinuado conservado para consulta.",
+    status: "INACTIVO",
+    priceMinor: 18990,
+    version: 2,
+    components: [
+      { sku: "CAS-COR-001", productName: "Casaca Cortaviento Trail", quantity: 1 },
+      { sku: "CAM-OXF-AZU-L", productName: "Camisa Oxford Manga Larga", quantity: 1 },
+    ],
+  },
+];
+
+const stockMap = new Map(Object.entries(stockFixtures));
+
+export const comboFixtures: Combo[] = seeds.map((seed) => ({
+  ...seed,
+  components: seed.components.map((item) => component(item.sku, item.productName, item.quantity)),
+  availability: calculateInformativeAvailability(
+    seed.status,
+    seed.components.map((item) => ({ sku: item.sku, quantity: item.quantity, active: true })),
+    stockMap,
+    CALCULATED_AT,
+  ),
+}));

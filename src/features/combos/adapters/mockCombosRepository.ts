@@ -1,17 +1,18 @@
-import { comboFixtures, priceFixtures, productDetails, productFixtures } from "../mocks/comboFixtures";
+import { comboFixtures } from "../mocks/comboFixtures";
+import { calculateInformativeAvailability } from "../services/availability";
 import { currentGlobalPricesForSku, effectivePublicMinor } from "../services/comboRules";
 import { validateMockComboPayload } from "../services/validateMockComboPayload";
 import {
   ComboError,
   type Combo,
+  type ComboAvailability,
   type ComboPayload,
   type ComboQuery,
+  type ComboStatus,
+  type CombosAvailabilityPort,
   type CombosCatalogPort,
   type CombosPricingPort,
   type CombosRepository,
-  type ProductDetail,
-  type ProductSummary,
-  type SkuPrice,
 } from "../types/combos";
 
 const clone = <T,>(value: T): T => structuredClone(value);
@@ -20,30 +21,26 @@ function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException("La consulta fue cancelada.", "AbortError");
 }
 
-export interface MockCombosOptions {
-  catalog?: ProductSummary[];
-  productDetails?: ProductDetail[];
-  prices?: SkuPrice[];
-  failProductSearches?: number;
-  failVariantDetails?: string[];
+export interface MockCombosDependencies {
+  catalog: CombosCatalogPort;
+  pricing: CombosPricingPort;
+  availability: CombosAvailabilityPort;
+  seed?: Combo[];
+  now?: () => number;
+  knownComboIds?: ReadonlySet<string>;
 }
 
-export class MockCombosRepository implements CombosRepository, CombosCatalogPort, CombosPricingPort {
+export class MockCombosRepository implements CombosRepository {
   private combos: Combo[] = clone(comboFixtures);
   private listErrorDelivered = false;
   private readonly versionConflictScenariosTriggered = new Set<string>();
-  private readonly catalog: ProductSummary[];
-  private readonly details: ProductDetail[];
-  private readonly prices: SkuPrice[];
-  private readonly failedVariantDetails: Set<string>;
-  private productSearchFailuresRemaining: number;
+  private readonly deps: MockCombosDependencies;
+  private readonly now: () => number;
 
-  constructor(options: MockCombosOptions = {}) {
-    this.catalog = clone(options.catalog ?? productFixtures);
-    this.details = clone(options.productDetails ?? productDetails);
-    this.prices = clone(options.prices ?? priceFixtures);
-    this.failedVariantDetails = new Set(options.failVariantDetails ?? []);
-    this.productSearchFailuresRemaining = options.failProductSearches ?? 0;
+  constructor(deps: MockCombosDependencies) {
+    this.deps = deps;
+    this.now = deps.now ?? (() => Date.now());
+    if (deps.seed) this.combos = clone(deps.seed);
   }
 
   async list(query: ComboQuery, signal?: AbortSignal): Promise<{ items: Combo[]; page: number; pageSize: number; total: number }> {
@@ -64,6 +61,7 @@ export class MockCombosRepository implements CombosRepository, CombosCatalogPort
 
   async getById(id: string, signal?: AbortSignal): Promise<Combo | null> {
     throwIfAborted(signal);
+    if (signal?.aborted) throw new DOMException("La consulta fue cancelada.", "AbortError");
     return clone(this.combos.find((item) => item.id === id) ?? null);
   }
 
@@ -71,8 +69,8 @@ export class MockCombosRepository implements CombosRepository, CombosCatalogPort
     if (scenario === "server-price-rejected") {
       throw new ComboError("price_invalid", "El precio del combo no cumple la regla económica.");
     }
-    validateMockComboPayload(payload, this.catalog, this.details, this.prices, this.combos.map((combo) => combo.id));
-    const combo = this.buildCombo(payload, `combo-${this.combos.length + 1}`, 1, "ACTIVO");
+    await validateMockComboPayload(payload, this.validationContext());
+    const combo = await this.buildCombo(payload, `combo-${this.combos.length + 1}`, 1, "ACTIVO");
     this.combos.unshift(combo);
     return clone(combo);
   }
@@ -93,15 +91,8 @@ export class MockCombosRepository implements CombosRepository, CombosCatalogPort
     if (scenario === "server-price-rejected") {
       throw new ComboError("price_invalid", "El precio del combo no cumple la regla económica.");
     }
-    validateMockComboPayload(payload, this.catalog, this.details, this.prices, this.combos.map((combo) => combo.id));
-    const updated = this.buildCombo(payload, current.id, current.version + 1, current.status);
-    const sameComposition = current.components.length === payload.components.length &&
-      current.components.every((component) => payload.components.some((proposed) =>
-        proposed.sku === component.sku && proposed.quantity === component.quantity,
-      ));
-    updated.availability = sameComposition
-      ? clone(current.availability)
-      : { verifiable: false, quantity: null, freshness: "INCOMPLETA", calculatedAt: null };
+    await validateMockComboPayload(payload, this.validationContext());
+    const updated = await this.buildCombo(payload, current.id, current.version + 1, current.status);
     this.combos = this.combos.map((item) => item.id === id ? updated : item);
     return clone(updated);
   }
@@ -109,53 +100,59 @@ export class MockCombosRepository implements CombosRepository, CombosCatalogPort
   async deactivate(id: string): Promise<Combo> {
     const current = this.combos.find((item) => item.id === id);
     if (!current) throw new ComboError("not_found", "No se encontró el combo.");
-    const updated = { ...current, status: "INACTIVO" as const, version: current.version + 1 };
+    const availability = current.availability.state === "COMBO_INACTIVO"
+      ? current.availability
+      : calculateInformativeAvailability("INACTIVO", [], new Map(), null);
+    const updated: Combo = { ...current, status: "INACTIVO", version: current.version + 1, availability };
     this.combos = this.combos.map((item) => item.id === id ? updated : item);
     return clone(updated);
   }
 
-  async listProducts(query: string, signal?: AbortSignal): Promise<ProductSummary[]> {
-    throwIfAborted(signal);
-    if (this.productSearchFailuresRemaining > 0) {
-      this.productSearchFailuresRemaining -= 1;
-      throw new ComboError("unavailable", "No se pudo consultar el catálogo.");
-    }
-    const normalized = query.trim().toLocaleLowerCase("es-PE");
-    return clone(this.catalog.filter((product) => product.active && product.name.toLocaleLowerCase("es-PE").includes(normalized)));
+  private validationContext() {
+    return {
+      catalog: this.deps.catalog,
+      pricing: this.deps.pricing,
+      existingComboIds: this.deps.knownComboIds ?? new Set(this.combos.map((combo) => combo.id)),
+      now: this.now(),
+    };
   }
 
-  async getProduct(productId: string, signal?: AbortSignal): Promise<ProductDetail | null> {
-    throwIfAborted(signal);
-    if (this.failedVariantDetails.has(productId)) {
-      this.failedVariantDetails.delete(productId);
-      throw new ComboError("unavailable", "No se pudo consultar el detalle de variantes.");
-    }
-    return clone(this.details.find((item) => item.productId === productId && item.active) ?? null);
+  private async computeAvailability(
+    status: ComboStatus,
+    components: { sku: string; quantity: number }[],
+  ): Promise<ComboAvailability> {
+    const skus = components.map((component) => component.sku);
+    const resolved = await this.deps.catalog.resolveSkus(skus);
+    const sellable = new Map(resolved.map((entry) => [entry.sku, entry.sellable]));
+    const readings = await this.deps.availability.readStocks(skus);
+    return calculateInformativeAvailability(
+      status,
+      components.map((component) => ({
+        sku: component.sku,
+        quantity: component.quantity,
+        active: sellable.get(component.sku) ?? false,
+      })),
+      new Map(readings.map((reading) => [reading.sku, reading])),
+      new Date(this.now()).toISOString(),
+    );
   }
 
-  async readCurrent(skus: string[], signal?: AbortSignal): Promise<SkuPrice[]> {
-    throwIfAborted(signal);
-    const now = Date.now();
-    return clone(skus.flatMap((sku) => currentGlobalPricesForSku(sku, this.prices, now)));
-  }
-
-  private buildCombo(payload: ComboPayload, id: string, version: number, status: Combo["status"]): Combo {
+  private async buildCombo(payload: ComboPayload, id: string, version: number, status: ComboStatus): Promise<Combo> {
+    const prices = await this.deps.pricing.readCurrent(payload.components.map((item) => item.sku));
+    const resolved = await this.deps.catalog.resolveSkus(payload.components.map((item) => item.sku));
+    const nameBySku = new Map(resolved.map((entry) => [entry.sku, entry.productName]));
     const components = payload.components.map((item) => {
-      const product = this.catalog.find((candidate) =>
-        candidate.hasVariants
-          ? this.details.find((detail) => detail.productId === candidate.productId)?.variants.some((variant) => variant.sku === item.sku)
-          : candidate.baseSku === item.sku,
-      );
-      const currentPrices = currentGlobalPricesForSku(item.sku, this.prices);
-      const price = currentPrices.length === 1 ? currentPrices[0] : undefined;
+      const matches = currentGlobalPricesForSku(item.sku, prices, this.now());
+      const price = matches.length === 1 ? matches[0] : undefined;
       return {
         sku: item.sku,
-        productName: product?.name ?? item.sku,
+        productName: nameBySku.get(item.sku) ?? item.sku,
         quantity: item.quantity,
         regularUnitMinor: price?.regularMinor ?? null,
         publicUnitMinor: price ? effectivePublicMinor(price) : null,
       };
     });
+    const availability = await this.computeAvailability(status, payload.components);
     return {
       id,
       name: payload.name.trim(),
@@ -164,7 +161,7 @@ export class MockCombosRepository implements CombosRepository, CombosCatalogPort
       priceMinor: payload.priceMinor,
       version,
       components,
-      availability: { verifiable: false, quantity: null, freshness: "INCOMPLETA", calculatedAt: null },
+      availability,
     };
   }
 }

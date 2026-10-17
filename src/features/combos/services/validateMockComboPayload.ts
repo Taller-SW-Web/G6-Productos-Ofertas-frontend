@@ -1,20 +1,34 @@
 import { currentGlobalPricesForSku, effectivePublicMinor } from "./comboRules";
-import { comboFixtures, productDetails, productFixtures, priceFixtures } from "../mocks/comboFixtures";
-import { ComboError, type ComboPayload, type ProductDetail, type ProductSummary, type SkuPrice } from "../types/combos";
+import {
+  ComboError,
+  type ComboPayload,
+  type CombosCatalogPort,
+  type CombosPricingPort,
+} from "../types/combos";
 
 const DEMO_CURRENCY = "PEN";
+
+export interface ComboPayloadValidationContext {
+  // Authoritative source of SKU identities. The selector and the save-time
+  // validation must consult this same port so a SKU never validates against one
+  // catalog and saves against another.
+  catalog: CombosCatalogPort;
+  pricing: CombosPricingPort;
+  existingComboIds?: ReadonlySet<string>;
+  now?: number;
+}
 
 function isValidDate(value: string): boolean {
   return value.length > 0 && Number.isFinite(Date.parse(value));
 }
 
-export function validateMockComboPayload(
+// Validates a combo payload against the shared Catalog identities and the
+// current Pricing references. It does not trust the components sent by the
+// form: every SKU is re-resolved against Catalog.
+export async function validateMockComboPayload(
   payload: ComboPayload,
-  catalog: ProductSummary[] = productFixtures,
-  details: ProductDetail[] = productDetails,
-  prices: SkuPrice[] = priceFixtures,
-  existingComboIds: string[] = comboFixtures.map((combo) => combo.id),
-): void {
+  context: ComboPayloadValidationContext,
+): Promise<void> {
   if (!payload.name.trim()) {
     throw new ComboError("invalid_components", "Ingresa el nombre del combo.");
   }
@@ -23,7 +37,7 @@ export function validateMockComboPayload(
   }
 
   const skus = payload.components.map((component) => component.sku);
-  if (skus.some((sku) => existingComboIds.includes(sku))) {
+  if (context.existingComboIds && skus.some((sku) => context.existingComboIds!.has(sku))) {
     throw new ComboError("nested_combo", "No se permite agregar un combo como componente.");
   }
   if (new Set(skus).size !== skus.length) {
@@ -33,19 +47,20 @@ export function validateMockComboPayload(
     throw new ComboError("invalid_quantity", "La cantidad de cada componente debe ser un entero positivo.");
   }
 
+  const resolved = await context.catalog.resolveSkus(skus);
+  const bySku = new Map(resolved.map((entry) => [entry.sku, entry]));
   for (const { sku } of payload.components) {
-    const knownProduct = catalog.find((product) =>
-      product.hasVariants
-        ? details.find((detail) => detail.productId === product.productId)?.variants.some((variant) => variant.sku === sku)
-        : product.baseSku === sku,
-    );
-    const owner = catalog.find((product) =>
-      product.active && (product.hasVariants
-        ? details.find((detail) => detail.productId === product.productId)?.variants.some((variant) => variant.active && variant.sku === sku)
-        : product.baseSku === sku),
-    );
-    if (!owner) {
-      if (!knownProduct) throw new ComboError("sku_not_found", `El SKU ${sku} no existe en el catálogo.`);
+    const entry = bySku.get(sku);
+    if (!entry) {
+      throw new ComboError("sku_not_found", `El SKU ${sku} no existe en el catálogo compartido.`);
+    }
+    if (entry.isCombo) {
+      throw new ComboError("nested_combo", `El SKU ${sku} corresponde a un combo y no puede ser componente.`);
+    }
+    if (entry.isVariantParentSku) {
+      throw new ComboError("sku_invalid", `El SKU ${sku} es el padre con variantes; selecciona una variante activa.`);
+    }
+    if (!entry.sellable) {
       throw new ComboError("sku_invalid", `El SKU ${sku} no pertenece a un producto y una variante activos del catálogo.`);
     }
   }
@@ -54,15 +69,19 @@ export function validateMockComboPayload(
     throw new ComboError("price_invalid", "El precio del combo debe ser mayor que cero.");
   }
 
-  const now = Date.now();
-  const selectedPrices = payload.components.map(({ sku }) => currentGlobalPricesForSku(sku, prices, now));
-  if (selectedPrices.some((matches) => matches.length !== 1)) {
+  const now = context.now ?? Date.now();
+  const prices = await context.pricing.readCurrent(skus);
+  const references = payload.components.map(({ sku }) => {
+    const matches = currentGlobalPricesForSku(sku, prices, now);
+    return matches.length === 1 ? matches[0]! : null;
+  });
+  if (references.some((reference) => reference === null)) {
     throw new ComboError("pricing_unavailable", "No se pudo confirmar una referencia global vigente única de Pricing para cada SKU.");
   }
 
-  const references = selectedPrices.map((matches) => matches[0]!);
-  const referenceCurrency = references[0]?.currency;
-  if (!referenceCurrency || referenceCurrency !== DEMO_CURRENCY || references.some((price) =>
+  const validReferences = references as NonNullable<(typeof references)[number]>[];
+  const referenceCurrency = validReferences[0]?.currency;
+  if (!referenceCurrency || referenceCurrency !== DEMO_CURRENCY || validReferences.some((price) =>
     price.currency !== referenceCurrency ||
     !Number.isSafeInteger(price.priceVersion) || price.priceVersion < 0 ||
     !price.validityId.trim() || !isValidDate(price.validFrom) ||
@@ -75,7 +94,7 @@ export function validateMockComboPayload(
   let regularTotal = 0;
   let publicTotal = 0;
   payload.components.forEach((component, index) => {
-    const reference = references[index]!;
+    const reference = validReferences[index]!;
     const effectivePublic = effectivePublicMinor(reference);
     if (effectivePublic === null) {
       throw new ComboError("pricing_unavailable", "No se pudo determinar el precio público vigente de todos los SKU.");

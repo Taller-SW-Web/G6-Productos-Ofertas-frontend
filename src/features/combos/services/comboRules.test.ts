@@ -1,264 +1,456 @@
 import { describe, expect, it } from "vitest";
-import { availabilityMessage, hasVerifiedPositiveAvailability } from "./availability";
-import { compareComboPrice, parseMoneyMinor, resolveProductSkus, toComparisonComponents, validateComposition } from "./comboRules";
+
+import { MockCatalogRepository } from "../../catalog/adapters/mockCatalogRepository";
+import { CatalogCombosAdapter } from "../adapters/catalogCombosAdapter";
+import { MockCombosRepository, type MockCombosDependencies } from "../adapters/mockCombosRepository";
+import { comboFixtures, priceFixtures, stockFixtures } from "../mocks/comboFixtures";
+import { MockCombosAvailabilityAdapter } from "../mocks/mockCombosAvailabilityAdapter";
+import { MockCombosPricingAdapter } from "../mocks/mockCombosPricingAdapter";
+import {
+  availabilityMessage,
+  availabilityMessageText,
+  calculateInformativeAvailability,
+  isUnavailableForNewSales,
+  isVerifiedPositiveAvailability,
+} from "./availability";
+import {
+  compareComboPrice,
+  effectivePublicMinor,
+  formatMoney,
+  isCurrentGlobalPrice,
+  parseMoneyMinor,
+  resolveProductSkus,
+  toComparisonComponents,
+  validateComposition,
+} from "./comboRules";
+import { diffComboDraft, draftFromCombo, isDraftDirty, keepDraftAfterVersionConflict } from "./drafts";
 import { parseComboPage } from "./parseComboPage";
 import { RequestIdentity } from "./requestIdentity";
-import { draftFromCombo, keepDraftAfterVersionConflict } from "./drafts";
-import { MockCombosRepository } from "../adapters/mockCombosRepository";
-import { comboFixtures, priceFixtures, productDetails } from "../mocks/comboFixtures";
-import { ComboError, type Combo, type ComboPayload, type SkuPrice } from "../types/combos";
+import {
+  ComboError,
+  type ComboPayload,
+  type CombosCatalogPort,
+  type StockReading,
+} from "../types/combos";
 
-const components = [
-  { sku: "INKA-BAND-01", productName: "Bandas", quantity: 1 },
-  { sku: "INKA-MAT-01", productName: "Mat", quantity: 1 },
-];
+// A fresh adapter over the shared Catalog ensures every test starts from the
+// real product/variant fixture state instead of the process-wide singleton.
+function makeCatalog(options: { pageSize?: number; comboTypeIds?: ReadonlySet<string> } = {}) {
+  return new CatalogCombosAdapter({ catalog: new MockCatalogRepository(), ...options });
+}
+
+function makeAvailability(snapshot: Record<string, StockReading> = stockFixtures as Record<string, StockReading>) {
+  return new MockCombosAvailabilityAdapter({ snapshot });
+}
+
+function makeRepository(overrides: Partial<MockCombosDependencies> = {}) {
+  return new MockCombosRepository({
+    catalog: makeCatalog(),
+    pricing: new MockCombosPricingAdapter(),
+    availability: makeAvailability(),
+    ...overrides,
+  });
+}
+
 const validPayload: ComboPayload = {
   name: "Combo de prueba",
   description: null,
-  components,
-  priceMinor: 12000,
-};
-const base: Combo = {
-  id: "c",
-  name: "Combo",
-  description: null,
-  status: "ACTIVO",
-  priceMinor: 1000,
-  version: 1,
-  components: [],
-  availability: { verifiable: true, quantity: 0, freshness: "ACTUALIZADA", calculatedAt: null },
+  components: [
+    { sku: "CAS-COR-001", quantity: 1 },
+    { sku: "CAM-OXF-BLA-M", quantity: 1 },
+  ],
+  priceMinor: 27990,
 };
 
-describe("resolución de producto a SKU", () => {
-  it("usa sku_base para producto simple y requiere detalle para seleccionar una variante", () => {
-    expect(resolveProductSkus(productDetails[0]!)).toEqual(["INKA-BAND-01"]);
-    expect(resolveProductSkus(productDetails.at(-1)!)).toEqual(["INKA-BAND-02", "INKA-BAND-03"]);
-    expect(resolveProductSkus({ ...productDetails[0]!, active: false })).toEqual([]);
+function draft(sku: string, productName: string, quantity = 1) {
+  return { sku, productName, quantity };
+}
+
+function readingMap(entries: Record<string, StockReading>): ReadonlyMap<string, StockReading> {
+  return new Map(Object.entries(entries));
+}
+
+function active(sku: string, quantity = 1) {
+  return { sku, quantity, active: true };
+}
+
+describe("COM-01 · resolución autoritativa de SKU contra el Catálogo compartido", () => {
+  it("marca como vendible un SKU simple de producto activo y una variante activa", async () => {
+    const resolved = await makeCatalog().resolveSkus(["CAS-COR-001", "CAM-OXF-BLA-M"]);
+    expect(resolved).toHaveLength(2);
+    expect(resolved.find((entry) => entry.sku === "CAS-COR-001"))
+      .toMatchObject({ productId: "PROD-CAS-001", productActive: true, variantActive: true, sellable: true, isVariantParentSku: false, isCombo: false });
+    expect(resolved.find((entry) => entry.sku === "CAM-OXF-BLA-M"))
+      .toMatchObject({ productId: "PROD-OXF-001", productActive: true, variantActive: true, sellable: true, isVariantParentSku: false });
   });
 
-  it("busca solo productos activos y recupera un error al consultar variantes", async () => {
-    const repository = new MockCombosRepository({ failProductSearches: 1, failVariantDetails: ["product-bands-variant"] });
-    await expect(repository.listProducts("bandas")).rejects.toMatchObject({ kind: "unavailable" });
-    expect(await repository.listProducts("bandas")).toHaveLength(2);
-    await expect(repository.getProduct("product-bands-variant")).rejects.toMatchObject({ kind: "unavailable" });
-    expect((await repository.getProduct("product-bands-variant"))?.variants.map((variant) => variant.sku)).toEqual(["INKA-BAND-02", "INKA-BAND-03"]);
+  it("no considera vendible un producto inactivo ni una variante inactiva", async () => {
+    const [inactiveProduct] = await makeCatalog().resolveSkus(["ZAP-RUN-41"]);
+    expect(inactiveProduct).toMatchObject({ productId: "PROD-ZAP-001", productActive: false, sellable: false });
+
+    const [inactiveVariant] = await makeCatalog().resolveSkus(["CAM-OXF-NEG-S"]);
+    expect(inactiveVariant).toMatchObject({ productId: "PROD-OXF-001", productActive: true, variantActive: false, sellable: false });
+  });
+
+  it("no vende el SKU padre de un producto con variantes", async () => {
+    const [parent] = await makeCatalog().resolveSkus(["CAM-OXF"]);
+    expect(parent).toMatchObject({ sku: "CAM-OXF", productId: "PROD-OXF-001", isVariantParentSku: true, sellable: false });
+  });
+
+  it("omite SKU inexistentes en lugar de inventarlos", async () => {
+    await expect(makeCatalog().resolveSkus(["SKU-UNKNOWN"])).resolves.toEqual([]);
+  });
+
+  it("detecta un combo por el tipo publicado de Catálogo y nunca por su nombre", async () => {
+    const byDefault = await makeCatalog().resolveSkus(["CAS-COR-001"]);
+    expect(byDefault[0]).toMatchObject({ isCombo: false, sellable: true });
+
+    const withComboType = await makeCatalog({ comboTypeIds: new Set(["TIP-CASACA"]) }).resolveSkus(["CAS-COR-001"]);
+    expect(withComboType[0]).toMatchObject({ isCombo: true, sellable: false });
+
+    const listed = await makeCatalog({ comboTypeIds: new Set(["TIP-CASACA"]) }).listProducts("");
+    expect(listed.map((product) => product.name).every((name) => !name.toLocaleLowerCase("es-PE").includes("combo"))).toBe(true);
+  });
+
+  it("resuelve SKU ubicados en páginas posteriores a la primera", async () => {
+    const paged = makeCatalog({ pageSize: 1 });
+    const resolved = await paged.resolveSkus(["CAS-COR-001", "CAM-OXF-BLA-M"]);
+    expect(resolved.map((entry) => entry.sku).sort()).toEqual(["CAM-OXF-BLA-M", "CAS-COR-001"]);
+  });
+
+  it("propaga el fallo del catálogo en lugar de silenciarlo", async () => {
+    const failingCatalog: CombosCatalogPort = {
+      async listProducts() { return []; },
+      async getProduct() { return null; },
+      async resolveSkus() { throw new Error("Catálogo compartido no disponible."); },
+    };
+    await expect(failingCatalog.resolveSkus(["CAS-COR-001"])).rejects.toThrow("Catálogo compartido no disponible.");
+    const repository = makeRepository({ catalog: failingCatalog });
+    await expect(repository.create(validPayload)).rejects.toThrow("Catálogo compartido no disponible.");
+  });
+
+  it("describe el detalle de producto con sus variantes activas e inactivas", async () => {
+    const catalog = makeCatalog();
+    const detail = await catalog.getProduct("PROD-OXF-001");
+    expect(detail?.variants.map((variant) => [variant.sku, variant.active])).toEqual([
+      ["CAM-OXF-BLA-M", true],
+      ["CAM-OXF-AZU-L", true],
+      ["CAM-OXF-NEG-S", false],
+    ]);
+    expect(resolveProductSkus(detail!)).toEqual(["CAM-OXF-BLA-M", "CAM-OXF-AZU-L"]);
+    expect(resolveProductSkus({ ...detail!, active: false })).toEqual([]);
+
+    const simple = await catalog.getProduct("PROD-CAS-001");
+    expect(resolveProductSkus(simple!)).toEqual(["CAS-COR-001"]);
   });
 });
 
-describe("composición y precio preventivo", () => {
-  it("requiere dos SKU distintos y cantidades enteras positivas", () => {
-    expect(validateComposition({ components: [components[0]!] })).toContain("Agrega al menos dos SKU vendibles.");
-    expect(validateComposition({ components: [components[0]!, { ...components[1]!, sku: components[0]!.sku }] })).toContain("Cada SKU debe aparecer una sola vez.");
-    expect(validateComposition({ components: [components[0]!, { ...components[1]!, quantity: 1.5 }] })).toContain("La cantidad de cada componente debe ser un entero igual o mayor que 1.");
+describe("COM-01 · validación definitiva al guardar un combo", () => {
+  it("crea un combo válido y calcula su disponibilidad informativa", async () => {
+    const created = await makeRepository().create(validPayload);
+    expect(created).toMatchObject({ status: "ACTIVO", version: 1, priceMinor: 27990 });
+    expect(created.availability).toMatchObject({ state: "DISPONIBLE", quantity: 4, freshness: "ACTUALIZADA", verifiable: true });
+    expect(created.components.map((component) => component.sku)).toEqual(["CAS-COR-001", "CAM-OXF-BLA-M"]);
   });
 
-  it("compara importes enteros y usa el precio regular cuando no hay oferta vigente", () => {
-    const noOfferComponents = [
-      { sku: "INKA-BAND-02", productName: "Bandas Pro", quantity: 1 },
-      { sku: "INKA-ROPE-01", productName: "Cuerda", quantity: 1 },
-    ];
-    const noOfferPrices = priceFixtures.filter((item) => noOfferComponents.some((component) => component.sku === item.sku));
-    const comparison = compareComboPrice(toComparisonComponents(noOfferComponents, noOfferPrices), "120.00", noOfferPrices);
+  it("devuelve el código canónico para cada composición inválida", async () => {
+    const repository = makeRepository();
+    await expect(repository.create({ ...validPayload, components: [draft("CAS-COR-001", "Casaca")] }))
+      .rejects.toMatchObject({ code: "COMBO_COMPONENTES_INSUFICIENTES" });
+    await expect(repository.create({ ...validPayload, components: [draft("CAS-COR-001", "Casaca"), draft("CAS-COR-001", "Casaca")] }))
+      .rejects.toMatchObject({ code: "COMBO_COMPONENTE_DUPLICADO" });
+    await expect(repository.create({ ...validPayload, components: [draft("CAS-COR-001", "Casaca"), draft("CAM-OXF-BLA-M", "Camisa", 1.5)] }))
+      .rejects.toMatchObject({ code: "CANTIDAD_INVALIDA" });
+    await expect(repository.create({ ...validPayload, components: [draft("CAS-COR-001", "Casaca"), draft("SKU-UNKNOWN", "Falso")] }))
+      .rejects.toMatchObject({ code: "SKU_NO_ENCONTRADO" });
+  });
+
+  it("rechaza variantes inactivas, productos inactivos y SKU padre con SKU_INACTIVO", async () => {
+    const repository = makeRepository();
+    for (const sku of ["CAM-OXF-NEG-S", "ZAP-RUN-41", "CAM-OXF"]) {
+      await expect(repository.create({ ...validPayload, components: [draft("CAS-COR-001", "Casaca"), draft(sku, "Componente")] }))
+        .rejects.toMatchObject({ code: "SKU_INACTIVO" });
+    }
+  });
+
+  it("rechaza un combo publicado por Catálogo como componente anidado", async () => {
+    const repository = makeRepository({ catalog: makeCatalog({ comboTypeIds: new Set(["TIP-CASACA"]) }) });
+    await expect(repository.create(validPayload)).rejects.toMatchObject({ code: "COMBO_ANIDADO_NO_PERMITIDO" });
+  });
+
+  it("rechaza precios iguales o superiores a las sumas de referencia", async () => {
+    const repository = makeRepository();
+    await expect(repository.create({ ...validPayload, priceMinor: 0 })).rejects.toMatchObject({ code: "COMBO_PRECIO_INVALIDO" });
+    await expect(repository.create({ ...validPayload, priceMinor: 28890 })).rejects.toMatchObject({ code: "COMBO_PRECIO_INVALIDO" });
+    await expect(repository.create({ ...validPayload, priceMinor: 31890 })).rejects.toMatchObject({ code: "COMBO_PRECIO_INVALIDO" });
+  });
+
+  it("no crea un combo si Pricing no confirma una referencia global vigente única", async () => {
+    const repository = makeRepository({ pricing: new MockCombosPricingAdapter({ prices: [] }) });
+    await expect(repository.create(validPayload)).rejects.toMatchObject({ kind: "pricing_unavailable" });
+  });
+
+  it("refleja la desactivación en el detalle y en el listado", async () => {
+    const repository = makeRepository();
+    const deactivated = await repository.deactivate("combo-001");
+    expect(deactivated).toMatchObject({ status: "INACTIVO", version: 4 });
+    expect(deactivated.availability).toMatchObject({ state: "COMBO_INACTIVO", quantity: null, verifiable: false });
+    expect(await repository.getById("combo-001")).toMatchObject({ status: "INACTIVO" });
+
+    const inactive = await repository.list({ status: "INACTIVO", page: 1, pageSize: 10 });
+    expect(inactive.items.map((combo) => combo.id).sort()).toEqual(["combo-001", "combo-003"]);
+  });
+
+  it("recalcula la disponibilidad al cambiar cantidades y conserva su valor al renombrar", async () => {
+    const repository = makeRepository();
+    const original = await repository.getById("combo-001");
+    expect(original?.availability).toMatchObject({ state: "DISPONIBLE", quantity: 4 });
+
+    const quantityChanged = await repository.update("combo-001", {
+      name: original!.name,
+      description: original!.description,
+      components: [draft("CAS-COR-001", "Casaca", 2), draft("CAM-OXF-BLA-M", "Camisa", 1)],
+      priceMinor: original!.priceMinor,
+      version: original!.version,
+    });
+    expect(quantityChanged).toMatchObject({ version: original!.version + 1 });
+    expect(quantityChanged.availability).toMatchObject({ state: "DISPONIBLE", quantity: 2 });
+
+    const soldOut = await repository.update("combo-001", {
+      name: original!.name,
+      description: original!.description,
+      components: [draft("CAS-COR-001", "Casaca", 5), draft("CAM-OXF-BLA-M", "Camisa", 1)],
+      priceMinor: original!.priceMinor,
+      version: quantityChanged.version,
+    });
+    expect(soldOut.availability).toMatchObject({ state: "AGOTADO", quantity: 0, freshness: "ACTUALIZADA" });
+
+    const renamed = await repository.update("combo-001", {
+      name: "Conjunto Trail Esencial v2",
+      description: original!.description,
+      components: [draft("CAS-COR-001", "Casaca", 1), draft("CAM-OXF-BLA-M", "Camisa", 1)],
+      priceMinor: original!.priceMinor,
+      version: soldOut.version,
+    });
+    expect(renamed.name).toBe("Conjunto Trail Esencial v2");
+    expect(renamed.availability).toMatchObject({ state: "DISPONIBLE", quantity: 4 });
+  });
+
+  it("expone la versión conflictiva sin sustituir el borrador y permite el segundo guardado", async () => {
+    const repository = makeRepository();
+    const original = await repository.getById("combo-001");
+    const local = draftFromCombo(original ?? undefined);
+    local.name = "Borrador local conservado";
+
+    const conflict = await repository
+      .update("combo-001", { ...validPayload, version: original!.version }, "version-conflict")
+      .catch((reason: unknown) => reason);
+    expect(conflict).toBeInstanceOf(ComboError);
+    expect(conflict).toMatchObject({ kind: "version_conflict" });
+    expect((conflict as ComboError).currentVersion)
+      .toMatchObject({ version: original!.version + 1, name: "Conjunto Trail Esencial (actualizado en servidor)" });
+
+    const captured = keepDraftAfterVersionConflict(local, (conflict as ComboError).currentVersion);
+    expect(captured.draft.name).toBe("Borrador local conservado");
+    expect(captured.currentVersion).toEqual(await repository.getById("combo-001"));
+
+    const secondSave = await repository.update("combo-001", { ...validPayload, version: captured.currentVersion!.version }, "version-conflict");
+    expect(secondSave.version).toBe(captured.currentVersion!.version + 1);
+  });
+
+  it("devuelve exactamente la versión persistida ante una versión obsoleta", async () => {
+    const repository = makeRepository();
+    const persisted = await repository.getById("combo-002");
+    const conflict = await repository
+      .update("combo-002", { ...validPayload, version: persisted!.version - 1 })
+      .catch((reason: unknown) => reason);
+    expect(conflict).toMatchObject({ kind: "version_conflict" });
+    expect((conflict as ComboError).currentVersion).toEqual(persisted);
+    expect(await repository.getById("combo-002")).toEqual(persisted);
+  });
+
+  it("distingue error de listado, listado vacío y paginación", async () => {
+    const errored = makeRepository();
+    await expect(errored.list({ status: "TODOS", page: 1, pageSize: 5, scenario: "list-error" }))
+      .rejects.toMatchObject({ kind: "unknown" });
+    await expect(errored.list({ status: "TODOS", page: 1, pageSize: 5, scenario: "list-error" }))
+      .resolves.toMatchObject({ total: 3 });
+
+    const empty = await makeRepository().list({ status: "TODOS", page: 1, pageSize: 5, scenario: "list-empty" });
+    expect(empty).toMatchObject({ items: [], total: 0 });
+
+    const firstPage = await makeRepository().list({ status: "TODOS", page: 1, pageSize: 2 });
+    expect(firstPage.items).toHaveLength(2);
+    expect(firstPage.total).toBe(3);
+    const secondPage = await makeRepository().list({ status: "TODOS", page: 2, pageSize: 2 });
+    expect(secondPage.items).toHaveLength(1);
+  });
+});
+
+describe("COM-02 · comparación preventiva y referencias de Pricing", () => {
+  it("interpreta importes con hasta dos decimales", () => {
     expect(parseMoneyMinor("120,05")).toBe(12005);
-    expect(comparison).toMatchObject({ status: "ready", regularMinor: 13980, publicMinor: 12980, valid: true });
+    expect(parseMoneyMinor("279.90")).toBe(27990);
+    expect(parseMoneyMinor("0")).toBe(0);
+    expect(parseMoneyMinor("abc")).toBeNull();
+    expect(parseMoneyMinor("1.999")).toBeNull();
+    expect(formatMoney(15900)).toContain("159");
+    expect(formatMoney(null)).toBe("No disponible");
+  });
+
+  it("usa el precio regular cuando no hay oferta efectiva vigente", () => {
+    expect(effectivePublicMinor({ sku: "X", regularMinor: 1000, offerMinor: null, currency: "PEN", channelId: null, priceVersion: 1, validityId: "v", validFrom: "2020-01-01T00:00:00Z", validUntil: null })).toBe(1000);
+    expect(effectivePublicMinor(priceFixtures[0]!)).toBe(15900);
+    expect(isCurrentGlobalPrice({ ...priceFixtures[0]!, validUntil: "2020-02-01T00:00:00Z" })).toBe(false);
+  });
+
+  it("aprueba un precio menor que las sumas regular y pública vigentes", () => {
+    const components = toComparisonComponents(
+      [draft("CAS-COR-001", "Casaca"), draft("CAM-OXF-BLA-M", "Camisa")],
+      priceFixtures,
+    );
+    expect(compareComboPrice(components, "279.90", priceFixtures))
+      .toMatchObject({ status: "ready", regularMinor: 31890, publicMinor: 28890, valid: true });
+  });
+
+  it("rechaza igualar o superar cada referencia y no inventa una comparación sin Pricing", () => {
+    const components = toComparisonComponents(
+      [draft("CAS-COR-001", "Casaca"), draft("CAM-OXF-BLA-M", "Camisa")],
+      priceFixtures,
+    );
+    expect(compareComboPrice(components, "288.90", priceFixtures))
+      .toMatchObject({ valid: false, reason: "El precio debe ser menor que la suma de precios públicos vigentes." });
+    expect(compareComboPrice(components, "318.90", priceFixtures))
+      .toMatchObject({ valid: false, reason: "El precio debe ser menor que la suma de precios regulares." });
+    expect(compareComboPrice(components, "279.90", [])).toMatchObject({ status: "unavailable" });
+    expect(compareComboPrice(components, "0", priceFixtures)).toMatchObject({ valid: false });
   });
 
   it("no elige arbitrariamente entre referencias globales vigentes duplicadas", () => {
-    const duplicate = { ...priceFixtures[0]!, priceVersion: priceFixtures[0]!.priceVersion + 1, validityId: "otra-vigencia" };
-    const ambiguous = [...priceFixtures.filter((price) => price.sku !== duplicate.sku), priceFixtures[0]!, duplicate];
-    expect(compareComboPrice(toComparisonComponents(components, ambiguous), "100.00", ambiguous)).toMatchObject({ status: "unavailable" });
+    const base = priceFixtures.find((price) => price.sku === "CAS-COR-001")!;
+    const duplicate = { ...base, priceVersion: base.priceVersion + 1, validityId: "otra-vigencia" };
+    const ambiguous = [...priceFixtures, duplicate];
+    const components = toComparisonComponents([draft("CAS-COR-001", "Casaca")], ambiguous);
+    expect(compareComboPrice(components, "100.00", ambiguous)).toMatchObject({ status: "unavailable" });
   });
 
-  it("rechaza superar la suma regular o pública y no inventa una comparación sin Pricing", () => {
-    const mapped = toComparisonComponents(components, priceFixtures);
-    expect(compareComboPrice(mapped, "170.00", priceFixtures)).toMatchObject({ valid: false, reason: "El precio debe ser menor que la suma de precios regulares." });
-    expect(compareComboPrice(mapped, "150.00", priceFixtures)).toMatchObject({ valid: false, reason: "El precio debe ser menor que la suma de precios públicos vigentes." });
-    expect(compareComboPrice(mapped, "100.00", [])).toMatchObject({ status: "unavailable" });
-    expect(compareComboPrice(mapped, "0", priceFixtures)).toMatchObject({ valid: false });
-  });
-});
-
-describe("estados de S04", () => {
-  it("distingue disponibilidad positiva, agotada, inactiva y desconocida", () => {
-    const positive = { ...base, availability: { ...base.availability, quantity: 4 } };
-    const zero = { ...base, availability: { ...base.availability, quantity: 0 } };
-    const inactive = { ...positive, status: "INACTIVO" as const };
-    const unknown = { ...positive, availability: { ...positive.availability, verifiable: false, quantity: null } };
-    expect(hasVerifiedPositiveAvailability(positive)).toBe(true);
-    expect(hasVerifiedPositiveAvailability(zero)).toBe(false);
-    expect(hasVerifiedPositiveAvailability(inactive)).toBe(false);
-    expect(hasVerifiedPositiveAvailability(unknown)).toBe(false);
-    expect(availabilityMessage(zero).label).toBe("Agotado actualmente");
-    expect(availabilityMessage(inactive).label).toBe("No disponible para nuevas ventas");
-    expect(availabilityMessage(unknown).label).toBe("No se puede confirmar la disponibilidad actual.");
-    expect(hasVerifiedPositiveAvailability({ ...positive, availability: { ...positive.availability, freshness: "DESACTUALIZADA" } })).toBe(false);
-    expect(hasVerifiedPositiveAvailability({ ...positive, availability: { ...positive.availability, freshness: "INCOMPLETA" } })).toBe(false);
+  it("exige dos SKU distintos, cantidades enteras y componentes de catálogo", () => {
+    expect(validateComposition({ components: [draft("CAS-COR-001", "Casaca")] }))
+      .toContain("Agrega al menos dos SKU vendibles.");
+    expect(validateComposition({ components: [draft("CAS-COR-001", "Casaca"), draft("CAS-COR-001", "Casaca")] }))
+      .toContain("Cada SKU debe aparecer una sola vez.");
+    expect(validateComposition({ components: [draft("CAS-COR-001", "Casaca"), draft("CAM-OXF-BLA-M", "Camisa", 1.5)] }))
+      .toContain("La cantidad de cada componente debe ser un entero igual o mayor que 1.");
   });
 });
 
-describe("validación definitiva del adapter mock", () => {
-  it("crea una composición válida y devuelve el código canónico para composiciones inválidas", async () => {
-    const repository = new MockCombosRepository();
-    expect((await repository.create(validPayload)).status).toBe("ACTIVO");
-    await expect(repository.create({ ...validPayload, components: [components[0]!] })).rejects.toMatchObject({ code: "COMBO_COMPONENTES_INSUFICIENTES" });
-    await expect(repository.create({ ...validPayload, components: [components[0]!, { ...components[1]!, sku: components[0]!.sku }] })).rejects.toMatchObject({ code: "COMBO_COMPONENTE_DUPLICADO" });
-    await expect(repository.create({ ...validPayload, components: [components[0]!, { ...components[1]!, sku: "combo-entrenamiento" }] })).rejects.toMatchObject({ code: "COMBO_ANIDADO_NO_PERMITIDO" });
-    await expect(repository.create({ ...validPayload, components: [components[0]!, { ...components[1]!, quantity: 1.2 }] })).rejects.toMatchObject({ code: "CANTIDAD_INVALIDA" });
-    await expect(repository.create({ ...validPayload, components: [components[0]!, { ...components[1]!, sku: "SKU-UNKNOWN" }] })).rejects.toMatchObject({ code: "SKU_NO_ENCONTRADO" });
-    await expect(repository.create({ ...validPayload, priceMinor: 0 })).rejects.toMatchObject({ code: "COMBO_PRECIO_INVALIDO" });
-    await expect(repository.create({ ...validPayload, priceMinor: 14980 })).rejects.toMatchObject({ code: "COMBO_PRECIO_INVALIDO" });
-    await expect(repository.create({ ...validPayload, priceMinor: 17000 })).rejects.toMatchObject({ code: "COMBO_PRECIO_INVALIDO" });
+describe("COM-03 · disponibilidad informativa sin inventar stock", () => {
+  const stocks = readingMap({
+    A: { sku: "A", stock: 5, stale: false, locationsCompatible: true },
+    B: { sku: "B", stock: 8, stale: false, locationsCompatible: true },
+    ZERO: { sku: "ZERO", stock: 0, stale: false, locationsCompatible: true },
   });
 
-  it("rechaza monedas, alcances y vigencias incompatibles", async () => {
-    const usdPrice = { ...priceFixtures[0]!, currency: "USD" };
-    const nonGlobalPrice = { ...priceFixtures[0]!, channelId: "retail" as never };
-    const expiredPrice = { ...priceFixtures[0]!, validUntil: "2020-10-02T00:00:00Z" };
-    for (const prices of [
-      [usdPrice, ...priceFixtures.slice(1)],
-      [nonGlobalPrice, ...priceFixtures.slice(1)],
-      [expiredPrice, ...priceFixtures.slice(1)],
-    ] as SkuPrice[][]) {
-      const repository = new MockCombosRepository({ prices });
-      await expect(repository.create(validPayload)).rejects.toMatchObject({ kind: "pricing_unavailable" });
-    }
+  it("calcula min(piso(stock / cantidad)) entre los componentes", () => {
+    const availability = calculateInformativeAvailability(
+      "ACTIVO",
+      [active("A", 2), active("B", 3)],
+      stocks,
+      "2026-01-01T00:00:00.000Z",
+    );
+    expect(availability).toMatchObject({ state: "DISPONIBLE", quantity: 2, verifiable: true, freshness: "ACTUALIZADA" });
+    expect(availability.calculatedAt).toBe("2026-01-01T00:00:00.000Z");
   });
 
-  it("resuelve una referencia global vigente aunque existan otros canales o periodos históricos", async () => {
-    const globalBand = priceFixtures.find((price) => price.sku === "INKA-BAND-01")!;
-    const globalMat = priceFixtures.find((price) => price.sku === "INKA-MAT-01")!;
-    const otherChannel = { ...globalBand, channelId: "retail" };
-    const historical = { ...globalBand, priceVersion: 0, validityId: "vigencia-anterior", validFrom: "2020-01-01T00:00:00Z", validUntil: "2020-02-01T00:00:00Z" };
-    const repository = new MockCombosRepository({ prices: [globalBand, otherChannel, historical, globalMat] });
-    expect(await repository.readCurrent(["INKA-BAND-01", "INKA-MAT-01"])).toHaveLength(2);
-    expect(await repository.create(validPayload)).toMatchObject({ status: "ACTIVO" });
+  it("marca agotado cuando la disponibilidad confirmada es cero", () => {
+    expect(calculateInformativeAvailability("ACTIVO", [active("ZERO")], stocks))
+      .toMatchObject({ state: "AGOTADO", quantity: 0, verifiable: true });
   });
 
-  it("rechaza referencias globales vigentes ambiguas sin desempatar por versión", async () => {
-    const globalBand = priceFixtures.find((price) => price.sku === "INKA-BAND-01")!;
-    const globalMat = priceFixtures.find((price) => price.sku === "INKA-MAT-01")!;
-    const duplicate = { ...globalBand, priceVersion: globalBand.priceVersion + 1, validityId: "otra-vigencia" };
-    const repository = new MockCombosRepository({ prices: [globalBand, duplicate, globalMat] });
-    await expect(repository.readCurrent(["INKA-BAND-01"])).resolves.toHaveLength(2);
-    await expect(repository.create(validPayload)).rejects.toMatchObject({ kind: "pricing_unavailable" });
+  it("advierte desactualizada sin dejar de ser verificable", () => {
+    const stale = readingMap({ A: { sku: "A", stock: 5, stale: true, locationsCompatible: true } });
+    expect(calculateInformativeAvailability("ACTIVO", [active("A")], stale))
+      .toMatchObject({ state: "DESACTUALIZADA", quantity: 5, verifiable: true, freshness: "DESACTUALIZADA" });
   });
 
-  it("usa el regular vigente como referencia pública si no existe oferta efectiva", async () => {
-    const band = priceFixtures.find((price) => price.sku === "INKA-BAND-02")!;
-    const rope = priceFixtures.find((price) => price.sku === "INKA-ROPE-01")!;
-    const repository = new MockCombosRepository({ prices: [band, rope] });
-    await expect(repository.create({ ...validPayload, components: [{ sku: band.sku, quantity: 1 }, { sku: rope.sku, quantity: 1 }], priceMinor: 12000 })).resolves.toMatchObject({ status: "ACTIVO" });
+  it("no convierte un saldo desconocido en un cero confiable", () => {
+    const unknown = readingMap({ A: { sku: "A", stock: null, stale: false, locationsCompatible: true } });
+    expect(calculateInformativeAvailability("ACTIVO", [active("A")], unknown))
+      .toMatchObject({ state: "INCOMPLETA", quantity: null, verifiable: false });
+
+    expect(calculateInformativeAvailability("ACTIVO", [active("A")], readingMap({})))
+      .toMatchObject({ state: "INCOMPLETA", quantity: null, verifiable: false });
+
+    const incompatible = readingMap({ A: { sku: "A", stock: 5, stale: false, locationsCompatible: false } });
+    expect(calculateInformativeAvailability("ACTIVO", [active("A")], incompatible))
+      .toMatchObject({ state: "INCOMPLETA", quantity: null });
   });
 
-  it("rechaza cuando falta el precio global vigente de un SKU", async () => {
-    const mat = priceFixtures.find((price) => price.sku === "INKA-MAT-01")!;
-    const repository = new MockCombosRepository({ prices: [mat] });
-    await expect(repository.create(validPayload)).rejects.toMatchObject({ kind: "pricing_unavailable" });
+  it("distingue combo inactivo, componente inactivo y cantidad no verificable", () => {
+    expect(calculateInformativeAvailability("INACTIVO", [active("A")], stocks))
+      .toMatchObject({ state: "COMBO_INACTIVO", quantity: null });
+    expect(calculateInformativeAvailability("ACTIVO", [active("A"), { sku: "B", quantity: 1, active: false }], stocks))
+      .toMatchObject({ state: "COMPONENTE_INACTIVO", quantity: null });
+    expect(calculateInformativeAvailability("ACTIVO", [], stocks))
+      .toMatchObject({ state: "INCOMPLETA" });
+    expect(calculateInformativeAvailability("ACTIVO", [active("A", 0.5)], stocks))
+      .toMatchObject({ state: "NO_VERIFICABLE", quantity: null });
   });
 
-  it("rechaza referencias vigentes sin vigencia identificable o con versión inválida", async () => {
-    const band = priceFixtures.find((price) => price.sku === "INKA-BAND-01")!;
-    const mat = priceFixtures.find((price) => price.sku === "INKA-MAT-01")!;
-    const invalidReferences = [
-      { ...band, validityId: "   " },
-      { ...band, priceVersion: -1 },
-    ];
-    for (const reference of invalidReferences) {
-      const repository = new MockCombosRepository({ prices: [reference, mat] });
-      await expect(repository.create(validPayload)).rejects.toMatchObject({ kind: "pricing_unavailable" });
-    }
+  it("clasifica disponibilidad, venta y mensajes semánticos", () => {
+    const available = comboWith({ state: "DISPONIBLE", verifiable: true, quantity: 4, freshness: "ACTUALIZADA", calculatedAt: "2026-01-01T00:00:00.000Z", reason: null });
+    expect(isVerifiedPositiveAvailability(available.availability)).toBe(true);
+    expect(isUnavailableForNewSales(available)).toBe(false);
+    expect(availabilityMessage(available)).toMatchObject({ label: "4 combos estimados", semantic: "success" });
+
+    expect(isVerifiedPositiveAvailability(comboWith({ state: "DESACTUALIZADA", verifiable: true, quantity: 4, freshness: "DESACTUALIZADA", calculatedAt: "2026-01-01T00:00:00.000Z", reason: null }).availability)).toBe(false);
+    expect(isUnavailableForNewSales(comboWith({ state: "AGOTADO", verifiable: true, quantity: 0, freshness: "ACTUALIZADA", calculatedAt: null, reason: null }))).toBe(true);
+    expect(availabilityMessage(comboWith({ state: "AGOTADO", verifiable: true, quantity: 0, freshness: "ACTUALIZADA", calculatedAt: null, reason: null })).label).toBe("Agotado (0 confirmado)");
+
+    const inactive = { ...comboWith(available.availability), status: "INACTIVO" as const };
+    expect(isUnavailableForNewSales(inactive)).toBe(true);
+    expect(availabilityMessageText(inactive)).toBe("La definición administrativa se conserva y no se ofrece para nuevas ventas.");
   });
+});
 
-  it("valida que una oferta cuyo periodo terminó no sea la referencia pública actual", async () => {
-    const band = { ...priceFixtures.find((price) => price.sku === "INKA-BAND-01")!, offerMinor: 100, validUntil: "2020-02-01T00:00:00Z" };
-    const mat = priceFixtures.find((price) => price.sku === "INKA-MAT-01")!;
-    const repository = new MockCombosRepository({ prices: [band, mat] });
-    await expect(repository.readCurrent(["INKA-BAND-01"])).resolves.toEqual([]);
-    await expect(repository.create(validPayload)).rejects.toMatchObject({ kind: "pricing_unavailable" });
-  });
+function comboWith(availability: ReturnType<typeof calculateInformativeAvailability>) {
+  return {
+    id: "combo",
+    name: "Combo",
+    description: null,
+    status: "ACTIVO" as const,
+    priceMinor: 1000,
+    version: 1,
+    components: [],
+    availability,
+  };
+}
 
-  it("rechaza SKU de producto inactivo aunque el SKU exista", async () => {
-    const inactiveCatalog = productDetails.map((product) => ({ ...product, active: product.productId !== "product-band" }));
-    const repository = new MockCombosRepository({ catalog: inactiveCatalog, productDetails: inactiveCatalog });
-    await expect(repository.create(validPayload)).rejects.toMatchObject({ code: "SKU_INACTIVO" });
-  });
-
-  it("rechaza una edición inválida sin modificar la versión guardada", async () => {
-    const repository = new MockCombosRepository();
-    const created = await repository.create(validPayload);
-    const before = await repository.getById(created.id);
-    await expect(repository.update(created.id, { ...validPayload, priceMinor: 14980, version: created.version })).rejects.toMatchObject({ code: "COMBO_PRECIO_INVALIDO" });
-    expect(await repository.getById(created.id)).toEqual(before);
-  });
-
-  it("invalida disponibilidad al cambiar cantidades o SKU, y la conserva al editar solo el nombre", async () => {
-    const repository = new MockCombosRepository();
-    const original = await repository.getById("combo-entrenamiento");
-    expect(original?.availability).toMatchObject({ verifiable: true, quantity: 8, freshness: "ACTUALIZADA" });
-
-    const quantityChanged = await repository.update(original!.id, {
-      name: original!.name, description: original!.description,
-      components: original!.components.map((item, index) => ({ sku: item.sku, quantity: index === 0 ? item.quantity + 1 : item.quantity })),
-      priceMinor: 12000, version: original!.version,
-    });
-    expect(quantityChanged).toMatchObject({ status: "ACTIVO", version: original!.version + 1, availability: { verifiable: false, quantity: null, freshness: "INCOMPLETA", calculatedAt: null } });
-
-    const skuChanged = await repository.update(original!.id, {
-      name: quantityChanged.name, description: quantityChanged.description,
-      components: [{ sku: "INKA-ROPE-01", quantity: 1 }, { sku: "INKA-MAT-01", quantity: 1 }],
-      priceMinor: 12000, version: quantityChanged.version,
-    });
-    expect(skuChanged.availability).toMatchObject({ verifiable: false, quantity: null, freshness: "INCOMPLETA" });
-
-    const beforeRename = await repository.getById(original!.id);
-    const renamed = await repository.update(original!.id, {
-      name: "Nombre actualizado", description: beforeRename!.description,
-      components: beforeRename!.components.map(({ sku, quantity }) => ({ sku, quantity })),
-      priceMinor: beforeRename!.priceMinor, version: beforeRename!.version,
-    });
-    expect(renamed.availability).toEqual(beforeRename!.availability);
-    expect(renamed.name).toBe("Nombre actualizado");
-  });
-
-  it("mantiene el borrador local y expone la versión conflictiva sin sustituirla", async () => {
-    const repository = new MockCombosRepository();
-    const original = await repository.getById("combo-entrenamiento");
-    const localDraft = draftFromCombo(original ?? undefined);
-    localDraft.name = "Nombre local";
-    localDraft.price = "120.00";
-    const conflict = await repository.update("combo-entrenamiento", { ...validPayload, version: original!.version }, "version-conflict").catch((reason: unknown) => reason);
-    expect(conflict).toMatchObject({ kind: "version_conflict", currentVersion: { version: original!.version + 1, name: `${original!.name} (actualizado en servidor)` } });
-    const captured = keepDraftAfterVersionConflict(localDraft, conflict instanceof ComboError ? conflict.currentVersion : undefined);
-    const currentVersion = captured.currentVersion;
-    expect(captured.draft).toMatchObject({ name: "Nombre local", price: "120.00" });
-    expect(currentVersion).toEqual(await repository.getById("combo-entrenamiento"));
-    const savedAfterExplicitDiscard = await repository.update("combo-entrenamiento", {
-      name: currentVersion!.name, description: currentVersion!.description,
-      components: currentVersion!.components.map(({ sku, quantity }) => ({ sku, quantity })),
-      priceMinor: currentVersion!.priceMinor, version: currentVersion!.version,
-    }, "version-conflict");
-    expect(savedAfterExplicitDiscard.version).toBe(currentVersion!.version + 1);
-    expect(savedAfterExplicitDiscard.name).toBe(currentVersion!.name);
-  });
-
-  it("devuelve exactamente la versión persistida ante una versión enviada obsoleta", async () => {
-    const repository = new MockCombosRepository();
-    const persisted = await repository.getById("combo-entrenamiento");
-    const conflict = await repository.update("combo-entrenamiento", { ...validPayload, version: persisted!.version - 1 }).catch((reason: unknown) => reason);
-    expect(conflict).toMatchObject({ kind: "version_conflict", currentVersion: persisted });
-    expect(await repository.getById("combo-entrenamiento")).toEqual(persisted);
-  });
-
-  it("crea un borrador independiente al cambiar entre dos combos", () => {
+describe("borradores , diffs y protección frente a respuestas fuera de orden", () => {
+  it("crea borradores independientes por combo", () => {
     const first = draftFromCombo(comboFixtures[0]);
     const second = draftFromCombo(comboFixtures[1]);
     first.name = "Borrador de la primera entidad";
-    expect(second.name).toBe("Kit yoga diario");
-    expect(second.components.map((item) => item.sku)).toEqual(["INKA-MAT-01", "INKA-BLOCK-02"]);
+    expect(second.name).toBe("Dúo Oxford");
+    expect(second.components.map((item) => item.sku)).toEqual(["CAM-OXF-BLA-M", "CAM-OXF-AZU-L"]);
   });
-});
 
-describe("protección frente a respuestas fuera de orden", () => {
+  it("detecta cambios reales ignorando espacios y orden irrelevante", () => {
+    const baseline = draftFromCombo(comboFixtures[0]);
+    expect(isDraftDirty({ ...baseline, name: `  ${baseline.name}  ` }, baseline)).toBe(false);
+    expect(isDraftDirty({ ...baseline, price: "100.00" }, baseline)).toBe(true);
+  });
+
+  it("describe el diff del conflicto de versión marcando los campos cambiados", () => {
+    const local = draftFromCombo(comboFixtures[0]);
+    local.name = "Nombre local";
+    local.price = "120.00";
+    const rows = diffComboDraft(local, { ...comboFixtures[0]!, name: "Versión servidor" });
+    expect(rows.find((row) => row.field === "Nombre")).toMatchObject({ server: "Versión servidor", draft: "Nombre local", changed: true });
+    expect(rows.find((row) => row.field === "Precio")).toMatchObject({ changed: true });
+    expect(rows.find((row) => row.field === "Componentes")).toMatchObject({ changed: false });
+  });
+
   it("solo permite aplicar el resultado de la consulta más reciente", async () => {
     let resolveOlder!: (value: string) => void;
     let resolveNewer!: (value: string) => void;
@@ -280,10 +472,8 @@ describe("protección frente a respuestas fuera de orden", () => {
     await oldWork;
     expect(visible).toBe("filtro vigente");
   });
-});
 
-describe("paginación de S01", () => {
-  it("normaliza entradas vacías, inválidas, infinitas o fuera de rango a la primera página", () => {
+  it("normaliza entradas de paginación inválidas a la primera página", () => {
     for (const value of [null, "", "0", "-2", "1.5", "Infinity", "9007199254740992", "abc"]) {
       expect(parseComboPage(value)).toBe(1);
     }

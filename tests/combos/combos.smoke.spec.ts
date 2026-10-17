@@ -1,82 +1,128 @@
 import { expect, test } from "@playwright/test";
 
-test("recorrido de listado, variante explícita, precio, creación, detalle y desactivación", async ({ page }) => {
+// MK-002 Combos — end-to-end coverage against the shared mock Catalog/Pricing
+// runtime. Every test starts from a fresh navigation, so the mock store resets.
+
+test("listado, navegación y detalle con disponibilidad informativa", async ({ page }) => {
   await page.goto("/combos");
   await expect(page.getByRole("heading", { name: "Gestión de combos" })).toBeVisible();
-  const navigation = page.getByRole("navigation", { name: "Navegación de la aplicación" });
-  await expect(navigation.getByRole("link", { name: "Gestión de combos", exact: true })).toHaveAttribute("href", "/combos");
-  await page.goto("/combos/combo-entrenamiento/no-disponible");
-  await expect(page).toHaveURL(/\/combos\/combo-entrenamiento$/);
-  await expect(page.getByRole("heading", { name: "Set de entrenamiento esencial" })).toBeVisible();
-  await page.goto("/combos");
-  await page.getByRole("link", { name: "Crear combo" }).first().click();
-  await expect(page.getByRole("heading", { name: "Crear combo" })).toBeVisible();
-  await page.getByRole("textbox", { name: "Nombre" }).fill("Kit de prueba smoke");
-  await page.getByRole("combobox", { name: "Producto" }).click();
-  await page.getByRole("option", { name: "Bandas Pro por resistencia" }).click();
-  await page.getByRole("combobox", { name: "Variante / SKU" }).click();
-  await page.getByRole("option", { name: "Ligera · INKA-BAND-03" }).click();
-  await page.getByRole("button", { name: "Agregar componente" }).click();
-  await page.getByRole("combobox", { name: "Producto" }).click();
-  await page.getByRole("option", { name: "Mat de entrenamiento" }).click();
-  await page.getByRole("button", { name: "Agregar componente" }).click();
-  await expect(page.getByRole("region", { name: "Comparación económica" })).toContainText("Suma pública vigente");
-  await page.getByRole("textbox", { name: "Precio del combo (PEN)" }).fill("110.00");
-  await expect(page.getByText("El precio es menor que las sumas regular y pública vigente para los componentes seleccionados.")).toBeVisible();
-  await page.getByRole("button", { name: "Crear combo" }).last().click();
-  await expect(page.getByRole("heading", { name: "Kit de prueba smoke" })).toBeVisible();
-  await expect(page.getByText("INKA-BAND-03")).toBeVisible();
-  await expect(page.getByText("No se puede confirmar la disponibilidad actual.").first()).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.getByRole("button", { name: "Desactivar combo" }).click();
-  await expect(page.getByRole("dialog")).toContainText("Su definición histórica y sus componentes permanecerán conservados.");
-  await page.getByRole("dialog").getByRole("button", { name: "Desactivar combo" }).click();
-  await expect(page.getByText("INACTIVO", { exact: true })).toBeVisible();
-  await page.getByRole("link", { name: "Ver situación de disponibilidad" }).click();
-  await expect(page.getByRole("status").getByText("No disponible para nuevas ventas")).toBeVisible();
 
-  await page.goto("/combos?scenario=list-error");
-  await expect(page).toHaveURL(/scenario=list-error/);
-  await expect(page.getByRole("alert")).toContainText("No se pudieron consultar los combos");
-  await page.getByRole("button", { name: "Reintentar" }).click();
-  const yogaRow = page.getByRole("row").filter({ hasText: "Kit yoga diario" });
-  await expect(yogaRow).toBeVisible();
-  await yogaRow.getByRole("button", { name: "Desactivar" }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Desactivar combo" }).click();
-  await expect(yogaRow).toContainText("INACTIVO");
-  await expect(yogaRow.getByRole("button", { name: "Desactivar" })).toHaveCount(0);
+  const navigation = page.getByRole("navigation", { name: "Navegación de la aplicación" });
+  await expect(navigation.getByRole("link", { name: "Gestión de combos", exact: true }))
+    .toHaveAttribute("href", "/combos");
+
+  const trailRow = page.getByRole("row").filter({ hasText: "Conjunto Trail Esencial" });
+  await expect(trailRow).toBeVisible();
+  await expect(trailRow).toContainText("4 combos estimados");
+  await expect(page.getByRole("row").filter({ hasText: "Dúo Oxford" })).toContainText("Agotado");
+  await expect(page.getByRole("row").filter({ hasText: "Pack Urbano histórico" })).toContainText("INACTIVO");
+
+  await trailRow.getByRole("link", { name: "Ver detalle" }).click();
+  await expect(page).toHaveURL(/\/combos\/combo-001$/);
+  await expect(page.getByRole("heading", { name: "Conjunto Trail Esencial" })).toBeVisible();
+  await expect(page.getByText("CAS-COR-001")).toBeVisible();
+  await expect(page.getByText("CAM-OXF-BLA-M")).toBeVisible();
+  await expect(page.getByText("4 combos estimados")).toBeVisible();
+  await expect(page.getByText("Suma regular vigente")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
-test("VERSION_CONFLICT conserva los cambios locales y permite consultar la versión actual", async ({ page }) => {
-  await page.goto("/combos/combo-entrenamiento/editar");
-  await page.getByRole("textbox", { name: "Nombre" }).fill("Borrador del primer combo");
-  await page.getByRole("link", { name: "Cancelar" }).click();
-  await page.getByRole("link", { name: "Volver a combos" }).click();
-  const secondComboRow = page.getByRole("row").filter({ hasText: "Kit yoga diario" });
-  await secondComboRow.getByRole("link", { name: "Editar" }).click();
-  await expect(page.getByRole("textbox", { name: "Nombre" })).toHaveValue("Kit yoga diario");
+test("creación de un combo directo y desactivación conservando el histórico", async ({ page }) => {
+  await page.goto("/combos/nuevo");
+  await expect(page.getByRole("heading", { name: "Crear combo" })).toBeVisible();
 
-  await page.goto("/combos/combo-entrenamiento/editar?scenario=version-conflict");
-  await expect(page.getByRole("heading", { name: "Editar combo" })).toBeVisible();
+  await page.getByRole("textbox", { name: "Nombre" }).fill("Combo smoke de prueba");
+
+  await page.getByRole("combobox", { name: "Producto" }).click();
+  await page.getByRole("option", { name: "Casaca Cortaviento Trail" }).click();
+  await page.getByRole("button", { name: "Agregar componente" }).click();
+
+  await page.getByRole("combobox", { name: "Producto" }).click();
+  await page.getByRole("option", { name: "Camisa Oxford Manga Larga" }).click();
+  await page.getByRole("combobox", { name: "Variante / SKU" }).click();
+  await page.getByRole("option", { name: /Blanco/ }).click();
+  await page.getByRole("button", { name: "Agregar componente" }).click();
+
+  await expect(page.getByRole("region", { name: "Comparación económica" })).toContainText("Suma pública vigente");
+  await page.getByRole("textbox", { name: "Precio del combo (PEN)" }).fill("279.90");
+  await expect(page.getByText("El precio es menor que las sumas regular y pública vigente para los componentes seleccionados.")).toBeVisible();
+
+  await page.getByRole("button", { name: "Crear combo" }).click();
+  await expect(page.getByRole("heading", { name: "Combo smoke de prueba" })).toBeVisible();
+  await expect(page.getByText("4 combos estimados")).toBeVisible();
+
+  await page.getByRole("button", { name: "Desactivar combo" }).click();
+  await expect(page.getByRole("dialog")).toContainText("dejará de ofrecerse para nuevas ventas");
+  await page.getByRole("dialog").getByRole("button", { name: "Desactivar combo" }).click();
+  await expect(page.getByText("INACTIVO", { exact: true })).toBeVisible();
+
+  await page.getByRole("link", { name: "Ver situación de disponibilidad" }).click();
+  await expect(page).toHaveURL(/\/combos\/combo-4\/no-disponible$/);
+  await expect(page.getByRole("heading", { name: "Combo no disponible" })).toBeVisible();
+  await expect(page.getByText("La definición administrativa se conserva y no se ofrece para nuevas ventas.")).toBeVisible();
+});
+
+test("error de listado con reintento sin mostrar un estado vacío", async ({ page }) => {
+  await page.goto("/combos?scenario=list-error");
+  await expect(page.getByRole("alert")).toContainText("No se pudieron consultar los combos");
+  await expect(page.getByText("No hay combos para mostrar")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Reintentar" }).click();
+  await expect(page.getByRole("row").filter({ hasText: "Conjunto Trail Esencial" })).toBeVisible();
+});
+
+test("COM-04: protege los cambios sin guardar y no bloquea la navegación tras guardar", async ({ page }) => {
+  await page.goto("/combos/combo-001/editar");
   const name = page.getByRole("textbox", { name: "Nombre" });
-  await expect(name).toHaveValue("Set de entrenamiento esencial");
+  await expect(name).toHaveValue("Conjunto Trail Esencial");
+  await name.fill("Borrador sin guardar");
+
+  // In-app menu navigation must be intercepted while dirty.
+  await page.getByRole("navigation", { name: "Navegación de la aplicación" })
+    .getByRole("link", { name: "Gestión de combos", exact: true }).click();
+  await expect(page.getByRole("dialog")).toContainText("Tienes cambios sin guardar");
+
+  // Cancel keeps the user on the editor with the draft intact.
+  await page.getByRole("dialog").getByRole("button", { name: "Cancelar" }).click();
+  await expect(page).toHaveURL(/\/combos\/combo-001\/editar$/);
+  await expect(name).toHaveValue("Borrador sin guardar");
+
+  // Discarding explicitly leaves the editor.
+  await page.getByRole("link", { name: "Cancelar" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Descartar y salir" }).click();
+  await expect(page).toHaveURL(/\/combos\/combo-001$/);
+  await expect(page.getByRole("heading", { name: "Conjunto Trail Esencial" })).toBeVisible();
+
+  // After a successful save, navigation to the detail must not be blocked.
+  await page.goto("/combos/combo-001/editar");
+  await page.getByRole("textbox", { name: "Nombre" }).fill("Conjunto Trail Esencial v2");
+  await page.getByRole("button", { name: "Guardar cambios" }).click();
+  await expect(page.getByRole("heading", { name: "Conjunto Trail Esencial v2" })).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
+test("COM-05: conflicto de versión, diff, conservación del borrador y segundo guardado", async ({ page }) => {
+  await page.goto("/combos/combo-001/editar?scenario=version-conflict");
+  const name = page.getByRole("textbox", { name: "Nombre" });
+  await expect(name).toHaveValue("Conjunto Trail Esencial");
   await name.fill("Propuesta local conservada");
+
   await page.getByRole("button", { name: "Guardar cambios" }).click();
   await expect(page.getByRole("alert")).toContainText("Hay cambios en el servidor");
   await expect(name).toHaveValue("Propuesta local conservada");
-  await expect(page.getByRole("button", { name: "Consultar versión actual" })).toBeVisible();
-  await page.getByRole("button", { name: "Consultar versión actual" }).click();
-  await expect(page.getByRole("region", { name: "Versión actual del servidor", exact: true })).toContainText("Set de entrenamiento esencial (actualizado en servidor)");
-  await expect(name).toHaveValue("Propuesta local conservada");
-  await page.getByRole("button", { name: "Cargar versión actual y descartar borrador" }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Descartar borrador y cargar" }).click();
-  await expect(name).toHaveValue("Set de entrenamiento esencial (actualizado en servidor)");
 
-  await page.goto("/combos/combo-entrenamiento/editar?scenario=server-price-rejected");
-  const rejectedName = page.getByRole("textbox", { name: "Nombre" });
-  await rejectedName.fill("Borrador tras rechazo");
+  const conflict = page.getByRole("region", { name: "Conflicto de versión" });
+  await expect(conflict).toContainText("Conjunto Trail Esencial (actualizado en servidor)");
+  await expect(conflict).toContainText("Propuesta local conservada");
+
+  // Keep the local draft, adopt the server version and reconcile explicitly.
+  await conflict.getByRole("button", { name: "Conservar borrador y reconciliar" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Conservar borrador", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Conflicto de versión" })).toHaveCount(0);
+  await expect(name).toHaveValue("Propuesta local conservada");
+
+  // Second save succeeds and navigates to the detail.
   await page.getByRole("button", { name: "Guardar cambios" }).click();
-  await expect(page.getByRole("alert")).toContainText("No se pudo guardar el precio");
-  await expect(rejectedName).toHaveValue("Borrador tras rechazo");
-  await expect(page.getByText("INKA-BAND-01")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Propuesta local conservada" })).toBeVisible();
+  await expect(page).toHaveURL(/\/combos\/combo-001$/);
 });
