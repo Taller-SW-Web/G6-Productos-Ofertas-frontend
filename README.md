@@ -1,5 +1,7 @@
 # Productos y Ofertas — Frontend
 
+Demo interna de lectura real preparada con selector explícito: [alcance, configuración y evidencias](docs/DEMO_G6_LECTURA_REAL.md). Su publicación requiere autorización final.
+
 Aplicación web de administración para el módulo Productos y Ofertas. Permite recorrer flujos de catálogo, taxonomía, precios, auditoría de precios, promociones, cupones, recomendaciones y carga masiva en modo de demostración. Usa React 19, TypeScript 6, Vite 8, Mantine 9 y Tabler Icons; este repositorio es independiente de [Docs](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs) y Backend. La presencia de puertos y adapters sustituibles facilita una futura integración, pero no acredita conexión HTTP con servicios reales.
 
 ## Inicio rápido
@@ -44,7 +46,7 @@ npm run preview
 
 ## Configuración de datos
 
-La única variable de entorno de la aplicación es `VITE_DATA_MODE` (ver [.env.example](.env.example)). Selecciona una vez el modo de datos global y se distribuye mediante `DataModeContext`.
+La selección general de datos usa `VITE_DATA_MODE`; la vista de consulta real usa además `VITE_G6_READ_DEMO` de forma explícita en la composición de App (ver [.env.example](.env.example)). Selecciona una vez el modo de datos global y se distribuye mediante `DataModeContext`.
 
 | Valor | Comportamiento |
 |---|---|
