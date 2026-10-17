@@ -16,12 +16,20 @@ export interface CategoryListResult {
   colapsadosPorId?: string[];
 }
 
+/** Local presentation error for a slug proposal occupied between review and save. */
+export class CategorySlugConflictError extends Error {
+  constructor() {
+    super("El slug propuesto dejó de estar disponible.");
+    this.name = "CategorySlugConflictError";
+  }
+}
+
 // Contract shaped like a real HTTP API: no simulation parameters. The mock adapter
 // decides locally which deterministic state to reproduce for local review.
 export interface CategoryRepository {
   list(signal?: AbortSignal): Promise<CategoryListResult>;
   obtener(id: string, signal?: AbortSignal): Promise<CategoryDetail | null>;
-  comprobarSlug(slug: string, signal?: AbortSignal): Promise<SlugCheckResult>;
+  proponerSlug(nombre: string, signal?: AbortSignal): Promise<SlugCheckResult>;
   crear(
     input: CategoryCreateInput,
     signal?: AbortSignal,

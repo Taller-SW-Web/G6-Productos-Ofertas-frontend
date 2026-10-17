@@ -1,4 +1,8 @@
-import type { CategoryRepository } from "../services/categoryRepository";
+import {
+  CategorySlugConflictError,
+  type CategoryRepository,
+} from "../services/categoryRepository";
+import { generarSlug } from "../services/slug";
 import type {
   BloqueoDependencia,
   CategoryDetail,
@@ -15,10 +19,34 @@ interface RegistroCategoria {
   orden: number;
   estado: CategoryNode["estado"];
   descripcion?: string;
+  imagen?: string;
   // Simulated dependency count. Taxonomy does not own product state; used only to
   // exercise the deactivation/reactivation review flows.
   productosActivos?: number;
 }
+
+type EscenarioDetalle = "default" | "no-encontrado" | "error";
+type EscenarioSlug =
+  | "default"
+  | "slug-sin-colision"
+  | "slug-con-colision"
+  | "slug-carrera-409";
+type EscenarioBaja =
+  | "default"
+  | "rechazada-subcategorias"
+  | "rechazada-productos"
+  | "rechazada-asincrona"
+  | "pendiente-prolongado"
+  | "error-consulta"
+  | "error";
+type EscenarioReactivacion = "default" | "bloqueada" | "error";
+type CategoryMockScenarios = {
+  detalle: EscenarioDetalle;
+  slug: EscenarioSlug;
+  baja: EscenarioBaja;
+  reactivacion: EscenarioReactivacion;
+  arbol: "default" | "empty" | "error";
+};
 
 const store: RegistroCategoria[] = [
   {
@@ -39,6 +67,16 @@ const store: RegistroCategoria[] = [
     orden: 2,
     estado: "Activo",
     descripcion: "Prendas de vestir.",
+    productosActivos: 0,
+  },
+  {
+    id: "accesorios",
+    nombre: "Accesorios",
+    slug: "accesorios",
+    padreId: null,
+    orden: 3,
+    estado: "Activo",
+    descripcion: "Accesorios y complementos.",
     productosActivos: 0,
   },
   {
@@ -77,12 +115,65 @@ const store: RegistroCategoria[] = [
     estado: "Verificando baja",
     productosActivos: 0,
   },
+  {
+    id: "inactiva-raiz",
+    nombre: "Inactiva Raiz",
+    slug: "inactiva-raiz",
+    padreId: null,
+    orden: 4,
+    estado: "Inactivo",
+    productosActivos: 3,
+  },
+  {
+    id: "hija-padre-inactivo",
+    nombre: "Hija Padre Inactivo",
+    slug: "hija-padre-inactivo",
+    padreId: "inactiva-raiz",
+    orden: 1,
+    estado: "Inactivo",
+    productosActivos: 0,
+  },
 ];
 
 const esperar = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const hallar = (id: string): RegistroCategoria | undefined =>
-  store.find((item) => item.id === id);
+// H-06: test isolation. The adapter keeps a module-level mutable store; tests that
+// create/move categories must be able to restore the pristine baseline so they do
+// not leak state into one another. Not part of the CategoryRepository contract.
+const estadoInicial: RegistroCategoria[] = store.map((item) => ({ ...item }));
+
+export const __resetCategoryStore = (): void => {
+  store.length = 0;
+  store.push(...estadoInicial.map((item) => ({ ...item })));
+  __resetCategoryMockScenarios();
+};
+
+// SPEC-008 / MK-008: la taxonomía admite como máximo dos niveles (raíz y
+// subcategoría). Crear o mover una categoría a un tercer nivel (nieta) rompería
+// el árbol y la navegación, por lo que el adaptador lo rechaza explícitamente.
+const MAX_NIVELES_CATEGORIA = 2;
+const MENSAJE_MAX_NIVELES =
+  "No se permiten más de dos niveles de categorías (raíz y subcategoría).";
+
+// LOP-01 / LOP-04: single internal ID per category. Catálogo can send external
+// aliases (CAT-CALZADO), so every id that takes part in a parent/child relation
+// is normalized to the canonical Taxonomy ID before it is stored or compared.
+// Without this, a category created or moved through an alias would keep the
+// alias as `padreId`, become invisible in the tree (hijasDe compares raw) and
+// allow self-referencing cycles that the raw equality check would miss.
+const ALIAS_CATEGORY_MAP: Record<string, string> = {
+  "CAT-CALZADO": "calzado",
+  "CAT-ROPA": "ropa",
+  "CAT-ACC": "accesorios",
+};
+
+const normalizarIdCategoria = (id: string): string =>
+  ALIAS_CATEGORY_MAP[id] ?? id;
+
+const hallar = (id: string): RegistroCategoria | undefined => {
+  const targetId = normalizarIdCategoria(id);
+  return store.find((item) => item.id === targetId);
+};
 
 const nivelDe = (id: string): number => {
   let nivel = 0;
@@ -95,18 +186,22 @@ const nivelDe = (id: string): number => {
 };
 
 const esDescendiente = (posibleDescendienteId: string, ancestroId: string): boolean => {
+  const ancestro = normalizarIdCategoria(ancestroId);
   let actual = hallar(posibleDescendienteId);
   while (actual && actual.padreId) {
-    if (actual.padreId === ancestroId) return true;
+    if (actual.padreId === ancestro) return true;
     actual = hallar(actual.padreId);
   }
   return false;
 };
 
-const hijasDe = (padreId: string | null): RegistroCategoria[] =>
-  store
-    .filter((item) => item.padreId === padreId)
+const hijasDe = (padreId: string | null): RegistroCategoria[] => {
+  const objetivo =
+    padreId === null ? null : normalizarIdCategoria(padreId);
+  return store
+    .filter((item) => item.padreId === objetivo)
     .sort((a, b) => a.orden - b.orden);
+};
 
 const slugEnUso = (slug: string, exceptoId?: string): boolean =>
   store.some((item) => item.slug === slug && item.id !== exceptoId);
@@ -119,6 +214,8 @@ const aNodo = (registro: RegistroCategoria): CategoryNode => ({
   slug: registro.slug,
   orden: registro.orden,
   descripcion: registro.descripcion,
+  imagen: registro.imagen,
+  imagenUrl: registro.imagen,
   hijas: hijasDe(registro.id).map(aNodo),
 });
 
@@ -134,6 +231,8 @@ const aDetalle = (registro: RegistroCategoria): CategoryDetail => {
     descripcion: registro.descripcion,
     padreId: registro.padreId ?? undefined,
     padreNombre: padre?.nombre,
+    imagen: registro.imagen,
+    imagenUrl: registro.imagen,
     hijas: hijasDe(registro.id).map(aNodo),
   };
 };
@@ -143,7 +242,7 @@ const aDetalle = (registro: RegistroCategoria): CategoryDetail => {
 // memoria para que la UI pueda consultar su estado sin inventar un endpoint HTTP.
 interface OperacionBajaCategoria {
   categoriaId: string;
-  estado: "pendiente" | "confirmada";
+  estado: "pendiente" | "confirmada" | "rechazada";
 }
 
 const operacionesBaja = new Map<string, OperacionBajaCategoria>();
@@ -151,25 +250,25 @@ const operacionesBaja = new Map<string, OperacionBajaCategoria>();
 // Deterministic local states used only for review. The repository contract does not
 // accept scenarios; reviewers change these values to reproduce error or edge cases
 // without touching pages, hooks or the service contract.
-type EscenarioDetalle = "default" | "no-encontrado" | "error";
-type EscenarioSlug =
-  | "default"
-  | "slug-sin-colision"
-  | "slug-con-colision"
-  | "slug-carrera-409";
-type EscenarioBaja = "default" | "rechazada-subcategorias" | "rechazada-productos" | "error";
-type EscenarioReactivacion = "default" | "bloqueada" | "error";
-
-const MOCK: {
-  detalle: EscenarioDetalle;
-  slug: EscenarioSlug;
-  baja: EscenarioBaja;
-  reactivacion: EscenarioReactivacion;
-} = {
+const DEFAULT_MOCK_SCENARIOS: CategoryMockScenarios = {
   detalle: "default",
   slug: "default",
   baja: "default",
   reactivacion: "default",
+  arbol: "default",
+};
+const MOCK: CategoryMockScenarios = { ...DEFAULT_MOCK_SCENARIOS };
+
+// Test/review controls for deterministic local adapter scenarios. They are not
+// part of CategoryRepository and do not select a different application data mode.
+export const __setCategoryMockScenarios = (
+  scenarios: Partial<CategoryMockScenarios>,
+): void => {
+  Object.assign(MOCK, scenarios);
+};
+
+export const __resetCategoryMockScenarios = (): void => {
+  Object.assign(MOCK, DEFAULT_MOCK_SCENARIOS);
 };
 
 // Mock adapter: returns deterministic fixtures, never a real backend response.
@@ -178,6 +277,10 @@ export const mockCategoryAdapter: CategoryRepository = {
     signal?.throwIfAborted();
     await esperar(400);
     signal?.throwIfAborted();
+    if (MOCK.arbol === "error") {
+      throw new Error("No se pudo cargar el árbol de categorías. Inténtalo de nuevo.");
+    }
+    if (MOCK.arbol === "empty") return { nodos: [], colapsadosPorId: [] };
     return { nodos: hijasDe(null).map(aNodo), colapsadosPorId: [] };
   },
 
@@ -195,10 +298,12 @@ export const mockCategoryAdapter: CategoryRepository = {
     return registro ? aDetalle(registro) : null;
   },
 
-  async comprobarSlug(slug, signal) {
+  async proponerSlug(nombre, signal) {
     signal?.throwIfAborted();
     await esperar(300);
     signal?.throwIfAborted();
+
+    const slug = generarSlug(nombre);
 
     if (MOCK.slug === "slug-sin-colision") {
       return { slug, disponible: true };
@@ -222,22 +327,74 @@ export const mockCategoryAdapter: CategoryRepository = {
     await esperar(400);
     signal?.throwIfAborted();
 
-    if (MOCK.slug === "slug-carrera-409" || slugEnUso(input.slug)) {
-      throw new Error(
-        "El slug ya está en uso. Elige la alternativa sugerida o modifica el slug.",
-      );
+    if (MOCK.slug === "slug-carrera-409") {
+      // Simulate a concurrent writer exactly once. The next resolution sees
+      // the occupied slug and returns the deterministic alternative.
+      MOCK.slug = "default";
+      store.push({
+        id: `reserva-concurrente-${input.slug}`,
+        nombre: "Categoría creada en otra operación",
+        slug: input.slug,
+        padreId: null,
+        orden: store.length + 1,
+        estado: "Activo",
+        productosActivos: 0,
+      });
+      throw new CategorySlugConflictError();
+    }
+    if (slugEnUso(input.slug)) {
+      throw new CategorySlugConflictError();
     }
 
-    const padreId = input.padreId ?? null;
+    const padreId = input.padreId
+      ? normalizarIdCategoria(input.padreId)
+      : null;
+    if (padreId) {
+      const padre = hallar(padreId);
+      if (!padre) {
+        throw new Error("La categoría padre seleccionada no existe.");
+      }
+      if (padre.estado !== "Activo") {
+        throw new Error(
+          "No se puede crear una categoría activa bajo una categoría padre inactiva.",
+        );
+      }
+      // The parent must be a root category: a child parent would place the new
+      // category on a third level.
+      if (nivelDe(padreId) + 1 >= MAX_NIVELES_CATEGORIA) {
+        throw new Error(MENSAJE_MAX_NIVELES);
+      }
+    }
+
+    // A reserved external alias must never become a stored category id; doing so
+    // would create a second ID for the same entity and break the single-ID rule.
+    if (normalizarIdCategoria(input.slug) !== input.slug) {
+      throw new Error(
+        "El slug no puede coincidir con un identificador reservado.",
+      );
+    }
     const id = input.slug;
+    if (padreId && padreId === id) {
+      throw new Error(
+        "Una categoría no puede ser su propia categoría padre.",
+      );
+    }
+    const orden =
+      typeof input.orden === "number"
+        ? input.orden
+        : hijasDe(padreId).length + 1;
+    const imagen =
+      input.imagen?.trim() || input.imagenUrl?.trim() || undefined;
+
     store.push({
       id,
       nombre: input.nombre,
       slug: input.slug,
       padreId,
-      orden: hijasDe(padreId).length + 1,
+      orden,
       estado: "Activo",
       descripcion: input.descripcion,
+      imagen,
       productosActivos: 0,
     });
     return { id, nombre: input.nombre, slug: input.slug };
@@ -258,18 +415,48 @@ export const mockCategoryAdapter: CategoryRepository = {
       );
     }
 
-    const padreId = input.padreId ?? null;
-    if (padreId === input.id || (padreId && esDescendiente(padreId, input.id))) {
-      throw new Error(
-        "No puedes mover una categoría dentro de sí misma o de una de sus subcategorías.",
-      );
+    const padreId = input.padreId
+      ? normalizarIdCategoria(input.padreId)
+      : null;
+    if (padreId) {
+      const padre = hallar(padreId);
+      if (!padre) {
+        throw new Error("La categoría padre seleccionada no existe.");
+      }
+      // Compare against the canonical stored id: a parent passed as an alias of
+      // the category itself (e.g. padreId "CAT-CALZADO" for id "calzado") must be
+      // rejected as self-reference instead of creating a cycle.
+      if (padreId === registro.id || esDescendiente(padreId, registro.id)) {
+        throw new Error(
+          "No puedes mover una categoría dentro de sí misma o de una de sus subcategorías.",
+        );
+      }
+      if (registro.estado === "Activo" && padre.estado !== "Activo") {
+        throw new Error(
+          "No se puede asignar como padre a una categoría inactiva.",
+        );
+      }
+      // The new parent must be a root: a child parent would place the moved
+      // category on a third level.
+      if (nivelDe(padreId) + 1 >= MAX_NIVELES_CATEGORIA) {
+        throw new Error(MENSAJE_MAX_NIVELES);
+      }
+      // Moving a category that already has children under any parent would push
+      // those children to a third level, so it is rejected.
+      if (hijasDe(registro.id).length > 0) {
+        throw new Error(
+          "No puedes mover una categoría con subcategorías bajo otra categoría: se superarían los dos niveles permitidos.",
+        );
+      }
     }
 
     registro.nombre = input.nombre;
     registro.slug = input.slug;
     registro.padreId = padreId;
-    registro.orden = input.orden;
+    registro.orden = typeof input.orden === "number" ? input.orden : registro.orden;
     registro.descripcion = input.descripcion;
+    registro.imagen =
+      input.imagen?.trim() || input.imagenUrl?.trim() || undefined;
 
     return aDetalle(registro);
   },
@@ -360,7 +547,7 @@ export const mockCategoryAdapter: CategoryRepository = {
     const operacionId = `op-baja-categoria-${id}`;
     operacionesBaja.set(operacionId, {
       categoriaId: id,
-      estado: "pendiente",
+      estado: MOCK.baja === "rechazada-asincrona" ? "rechazada" : "pendiente",
     });
     return {
       resultado: "verificando",
@@ -384,6 +571,29 @@ export const mockCategoryAdapter: CategoryRepository = {
     const registro = hallar(operacion.categoriaId);
     if (!registro) {
       throw new Error("La categoría ya no está disponible.");
+    }
+
+    if (MOCK.baja === "error-consulta") {
+      throw new Error("No se pudo consultar la verificación de dependencias.");
+    }
+
+    if (operacion.estado === "rechazada") {
+      registro.estado = "Activo";
+      return {
+        operacionId,
+        estado: "rechazada",
+        mensaje: "La verificación encontró productos activos asociados. La categoría continúa activa.",
+        categoria: aDetalle(registro),
+      };
+    }
+
+    if (operacion.estado === "pendiente" && MOCK.baja === "pendiente-prolongado") {
+      return {
+        operacionId,
+        estado: "pendiente",
+        mensaje: "La verificación continúa pendiente. La categoría no se ha desactivado.",
+        categoria: aDetalle(registro),
+      };
     }
 
     if (operacion.estado === "pendiente") {

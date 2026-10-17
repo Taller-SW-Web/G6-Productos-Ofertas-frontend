@@ -8,6 +8,7 @@ import {
   Text,
   Textarea,
   TextInput,
+  NumberInput,
 } from "@mantine/core";
 import {
   ConfirmDialog,
@@ -20,7 +21,7 @@ import { useCategoryTree } from "../hooks/useCategoryTree";
 import { useCreateCategory } from "../hooks/useCreateCategory";
 
 // MK-008-S02: crear categoría en `/categorias/nueva`.
-// MK-008-S02-C: confirmación de slug SEO (mismo flujo; ruta `/categorias/confirmar-slug`).
+// MK-008-S02-C: confirmación de slug SEO como diálogo en el mismo flujo.
 export function CreateCategoryPage() {
   const navigate = useNavigate();
   const { state: treeState } = useCategoryTree();
@@ -31,18 +32,30 @@ export function CreateCategoryPage() {
   const [nombre, setNombre] = useState("");
   const [padreId, setPadreId] = useState<string | null>(null);
   const [descripcion, setDescripcion] = useState("");
+  const [orden, setOrden] = useState<number>(0);
+  const [imagenUrl, setImagenUrl] = useState<string>("");
   const [nombreError, setNombreError] = useState<string | null>(null);
 
-  const padres = useMemo(
-    () =>
-      treeState.status === "success"
-        ? treeState.nodos.map((nodo) => ({
-            value: nodo.id,
-            label: nodo.nombre,
-          }))
-        : [],
-    [treeState],
-  );
+  // SPEC-008 / MK-008: la taxonomía admite como máximo dos niveles. Por eso el
+  // padre de una nueva categoría solo puede ser una categoría raíz (nivel 1);
+  // nunca una subcategoría, que daría lugar a un tercer nivel.
+  const padres = useMemo(() => {
+    if (treeState.status !== "success") return [];
+    return treeState.nodos
+      .filter((raiz) => raiz.estado === "Activo")
+      .flatMap((raiz) => [
+        {
+          value: raiz.id,
+          label: raiz.nombre,
+          disabled: false,
+        },
+        ...(raiz.hijas ?? []).map((hija) => ({
+          value: hija.id,
+          label: `${raiz.nombre} / ${hija.nombre} (no puede ser padre: máximo dos niveles)`,
+          disabled: true,
+        })),
+      ]);
+  }, [treeState]);
 
   const modalAbierto =
     phase === "comprobando" || phase === "confirmando" || phase === "guardando";
@@ -61,6 +74,7 @@ export function CreateCategoryPage() {
   const handleConfirmar = () => {
     if (
       !slugCheck ||
+      (!slugCheck.disponible && slug !== slugCheck.alternativo) ||
       phase === "comprobando" ||
       phase === "guardando"
     ) {
@@ -71,6 +85,8 @@ export function CreateCategoryPage() {
       slug: slug.trim(),
       padreId: padreId ?? undefined,
       descripcion: descripcion.trim() || undefined,
+      orden,
+      imagen: imagenUrl.trim() || undefined,
     });
   };
 
@@ -78,6 +94,8 @@ export function CreateCategoryPage() {
     setNombre("");
     setPadreId(null);
     setDescripcion("");
+    setOrden(0);
+    setImagenUrl("");
     setNombreError(null);
     cerrar();
   };
@@ -132,6 +150,7 @@ export function CreateCategoryPage() {
                   />
                   <Select
                     label="Categoría padre (opcional)"
+                    description="Solo dos niveles: la nueva categoría será raíz o subcategoría de una categoría raíz."
                     placeholder="Categoría raíz"
                     data={padres}
                     value={padreId}
@@ -140,6 +159,21 @@ export function CreateCategoryPage() {
                     nothingFoundMessage="Sin categorías disponibles"
                     disabled={phase === "comprobando"}
                     onChange={(value) => setPadreId(value)}
+                  />
+                  <NumberInput
+                    label="Orden"
+                    min={0}
+                    allowDecimal={false}
+                    value={orden}
+                    disabled={phase === "comprobando"}
+                    onChange={(value) => setOrden(typeof value === "number" ? value : 0)}
+                  />
+                  <TextInput
+                    label="Imagen (URL)"
+                    placeholder="https://example.com/imagen.png"
+                    value={imagenUrl}
+                    disabled={phase === "comprobando"}
+                    onChange={(e) => setImagenUrl(e.currentTarget.value)}
                   />
                   <Textarea
                     label="Descripción (opcional)"
@@ -225,8 +259,8 @@ export function CreateCategoryPage() {
               <TextInput
                 label="Slug (URL)"
                 value={slug}
+                readOnly
                 disabled={phase === "guardando"}
-                onChange={(event) => setSlug(event.currentTarget.value)}
               />
             </>
           )}

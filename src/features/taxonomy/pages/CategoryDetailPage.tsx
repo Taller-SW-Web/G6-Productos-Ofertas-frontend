@@ -46,8 +46,8 @@ const columnasHijas: TableColumn<CategoryNode>[] = [
 ];
 
 // MK-008-S05: detalle de categoría en `/categorias/:id`.
-// MK-008-S05-R: reactivación de categoría (misma pantalla; ruta `/categorias/:id/reactivar`
-// disponible para deep-link; el botón Reactivar aparece según el estado).
+// MK-008-S05-R: bloqueo de reactivación dentro del detalle contextual; no añade
+// una ruta de deep-link sin el resultado previo de la operación.
 export function CategoryDetailPage() {
   const { id } = useParams<{ id: string }>();
   if (!id) {
@@ -166,12 +166,16 @@ function CategoryDetailContent({
           title="Reactivación bloqueada"
           actions={
             <Group gap="sm">
-              <Button variant="outline" onClick={reiniciar}>
-                Entendido
-              </Button>
-              <Button variant="outline" onClick={() => navigate("/categorias")}>
-                Volver al árbol
-              </Button>
+              <Button variant="outline" onClick={reiniciar}>Entendido</Button>
+              {detalle.padreId && state.result.bloqueos.some((b) => b.tipo === "padre") ? (
+                <Button variant="outline" onClick={() => navigate(`/categorias/${detalle.padreId}`)}>
+                  Ir a la categoría padre
+                </Button>
+              ) : !detalle.padreId ? (
+                <Button variant="outline" onClick={() => navigate("/categorias")}>
+                  Volver al árbol
+                </Button>
+              ) : null}
             </Group>
           }
         >
