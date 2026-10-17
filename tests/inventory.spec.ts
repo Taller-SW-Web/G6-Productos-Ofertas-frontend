@@ -290,7 +290,10 @@ test.describe("MK-015: Control de stock, umbrales y traslados (Issue #17)", () =
     await expect(page.getByText(/\(COMPLETADO_CON_DISCREPANCIA\)/)).toBeVisible();
 
     await page.getByRole("link", { name: "Volver a Control de stock" }).click();
-    await page.getByRole("link", { name: "Dashboard analítico" }).click();
+    await page
+      .getByRole("main")
+      .getByRole("link", { name: "Dashboard analítico" })
+      .click();
     await expect(page).toHaveURL(/\/inventario\/dashboard/);
 
     await expect(
