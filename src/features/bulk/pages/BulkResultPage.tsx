@@ -32,6 +32,7 @@ export function BulkResultPage() {
     isStale,
     resuming,
     resumeError,
+    canResume,
     downloadingReport,
     reportError,
     reportAvailable,
@@ -89,7 +90,7 @@ export function BulkResultPage() {
                 Descargar reporte de errores
               </Button>
             )}
-            {batch && isTerminal && batch.needs_reconciliation && (
+            {batch && canResume && (
               <Button
                 leftSection={
                   <IconRotateClockwise size={18} stroke={2} aria-hidden="true" />
@@ -192,10 +193,11 @@ export function BulkResultPage() {
               batch={batch}
               onRefresh={refreshBatch}
               onResume={
-                batch.needs_reconciliation
+                canResume
                   ? () => setConfirmResumeOpen(true)
                   : undefined
               }
+              canResume={canResume}
               refreshing={loading}
               resuming={resuming}
             />
@@ -215,6 +217,7 @@ export function BulkResultPage() {
         onCancel={() => setConfirmResumeOpen(false)}
         onConfirm={handleConfirmResume}
         submitting={resuming}
+        confirmDisabled={!canResume}
       >
         <Stack gap="sm">
           <Text size="sm">

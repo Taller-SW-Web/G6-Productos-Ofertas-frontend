@@ -144,6 +144,7 @@ export function BulkDownloadsPage() {
           submitting={submittingExport}
           refreshing={refreshingJob}
           downloading={downloadingExport}
+          stale={isStale}
           dataMode={dataMode}
         />
       </Stack>
