@@ -327,6 +327,23 @@ try {
     await page.getByRole("table").waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   }
+  if (mode === "mock") {
+    await page.goto(baseURL + "/precios/editar?target=base");
+    await page.getByRole("textbox", { name: "Nuevo precio regular", exact: true }).fill("279.90");
+    await page.getByRole("textbox", { name: "Motivo del cambio", exact: true }).fill("VER-01 producción simulada");
+    await page.getByRole("button", { name: "Guardar cambios", exact: true }).click();
+    await page.getByRole("button", { name: "Confirmar cambio de precio", exact: true }).click();
+    await page.getByText("Precio actualizado", { exact: true }).waitFor();
+    await page.getByRole("link", { name: "Historial de precios", exact: true }).click();
+    await page.getByRole("row").filter({ hasText: "ZAP-TRL-EXP" }).getByRole("link", { name: /Ver detalle/ }).click();
+    const detail = page.getByRole("dialog");
+    await detail.getByText(/VER-01 producción simulada/).waitFor();
+    assert.match(await detail.innerText(), /VER-01 producción simulada/);
+    assert.match(await detail.innerText(), /demo-pricing/);
+    await page.getByRole("button", { name: "Volver al historial", exact: true }).click();
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    console.log("PASS VER-01 producción: edición → asiento simulado, sin herramientas DEV");
+  }
   if (mode === "api")
     assert.equal(
       requests.some((url) =>
@@ -334,7 +351,7 @@ try {
         // Taxonomía ni en URLs de DEV (/features/taxonomy/) ni en bundles
         // compilados de dist/assets/ (chunks derivados de las páginas y el
         // servicio de taxonomía).
-        /createMockAuditRuntime|reviewRepository|audit-demo\.(csv|pdf)|createDemoPricingRuntime|mock[A-Z]|mockInventory|inventoryFixtures|\/prices-|\/catalogChoices-|\/promotionServices-|\/PromotionDataNotice-|\/(?:Coupon|Campaign|Recommendation|StockControl|Thresholds|Transfers|InventoryDashboard)[^/]*Page-|\/features\/taxonomy\/|\/assets\/[^/]*(?:Category(?:Tree|Create|Edit|Detail|Deactivate)|Characteristic|ProductType|Brand|Seo(?:List|Config)|SEO|taxonomyServices)[^/]*\.(?:js|css)/.test(
+        /pricingChanges|createMockAuditRuntime|reviewRepository|audit-demo\.(csv|pdf)|createDemoPricingRuntime|mock[A-Z]|mockInventory|inventoryFixtures|\/prices-|\/catalogChoices-|\/promotionServices-|\/PromotionDataNotice-|\/(?:Coupon|Campaign|Recommendation|StockControl|Thresholds|Transfers|InventoryDashboard)[^/]*Page-|\/features\/taxonomy\/|\/assets\/[^/]*(?:Category(?:Tree|Create|Edit|Detail|Deactivate)|Characteristic|ProductType|Brand|Seo(?:List|Config)|SEO|taxonomyServices)[^/]*\.(?:js|css)/.test(
           url,
         ),
       ),
