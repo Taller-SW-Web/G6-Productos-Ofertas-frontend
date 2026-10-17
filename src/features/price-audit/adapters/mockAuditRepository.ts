@@ -17,8 +17,10 @@ export function matches(entry: AuditEntry, filters: AuditFilters) {
     (!filters.hasta || Date.parse(entry.at) <= Date.parse(filters.hasta))
   );
 }
-export function createMockAuditRepository(): AuditRepository {
-  const entries = structuredClone(auditEntries).sort(
+export function createMockAuditRepository(
+  changes: () => AuditEntry[] = () => [],
+): AuditRepository {
+  const entries = () => [...changes(), ...structuredClone(auditEntries)].sort(
     (a, b) => Date.parse(b.at) - Date.parse(a.at),
   );
   const jobs = new Map<string, AuditJob>();
@@ -26,7 +28,7 @@ export function createMockAuditRepository(): AuditRepository {
   return {
     async list(query, signal) {
       signal.throwIfAborted();
-      const selected = entries.filter((entry) => matches(entry, query));
+      const selected = entries().filter((entry) => matches(entry, query));
       const pages = Math.ceil(selected.length / query.size);
       const page = Math.min(query.page, pages || 1);
       return {
@@ -41,11 +43,11 @@ export function createMockAuditRepository(): AuditRepository {
     },
     async detail(id, signal) {
       signal.throwIfAborted();
-      return structuredClone(entries.find((entry) => entry.id === id) ?? null);
+      return structuredClone(entries().find((entry) => entry.id === id) ?? null);
     },
     async requestExport(input, signal) {
       signal.throwIfAborted();
-      const count = entries.filter((entry) =>
+      const count = entries().filter((entry) =>
         matches(entry, input.filters),
       ).length;
       if (count > (input.format === "CSV" ? 100000 : 500))
