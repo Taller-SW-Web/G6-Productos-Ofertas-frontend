@@ -9,6 +9,7 @@ import type {
   PricingRepository,
   PriceView,
   PriceChannel,
+  PriceTarget,
 } from "../services/pricingRepository";
 import type { Clock } from "../services/pricingRuntime";
 import {
@@ -17,7 +18,10 @@ import {
   validateSchedule,
 } from "../services/pricingValidation";
 
-export function createMockPricingRepository(clock: Clock): PricingRepository {
+export function createMockPricingRepository(
+  clock: Clock,
+  onUpdated?: (target: PriceTarget, before: PriceView, after: PriceView, reason: string) => void,
+): PricingRepository {
   const records = structuredClone(priceRecords);
   const schedules = structuredClone(scheduleFixtures);
   let sequence = schedules.length;
@@ -175,6 +179,14 @@ export function createMockPricingRepository(clock: Clock): PricingRepository {
         )
           row.validUntil = clock.now();
       records.push(saved);
+      try {
+        onUpdated?.(target, current, saved, change.draft.reason);
+      } catch (error) {
+        console.warn(
+          "Fallo en la notificación onUpdated tras guardar el precio:",
+          error,
+        );
+      }
       return structuredClone(saved);
     },
     async listSchedules(targetId, page, signal) {

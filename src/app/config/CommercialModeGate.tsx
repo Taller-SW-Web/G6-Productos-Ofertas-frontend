@@ -8,9 +8,13 @@ export function CommercialModeGate({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
   if (!mode)
     throw new Error("La aplicación requiere configurar su modo de datos.");
-  const mockOnly = ["/cupones", "/promociones", "/recomendaciones", "/combos"].some(
-    (path) => pathname === path || pathname.startsWith(`${path}/`),
-  );
+  const mockOnly = [
+    "/cupones",
+    "/promociones",
+    "/recomendaciones",
+    "/inventario",
+    "/combos",
+  ].some((path) => pathname === path || pathname.startsWith(`${path}/`));
   if (mode === "api" && mockOnly)
     return (
       <FeedbackAlert semantic="error" title={pathname.startsWith("/combos") ? "Provider API de Combos no configurado" : "Integración API no disponible"}>
