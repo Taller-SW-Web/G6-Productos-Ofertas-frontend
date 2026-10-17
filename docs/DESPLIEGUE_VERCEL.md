@@ -1,9 +1,13 @@
 # Despliegue del frontend G6 en Vercel
 
-Alcance operativo: **IMPLEMENTAR_AHORA** para hosting y lógica interna de bootstrap;
-**BLOQUEADO_ESPECÍFICO** para conexión GitHub mientras falte autorización de la App,
-y publicación de este cambio hasta merge autorizado. El estado de ejecución al
-2026-10-16 está en [el registro](VALIDACION_VERCEL.md). No acredita APIs reales ni
+Estado verificado el 2026-10-16: GitHub **conectado** al repositorio oficial y
+[PR #31 fusionado](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/31).
+El push a `master` generó el primer deployment nativo de Production, `READY`, con
+`VITE_DATA_MODE=mock`. El [alias público](https://g6-productos-ofertas.vercel.app)
+superó el smoke y la verificación ampliada de 48 vistas. Dictamen **PARCIAL**:
+la URL inmutable requiere login Vercel y las seis sincronizaciones fallaron.
+El [registro de validación](VALIDACION_VERCEL.md) conserva SHA, evidencias y límites.
+La conexión GitHub ya no está bloqueada; no se acreditan APIs reales ni
 homologación externa.
 
 ## Flujo y configuración
@@ -16,7 +20,7 @@ no espera a la CI de ese push. La garantía de CI previa requiere proteger el me
 | Ajuste | Valor |
 |---|---|
 | Repositorio | `Taller-SW-Web/G6-Productos-Ofertas-frontend` |
-| Proyecto propuesto | `g6-productos-ofertas` (reutilizar si ya está asociado) |
+| Proyecto existente | `g6-productos-ofertas`, ID `prj_RkhYGt0vM0nKW9jMY8LVMnAxCa8W` |
 | Framework / raíz | Vite / raíz (`rootDirectory: null` en API) |
 | Node | 22.x, mínimo 22.12; `.nvmrc` y `engines` evitan selección automática de una major superior |
 | Instalación / build / salida | `npm ci` / `npm run build` / `dist` |
@@ -85,8 +89,11 @@ El check real se llama **`validate`**, app `github-actions`, workflow
 `Frontend Foundation`. Propuesta: exigir PR, aprobación y ese check antes del merge
 a `master`, con rama actualizada. El owner debe acordar además las excepciones
 administrativas. Hasta entonces la CI no es una barrera obligatoria de producción.
-El fallo observado del workflow de sincronización es independiente del check
-`validate` aprobado en la base `79f407d`; no se corrige dentro de esta tarea.
+La ejecución posterior al merge de [sincronización](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/38948282979)
+falló en las seis ramas: conflictos en Castilla/Taco y ausencia de
+`VITE_DATA_MODE` en el build de Poma/López/Cueva/Vera. No hubo pushes ni deployments
+adicionales; esto no equivale a probar seis sincronizaciones exitosas sin previews.
+El workflow y las ramas de los desarrolladores no se modificaron en esta verificación.
 
 ## Validación y publicación
 
@@ -128,8 +135,15 @@ las sincronizaciones posteriores no crearon deployments adicionales.
 `/categorias` y `/carga-masiva` directamente a 1440×900, verifica HTTP/HTML,
 encabezados y tablas donde corresponden, refresca `/productos`, revisa JS/CSS y
 MIME, y falla ante errores JavaScript, consola o recursos fallidos.
-No modifica datos ni acredita APIs reales. La evidencia remota está pendiente
-hasta que exista producción; ver [registro de validación](VALIDACION_VERCEL.md).
+No modifica datos ni acredita APIs reales. El smoke remoto pasó sobre el alias
+público del primer deployment. Sobre la URL inmutable falló porque respondió
+HTTP 302 al SSO de Vercel y mostró «Log in to Vercel». Por ello, el comando
+`--inspect --verify-sha` verifica SHA/estado pero termina con código 1 en el smoke
+de esa URL; no emite un PASS global. Su mensaje genérico sugiere revisar sesión o
+GitHub App, pero la causa comprobada es Deployment Protection, no una desconexión
+GitHub. No desactivar protección ni usar un despliegue manual para eludirla.
+La política de acceso o una vía autorizada de prueba autenticada requieren una
+decisión del owner. Ver [evidencia y comandos ejecutados](VALIDACION_VERCEL.md).
 
 ## Operación
 
