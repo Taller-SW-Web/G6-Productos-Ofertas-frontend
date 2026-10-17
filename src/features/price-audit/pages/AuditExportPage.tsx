@@ -125,8 +125,7 @@ function AuditExportFlow({
             <AuditScope filters={filters} total={total} />
             <Text size="sm">
               {format} admite hasta {limit.toLocaleString("es-PE")} registros,
-              inclusive. El servicio vuelve a comprobar el resultado al
-              solicitar.
+              inclusive.
             </Text>
             {inputError && (
               <FeedbackAlert semantic="error" title="Revisa las fechas">
@@ -248,7 +247,7 @@ function AuditExportFlow({
                       )}
                     {job.status === "COMPLETED" && !job.fileAvailable && (
                       <Text size="sm">
-                        El servicio todavía no informa un archivo disponible.
+                        El archivo aún no está disponible.
                       </Text>
                     )}
                     {job.status === "FAILED_GENERAL" && (

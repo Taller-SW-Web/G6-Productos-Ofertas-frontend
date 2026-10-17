@@ -128,7 +128,7 @@ export function BulkResultPage() {
             {error}
             {isStale && (
               <Text size="xs" mt="xs" c="dimmed">
-                Nota: Se muestra la última información confirmada del lote antes de producirse el error de conexión.
+                Se muestra la última información confirmada del lote.
               </Text>
             )}
           </FeedbackAlert>
@@ -142,7 +142,7 @@ export function BulkResultPage() {
 
         {batch && isTerminal && batch.failed_rows > 0 && !reportAvailable && (
           <FeedbackAlert semantic="info" title="Reporte de errores no disponible">
-            No hay un recurso de reporte descargable para este lote. No se ofrece un archivo ficticio.
+            No hay un reporte descargable para este lote.
           </FeedbackAlert>
         )}
 

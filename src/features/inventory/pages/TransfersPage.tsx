@@ -20,7 +20,6 @@ import {
   type TableColumn,
 } from "../../../components/shared";
 import { ReceiveTransferModal } from "../components/ReceiveTransferModal";
-import { DevScenarioSelector } from "../dev/DevScenarioSelector";
 import { useTransfers } from "../hooks/useTransfers";
 import { useInventoryFilterOptions } from "../hooks/useInventoryFilterOptions";
 import {
@@ -56,9 +55,6 @@ export function TransfersPage() {
 
   const { locations, loading: catalogLoading } = useInventoryFilterOptions();
   const [activeTransfer, setActiveTransfer] = useState<TransferItem | null>(null);
-
-  const isRevisionMode =
-    import.meta.env.DEV && params.get("modoRevision") === "1";
 
   const handleFilterChange = (key: keyof TransferFiltersQuery, val: string | null) => {
     setParams((prev) => {
@@ -281,7 +277,6 @@ export function TransfersPage() {
           </FeedbackAlert>
         )}
 
-        {isRevisionMode && <DevScenarioSelector />}
 
         <FilterBar>
           <Select

@@ -1,4 +1,4 @@
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Button, Skeleton, Stack } from "@mantine/core";
 import { IconArrowLeft } from "@tabler/icons-react";
 import {
@@ -7,14 +7,11 @@ import {
   PageHeader,
 } from "../../../components/shared";
 import { ThresholdConfigForm } from "../components/ThresholdConfigForm";
-import { DevScenarioSelector } from "../dev/DevScenarioSelector";
 import { useInventoryStock } from "../hooks/useInventoryStock";
 import { useThresholds } from "../hooks/useThresholds";
 import type { StockFiltersQuery } from "../services/inventoryTypes";
 
 export function ThresholdsPage() {
-  const [params] = useSearchParams();
-
   const {
     thresholds,
     loading,
@@ -26,9 +23,6 @@ export function ThresholdsPage() {
   } = useThresholds();
 
   const { items: stockItems } = useInventoryStock({} as StockFiltersQuery);
-
-  const isRevisionMode =
-    import.meta.env.DEV && params.get("modoRevision") === "1";
 
   return (
     <>
@@ -58,8 +52,6 @@ export function ThresholdsPage() {
           Cuando el saldo disponible es menor o igual a este valor, el estado comercial pasa a{" "}
           <strong>stock bajo</strong>.
         </ContextNote>
-
-        {isRevisionMode && <DevScenarioSelector />}
 
         {loading && !thresholds && (
           <Stack gap="md">

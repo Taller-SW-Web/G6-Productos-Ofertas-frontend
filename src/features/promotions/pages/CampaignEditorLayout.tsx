@@ -102,8 +102,10 @@ function CampaignEditorProvider({ initial }: { initial: CampaignView | null }) {
     root,
   );
   const readProducts = useCallback(
-    (signal: AbortSignal) => services.catalog.products(signal),
-    [services],
+    (signal: AbortSignal) => services.catalog.products(signal, initial
+      ? { productIds: initial.configuration.productIds, skus: initial.configuration.skus }
+      : undefined),
+    [services, initial],
   );
   const catalog = useAdministrationRead("catalog", readProducts);
   if (form.confirmed) {

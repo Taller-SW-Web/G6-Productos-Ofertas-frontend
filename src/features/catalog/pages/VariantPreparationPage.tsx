@@ -181,19 +181,17 @@ export function VariantPreparationPage() {
           {/* Main Status & Retry Section */}
           <Grid.Col span={{ base: 12, md: 7 }}>
             <SectionCard
-              title="Estado de Integración con Inventario"
-              description="Seguimiento de la inicialización de stock y perfil de embalaje en los servicios de Inventario."
+              title="Estado de preparación"
+              description="Seguimiento de la inicialización de stock y perfil de embalaje."
             >
               <Stack gap="md">
                 {inventoryStatus === "COMPLETED" && (
                   <Alert icon={<IconCheck size={20} />} color="teal" variant="light">
                     <Text size="sm" fw={600}>
-                      Preparación Completada (COMPLETED)
+                      Preparación completada
                     </Text>
                     <Text size="xs" mt={2}>
-                      El SKU se encuentra registrado y validado en el sistema de Inventario. La
-                      inicialización es definitiva y este SKU está listo para registrar existencias y ser
-                      activado comercialmente.
+                      La preparación del SKU fue completada.
                     </Text>
                   </Alert>
                 )}
@@ -201,11 +199,10 @@ export function VariantPreparationPage() {
                 {inventoryStatus === "PENDING" && (
                   <Alert icon={<IconClock size={20} />} color="yellow" variant="light">
                     <Text size="sm" fw={600}>
-                      En Proceso de Inicialización (PENDING)
+                      Preparación en proceso
                     </Text>
                     <Text size="xs" mt={2}>
-                      La solicitud de alta del SKU fue enviada al módulo de Inventario y está siendo
-                      procesada asíncronamente. La variante permanecerá en este estado hasta confirmación.
+                      La preparación del SKU está en curso. La variante permanecerá en este estado hasta su confirmación.
                     </Text>
                   </Alert>
                 )}
@@ -213,10 +210,10 @@ export function VariantPreparationPage() {
                 {inventoryStatus === "REJECTED" && (
                   <Alert icon={<IconAlertTriangle size={20} />} color="red" variant="light">
                     <Text size="sm" fw={600}>
-                      Preparación Rechazada o Bloqueada (REJECTED)
+                      Preparación pendiente
                     </Text>
                     <Text size="xs" mt={2}>
-                      El servicio de Inventario no pudo inicializar el SKU. Puede solicitar un reintento
+                      No se pudo inicializar el SKU. Puede solicitar un reintento
                       manual para reevaluar la preparación si las condiciones están corregidas.
                     </Text>
                     {canRetry && (
@@ -227,7 +224,7 @@ export function VariantPreparationPage() {
                         loading={retrying}
                         onClick={() => retry()}
                       >
-                        Reintentar ahora (202 Accepted)
+                        Reintentar ahora
                       </Button>
                     )}
                   </Alert>

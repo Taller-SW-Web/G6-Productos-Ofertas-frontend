@@ -88,7 +88,7 @@ export function BulkReviewPage() {
         const message =
           err instanceof Error
             ? err.message
-            : "El servicio no pudo admitir el lote de importación.";
+            : "No se pudo iniciar la importación.";
         const category = err instanceof BulkRepositoryError ? err.category : "unknown";
         const status = category === "communication" || category === "unknown"
           ? "uncertain"
@@ -145,15 +145,15 @@ export function BulkReviewPage() {
               submissionError.category === "rejected"
                 ? "Archivo rechazado en la admisión"
                 : submissionError.category === "configuration"
-                  ? "Servicio de carga masiva no configurado"
+                  ? "Importación no disponible"
                   : submissionError.category === "communication"
-                    ? "No se pudo comunicar con el servicio"
+                    ? "No se pudo completar la solicitud"
                     : "No se confirmó el resultado de admisión"
             }
           >
             {submissionError.message}
             {admissionUncertain && (
-              <div>La admisión no quedó confirmada. Consulta el estado con el servicio antes de iniciar otra operación.</div>
+              <div>No se confirmó el resultado. Consulta el estado antes de iniciar otra operación.</div>
             )}
           </FeedbackAlert>
         )}

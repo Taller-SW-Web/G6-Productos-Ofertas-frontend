@@ -131,6 +131,30 @@ describe("PricingCombosAdapter · referencias compartidas de Pricing", () => {
     expect((await adapter.readCurrent(["SKU-X"]))[0]?.regularMinor).toBe(1250);
   });
 
+  it("refleja en Combos una edición confirmada en el mismo repositorio mock", async () => {
+    const pricing = createMockPricingRepository(fixedClock);
+    const adapter = makeAdapter(pricing);
+    const signal = new AbortController().signal;
+    const target = { targetId: "combo-oxf-bla-m", channel: "global" as const };
+    const before = await pricing.readEditable(target, signal);
+    expect(before).not.toBeNull();
+
+    await pricing.update({
+      target,
+      version: before!.version,
+      draft: {
+        regular: "159.90",
+        offer: "149.90",
+        offerAction: "ESTABLECER",
+        currency: "PEN",
+        reason: "Ajuste de demostración",
+      },
+    }, signal);
+
+    await expect(adapter.readCurrent(["CAM-OXF-BLA-M"]))
+      .resolves.toMatchObject([{ regularMinor: 15990, offerMinor: 14990, priceVersion: before!.version + 1 }]);
+  });
+
   it("falla explícitamente ante referencias ambiguas o importes/moneda inválidos", async () => {
     const ambiguous = makeAdapter(stubPricing({
       targets: [productTarget("producto", "SKU-X"), variantTarget("variante", "SKU-X")],

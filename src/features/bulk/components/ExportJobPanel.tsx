@@ -48,11 +48,6 @@ export function ExportJobPanel({
       description="Genera un archivo consolidado asíncrono con productos, precios base/oferta y existencias de inventario"
     >
       <Stack gap="lg">
-        <Text size="xs" c="dimmed">
-          {dataMode === "mock"
-            ? "Modo demostración · Generación asíncrona simulada de exportación"
-            : "Trabajo de exportación completo del catálogo, sin filtros adicionales"}
-        </Text>
         <Text size="sm">
           La exportación procesa la totalidad del catálogo activo en segundo plano sin bloquear las consultas transaccionales.
         </Text>
@@ -110,17 +105,13 @@ export function ExportJobPanel({
             <Stack gap="md">
               {isQueued && (
                 <FeedbackAlert semantic="info" title="Solicitud recibida en cola">
-                  {dataMode === "mock"
-                    ? "La demostración mock recibió la solicitud y espera iniciar la consolidación."
-                    : "El provider informó la admisión del trabajo, que permanece pendiente de consolidación."}
+                  "La solicitud fue recibida y está pendiente de consolidación."
                 </FeedbackAlert>
               )}
 
               {isProcessing && (
                 <FeedbackAlert semantic="info" title="Consolidando catálogo">
-                  {dataMode === "mock"
-                    ? "La demostración simula la consolidación del snapshot. Pulse &quot;Actualizar estado&quot; para consultar el estado."
-                    : "El provider informó que está consolidando el catálogo. Pulse &quot;Actualizar estado&quot; para consultar el estado."}
+                  'La exportación está en proceso. Seleccione "Actualizar estado" para consultar el avance.'
                 </FeedbackAlert>
               )}
 
@@ -134,16 +125,14 @@ export function ExportJobPanel({
                     }
                   >
                     {job.format === "CSV"
-                      ? `${job.file_name ?? "catalogo_exportado.csv"}${dataMode === "mock" ? " · Archivo de demostración listo para descargar." : ""}`
-                      : dataMode === "mock"
-                        ? "La demostración no genera libros XLSX ni renombra un CSV como XLSX."
-                        : "El provider informó que el trabajo terminó. Solicita el archivo mediante la acción de descarga."}
+                      ? job.file_name ?? "catalogo_exportado.csv"
+                      : "La exportación terminó, pero el archivo solicitado no está disponible."}
                 </FeedbackAlert>
               )}
 
               {isFailed && (
                 <FeedbackAlert semantic="error" title="No se pudo completar la exportación">
-                  {job.error_message ?? "El servicio no pudo generar el archivo consolidado."}
+                  {job.error_message ?? "No se pudo generar el archivo consolidado."}
                 </FeedbackAlert>
               )}
 
@@ -162,9 +151,7 @@ export function ExportJobPanel({
                 >
                   {job.format === "CSV"
                     ? "Descargar archivo CSV consolidado"
-                    : dataMode === "mock"
-                      ? "Descarga XLSX no disponible en demo"
-                      : "Descargar archivo XLSX consolidado"}
+                    : "Descargar archivo XLSX consolidado"}
                 </Button>
               </Group>
             </Stack>

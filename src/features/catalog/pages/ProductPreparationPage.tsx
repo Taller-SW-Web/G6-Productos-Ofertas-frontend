@@ -138,12 +138,12 @@ export function ProductPreparationPage() {
 
       {justCreated && (
         <Alert icon={<IconCheck size={16} />} color="green" variant="light">
-          <strong>Borrador guardado exitosamente.</strong> La preparación técnica se coordina asíncronamente. El producto permanecerá en BORRADOR hasta que cumplas los requisitos y confirmes su activación.
+          <strong>Borrador guardado.</strong> El producto permanecerá en BORRADOR hasta que completes los requisitos y confirmes su activación.
         </Alert>
       )}
 
       {prepState.retrySuccess && (
-        <FeedbackAlert semantic="info" title="Reintento admitido (HTTP 202)">
+        <FeedbackAlert semantic="info" title="Reintento solicitado">
           {prepState.retrySuccess}
         </FeedbackAlert>
       )}
@@ -178,7 +178,7 @@ export function ProductPreparationPage() {
 
             <Stack gap="sm">
               <Text size="xs" c="dimmed">
-                Owner del precio: <code>pricing-svc</code>. Coordina la inicialización del precio base regular.
+                Inicialización del precio base regular.
               </Text>
 
               {prep.pricing.status === "COMPLETED" && (
@@ -250,7 +250,7 @@ export function ProductPreparationPage() {
 
             <Stack gap="sm">
               <Text size="xs" c="dimmed">
-                Owner de stock: <code>inventory-svc</code>. Coordina los saldos físicos vendibles.
+                Inicialización del stock disponible.
               </Text>
 
               {!p.hasVariants && prep.inventario ? (
@@ -258,7 +258,7 @@ export function ProductPreparationPage() {
                   {prep.inventario.status === "COMPLETED" && (
                     <Alert icon={<IconCheck size={16} />} color="green" variant="light" p="xs">
                       <Text size="xs">
-                        SKU simple inicializado correctamente en el servicio de Inventario.
+                        SKU simple inicializado correctamente.
                       </Text>
                     </Alert>
                   )}

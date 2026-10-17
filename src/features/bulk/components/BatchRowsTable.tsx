@@ -209,7 +209,7 @@ export function BatchRowsTable({
       empty={{
         title: "Sin filas de detalle",
         description:
-          "El lote no incluye filas individuales en el reporte actual o aún no se ha generado el desglose.",
+          "No hay filas de detalle disponibles.",
       }}
       pagination={
         rows.length > pageSize

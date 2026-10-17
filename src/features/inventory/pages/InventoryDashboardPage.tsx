@@ -29,7 +29,6 @@ import { DashboardAlerts } from "../components/DashboardAlerts";
 import { DashboardKpiGrid } from "../components/DashboardKpiGrid";
 import { LocationDistributionTable } from "../components/LocationDistributionTable";
 import { StockDetailDrawer } from "../components/StockDetailDrawer";
-import { DevScenarioSelector } from "../dev/DevScenarioSelector";
 import { useInventoryDashboard } from "../hooks/useInventoryDashboard";
 import { useInventoryFilterOptions } from "../hooks/useInventoryFilterOptions";
 import type {
@@ -71,9 +70,6 @@ export function InventoryDashboardPage() {
   } = useInventoryFilterOptions();
 
   const [selectedItem, setSelectedItem] = useState<StockItem | null>(null);
-
-  const isRevisionMode =
-    import.meta.env.DEV && params.get("modoRevision") === "1";
 
   const handleFilterChange = (key: keyof DashboardFiltersQuery, val: string | null) => {
     setParams((prev) => {
@@ -271,7 +267,6 @@ export function InventoryDashboardPage() {
           o ajustar umbrales, utiliza las vistas operativas de control de stock.
         </ContextNote>
 
-        {isRevisionMode && <DevScenarioSelector />}
 
         {(catalogErrors.categories ||
           catalogErrors.brands ||

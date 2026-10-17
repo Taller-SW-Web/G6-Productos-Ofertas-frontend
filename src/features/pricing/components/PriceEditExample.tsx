@@ -39,7 +39,7 @@ export function PriceEditExample() {
   return (
     <SectionCard
       title="Propuesta de nuevos valores"
-      description="Muestra de S02. El formulario no guarda cambios ni simula una versión nueva."
+      description="Edita los valores propuestos para el precio."
     >
       <Radio.Group label="Alcance del precio" value={scope} onChange={setScope}>
         <SimpleGrid cols={2} spacing="lg" mt="sm">
@@ -66,7 +66,6 @@ export function PriceEditExample() {
         onChange={setRegular}
         decimalSeparator="."
         hideControls
-        description="Valor de presentación; la precisión admitida debe proceder del contrato."
       />
       <Radio.Group
         label="Acción para la oferta"
@@ -97,7 +96,6 @@ export function PriceEditExample() {
         label="Motivo del cambio"
         value={reason}
         onChange={(event) => setReason(event.currentTarget.value)}
-        description="El texto se conserva al cancelar la revisión de esta muestra."
       />
       <Group justify="flex-end">
         <Button onClick={() => setReviewing(true)}>Revisar presentación</Button>
@@ -113,11 +111,6 @@ export function PriceEditExample() {
           <Text size="sm">
             Regular propuesto: {regular || "Sin importe"} PEN. Alcance:{" "}
             {scope === "product" ? "producto" : "SKU seleccionado"}.
-          </Text>
-          <Text size="sm">
-            Esta revisión solo muestra el diálogo. La edición real requiere
-            lectura de la versión, validación, confirmación y un adapter de
-            escritura.
           </Text>
         </Stack>
       </ConfirmDialog>

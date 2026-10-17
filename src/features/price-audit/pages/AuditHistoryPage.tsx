@@ -84,10 +84,6 @@ export function AuditHistoryPage() {
       />
       <Stack gap="lg">
         <AuditDataNotice />
-        <FeedbackAlert semantic="warning" title="Moneda no informada">
-          El contrato de auditoría no publica la moneda histórica. Los importes
-          se muestran sin atribuir una divisa.
-        </FeedbackAlert>
         <AuditFilters
           key={key}
           query={query}

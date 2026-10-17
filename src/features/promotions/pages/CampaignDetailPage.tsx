@@ -51,12 +51,14 @@ export function CampaignDetailPage({
     `${promotionId}:${revision + queryRevision}`,
     read,
   );
+  const record = state.status === "success" ? state.result : null;
   const catalogRead = useCallback(
-    (signal: AbortSignal) => confirmedServices.catalog.products(signal),
-    [confirmedServices],
+    (signal: AbortSignal) => confirmedServices.catalog.products(signal, record
+      ? { productIds: record.configuration.productIds, skus: record.configuration.skus }
+      : undefined),
+    [confirmedServices, record],
   );
-  const catalog = useAdministrationRead("catalog", catalogRead),
-    record = state.status === "success" ? state.result : null;
+  const catalog = useAdministrationRead("catalog", catalogRead);
   useEffect(() => {
     if (record && (location.state?.focusState || updated))
       trigger.current?.focus();

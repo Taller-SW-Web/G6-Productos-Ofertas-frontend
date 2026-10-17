@@ -4,13 +4,11 @@ import {
   Select,
   SimpleGrid,
   Stack,
-  Text,
   Textarea,
   TextInput,
 } from "@mantine/core";
 import {
   EntityTable,
-  FeedbackAlert,
   SectionCard,
   StatusBadge,
   type TableColumn,
@@ -55,7 +53,7 @@ export function ScheduleExample() {
       <div style={{ maxWidth: 880 }}>
         <SectionCard
           title="Nueva vigencia programada"
-          description="Muestra de S03. Los controles de fecha/hora usan TextInput nativo etiquetado."
+          description="Define el tipo, importe y vigencia del precio."
         >
           <SimpleGrid cols={2} spacing="lg">
             <Select
@@ -86,17 +84,6 @@ export function ScheduleExample() {
             />
           </SimpleGrid>
           <Textarea label="Motivo de la programación" />
-          <FeedbackAlert
-            semantic="info"
-            title="Programación pendiente de implementación"
-          >
-            Esta muestra permite revisar las fechas y el formulario. No crea una
-            vigencia ni modifica el precio actual.
-          </FeedbackAlert>
-          <Text size="sm">
-            Las validaciones de fecha futura, superposición y confirmación
-            pertenecen al flujo de programación, fuera del piloto S01.
-          </Text>
         </SectionCard>
       </div>
     </Stack>

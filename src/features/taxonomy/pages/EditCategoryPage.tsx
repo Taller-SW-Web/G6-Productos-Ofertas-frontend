@@ -180,7 +180,7 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
             </Group>
           }
         >
-          {`Se actualizó «${resultado.nombre}» con el slug «${resultado.slug}». La actualización es simulada y no se guarda en un backend.`}
+          {`Se actualizó «${resultado.nombre}» con el slug «${resultado.slug}».`}
         </FeedbackAlert>
       ) : (
         <>

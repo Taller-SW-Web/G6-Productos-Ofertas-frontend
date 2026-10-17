@@ -1,5 +1,6 @@
 import { calculateInformativeAvailability } from "../services/availability";
 import type { Combo, ComboStatus, StockReading, SkuPrice } from "../types/combos";
+import { initialStockItems } from "../../inventory/mocks/inventoryFixtures";
 
 // Demonstration combos. Every SKU below exists in the shared Catalog used by
 // MK-003/MK-004 (see src/features/catalog/mocks/catalogFixtures.ts):
@@ -8,12 +9,14 @@ import type { Combo, ComboStatus, StockReading, SkuPrice } from "../types/combos
 //   CAM-OXF-AZU-L    active variant of PROD-OXF-001
 // Combos never insert fictitious products into the shared Catalog.
 
-export const stockFixtures: Readonly<Record<string, StockReading>> = {
-  "CAS-COR-001": { sku: "CAS-COR-001", stock: 4, stale: false, locationsCompatible: true },
-  "CAM-OXF-BLA-M": { sku: "CAM-OXF-BLA-M", stock: 8, stale: false, locationsCompatible: true },
-  "CAM-OXF-AZU-L": { sku: "CAM-OXF-AZU-L", stock: 0, stale: false, locationsCompatible: true },
-  "CAM-OXF-NEG-S": { sku: "CAM-OXF-NEG-S", stock: 0, stale: false, locationsCompatible: true },
-};
+export const stockFixtures: Readonly<Record<string, StockReading>> = Object.fromEntries(
+  Array.from(new Set(initialStockItems.map((item) => item.sku))).map((sku) => {
+    const stock = initialStockItems
+      .filter((item) => item.sku === sku)
+      .reduce((sum, item) => sum + item.available, 0);
+    return [sku, { sku, stock, stale: false, locationsCompatible: true }];
+  }),
+);
 
 export const priceFixtures: SkuPrice[] = [
   { sku: "CAS-COR-001", regularMinor: 17900, offerMinor: 15900, currency: "PEN", channelId: null, priceVersion: 1, validityId: "vigencia-cas-cor-001", validFrom: "2020-10-01T00:00:00Z", validUntil: null },

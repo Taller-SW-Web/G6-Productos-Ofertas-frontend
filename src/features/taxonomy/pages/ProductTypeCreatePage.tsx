@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Button, Group, Stack, TextInput } from "@mantine/core";
 import {
   FeedbackAlert,
@@ -10,9 +10,6 @@ import { productTypeService } from "../services/productTypeService";
 
 export function ProductTypeCreatePage() {
   const navigate = useNavigate();
-  const [params] = useSearchParams();
-  const isRevisionMode =
-    import.meta.env.DEV && params.get("modoRevision") === "1";
   const [nombre, setNombre] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
@@ -56,11 +53,6 @@ export function ProductTypeCreatePage() {
         ]}
       />
       <Stack gap="lg">
-        {isRevisionMode && creado && (
-          <FeedbackAlert semantic="success" title="Tipo de producto creado">
-            Redirigiendo al detalle del tipo de producto…
-          </FeedbackAlert>
-        )}
         {error && (
           <FeedbackAlert semantic="error" title="No se pudo crear el tipo de producto">
             {error}

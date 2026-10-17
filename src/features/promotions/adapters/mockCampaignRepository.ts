@@ -58,6 +58,12 @@ export function createMockCampaignRepository(
     },
     async save(id, draft, signal) {
       signal.throwIfAborted();
+      const original = id ? records.find((item) => item.id === id) : null;
+      if (id && !original)
+        throw new AdministrationError(
+          "rejected",
+          "La promoción no está disponible para editar.",
+        );
       const errors = campaignErrors(draft);
       if (Object.keys(errors).length)
         throw new AdministrationError(
@@ -65,7 +71,9 @@ export function createMockCampaignRepository(
           "Revisa los campos indicados. El borrador se conserva.",
           errors,
         );
-      const products = await dependencies.catalog().products(signal);
+      const products = await dependencies.catalog().products(signal, original
+        ? { productIds: original.configuration.productIds, skus: original.configuration.skus }
+        : undefined);
       signal.throwIfAborted();
       if (
         draft.productIds.some(
@@ -82,12 +90,6 @@ export function createMockCampaignRepository(
       )
         errors.scope =
           "El alcance incluye una referencia no disponible o inactiva.";
-      const original = id ? records.find((item) => item.id === id) : null;
-      if (id && !original)
-        throw new AdministrationError(
-          "rejected",
-          "La promoción no está disponible para editar.",
-        );
       if (
         original &&
         draft.mode !== original.configuration.mode &&
