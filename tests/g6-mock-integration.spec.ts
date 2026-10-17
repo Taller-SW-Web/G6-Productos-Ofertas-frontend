@@ -30,6 +30,19 @@ test("Catalog → Pricing → Inventory → Combos comparte identidad, precio y 
   await expect(page.getByText("SKU: CAM-OXF-BLA-M")).toBeVisible();
   await expect(page.getByText("S/ 139.90").first()).toBeVisible();
 
+  // Confirm a real price edit in Pricing; Combos must read this same repository.
+  await page.getByRole("link", { name: "Editar precio", exact: true }).click();
+  await page.getByRole("textbox", { name: "Nuevo precio regular", exact: true }).fill("149.90");
+  await page.getByRole("textbox", { name: "Motivo del cambio", exact: true }).fill("Ajuste demo transversal");
+  await page.getByRole("button", { name: "Guardar cambios", exact: true }).click();
+  await page.getByRole("button", { name: "Confirmar cambio de precio", exact: true }).click();
+  await expect(page.getByText("Precio actualizado", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Consultar el precio vigente", exact: true }).click();
+  await expect(page.getByText("S/ 149.90").first()).toBeVisible();
+  await navigation.getByRole("link", { name: "Historial de precios", exact: true }).click();
+  await page.getByRole("textbox", { name: "SKU", exact: true }).fill("CAM-OXF-BLA-M");
+  await page.getByRole("button", { name: "Aplicar filtros", exact: true }).click();
+  await expect(page.getByRole("row").filter({ hasText: "CAM-OXF-BLA-M" })).toContainText("149,90");
   await navigation.getByRole("link", { name: "Control de stock", exact: true }).click();
   let stockRow = page.getByRole("row").filter({ hasText: "CAM-OXF-BLA-M" });
   await expect(stockRow).toContainText("8");
@@ -38,7 +51,7 @@ test("Catalog → Pricing → Inventory → Combos comparte identidad, precio y 
   let comboRow = page.getByRole("row").filter({ hasText: "Conjunto Trail Esencial" });
   await expect(comboRow).toContainText("4 combos estimados");
   await comboRow.getByRole("link", { name: "Ver detalle" }).click();
-  await expect(page.getByRole("row").filter({ hasText: "CAM-OXF-BLA-M" })).toContainText("S/ 139.90");
+  await expect(page.getByRole("row").filter({ hasText: "CAM-OXF-BLA-M" })).toContainText("S/ 149.90");
   await expect(page.getByText("4 combos estimados")).toBeVisible();
 
   // CAM stock changes through Inventory's existing receipt operation.
