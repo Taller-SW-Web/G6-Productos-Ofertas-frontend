@@ -110,6 +110,7 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
     const recorrer = (nodos: CategoryNode[], profundidad: number) => {
       for (const nodo of nodos) {
         if (nodo.id === detalle.id) continue;
+        if (detalle.estado === "Activo" && nodo.estado !== "Activo") continue;
         opciones.push({
           value: nodo.id,
           label: `${"— ".repeat(profundidad)}${nodo.nombre}`,
@@ -119,7 +120,7 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
     };
     recorrer(treeState.nodos, 0);
     return opciones;
-  }, [treeState, detalle.id]);
+  }, [treeState, detalle.id, detalle.estado]);
 
   const modalAbierto =
     phase === "comprobando" || phase === "confirmando" || phase === "guardando";
@@ -212,11 +213,11 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
                 />
                 <NumberInput
                   label="Orden"
-                  min={1}
+                  min={0}
                   allowDecimal={false}
                   value={orden}
                   onChange={(value) =>
-                    setOrden(typeof value === "number" ? value : 1)
+                    setOrden(typeof value === "number" ? value : 0)
                   }
                 />
                 <TextInput

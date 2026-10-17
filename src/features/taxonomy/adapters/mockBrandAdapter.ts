@@ -51,6 +51,33 @@ const store: RegistroMarca[] = [
     descripcion: null,
     version: 1,
   },
+  {
+    marcaId: "BRD-INKA",
+    nombre: "Inka Athletic",
+    estado: "Activo",
+    logoUrl: null,
+    paisOrigenIso: "PE",
+    descripcion: "Marca de alto rendimiento andino.",
+    version: 1,
+  },
+  {
+    marcaId: "BRD-ANDES",
+    nombre: "Andean Peak",
+    estado: "Activo",
+    logoUrl: null,
+    paisOrigenIso: "PE",
+    descripcion: "Equipamiento de montaña.",
+    version: 1,
+  },
+  {
+    marcaId: "BRD-QENTE",
+    nombre: "Q'ente Sport",
+    estado: "Activo",
+    logoUrl: null,
+    paisOrigenIso: "PE",
+    descripcion: "Prendas deportivas peruanas.",
+    version: 1,
+  },
 ];
 
 const operacionesBaja: OperacionBaja[] = [

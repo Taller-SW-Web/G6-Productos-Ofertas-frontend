@@ -19,6 +19,7 @@ import {
 import { SufijoResaltado } from "../components/SufijoResaltado";
 import { useCategoryTree } from "../hooks/useCategoryTree";
 import { useCreateCategory } from "../hooks/useCreateCategory";
+import type { CategoryNode } from "../types";
 
 // MK-008-S02: crear categoría en `/categorias/nueva`.
 // MK-008-S02-C: confirmación de slug SEO (mismo flujo; ruta `/categorias/confirmar-slug`).
@@ -36,16 +37,23 @@ export function CreateCategoryPage() {
   const [imagenUrl, setImagenUrl] = useState<string>("");
   const [nombreError, setNombreError] = useState<string | null>(null);
 
-  const padres = useMemo(
-    () =>
-      treeState.status === "success"
-        ? treeState.nodos.map((nodo) => ({
+  const padres = useMemo(() => {
+    if (treeState.status !== "success") return [];
+    const opciones: { value: string; label: string }[] = [];
+    const recorrer = (nodos: CategoryNode[], profundidad: number) => {
+      for (const nodo of nodos) {
+        if (nodo.estado === "Activo") {
+          opciones.push({
             value: nodo.id,
-            label: nodo.nombre,
-          }))
-        : [],
-    [treeState],
-  );
+            label: `${"— ".repeat(profundidad)}${nodo.nombre}`,
+          });
+          if (nodo.hijas?.length) recorrer(nodo.hijas, profundidad + 1);
+        }
+      }
+    };
+    recorrer(treeState.nodos, 0);
+    return opciones;
+  }, [treeState]);
 
   const modalAbierto =
     phase === "comprobando" || phase === "confirmando" || phase === "guardando";
@@ -83,6 +91,8 @@ export function CreateCategoryPage() {
     setNombre("");
     setPadreId(null);
     setDescripcion("");
+    setOrden(0);
+    setImagenUrl("");
     setNombreError(null);
     cerrar();
   };
@@ -149,6 +159,7 @@ export function CreateCategoryPage() {
                   <NumberInput
                     label="Orden"
                     min={0}
+                    allowDecimal={false}
                     value={orden}
                     disabled={phase === "comprobando"}
                     onChange={(value) => setOrden(typeof value === "number" ? value : 0)}

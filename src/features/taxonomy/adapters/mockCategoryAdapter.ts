@@ -15,6 +15,7 @@ interface RegistroCategoria {
   orden: number;
   estado: CategoryNode["estado"];
   descripcion?: string;
+  imagen?: string;
   // Simulated dependency count. Taxonomy does not own product state; used only to
   // exercise the deactivation/reactivation review flows.
   productosActivos?: number;
@@ -39,6 +40,16 @@ const store: RegistroCategoria[] = [
     orden: 2,
     estado: "Activo",
     descripcion: "Prendas de vestir.",
+    productosActivos: 0,
+  },
+  {
+    id: "accesorios",
+    nombre: "Accesorios",
+    slug: "accesorios",
+    padreId: null,
+    orden: 3,
+    estado: "Activo",
+    descripcion: "Accesorios y complementos.",
     productosActivos: 0,
   },
   {
@@ -82,7 +93,7 @@ const store: RegistroCategoria[] = [
     nombre: "Inactiva Raiz",
     slug: "inactiva-raiz",
     padreId: null,
-    orden: 3,
+    orden: 4,
     estado: "Inactivo",
     productosActivos: 3,
   },
@@ -99,8 +110,16 @@ const store: RegistroCategoria[] = [
 
 const esperar = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const hallar = (id: string): RegistroCategoria | undefined =>
-  store.find((item) => item.id === id);
+const ALIAS_CATEGORY_MAP: Record<string, string> = {
+  "CAT-CALZADO": "calzado",
+  "CAT-ROPA": "ropa",
+  "CAT-ACC": "accesorios",
+};
+
+const hallar = (id: string): RegistroCategoria | undefined => {
+  const targetId = ALIAS_CATEGORY_MAP[id] ?? id;
+  return store.find((item) => item.id === targetId || item.id === id);
+};
 
 const nivelDe = (id: string): number => {
   let nivel = 0;
@@ -137,6 +156,8 @@ const aNodo = (registro: RegistroCategoria): CategoryNode => ({
   slug: registro.slug,
   orden: registro.orden,
   descripcion: registro.descripcion,
+  imagen: registro.imagen,
+  imagenUrl: registro.imagen,
   hijas: hijasDe(registro.id).map(aNodo),
 });
 
@@ -152,6 +173,8 @@ const aDetalle = (registro: RegistroCategoria): CategoryDetail => {
     descripcion: registro.descripcion,
     padreId: registro.padreId ?? undefined,
     padreNombre: padre?.nombre,
+    imagen: registro.imagen,
+    imagenUrl: registro.imagen,
     hijas: hijasDe(registro.id).map(aNodo),
   };
 };
@@ -247,15 +270,35 @@ export const mockCategoryAdapter: CategoryRepository = {
     }
 
     const padreId = input.padreId ?? null;
+    if (padreId) {
+      const padre = hallar(padreId);
+      if (!padre) {
+        throw new Error("La categoría padre seleccionada no existe.");
+      }
+      if (padre.estado !== "Activo") {
+        throw new Error(
+          "No se puede crear una categoría activa bajo una categoría padre inactiva.",
+        );
+      }
+    }
+
     const id = input.slug;
+    const orden =
+      typeof input.orden === "number"
+        ? input.orden
+        : hijasDe(padreId).length + 1;
+    const imagen =
+      input.imagen?.trim() || input.imagenUrl?.trim() || undefined;
+
     store.push({
       id,
       nombre: input.nombre,
       slug: input.slug,
       padreId,
-      orden: hijasDe(padreId).length + 1,
+      orden,
       estado: "Activo",
       descripcion: input.descripcion,
+      imagen,
       productosActivos: 0,
     });
     return { id, nombre: input.nombre, slug: input.slug };
@@ -277,17 +320,30 @@ export const mockCategoryAdapter: CategoryRepository = {
     }
 
     const padreId = input.padreId ?? null;
-    if (padreId === input.id || (padreId && esDescendiente(padreId, input.id))) {
-      throw new Error(
-        "No puedes mover una categoría dentro de sí misma o de una de sus subcategorías.",
-      );
+    if (padreId) {
+      const padre = hallar(padreId);
+      if (!padre) {
+        throw new Error("La categoría padre seleccionada no existe.");
+      }
+      if (padreId === input.id || esDescendiente(padreId, input.id)) {
+        throw new Error(
+          "No puedes mover una categoría dentro de sí misma o de una de sus subcategorías.",
+        );
+      }
+      if (registro.estado === "Activo" && padre.estado !== "Activo") {
+        throw new Error(
+          "No se puede asignar como padre a una categoría inactiva.",
+        );
+      }
     }
 
     registro.nombre = input.nombre;
     registro.slug = input.slug;
     registro.padreId = padreId;
-    registro.orden = input.orden;
+    registro.orden = typeof input.orden === "number" ? input.orden : registro.orden;
     registro.descripcion = input.descripcion;
+    registro.imagen =
+      input.imagen?.trim() || input.imagenUrl?.trim() || undefined;
 
     return aDetalle(registro);
   },
