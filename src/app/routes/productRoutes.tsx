@@ -59,6 +59,10 @@ import {
   BulkProgressPage,
   BulkResultPage,
   BulkDownloadsPage,
+  StockControlPage,
+  ThresholdsPage,
+  TransfersPage,
+  InventoryDashboardPage,
   ComboListPage,
   ComboCreatePage,
   ComboDetailPage,
@@ -225,4 +229,9 @@ export const productRoutes: RouteObject[] = [
       { path: "descargas", element: <BulkDownloadsPage /> },
     ],
   },
+  // MK-015 y MK-016: Control de stock, umbrales, traslados y dashboard analítico
+  { path: "/inventario", element: <StockControlPage /> },
+  { path: "/inventario/umbrales", element: <ThresholdsPage /> },
+  { path: "/inventario/traslados", element: <TransfersPage /> },
+  { path: "/inventario/dashboard", element: <InventoryDashboardPage /> },
 ];

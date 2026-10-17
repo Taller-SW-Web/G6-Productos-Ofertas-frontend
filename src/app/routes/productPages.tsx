@@ -309,6 +309,29 @@ export const BulkDownloadsPage = lazy(() =>
   })),
 );
 
+export const StockControlPage = lazy(() =>
+  import("../../features/inventory/pages/StockControlPage").then((module) => ({
+    default: module.StockControlPage,
+  })),
+);
+export const ThresholdsPage = lazy(() =>
+  import("../../features/inventory/pages/ThresholdsPage").then((module) => ({
+    default: module.ThresholdsPage,
+  })),
+);
+export const TransfersPage = lazy(() =>
+  import("../../features/inventory/pages/TransfersPage").then((module) => ({
+    default: module.TransfersPage,
+  })),
+);
+export const InventoryDashboardPage = lazy(() =>
+  import("../../features/inventory/pages/InventoryDashboardPage").then(
+    (module) => ({
+      default: module.InventoryDashboardPage,
+    }),
+  ),
+);
+
 export const ComboListPage = lazy(() =>
   import("../../features/combos/pages/ComboListPage").then((module) => ({ default: module.ComboListPage })),
 );
@@ -321,4 +344,3 @@ export const ComboEditPage = lazy(() =>
 export const ComboDetailPage = lazy(() =>
   import("../../features/combos/pages/ComboDetailPage").then((module) => ({ default: module.ComboDetailPage })),
 );
-

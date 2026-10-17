@@ -214,6 +214,82 @@ try {
     }
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   }
+  // Verificaciones aditivas de las cuatro rutas de Inventario (MK-015 y MK-016)
+  const inventoryChecks = [
+    {
+      path: "/inventario",
+      mockCheck: async (p) => {
+        await p.getByRole("heading", { level: 1 }).waitFor();
+        await p.getByRole("table").first().waitFor();
+        assert.ok(await p.getByRole("heading", { level: 1 }).isVisible());
+        assert.ok((await p.getByRole("table").count()) >= 1);
+      },
+    },
+    {
+      path: "/inventario/umbrales",
+      mockCheck: async (p) => {
+        await p.getByRole("heading", { level: 1 }).waitFor();
+        assert.ok(await p.getByRole("heading", { level: 1 }).isVisible());
+        const form = p.locator("main form, [role='form']").first();
+        const hasForm = (await form.count()) > 0;
+        const hasInput =
+          (await p.getByRole("spinbutton").count()) > 0 ||
+          (await p.getByRole("textbox").count()) > 0;
+        assert.ok(hasForm || hasInput, "Umbrales: debe tener formulario de umbral global");
+      },
+    },
+    {
+      path: "/inventario/traslados",
+      mockCheck: async (p) => {
+        await p.getByRole("heading", { level: 1 }).waitFor();
+        assert.ok(await p.getByRole("heading", { level: 1 }).isVisible());
+        const hasTable = (await p.getByRole("table").count()) > 0;
+        const hasEmpty =
+          (await p.getByText("No hay traslados", { exact: false }).count()) > 0;
+        assert.ok(hasTable || hasEmpty, "Traslados: debe tener tabla o mensaje de lista vacía");
+      },
+    },
+    {
+      path: "/inventario/dashboard",
+      mockCheck: async (p) => {
+        await p.getByRole("heading", { level: 1 }).waitFor();
+        assert.ok(await p.getByRole("heading", { level: 1 }).isVisible());
+        const hasKpi =
+          (await p.getByText("Total unidades físicas", { exact: false }).count()) > 0 ||
+          (await p.getByText("Unidades disponibles", { exact: false }).count()) > 0 ||
+          (await p.getByRole("table").count()) > 0;
+        assert.ok(hasKpi, "Dashboard: debe mostrar KPIs o tabla de distribución");
+      },
+    },
+  ];
+  for (const { path, mockCheck } of inventoryChecks) {
+    await page.goto(baseURL + path + "?modoRevision=1&escenario=loading");
+    if (mode === "api") {
+      const alert = page.getByRole("alert");
+      await alert.waitFor();
+      const message = await alert.innerText();
+      assert.match(message, /Integración API no disponible/);
+      assert.equal(await page.getByRole("table").count(), 0);
+      assert.equal(await page.locator("main form").count(), 0);
+      assert.equal(await page.getByRole("dialog").count(), 0);
+      assert.equal(await page.getByText("Total unidades físicas").count(), 0);
+      assert.equal(await page.getByText("Unidades disponibles").count(), 0);
+      assert.equal(await page.getByText("Alertas operativas de inventario").count(), 0);
+    } else {
+      await mockCheck(page);
+      assert.equal(
+        await page.getByRole("combobox", { name: /Escenario/ }).count(),
+        0,
+      );
+      assert.equal(await page.getByText("Integración API no disponible").count(), 0);
+    }
+    assert.equal(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      true,
+    );
+  }
   // MK-002 Combos: rutas canónicas integradas. En mock cada ruta es operativa
   // contra el Catálogo y Pricing compartidos; en api el gate falla cerrado, sin
   // datos de demostración ni fallback silencioso a fixtures.
@@ -254,20 +330,20 @@ try {
   if (mode === "api")
     assert.equal(
       requests.some((url) =>
-        // Adapters de revisión, páginas Promotions no bloqueadas y mocks de
+        // Adapters de revisión, páginas Promotions/Inventory no bloqueadas y mocks de
         // Taxonomía ni en URLs de DEV (/features/taxonomy/) ni en bundles
         // compilados de dist/assets/ (chunks derivados de las páginas y el
         // servicio de taxonomía).
-        /createMockAuditRuntime|reviewRepository|audit-demo\.(csv|pdf)|createDemoPricingRuntime|mock[A-Z]|\/prices-|\/catalogChoices-|\/promotionServices-|\/PromotionDataNotice-|\/(?:Coupon|Campaign|Recommendation)[^/]*Page-|\/features\/taxonomy\/|\/assets\/[^/]*(?:Category(?:Tree|Create|Edit|Detail|Deactivate)|Characteristic|ProductType|Brand|Seo(?:List|Config)|SEO|taxonomyServices)[^/]*\.(?:js|css)/.test(
+        /createMockAuditRuntime|reviewRepository|audit-demo\.(csv|pdf)|createDemoPricingRuntime|mock[A-Z]|mockInventory|inventoryFixtures|\/prices-|\/catalogChoices-|\/promotionServices-|\/PromotionDataNotice-|\/(?:Coupon|Campaign|Recommendation|StockControl|Thresholds|Transfers|InventoryDashboard)[^/]*Page-|\/features\/taxonomy\/|\/assets\/[^/]*(?:Category(?:Tree|Create|Edit|Detail|Deactivate)|Characteristic|ProductType|Brand|Seo(?:List|Config)|SEO|taxonomyServices)[^/]*\.(?:js|css)/.test(
           url,
         ),
       ),
       false,
     );
   assert.deepEqual(errors, []);
-  const totalViews = 4 + 16 + catalogPaths.length + taxonomyPaths.length + (mode === "mock" ? 4 : 0) + 5 + comboPaths.length + (mode === "mock" ? 1 : 0);
+  const totalViews = 4 + 16 + catalogPaths.length + taxonomyPaths.length + (mode === "mock" ? 4 : 0) + 5 + inventoryChecks.length + comboPaths.length + (mode === "mock" ? 1 : 0);
   console.log(
-    `PASS producción ${mode}: ${totalViews} vistas de Catálogo, Promotions, Pricing S01, Auditoría S01–S05, Taxonomía y Combos S01–S03, 1440 px, sin errores; ${mode === "api" ? "providers ausentes explícitos, reintento y persistencia del error de Pricing, taxonomía y combos bloqueados y cero carga de mocks/bundles" : "módulos presentes, tablas comerciales verificadas y controles de revisión ausentes"}.`,
+    `PASS producción ${mode}: ${totalViews} vistas de Catálogo, Promotions, Pricing S01, Auditoría S01–S05, Taxonomía, Inventario y Combos S01–S03, 1440 px, sin errores; ${mode === "api" ? "providers ausentes explícitos, reintento y persistencia del error de Pricing, taxonomía, inventario y combos bloqueados y cero carga de mocks/bundles" : "módulos presentes, tablas comerciales verificadas y controles de revisión ausentes"}.`,
   );
 } finally {
   await browser.close();

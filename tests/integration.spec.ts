@@ -135,10 +135,16 @@ for (const module of modules) {
         navigation.getByRole("link", { name: "Gestión de combos", exact: true }),
       ).toHaveAttribute("href", "/combos");
       await expect(
+        navigation.getByRole("link", { name: "Control de stock", exact: true }),
+      ).toHaveAttribute("href", "/inventario");
+      await expect(
         navigation.getByText("PROMOCIONES", { exact: true }),
       ).toBeVisible();
       await expect(
         navigation.getByText("PRECIOS", { exact: true }),
+      ).toBeVisible();
+      await expect(
+        navigation.getByText("INVENTARIO", { exact: true }),
       ).toBeVisible();
       const active = navigation.locator('a[aria-current="page"]');
       await expect(active).toHaveCount(1);

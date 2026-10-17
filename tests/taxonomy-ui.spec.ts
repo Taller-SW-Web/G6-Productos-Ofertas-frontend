@@ -69,8 +69,11 @@ for (const module of taxonomySections) {
       const navigation = page.getByRole("navigation", {
         name: "Navegación de la aplicación",
       });
-      // Comprueba destinos del shell de productos y la sección de Taxonomía por sus enlaces estables.
+      // Comprueba destinos del shell de productos, Combos, Inventario y Taxonomía por sus enlaces estables.
       await expect(navigation.getByRole("link", { name: "Gestión de combos", exact: true })).toHaveAttribute("href", "/combos");
+      await expect(navigation.getByRole("link", { name: "Control de stock", exact: true })).toHaveAttribute("href", "/inventario");
+      await expect(navigation.getByRole("link", { name: "Traslados de stock", exact: true })).toHaveAttribute("href", "/inventario/traslados");
+      await expect(navigation.getByRole("link", { name: "Dashboard analítico", exact: true })).toHaveAttribute("href", "/inventario/dashboard");
       await expect(navigation.getByRole("link", { name: "Gestión de productos", exact: true })).toHaveAttribute("href", "/productos");
       await expect(navigation.getByRole("link", { name: "Importar precios", exact: true })).toHaveAttribute("href", "/precios/importar");
       await expect(navigation.getByRole("link", { name: "Historial de precios", exact: true })).toHaveAttribute("href", "/precios/auditoria");
