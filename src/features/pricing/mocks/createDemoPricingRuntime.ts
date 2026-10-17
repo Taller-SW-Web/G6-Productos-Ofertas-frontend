@@ -7,6 +7,7 @@ import { createMockPricingRepository } from "../adapters/mockPricingRepository";
 import { DemoControl } from "./demoControl";
 import { decorateDemoRepository } from "./demoPricingDecorator";
 import { demoNow } from "./prices";
+import { mockCatalogRepository } from "../../catalog/adapters/mockCatalogRepository";
 import { mockPricingAudit } from "../../price-audit/mocks/pricingChanges";
 
 export function createDemoPricingRuntime(
@@ -28,7 +29,15 @@ export function createDemoPricingRuntime(
     ),
     clock,
     downloader,
-    updates: control,
+    updates: {
+      subscribe(listener) {
+        const unsubscribeControl = control.subscribe(listener);
+        const unsubscribeCatalog = mockCatalogRepository.subscribe(listener);
+        return () => { unsubscribeControl(); unsubscribeCatalog(); };
+      },
+      version: operation => control.version(operation) +
+        (operation === "listTargets" ? mockCatalogRepository.revision() : 0),
+    },
     notice: {
       title: "Datos de demostración",
       description:

@@ -1,5 +1,7 @@
 # Productos y Ofertas — Frontend
 
+Demo interna de lectura real preparada con selector explícito: [alcance, configuración y evidencias](docs/DEMO_G6_LECTURA_REAL.md). Su publicación requiere autorización final.
+
 Aplicación web de administración para el módulo Productos y Ofertas. Permite recorrer flujos de catálogo, taxonomía, precios, auditoría de precios, promociones, cupones, recomendaciones, carga masiva, gestión de combos e inventario en modo de demostración. Usa React 19, TypeScript 6, Vite 8, Mantine 9 y Tabler Icons; este repositorio es independiente de [Docs](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs) y Backend. La presencia de puertos y adapters sustituibles facilita una futura integración, pero no acredita conexión HTTP con servicios reales.
 
 ## Inicio rápido
@@ -48,7 +50,7 @@ npm run preview
 
 ## Configuración de datos
 
-La única variable de entorno de la aplicación es `VITE_DATA_MODE` (ver [.env.example](.env.example)). Selecciona una vez el modo de datos global y se distribuye mediante `DataModeContext`.
+La selección general de datos usa `VITE_DATA_MODE`; la vista de consulta real usa además `VITE_G6_READ_DEMO` de forma explícita en la composición de App (ver [.env.example](.env.example)). Selecciona una vez el modo de datos global y se distribuye mediante `DataModeContext`.
 
 | Valor | Comportamiento |
 |---|---|
@@ -88,6 +90,15 @@ Implementa S01–S04 como vistas administrativas con puertos tipados y adapters 
 La elegibilidad de componentes, las reglas económicas y la disponibilidad informativa consultan las identidades del Catálogo compartido (no un catálogo paralelo). La disponibilidad se calcula como `min(floor(stockDisponibleSKU / cantidadRequeridaSKU))` sobre un snapshot inyectable; si los datos no permiten verificar, se muestra información incompleta o no verificable en lugar de un cero inventado. Los precios vigentes de referencia provienen del puerto de Pricing y se distinguen del precio comercial guardado.
 
 No hay provider HTTP real ni persistencia comercial. En modo `api`, la integración permanece cerrada y no cae a fixtures. La referencia consultada es OpenAPI `0.6.0-rc.1`: las operaciones administrativas de Combos están marcadas `provisional-internal`; `combos:leer`, `catalogo:leer` y `precios:leer` siguen pendientes de registro de scopes. El component spec de MK-002 permanece **En revisión**: esta entrega no declara aprobación UX, homologación ni integración API.
+
+La revisión [Catálogo/SKU, issue #35](docs/ISSUE_35_CATALOGO.md) actualiza la composición
+del demo: categorías/marcas editables provienen de Taxonomía; los nombres se resuelven
+por ID y los SKU comparten un espacio de unicidad entre productos y variantes.
+Pricing y Promociones leen la identidad/estado de los registros de Catálogo de la misma
+sesión. Pricing no crea un precio vigente a partir del precio inicial: un objetivo sin
+registro muestra «Sin precio aplicable». Se conservan las referencias históricas sin
+mapearlas por nombre; migración de IDs/roles oficiales y revisión entre owners siguen
+pendientes. Ver el informe para fuentes fijadas, pruebas, límites y evidencia de esta revisión.
 
 ## Arquitectura
 

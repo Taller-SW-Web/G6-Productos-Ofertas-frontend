@@ -1,5 +1,11 @@
 # Integración MK-003/MK-004 con Taxonomía — revisión requerida
 
+> Estado del 16 de octubre: [issue #35](ISSUE_35_CATALOGO.md) activa lecturas de los
+> servicios editables de Taxonomía en el demo integrado, preservando por separado los
+> IDs históricos. Este informe registra la coordinación original; la migración de
+> esos IDs y los roles identificadores oficiales siguen sin aprobación confirmada.
+> No se debe interpretar la activación del puente como aprobación de ese mapeo.
+
 Referencia: PR #25; integración de `master@fdbacbae347b346bb492c27b3f4fab3c81be77da`, incluido PR #24 de López.
 Fuentes: Docs `master@942bf7322eb388fe5b0fcc9c5a565152e1099139`, SPEC-003/004/009/010 y OpenAPI; puertos `src/features/taxonomy/services/*Repository.ts`.
 
