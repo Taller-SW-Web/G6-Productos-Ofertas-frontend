@@ -6,6 +6,7 @@ import {
 } from "@tabler/icons-react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
+  ContextNote,
   FeedbackAlert,
   PageHeader,
   SectionCard,
@@ -99,11 +100,11 @@ export function BulkDownloadsPage() {
           description="Estructura de referencia para preparar archivos de importación masiva"
         >
           <Stack gap="md">
-            <FeedbackAlert semantic="info" title="Disponibilidad de plantillas">
+            <ContextNote title="Disponibilidad de plantillas">
               {dataMode === "mock"
                 ? "La demostración ofrece una muestra CSV y no incluye una plantilla XLSX descargable."
                 : "La disponibilidad de cada plantilla depende de la respuesta del provider API configurado."}
-            </FeedbackAlert>
+            </ContextNote>
 
             <Group justify="space-between" align="flex-end" wrap="wrap" gap="md">
               <Radio.Group

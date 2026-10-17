@@ -14,6 +14,7 @@ import {
   EntityTable,
   FeedbackAlert,
   FilterBar,
+  ContextNote,
   PageHeader,
   StatusBadge,
   type TableColumn,
@@ -261,10 +262,10 @@ export function TransfersPage() {
       />
 
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Recepción física y disposición contable">
+        <ContextNote title="Recepción física y disposición contable">
           Al recibir un traslado, las unidades se acreditan al saldo físico de destino según su disposición
           (reingreso a disponible o reingreso bloqueado). Las mermas no acreditan stock vendible.
-        </FeedbackAlert>
+        </ContextNote>
 
         {successMessage && (
           <FeedbackAlert

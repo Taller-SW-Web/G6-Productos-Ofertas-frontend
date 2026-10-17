@@ -8,8 +8,8 @@ import {
   IconTruckDelivery,
 } from "@tabler/icons-react";
 import {
+  ContextNote,
   EntityTable,
-  FeedbackAlert,
   PageHeader,
   StatusBadge,
   type TableColumn,
@@ -243,11 +243,11 @@ export function StockControlPage() {
       />
 
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Disponibilidad autoritativa multicanal">
+        <ContextNote title="Disponibilidad autoritativa multicanal">
           El saldo disponible se calcula a partir de las unidades físicas menos las reservadas y las
           bloqueadas, sin valores negativos. Los canales de venta consultan este saldo sin modificar
           físicamente el inventario.
-        </FeedbackAlert>
+        </ContextNote>
 
         {isRevisionMode && <DevScenarioSelector />}
 

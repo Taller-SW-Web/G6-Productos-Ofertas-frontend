@@ -287,7 +287,7 @@ export function VariantListPage() {
                 <Table.Th>Perfil Físico</Table.Th>
                 <Table.Th>Preparación Inventario</Table.Th>
                 <Table.Th>Estado</Table.Th>
-                <Table.Th style={{ textAlign: "right" }}>Acciones</Table.Th>
+                <Table.Th style={{ textAlign: "right", width: 120 }}>Acciones</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -342,36 +342,19 @@ export function VariantListPage() {
                       </StatusBadge>
                     </Table.Td>
                     <Table.Td style={{ textAlign: "right" }}>
-                      <Group gap="xs" justify="flex-end">
+                      <Group gap="xs" justify="flex-end" wrap="nowrap">
                         <ActionIcon
                           component={Link}
                           to={`/productos/${productId}/variantes/${v.variantId}`}
-                          variant="subtle"
-                          color="gray"
-                          size="sm"
                           aria-label={`Ver detalle de ${v.sku}`}
                           title="Ver detalle"
                         >
                           <IconEye size={16} />
                         </ActionIcon>
-                        <ActionIcon
-                          component={Link}
-                          to={`/productos/${productId}/variantes/${v.variantId}/editar`}
-                          variant="subtle"
-                          color="gray"
-                          size="sm"
-                          aria-label={`Editar variante ${v.sku}`}
-                          title="Editar variante"
-                        >
-                          <IconEdit size={16} />
-                        </ActionIcon>
                         <Menu position="bottom-end" shadow="md">
                           <Menu.Target>
                             <ActionIcon
-                              variant="subtle"
-                              color="gray"
-                              size="sm"
-                              aria-label={`Más acciones para ${v.sku}`}
+                              aria-label={`Más acciones de ${v.sku}`}
                               title="Más acciones"
                             >
                               <IconDotsVertical size={16} />
@@ -380,14 +363,21 @@ export function VariantListPage() {
                           <Menu.Dropdown>
                             <Menu.Item
                               component={Link}
+                              to={`/productos/${productId}/variantes/${v.variantId}/editar`}
+                              leftSection={<IconEdit size={16} />}
+                            >
+                              Editar
+                            </Menu.Item>
+                            <Menu.Item
+                              component={Link}
                               to={`/productos/${productId}/variantes/${v.variantId}/preparacion`}
-                              leftSection={<IconListCheck size={14} />}
+                              leftSection={<IconListCheck size={16} />}
                             >
                               Consultar Preparación
                             </Menu.Item>
                             {v.status === "BORRADOR" && (
                               <Menu.Item
-                                leftSection={<IconCheck size={14} />}
+                                leftSection={<IconCheck size={16} />}
                                 onClick={() => handleActivateClick(v)}
                               >
                                 Activar Variante
@@ -396,7 +386,7 @@ export function VariantListPage() {
                             {v.status === "ACTIVA" && (
                               <Menu.Item
                                 color="danger"
-                                leftSection={<IconPower size={14} />}
+                                leftSection={<IconPower size={16} />}
                                 onClick={() => handleDeactivateClick(v)}
                               >
                                 Desactivar Variante
@@ -404,7 +394,7 @@ export function VariantListPage() {
                             )}
                             {v.status === "INACTIVA" && (
                               <Menu.Item
-                                leftSection={<IconRefresh size={14} />}
+                                leftSection={<IconRefresh size={16} />}
                                 onClick={() => handleReactivateClick(v)}
                               >
                                 Reactivar Variante

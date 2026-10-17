@@ -16,6 +16,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import {
+  ContextNote,
   EntityTable,
   FeedbackAlert,
   FilterBar,
@@ -265,10 +266,10 @@ export function InventoryDashboardPage() {
       />
 
       <Stack gap="xl">
-        <FeedbackAlert semantic="info" title="Panel de solo lectura">
+        <ContextNote title="Panel de solo lectura">
           Este panel resume indicadores clave del catálogo y almacenes. Para registrar recepciones de traslados
           o ajustar umbrales, utiliza las vistas operativas de control de stock.
-        </FeedbackAlert>
+        </ContextNote>
 
         {isRevisionMode && <DevScenarioSelector />}
 

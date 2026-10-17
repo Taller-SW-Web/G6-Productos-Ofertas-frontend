@@ -1,4 +1,5 @@
-import { Button, Stack, Text } from "@mantine/core";
+import { ActionIcon, Button, Stack, Text } from "@mantine/core";
+import { IconEye } from "@tabler/icons-react";
 import { Link } from "react-router-dom";
 import {
   EntityTable,
@@ -70,19 +71,20 @@ export function AuditTable({
     },
     {
       key: "action",
-      header: "Consulta",
-      width: 150,
+      header: "Acciones",
+      width: 80,
+      align: "right",
       render: (entry) => (
-        <Button
+        <ActionIcon
           component={Link}
-          variant="subtle"
           to={`/precios/auditoria/asientos/${encodeURIComponent(entry.id)}${suffix}`}
           state={{ auditOpener: entry.id }}
           data-audit-id={entry.id}
-          aria-label={`Ver detalle de ${entry.id}`}
+          aria-label={`Ver detalle del asiento ${entry.id}`}
+          title="Ver detalle"
         >
-          Ver detalle
-        </Button>
+          <IconEye size={16} />
+        </ActionIcon>
       ),
     },
   ];

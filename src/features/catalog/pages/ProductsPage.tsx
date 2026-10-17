@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
-import { Avatar, Button, Group, Stack, Text } from "@mantine/core";
+import { ActionIcon, Avatar, Button, Group, Stack, Text } from "@mantine/core";
 import { IconEye, IconPlus } from "@tabler/icons-react";
 import {
   EntityTable,
@@ -197,19 +197,17 @@ export function ProductsPage() {
     {
       key: "actions",
       header: "ACCIONES",
-      width: 160,
+      width: 80,
       align: "right",
       render: (row) => (
-        <Button
+        <ActionIcon
           component={Link}
           to={{ pathname: `/productos/${row.id}`, search: location.search }}
-          variant="outline"
-          size="xs"
-          leftSection={<IconEye size={14} />}
-          styles={{ label: { whiteSpace: "nowrap" } }}
+          aria-label={`Ver detalle de ${row.name}`}
+          title="Ver detalle"
         >
-          Ver detalle
-        </Button>
+          <IconEye size={16} />
+        </ActionIcon>
       ),
     },
   ];
