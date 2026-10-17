@@ -51,7 +51,7 @@ El frontend de inventario implementa el patrón de puertos y adaptadores (Arquit
    - Validada mediante `tests/adapters/alternateInventoryRepository.ts` y harness `tests/harness/inventory-adapter.html`.
    - La suite `tests/inventory-adapter.spec.ts` verifica lectura, filtros, vacío, errores, recepciones y refresco sin depender de fixtures ni `MockInventoryAdapter`.
 5. **Ejecución de pruebas automatizadas:**
-   - Suite integrada (`npm test` / `npx playwright test`): ejecuta las pruebas de idempotencia y validación de contrato (`tests/inventory-idempotency.spec.ts`), las pruebas de sustitución de adaptador (`tests/inventory-adapter.spec.ts` sobre `tests/harness/inventory-adapter.html`) y las pruebas de interfaz y navegación E2E (`tests/inventory.spec.ts`).
+   - Suite integrada (`npm run test:ci` / `npm run test:e2e`): ejecuta las pruebas unitarias de Vitest y la suite E2E de Playwright, incluyendo las pruebas de idempotencia y validación de contrato (`tests/inventory-idempotency.spec.ts`), las pruebas de sustitución de adaptador (`tests/inventory-adapter.spec.ts` sobre `tests/harness/inventory-adapter.html`), el dashboard (`tests/inventory-dashboard.spec.ts`) y las pruebas de interfaz y navegación E2E (`tests/inventory.spec.ts`).
 
 ---
 
@@ -111,7 +111,7 @@ La conformidad de este contrato se valida mediante los siguientes comandos. Los 
 | `npm run lint` | Cero advertencias ni errores bajo ESLint y reglas de hooks React 19. |
 | `$env:VITE_DATA_MODE = 'mock'; npm run build` | Compilación exitosa del bundle de demostración (`VITE_DATA_MODE=mock`). |
 | `$env:VITE_DATA_MODE = 'api'; npm run build` | Compilación exitosa del bundle de producción (`VITE_DATA_MODE=api`). |
-| `npm test` | Suite completa Playwright (49 pruebas): 14 de idempotencia/contrato (`tests/inventory-idempotency.spec.ts`), 12 sobre el harness de independencia de mocks — 6 de sustitución de repositorio y 6 de reintentos/idempotencia/estado del modal (`tests/inventory-adapter.spec.ts`) y 23 E2E de flujos y navegación (`tests/inventory.spec.ts`). |
+| `npm run test:ci` | Pruebas unitarias (Vitest: Combos y Bulk) + suite E2E Playwright completa, incluyendo las pruebas de Inventario (`tests/inventory-idempotency.spec.ts`, `tests/inventory-adapter.spec.ts`, `tests/inventory-dashboard.spec.ts` y `tests/inventory.spec.ts`). |
 | `node scripts/verify-production.mjs <mock\|api>` | Verificación en preview de producción (`1440 × 900`) para ambos modos sin errores ni carga de mocks en modo `api`. |
 
 > **Regla de evidencia:** no declarar `PASS` sin haber ejecutado el comando correspondiente y obtenido salida libre de errores. Si no se ejecutó, registrar `NO EJECUTADO`.
