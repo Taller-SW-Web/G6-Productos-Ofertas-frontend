@@ -63,8 +63,17 @@ import {
   ThresholdsPage,
   TransfersPage,
   InventoryDashboardPage,
+  ComboListPage,
+  ComboCreatePage,
+  ComboDetailPage,
+  ComboEditPage,
 } from "./productPages";
 export const productRoutes: RouteObject[] = [
+  { path: "/combos", element: <ComboListPage /> },
+  { path: "/combos/nuevo", element: <ComboCreatePage /> },
+  { path: "/combos/:comboId/editar", element: <ComboEditPage /> },
+  { path: "/combos/:comboId/no-disponible", element: <ComboDetailPage unavailable /> },
+  { path: "/combos/:comboId", element: <ComboDetailPage /> },
   { path: "/productos", element: <ProductsPage /> },
   { path: "/productos/nuevo", element: <ProductCreatePage /> },
   { path: "/productos/:productId", element: <ProductDetailPage /> },
