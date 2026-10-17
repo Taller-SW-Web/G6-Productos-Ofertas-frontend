@@ -179,7 +179,14 @@ export function createMockPricingRepository(
         )
           row.validUntil = clock.now();
       records.push(saved);
-      onUpdated?.(target, current, saved, change.draft.reason);
+      try {
+        onUpdated?.(target, current, saved, change.draft.reason);
+      } catch (error) {
+        console.warn(
+          "Fallo en la notificación onUpdated tras guardar el precio:",
+          error,
+        );
+      }
       return structuredClone(saved);
     },
     async listSchedules(targetId, page, signal) {

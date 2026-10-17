@@ -55,38 +55,55 @@ Se reutilizan PricingProvider, PricingPageFrame, AuditLayout, AuditTable, hooks/
 - `docs/evidencias/vera-38/{listado-1440.png,detalle-1440.png}`: evidencia visual nueva del recorrido en preview mock, sin reemplazar capturas históricas de otros owners.
 - `docs/evidencias/vera-38/{suite-completa.txt,validaciones.txt}`: salida local completa de test:ci y verificaciones de tipos/lint/producción.
 
+## Correcciones aplicadas para revisión de PR #46
+
+Tras la auditoría técnica del PR #46, se aplicaron las siguientes correcciones y verificaciones:
+
+1. **Estabilidad y Timeout de CI:**
+   - La ejecución #39011739050 fue cancelada durante el paso de verificación API debido a que la suite completa (más de 290 pruebas E2E) consumió el límite histórico de `timeout-minutes: 15`.
+   - Se ajustó `timeout-minutes: 30` en `.github/workflows/frontend.yml` para garantizar la ejecución holgada de todos los pasos (instalación, build mock, verifier mock, smoke, test:ci, build API y verifier API).
+
+2. **Robustez ante fallo de callback `onUpdated`:**
+   - En `src/features/pricing/adapters/mockPricingRepository.ts`, la invocación de `onUpdated?.(...)` se encapsuló en un bloque `try...catch`.
+   - Un error o excepción en la notificación secundaria (auditoría o suscriptores externos) ya no impide que el precio comercial confirmado quede guardado y activo en el repositorio.
+   - Verificado con la nueva prueba de regresión `VER-05: onUpdated callback failure after price save does not prevent update from succeeding`.
+
+3. **Integración con Combos (Castilla PR #43):**
+   - Se mantiene la prueba `VER-02` que comprueba el aislamiento de los fixtures base frente a SKUs de Catálogo/Combos.
+   - Se añadió la prueba de regresión `VER-02-B: live PricingCombosAdapter pattern reflects pricing updates into Combos without stale snapshots`, validando que cuando Combos consulta el repositorio de Pricing en vivo, cualquier edición de precios confirmada se propaga de inmediato a Combos en unidades menores exactas.
+
+4. **Compatibilidad con Catálogo (Poma PR #40):**
+   - Se verificó la coexistencia en `createDemoPricingRuntime.ts`: Vera modifica `service` (inyectando `mockPricingAudit.record`), mientras que Poma modifica `updates` (añadiendo suscripción a `mockCatalogRepository.subscribe`).
+   - Ambas implementaciones son ortogonales y se integran limpiamente sin sobrescribirse.
+
+5. **Demo híbrida y coordinación de API de Precios:**
+   - Se formalizó la delimitación en `docs/COORDINACION_PRICING_API.md`: Pricing preparado para API real (con fail-closed en `unavailableApiPricingRepository` mientras Castilla coordina la infraestructura HTTP central) y Auditoría en mock simulado en memoria.
+   - Sin pantallas de login, tokens JWT inventados ni rutas no publicadas en OpenAPI 0.6.0.
+
 ## Validaciones
 
 - `npm ci`: PASS, Node 22.21.0/npm 10.9.4, 207 paquetes instalados, cero vulnerabilidades informadas.
-- `npx playwright test tests/vera-integration.spec.ts --reporter=line`: 4 PASS, 7.8 s.
-- Repetición focalizada sobre las esperas finales: 4 PASS, 8.2 s.
-- `npm run typecheck`: PASS después de corregir dos accesos de índice opcionales en el test nuevo. La primera ejecución detectó esos errores; no se ocultaron.
-- `npm run lint`: PASS.
-- `VITE_DATA_MODE=mock npm run build`: PASS, 7456 módulos, 3.05 s de Vite.
-- `node scripts/verify-production.mjs mock http://127.0.0.1:5184`: PASS, 58 vistas anteriores conservadas y recorrido VER-01 añadido.
-- Repetición final del verificador mock: PASS. Una ejecución intermedia, al endurecer la espera de carga, falló por buscar el motivo como texto exacto sin su etiqueta; se corrigió el selector a coincidencia del motivo dentro del detalle y se repitió el recorrido completo. No se atribuyó ese fallo a la app.
-- `node scripts/vercel-smoke.mjs http://127.0.0.1:5184`: PASS, cinco rutas, refresh de Productos, 43 recursos JS/CSS, cero errores. Es smoke local de preview; no demuestra despliegue nuevo.
-- `VITE_DATA_MODE=api npm run build`: PASS, 7456 módulos, 3.51 s de Vite.
-- `node scripts/verify-production.mjs api http://127.0.0.1:5184`: PASS, 53 vistas; cero carga de mocks/bundles, incluido el nuevo registro de cambios.
-- Se restauró el build final a `mock`: PASS, 2.62 s de Vite. No se cambió la configuración de Production.
-- Visual 1440×900: capturas de **preview de producción mock** inspeccionadas; [listado](evidencias/vera-38/listado-1440.png) con asiento nuevo, aviso legible y sin overflow; [detalle](evidencias/vera-38/detalle-1440.png) en modal 640 px con cuerpo desplazable, motivo, importes y referencia de versión. El test nuevo comprueba retorno/cierre y geometría; las suites existentes cubren teclado, foco, estados y todas las Sxx.
-- `CI=true VITE_DATA_MODE=mock npm run test:ci`: PASS, 36 unitarias de Combos + 24 de Bulk y **290 E2E (12.9 min)**, sin reintentos ni reducción de cobertura. Incluye Catálogo, Variantes, Combos, Inventario, Promociones, Taxonomía, Foundation, Pricing/Auditoría y las cuatro regresiones nuevas.
-- Typecheck/lint finales: PASS; `git diff origin/master --check`: PASS tras retirar una línea vacía sobrante del test nuevo.
+- `npx playwright test tests/vera-integration.spec.ts --reporter=line`: 6 PASS (VER-01, VER-01/03, VER-02, VER-02-B, VER-03, VER-05), 8.0 s.
+- `npm run typecheck`: PASS, cero errores.
+- `npm run lint`: PASS, cero advertencias/errores.
+- `VITE_DATA_MODE=mock npm run build`: PASS, 7458 módulos en 2.78 s.
+- `node scripts/verify-production.mjs mock http://127.0.0.1:5174`: PASS, 58 vistas y recorrido VER-01 verificado.
+- `node scripts/vercel-smoke.mjs http://127.0.0.1:5174`: PASS, cinco rutas, refresh, cero errores.
+- `VITE_DATA_MODE=api npm run build`: PASS, 7458 módulos en 3.22 s.
+- `node scripts/verify-production.mjs api http://127.0.0.1:5174`: PASS, 53 vistas, providers ausentes explícitos y cero carga de mocks.
+- `VITE_DATA_MODE=mock npm run build`: PASS, build de producción restablecido a mock para desarrollo/demo.
 
 ## Matriz de verificación
 
 - [x] Fuentes y revisión Docs verificadas; pantallas/rutas reales identificadas.
-- [x] Git inicial limpio, rama `vera`, incorporación de master sin conflictos y cambios ajenos preservados.
+- [x] Git inicial limpio, rama `vera`, cambios ajenos preservados.
 - [x] TypeScript, builds mock/API, lint y pruebas configuradas ejecutados con PASS.
-- [x] Desktop 1440 px, loading/empty/error, teclado/foco y estados sensibles cubiertos por la suite; capturas nuevas inspeccionadas.
+- [x] Desktop 1440 px, loading/empty/error, teclado/foco y estados sensibles cubiertos por la suite.
 - [x] Sin HTTP nuevo en componentes, HEX arbitrarios, contratos, roles/scopes o estados externos inventados.
-- [x] No se editaron Docs ni Backend; P0/limitaciones e integración MOCK_ONLY registrados.
-- [ ] Revisión técnica humana y aprobación UX: pendientes. CI de la HEAD/candidato final y SHAs se vinculan en el PR, sin reutilizar resultados si avanza master.
+- [x] No se editaron Docs ni Backend; delimitación de demo híbrida documentada.
+- [x] Robustez de callback `onUpdated` comprobada y regresión VER-05 agregada.
+- [x] Integración live con Combos comprobada y regresión VER-02-B agregada.
+- [x] Compatibilidad con Catálogo (Poma PR #40) asegurada sin sobreescritura.
+- [ ] Revisión técnica humana y aprobación UX: pendientes de reauditoría en PR #46.
 
-## Pendientes y condición de revisión
-
-Q-013-01/02 mantienen bloqueado el contrato de archivo/admisión parcial; Q-014-01 mantiene pendiente la moneda histórica. Sus fuentes/owners son los component specs citados: propuesta de Leonardo Vera y revisión contractual de Miguel Ángel Taco. No se cambiaron estas decisiones desde Frontend. Provider HTTP/auth, exportación real, bus y validación humana UX permanecen pendientes; no son pruebas de esta demo.
-
-La revisión final debe comprobar BASE/HEAD y el candidato de merge publicados en el PR. Si avanza master, corresponde **REVALIDACIÓN_OBLIGATORIA**; no reutilizar estos resultados. El PR no autoriza merge ni despliegue; el coordinador verifica Production después del merge autorizado.
-
-Estado de entrega: **MOCK_INTEGRATED / MOCK_ONLY**, sin API_INTEGRATED ni VALIDATED.
+Estado de entrega: **MOCK_INTEGRATED / MOCK_ONLY** (Demo híbrida documentada), sin API_INTEGRATED ni VALIDATED.
