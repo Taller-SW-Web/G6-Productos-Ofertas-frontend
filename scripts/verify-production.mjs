@@ -214,6 +214,43 @@ try {
     }
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   }
+  // MK-002 Combos: rutas canónicas integradas. En mock cada ruta es operativa
+  // contra el Catálogo y Pricing compartidos; en api el gate falla cerrado, sin
+  // datos de demostración ni fallback silencioso a fixtures.
+  const comboPaths = [
+    { path: "/combos", table: true, form: false },
+    { path: "/combos/nuevo", table: false, form: true },
+    { path: "/combos/combo-001", table: true, form: false },
+    { path: "/combos/combo-001/editar", table: false, form: true },
+    { path: "/combos/combo-001/no-disponible", table: false, form: false },
+  ];
+  for (const { path, table, form } of comboPaths) {
+    await page.goto(baseURL + path);
+    if (mode === "api") {
+      const alert = page.getByRole("alert");
+      await alert.waitFor();
+      assert.match(await alert.innerText(), /Provider API de Combos no configurado/);
+      assert.equal(await page.getByRole("table").count(), 0);
+      assert.equal(await page.locator("main form").count(), 0);
+      assert.equal(await page.getByRole("dialog").count(), 0);
+      assert.equal(await page.getByText("Datos de demostración", { exact: true }).count(), 0);
+    } else {
+      await page.getByRole("heading", { level: 1 }).waitFor();
+      if (table) await page.getByRole("table").waitFor();
+      if (form) await page.locator("main form").waitFor();
+      assert.equal(await page.getByText("Datos de demostración", { exact: true }).count(), 0);
+    }
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  }
+  // Estado de error de listado: alerta con reintento que recupera el listado.
+  if (mode === "mock") {
+    await page.goto(baseURL + "/combos?scenario=list-error");
+    await page.getByRole("alert").waitFor();
+    assert.match(await page.getByRole("alert").innerText(), /No se pudieron consultar los combos/);
+    await page.getByRole("button", { name: "Reintentar" }).click();
+    await page.getByRole("table").waitFor();
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  }
   if (mode === "api")
     assert.equal(
       requests.some((url) =>
@@ -228,9 +265,9 @@ try {
       false,
     );
   assert.deepEqual(errors, []);
-  const totalViews = 4 + 16 + catalogPaths.length + taxonomyPaths.length + (mode === "mock" ? 4 : 0) + 5;
+  const totalViews = 4 + 16 + catalogPaths.length + taxonomyPaths.length + (mode === "mock" ? 4 : 0) + 5 + comboPaths.length + (mode === "mock" ? 1 : 0);
   console.log(
-    `PASS producción ${mode}: ${totalViews} vistas de Catálogo, Promotions, Pricing S01, Auditoría S01–S05 y Taxonomía, 1440 px, sin errores; ${mode === "api" ? "providers ausentes explícitos, reintento y persistencia del error de Pricing, taxonomía bloqueada y cero carga de mocks/bundles" : "módulos presentes, tablas comerciales verificadas y controles de revisión ausentes"}.`,
+    `PASS producción ${mode}: ${totalViews} vistas de Catálogo, Promotions, Pricing S01, Auditoría S01–S05, Taxonomía y Combos S01–S03, 1440 px, sin errores; ${mode === "api" ? "providers ausentes explícitos, reintento y persistencia del error de Pricing, taxonomía y combos bloqueados y cero carga de mocks/bundles" : "módulos presentes, tablas comerciales verificadas y controles de revisión ausentes"}.`,
   );
 } finally {
   await browser.close();

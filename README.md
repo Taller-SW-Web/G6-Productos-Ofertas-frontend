@@ -1,6 +1,6 @@
 # Productos y Ofertas — Frontend
 
-Aplicación web de administración para el módulo Productos y Ofertas. Permite recorrer flujos de catálogo, taxonomía, precios, auditoría de precios, promociones, cupones, recomendaciones y carga masiva en modo de demostración. Usa React 19, TypeScript 6, Vite 8, Mantine 9 y Tabler Icons; este repositorio es independiente de [Docs](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs) y Backend. La presencia de puertos y adapters sustituibles facilita una futura integración, pero no acredita conexión HTTP con servicios reales.
+Aplicación web de administración para el módulo Productos y Ofertas. Permite recorrer flujos de catálogo, taxonomía, precios, auditoría de precios, promociones, cupones, recomendaciones, carga masiva y gestión de combos en modo de demostración. Usa React 19, TypeScript 6, Vite 8, Mantine 9 y Tabler Icons; este repositorio es independiente de [Docs](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs) y Backend. La presencia de puertos y adapters sustituibles facilita una futura integración, pero no acredita conexión HTTP con servicios reales.
 
 ## Inicio rápido
 
@@ -11,7 +11,7 @@ npm ci
 npm run dev
 ```
 
-Vite inicia en `http://127.0.0.1:5173`. La ruta inicial redirige a `/precios`. Para revisar las pantallas, navega por el menú o abre, por ejemplo, `/productos`, `/categorias`, `/precios/auditoria` o `/carga-masiva`.
+Vite inicia en `http://127.0.0.1:5173`. La ruta inicial redirige a `/precios`. Para revisar las pantallas, navega por el menú o abre, por ejemplo, `/productos`, `/categorias`, `/precios/auditoria`, `/carga-masiva` o `/combos`.
 
 Comandos disponibles:
 
@@ -26,10 +26,14 @@ Instala primero Chromium para Playwright:
 npx playwright install chromium
 ```
 
-Después, ejecuta la suite automatizada:
+Después, ejecuta las validaciones:
 
 ```sh
-npm test
+npm test                  # pruebas unitarias (Combos y Bulk) con Vitest
+npm run test:e2e          # suite E2E completa de Playwright
+npm run test:ci           # unitarias + E2E, usado por CI
+npm run test:unit:combos  # solo unitarias de Combos
+npm run test:unit:bulk    # solo unitarias de Bulk
 ```
 
 Para construir y servir la versión compilada:
@@ -49,7 +53,7 @@ La única variable de entorno de la aplicación es `VITE_DATA_MODE` (ver [.env.e
 | Valor | Comportamiento |
 |---|---|
 | `mock` | Demostración con repositorios en memoria y fixtures. No requiere Backend, credenciales ni conexión de red. Las escrituras simuladas se pierden al recargar. |
-| `api` | Selecciona puertos API cuando hay providers configurados; sin ellos, cada módulo define su respuesta. La excepción de Bulk, que usa mocks directamente, se detalla debajo. |
+| `api` | Selecciona puertos API cuando hay providers configurados; sin ellos, cada módulo define su respuesta. Bulk y Combos se detallan debajo. |
 
 **Excepción en Bulk:** `bulkService.ts` usa `mockBulkRepository` directamente, incluso cuando `VITE_DATA_MODE=api`; `/carga-masiva` no está entre las rutas que `CommercialModeGate` bloquea o trata según el modo. Por tanto, ese flujo sigue siendo una simulación en ambos modos. Es una discrepancia funcional que requiere corrección independiente; este cambio solo la documenta.
 
@@ -69,17 +73,25 @@ La tabla resume lo que muestran el código y la configuración de esta rama; la 
 | Auditoría de precios | Listado, detalle y exportación de demostración mock. El runtime permite inyección, pero no incluye provider API predeterminado. Los archivos disponibles son muestras. |
 | Cupones, promociones y recomendaciones | Flujos de demostración mock. En modo `api`, `CommercialModeGate` bloquea estas rutas incondicionalmente. Una integración futura requiere configurar el provider y adaptar el gate; inyectar el provider por sí solo no desbloquea la interfaz. Las recomendaciones no calculan un precio final ni garantizan stock; ambos datos figuran como no disponibles en la demostración. |
 | Carga masiva | Simulación mock tanto en `mock` como en `api` por la excepción descrita arriba. La revisión local de archivos no sustituye la validación comercial; XLSX y procesamiento/exportación reales requieren Backend. Ver [límites de carga masiva](docs/ESTADO_CARGA_MASIVA.md). |
-| Combos e inventario | No hay features frontend en esta rama. |
+| Combos e inventario | Gestión de combos (MK-002) con puertos tipados y adapters mock; la disponibilidad es información de catálogo compartido, sin consultar ni reservar stock real. En `api` sin provider la integración se muestra cerrada, sin fallback a fixtures. |
 | Foundation | Galería de componentes accesible solo en desarrollo; no es un flujo comercial. |
 
 Los detalles, limitaciones y estados pendientes por feature están en [AUDITORIA_MK013.md](docs/AUDITORIA_MK013.md), [AUDITORIA_CATALOGO_MK003_MK004.md](docs/AUDITORIA_CATALOGO_MK003_MK004.md), [AVANCE_FRONTEND_CUEVA.md](docs/AVANCE_FRONTEND_CUEVA.md) y [VALIDACION_MK014.md](docs/VALIDACION_MK014.md). Consulta esos informes antes de inferir alcance de una operación o estado de integración.
+
+## Gestión de combos (MK-002)
+
+Implementa S01–S04 como vistas administrativas con puertos tipados y adapters en memoria sobre el catálogo compartido de MK-003/MK-004. Rutas: `/combos` (S01), `/combos/nuevo` (S02 crear), `/combos/:comboId/editar` (S02 editar), `/combos/:comboId` (S03) y `/combos/:comboId/no-disponible` (S04). Se pueden crear, consultar, editar y desactivar combos en la sesión; recargar reinicia los cambios.
+
+La elegibilidad de componentes, las reglas económicas y la disponibilidad informativa consultan las identidades del Catálogo compartido (no un catálogo paralelo). La disponibilidad se calcula como `min(floor(stockDisponibleSKU / cantidadRequeridaSKU))` sobre un snapshot inyectable; si los datos no permiten verificar, se muestra información incompleta o no verificable en lugar de un cero inventado. Los precios vigentes de referencia provienen del puerto de Pricing y se distinguen del precio comercial guardado.
+
+No hay provider HTTP real ni persistencia comercial. En modo `api`, la integración permanece cerrada y no cae a fixtures. La referencia consultada es OpenAPI `0.6.0-rc.1`: las operaciones administrativas de Combos están marcadas `provisional-internal`; `combos:leer`, `catalogo:leer` y `precios:leer` siguen pendientes de registro de scopes. El component spec de MK-002 permanece **En revisión**: esta entrega no declara aprobación UX, homologación ni integración API.
 
 ## Arquitectura
 
 `src/` organiza la aplicación por capa y feature:
 
 - `app/`: shell, navegación, configuración del modo de datos y registro de rutas comerciales y demos. `productRoutes.tsx` registra funcionalidades; `demoRoutes.tsx` solo se agrega en desarrollo.
-- `features/<feature>/`: páginas, componentes, hooks, servicios/puertos, adapters mock y fixtures agrupados por área (`catalog`, `taxonomy`, `pricing`, `price-audit`, `promotions`, `bulk`).
+- `features/<feature>/`: páginas, componentes, hooks, servicios/puertos, adapters mock y fixtures agrupados por área (`catalog`, `taxonomy`, `pricing`, `price-audit`, `promotions`, `bulk`, `combos`).
 - `components/shared/`: patrones visuales reutilizables sin reglas de negocio ni conocimiento de endpoints.
 - `theme/`: tema, tokens, defaults de componentes y estilos globales.
 
@@ -94,8 +106,9 @@ La configuración de Playwright fija Chromium a `1440 × 900`. Los tests viven e
 ```sh
 npm run typecheck
 npm run lint
-npx playwright install chromium
 npm test
+npx playwright install chromium
+npm run test:e2e
 ```
 
 Antes de compilar, define explícitamente el modo. En PowerShell:
@@ -114,7 +127,7 @@ VITE_DATA_MODE=mock npm run build
 VITE_DATA_MODE=api npm run build
 ```
 
-El workflow valida ambos builds y revisa en preview rutas seleccionadas; esa revisión no cubre Bulk ni acredita que todos los módulos eviten mocks en modo `api`.
+El workflow valida ambos builds y revisa en preview rutas seleccionadas; esa revisión no cubre todo el catálogo de módulos ni acredita que todos eviten mocks en modo `api`.
 
 Los reportes técnicos y las capturas que corresponden a auditorías concretas están en [`docs/`](docs/). Entre ellos: [auditoría de Pricing](docs/AUDITORIA_MK013.md), [auditoría de Catálogo y variantes](docs/AUDITORIA_CATALOGO_MK003_MK004.md), [validación de auditoría de precios](docs/VALIDACION_MK014.md), [validación de Foundation](docs/VALIDACION_FOUNDATION.md), y [evidencias](docs/evidencias/). Son registros de sus respectivas revisiones; consulta fecha, alcance y commit documentados antes de aplicar sus resultados a otra revisión.
 

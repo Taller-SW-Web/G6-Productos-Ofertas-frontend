@@ -17,7 +17,7 @@ export interface BulkRepository {
 
   createImport(
     file: File,
-    scenario?: string,
+    localSummary?: { detectedRows?: number },
     signal?: AbortSignal,
   ): Promise<BulkImportBatch>;
 
@@ -30,6 +30,9 @@ export interface BulkRepository {
     batchId: string,
     signal?: AbortSignal,
   ): Promise<DownloadResource | null>;
+
+  /** Mock adapters can report known artifact availability; API availability stays unknown. */
+  canDownloadImportReport?(batch: BulkImportBatch): boolean;
 
   resumeImport(
     batchId: string,
@@ -50,4 +53,14 @@ export interface BulkRepository {
     exportId: string,
     signal?: AbortSignal,
   ): Promise<DownloadResource | null>;
+}
+
+export function canRequestImportReport(
+  repository: BulkRepository,
+  batch: BulkImportBatch,
+): boolean {
+  return (
+    batch.failed_rows > 0 &&
+    (repository.canDownloadImportReport?.(batch) ?? true)
+  );
 }
