@@ -32,36 +32,38 @@ test.describe("E2E / MK-008 ↔ Catálogo: Árbol de categorías", () => {
     await expect(page.getByText("Accesorios")).toBeVisible();
   });
 
-  test("formulario de nueva categoría requiere nombre y slug; permite guardar con padre", async ({
+  test("formulario de nueva categoría exige nombre y confirma el slug antes de crear", async ({
     page,
   }) => {
     await page.goto("/categorias/nueva");
-    await expect(page.getByRole("heading", { name: /nueva/i })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: /crear categoría|nueva/i }),
+    ).toBeVisible();
 
-    // Fill required fields
+    // The main form requires a name and exposes orden/imagen (H-02 field completeness).
     const nombre = page.getByLabel(/nombre/i);
-    const slug = page.getByLabel(/slug/i);
     await expect(nombre).toBeVisible();
-    await expect(slug).toBeVisible();
+    await expect(page.getByLabel(/orden/i)).toBeVisible();
+    await expect(page.getByLabel(/imagen/i)).toBeVisible();
 
-    // Fill the form
+    // The slug is not on the form: it is proposed and confirmed in the next step,
+    // so the test must execute the creation flow to reach it (no render-only check).
     await nombre.fill("Categoría E2E Test");
-    // Wait for slug to auto-fill or fill manually
-    await page.waitForTimeout(300);
+    await page.getByRole("button", { name: "Crear categoría" }).click();
 
-    // Check that orden and imagen fields exist (H-02 field completeness)
-    const orden = page.getByLabel(/orden/i);
-    const imagen = page.getByLabel(/imagen/i);
-    await expect(orden).toBeVisible();
-    await expect(imagen).toBeVisible();
+    await expect(page.getByLabel(/slug/i)).toBeVisible();
   });
 
   test("vista de detalle de categoría existente muestra estado y acciones", async ({
     page,
   }) => {
     await page.goto("/categorias/calzado");
-    // Should show category detail: name, status, parent/children info
-    await expect(page.getByText("Calzado")).toBeVisible();
+    // Should show category detail: name, status, parent/children info.
+    // Match the page title (h1) so the breadcrumb and the "Nombre" field, which
+    // repeat the same text, do not trigger a strict-mode violation.
+    await expect(
+      page.getByRole("heading", { name: "Calzado", level: 1 }),
+    ).toBeVisible();
     // Should have actions like edit, deactivate
     await expect(
       page.getByRole("link", { name: /editar/i }).or(
@@ -97,9 +99,10 @@ test.describe("E2E / Tipos de producto → Catálogo", () => {
     await page.goto("/tipos-producto");
     await expect(page.getByRole("heading", { name: /tipos/i })).toBeVisible();
 
-    // Expect Taxonomía types
+    // Expect Taxonomía types. Assert one specific row: getByText("Ropa") would
+    // also match "Ropa de entrenamiento" and break strict mode.
     await expect(
-      page.getByText("Calzado deportivo").or(page.getByText("Ropa")),
+      page.getByText("Calzado deportivo", { exact: true }),
     ).toBeVisible();
   });
 
@@ -137,30 +140,22 @@ test.describe("E2E / Catálogo: selector de categorías refleja Taxonomía", () 
 });
 
 test.describe("E2E / Reactivación bloqueada por padre inactivo (S05-R)", () => {
-  test("vista de categoría inactiva cuyo padre está inactivo muestra botón Ir a categoría padre", async ({
+  test("reactivar una categoría con padre inactivo se bloquea y ofrece Ir a la categoría padre", async ({
     page,
   }) => {
     // hija-padre-inactivo is a category whose parent is inactiva-raiz (Inactivo)
     await page.goto("/categorias/hija-padre-inactivo");
-
-    // Should show the category detail page
     await expect(page.getByRole("main")).toBeVisible();
 
-    // If the category is Inactivo and parent is Inactivo, the reactivation
-    // should be blocked and the "Ir a la categoría padre" link should appear.
-    // The button should only appear for this specific blocking reason.
-    const irAlPadre = page
-      .getByRole("link", { name: /categoría padre|ir al padre/i })
-      .or(page.getByRole("button", { name: /categoría padre|ir al padre/i }));
+    // The blocked state is reached by exercising the real flow: request
+    // reactivation, which the mock rejects because the parent is inactive.
+    const reactivar = page.getByRole("button", { name: /^reactivar$/i });
+    await expect(reactivar).toBeVisible();
+    await reactivar.click();
 
-    const volverArbol = page.getByRole("link", {
-      name: /volver al árbol|árbol/i,
-    });
-
-    // Either the "ir al padre" button or "volver al arbol" should be visible
-    // (depending on whether the reactivation blocked state is triggered in detail view)
-    const eitherVisible =
-      (await irAlPadre.count()) > 0 || (await volverArbol.count()) > 0;
-    expect(eitherVisible).toBe(true);
+    await expect(page.getByText(/reactivación bloqueada/i)).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /ir a la categoría padre/i }),
+    ).toBeVisible();
   });
 });

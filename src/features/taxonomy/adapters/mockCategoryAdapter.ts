@@ -110,15 +110,24 @@ const store: RegistroCategoria[] = [
 
 const esperar = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// LOP-01 / LOP-04: single internal ID per category. Catálogo can send external
+// aliases (CAT-CALZADO), so every id that takes part in a parent/child relation
+// is normalized to the canonical Taxonomy ID before it is stored or compared.
+// Without this, a category created or moved through an alias would keep the
+// alias as `padreId`, become invisible in the tree (hijasDe compares raw) and
+// allow self-referencing cycles that the raw equality check would miss.
 const ALIAS_CATEGORY_MAP: Record<string, string> = {
   "CAT-CALZADO": "calzado",
   "CAT-ROPA": "ropa",
   "CAT-ACC": "accesorios",
 };
 
+const normalizarIdCategoria = (id: string): string =>
+  ALIAS_CATEGORY_MAP[id] ?? id;
+
 const hallar = (id: string): RegistroCategoria | undefined => {
-  const targetId = ALIAS_CATEGORY_MAP[id] ?? id;
-  return store.find((item) => item.id === targetId || item.id === id);
+  const targetId = normalizarIdCategoria(id);
+  return store.find((item) => item.id === targetId);
 };
 
 const nivelDe = (id: string): number => {
@@ -132,18 +141,22 @@ const nivelDe = (id: string): number => {
 };
 
 const esDescendiente = (posibleDescendienteId: string, ancestroId: string): boolean => {
+  const ancestro = normalizarIdCategoria(ancestroId);
   let actual = hallar(posibleDescendienteId);
   while (actual && actual.padreId) {
-    if (actual.padreId === ancestroId) return true;
+    if (actual.padreId === ancestro) return true;
     actual = hallar(actual.padreId);
   }
   return false;
 };
 
-const hijasDe = (padreId: string | null): RegistroCategoria[] =>
-  store
-    .filter((item) => item.padreId === padreId)
+const hijasDe = (padreId: string | null): RegistroCategoria[] => {
+  const objetivo =
+    padreId === null ? null : normalizarIdCategoria(padreId);
+  return store
+    .filter((item) => item.padreId === objetivo)
     .sort((a, b) => a.orden - b.orden);
+};
 
 const slugEnUso = (slug: string, exceptoId?: string): boolean =>
   store.some((item) => item.slug === slug && item.id !== exceptoId);
@@ -269,7 +282,9 @@ export const mockCategoryAdapter: CategoryRepository = {
       );
     }
 
-    const padreId = input.padreId ?? null;
+    const padreId = input.padreId
+      ? normalizarIdCategoria(input.padreId)
+      : null;
     if (padreId) {
       const padre = hallar(padreId);
       if (!padre) {
@@ -282,7 +297,19 @@ export const mockCategoryAdapter: CategoryRepository = {
       }
     }
 
+    // A reserved external alias must never become a stored category id; doing so
+    // would create a second ID for the same entity and break the single-ID rule.
+    if (normalizarIdCategoria(input.slug) !== input.slug) {
+      throw new Error(
+        "El slug no puede coincidir con un identificador reservado.",
+      );
+    }
     const id = input.slug;
+    if (padreId && padreId === id) {
+      throw new Error(
+        "Una categoría no puede ser su propia categoría padre.",
+      );
+    }
     const orden =
       typeof input.orden === "number"
         ? input.orden
@@ -319,13 +346,18 @@ export const mockCategoryAdapter: CategoryRepository = {
       );
     }
 
-    const padreId = input.padreId ?? null;
+    const padreId = input.padreId
+      ? normalizarIdCategoria(input.padreId)
+      : null;
     if (padreId) {
       const padre = hallar(padreId);
       if (!padre) {
         throw new Error("La categoría padre seleccionada no existe.");
       }
-      if (padreId === input.id || esDescendiente(padreId, input.id)) {
+      // Compare against the canonical stored id: a parent passed as an alias of
+      // the category itself (e.g. padreId "CAT-CALZADO" for id "calzado") must be
+      // rejected as self-reference instead of creating a cycle.
+      if (padreId === registro.id || esDescendiente(padreId, registro.id)) {
         throw new Error(
           "No puedes mover una categoría dentro de sí misma o de una de sus subcategorías.",
         );
