@@ -196,6 +196,22 @@ export const initialStockItems: StockItem[] = [
 
 export const initialTransfers: TransferItem[] = [
   {
+    id: "tr-cas-cor-001",
+    transferCode: "TR-2026-100",
+    sku: "CAS-COR-001",
+    productName: "Casaca Cortaviento Trail",
+    sourceLocationId: "ALM-NOR",
+    sourceLocationName: "Almacén Norte Trujillo",
+    targetLocationId: "ALM-CEN",
+    targetLocationName: "Almacén Central Lima",
+    quantityShipped: 5,
+    quantityReceived: 0,
+    quantityPending: 5,
+    status: "EN_TRANSITO",
+    shippedAt: "2026-10-17T09:00:00Z",
+    notes: "Traslado de demostración para el flujo integrado de Combos.",
+  },
+  {
     id: "tr-oxford-bla-m",
     transferCode: "TR-2026-101",
     sku: "CAM-OXF-BLA-M",
