@@ -1,5 +1,7 @@
 import {
+  IconBox,
   IconCalculator,
+  IconChartBar,
   IconHistory,
   IconCategory,
   IconUpload,
@@ -15,6 +17,7 @@ import {
   IconArrowsShuffle,
   IconPackage,
   IconFileSpreadsheet,
+  IconTruckDelivery,
   IconPackages,
   type TablerIcon,
 } from "@tabler/icons-react";
@@ -96,6 +99,25 @@ export const productNavigation: NavigationItem[] = [
     label: "Historial de precios",
     icon: IconHistory,
     group: "Precios",
+  },
+  {
+    to: "/inventario",
+    label: "Control de stock",
+    icon: IconBox,
+    group: "Inventario",
+    matchPaths: ["/inventario/umbrales"],
+  },
+  {
+    to: "/inventario/traslados",
+    label: "Traslados de stock",
+    icon: IconTruckDelivery,
+    group: "Inventario",
+  },
+  {
+    to: "/inventario/dashboard",
+    label: "Dashboard analítico",
+    icon: IconChartBar,
+    group: "Inventario",
   },
 ];
 export const taxonomyNavigation: NavigationItem[] = [
