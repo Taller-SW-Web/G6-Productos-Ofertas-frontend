@@ -323,25 +323,32 @@ test.describe("MK-015: Control de stock, umbrales y traslados (Issue #17)", () =
   });
 
   test("MK-015: Navegación entre vistas de inventario", async ({ page }) => {
+    // Las páginas de Inventario se cargan con React.lazy: la primera visita a
+    // cada ruta dispara el transform en frío de Vite de su grafo de módulos.
+    // Bajo fullyParallel ese primer render puede exceder el timeout por defecto
+    // de expect (5 s). Se da margen al arranque sin relajar la aserción: el
+    // locator y el heading exigidos son los mismos.
+    const coldNav = { timeout: 15_000 };
+
     await page.goto("/inventario");
     await expect(
       page.getByRole("heading", { name: "Control de stock y disponibilidad" }),
-    ).toBeVisible();
+    ).toBeVisible(coldNav);
 
     await page.goto("/inventario/traslados");
     await expect(
       page.getByRole("heading", { name: "Traslados y recepciones de inventario" }),
-    ).toBeVisible();
+    ).toBeVisible(coldNav);
 
     await page.goto("/inventario/umbrales");
     await expect(
       page.getByRole("heading", { name: "Configuración de umbrales de stock" }),
-    ).toBeVisible();
+    ).toBeVisible(coldNav);
 
     await page.goto("/inventario/dashboard");
     await expect(
       page.getByRole("heading", { name: "Dashboard analítico y alertas de stock" }),
-    ).toBeVisible();
+    ).toBeVisible(coldNav);
   });
 });
 
