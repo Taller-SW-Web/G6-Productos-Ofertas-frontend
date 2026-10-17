@@ -26,7 +26,7 @@ type PriceState =
   | { key: string; status: "success"; prices: SkuPrice[] };
 
 export function ComboEditor({ existing }: { existing?: Combo }) {
-  const { combos, catalog, pricing } = useCombosRuntime();
+  const { combos, catalog, pricing, now } = useCombosRuntime();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const scenario = params.get("scenario") ?? undefined;
@@ -160,8 +160,8 @@ export function ComboEditor({ existing }: { existing?: Combo }) {
     : priceState.key === priceKey ? priceState : { key: priceKey, status: "loading" };
   const prices = currentPrice.status === "success" ? currentPrice.prices : emptyPrices;
   const pricingError = currentPrice.status === "error" ? currentPrice.message : null;
-  const comparisonComponents = useMemo(() => toComparisonComponents(draft.components, prices), [draft.components, prices]);
-  const comparison = useMemo(() => compareComboPrice(comparisonComponents, draft.price, scenario === "pricing-unavailable" ? [] : prices), [comparisonComponents, draft.price, prices, scenario]);
+  const comparisonComponents = useMemo(() => toComparisonComponents(draft.components, prices, now()), [draft.components, prices, now]);
+  const comparison = useMemo(() => compareComboPrice(comparisonComponents, draft.price, scenario === "pricing-unavailable" ? [] : prices, now()), [comparisonComponents, draft.price, prices, scenario, now]);
   const compositionErrors = validateComposition(draft);
   const nameError = draft.name.trim() ? null : "Ingresa el nombre del combo.";
   const canSave = !submitting && !versionConflict && !nameError && compositionErrors.length === 0 && currentPrice.status === "success" && comparison.status === "ready" && comparison.valid;
