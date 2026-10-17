@@ -16,6 +16,7 @@ import {
   IconDiscount2,
   IconArrowsShuffle,
   IconPackage,
+  IconFileSpreadsheet,
   IconTruckDelivery,
   IconPackages,
   type TablerIcon,
