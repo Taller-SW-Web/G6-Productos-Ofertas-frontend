@@ -98,7 +98,7 @@ Si el contrato pertenece a **otro módulo**, consulta la fuente oficial de ese o
 ### 2.3 Si no puedes acceder a Docs
 
 1. Comprueba si realmente existe `../docs/` y no estás en un subdirectorio de `src/`.
-2. Si hay permiso, consulta la documentación en el repositorio oficial: https://github.com/Taller-SW-Web/Productos-y-Ofertas-docs (rama `master`).
+2. Si hay permiso, consulta la documentación en el repositorio oficial: https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs (rama `master`).
 3. Si trabajas en un ambiente remoto de un único repositorio, utiliza el mecanismo autorizado para montar/clonar Docs como **segunda fuente de solo lectura**.
 4. **Si no puedes leer una fuente que es imprescindible para ejecutar correctamente una tarea, marca esa parte como `BLOCKED_DOCS`. No la inventes.** Puedes continuar una parte de foundation que no dependa de ese contenido; por ejemplo configurar herramientas sin definir tokens visuales.
 5. No copies masivamente Docs dentro de `frontend/`, no modifiques su Git y no descargues archivos secretos.

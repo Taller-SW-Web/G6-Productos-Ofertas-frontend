@@ -1,5 +1,6 @@
 import {
   IconCalculator,
+  IconHistory,
   IconCategory,
   IconUpload,
   IconComponents,
@@ -13,6 +14,8 @@ import {
   IconTicket,
   IconDiscount2,
   IconArrowsShuffle,
+  IconPackage,
+  IconFileSpreadsheet,
   type TablerIcon,
 } from "@tabler/icons-react";
 export interface NavigationItem {
@@ -22,7 +25,35 @@ export interface NavigationItem {
   group?: string;
   matchPaths?: readonly string[];
 }
+
+export const bulkNavigation: NavigationItem[] = [
+  {
+    to: "/carga-masiva",
+    label: "Carga masiva",
+    icon: IconUpload,
+    group: "Catálogo",
+    matchPaths: [
+      "/carga-masiva",
+      "/carga-masiva/revisar",
+      "/carga-masiva/importaciones",
+    ],
+  },
+  {
+    to: "/carga-masiva/descargas",
+    label: "Descargas y exportación",
+    icon: IconFileSpreadsheet,
+    group: "Catálogo",
+    matchPaths: ["/carga-masiva/descargas"],
+  },
+];
 export const productNavigation: NavigationItem[] = [
+  {
+    to: "/productos",
+    label: "Gestión de productos",
+    icon: IconPackage,
+    group: "Catálogo",
+    matchPaths: ["/productos", "/MK-004"],
+  },
   {
     to: "/recomendaciones",
     label: "Venta cruzada y upselling",
@@ -53,6 +84,12 @@ export const productNavigation: NavigationItem[] = [
     icon: IconUpload,
     group: "Precios",
     matchPaths: ["/precios/importaciones"],
+  },
+  {
+    to: "/precios/auditoria",
+    label: "Historial de precios",
+    icon: IconHistory,
+    group: "Precios",
   },
 ];
 export const taxonomyNavigation: NavigationItem[] = [

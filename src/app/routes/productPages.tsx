@@ -1,4 +1,25 @@
 import { lazy } from "react";
+export const AuditLayout = lazy(() =>
+  import("../../features/price-audit/components/AuditLayout").then(
+    (module) => ({ default: module.AuditLayout }),
+  ),
+);
+export const AuditHistoryPage = lazy(() =>
+  import("../../features/price-audit/pages/AuditHistoryPage").then(
+    (module) => ({ default: module.AuditHistoryPage }),
+  ),
+);
+export const AuditDetailPage = lazy(() =>
+  import("../../features/price-audit/pages/AuditDetailPage").then((module) => ({
+    default: module.AuditDetailPage,
+  })),
+);
+export const AuditExportPage = lazy(() =>
+  import("../../features/price-audit/pages/AuditExportPage").then((module) => ({
+    default: module.AuditExportPage,
+  })),
+);
+
 export const RecommendationsPage = lazy(() =>
   import("../../features/promotions/pages/RecommendationsPage").then(
     (module) => ({ default: module.RecommendationsPage }),
@@ -67,6 +88,56 @@ export const CouponDetailPage = lazy(() =>
 export const CurrentPricePage = lazy(() =>
   import("../../features/pricing/pages/CurrentPricePage").then((module) => ({
     default: module.CurrentPricePage,
+  })),
+);
+export const ProductsPage = lazy(() =>
+  import("../../features/catalog/pages/ProductsPage").then((module) => ({
+    default: module.ProductsPage,
+  })),
+);
+export const ProductCreatePage = lazy(() =>
+  import("../../features/catalog/pages/ProductCreatePage").then((module) => ({
+    default: module.ProductCreatePage,
+  })),
+);
+export const ProductEditPage = lazy(() =>
+  import("../../features/catalog/pages/ProductEditPage").then((module) => ({
+    default: module.ProductEditPage,
+  })),
+);
+export const ProductDetailPage = lazy(() =>
+  import("../../features/catalog/pages/ProductDetailPage").then((module) => ({
+    default: module.ProductDetailPage,
+  })),
+);
+export const ProductPreparationPage = lazy(() =>
+  import("../../features/catalog/pages/ProductPreparationPage").then((module) => ({
+    default: module.ProductPreparationPage,
+  })),
+);
+export const VariantListPage = lazy(() =>
+  import("../../features/catalog/pages/VariantListPage").then((module) => ({
+    default: module.VariantListPage,
+  })),
+);
+export const VariantCreatePage = lazy(() =>
+  import("../../features/catalog/pages/VariantCreatePage").then((module) => ({
+    default: module.VariantCreatePage,
+  })),
+);
+export const VariantEditPage = lazy(() =>
+  import("../../features/catalog/pages/VariantEditPage").then((module) => ({
+    default: module.VariantEditPage,
+  })),
+);
+export const VariantDetailPage = lazy(() =>
+  import("../../features/catalog/pages/VariantDetailPage").then((module) => ({
+    default: module.VariantDetailPage,
+  })),
+);
+export const VariantPreparationPage = lazy(() =>
+  import("../../features/catalog/pages/VariantPreparationPage").then((module) => ({
+    default: module.VariantPreparationPage,
   })),
 );
 export const EditPricePage = lazy(() =>
@@ -206,3 +277,35 @@ export const SeoConfigPage = lazy(() =>
     default: module.SeoConfigPage,
   })),
 );
+
+export const BulkLayout = lazy(() =>
+  import("../../features/bulk/pages/BulkLayout").then((module) => ({
+    default: module.BulkLayout,
+  })),
+);
+export const BulkUploadPage = lazy(() =>
+  import("../../features/bulk/pages/BulkUploadPage").then((module) => ({
+    default: module.BulkUploadPage,
+  })),
+);
+export const BulkReviewPage = lazy(() =>
+  import("../../features/bulk/pages/BulkReviewPage").then((module) => ({
+    default: module.BulkReviewPage,
+  })),
+);
+export const BulkProgressPage = lazy(() =>
+  import("../../features/bulk/pages/BulkProgressPage").then((module) => ({
+    default: module.BulkProgressPage,
+  })),
+);
+export const BulkResultPage = lazy(() =>
+  import("../../features/bulk/pages/BulkResultPage").then((module) => ({
+    default: module.BulkResultPage,
+  })),
+);
+export const BulkDownloadsPage = lazy(() =>
+  import("../../features/bulk/pages/BulkDownloadsPage").then((module) => ({
+    default: module.BulkDownloadsPage,
+  })),
+);
+

@@ -1,5 +1,9 @@
 import type { RouteObject } from "react-router-dom";
 import {
+  AuditLayout,
+  AuditHistoryPage,
+  AuditDetailPage,
+  AuditExportPage,
   BrandDetailPage,
   BrandFormPage,
   BrandListPage,
@@ -36,11 +40,60 @@ import {
   RecommendationEditorLayout,
   RecommendationFormPage,
   RecommendationSelectorPage,
+  ProductsPage,
+  ProductCreatePage,
+  ProductEditPage,
+  ProductDetailPage,
+  ProductPreparationPage,
+  VariantListPage,
+  VariantCreatePage,
+  VariantEditPage,
+  VariantDetailPage,
+  VariantPreparationPage,
   RecommendationsPage,
   SeoConfigPage,
   SeoListPage,
+  BulkLayout,
+  BulkUploadPage,
+  BulkReviewPage,
+  BulkProgressPage,
+  BulkResultPage,
+  BulkDownloadsPage,
 } from "./productPages";
 export const productRoutes: RouteObject[] = [
+  { path: "/productos", element: <ProductsPage /> },
+  { path: "/productos/nuevo", element: <ProductCreatePage /> },
+  { path: "/productos/:productId", element: <ProductDetailPage /> },
+  { path: "/productos/:productId/editar", element: <ProductEditPage /> },
+  { path: "/productos/:productId/preparacion", element: <ProductPreparationPage /> },
+  {
+    path: "/productos/:productId/activar",
+    element: <ProductDetailPage initialDialog="activar" />,
+  },
+  {
+    path: "/productos/:productId/desactivar",
+    element: <ProductDetailPage initialDialog="desactivar" />,
+  },
+  { path: "/productos/:productId/variantes", element: <VariantListPage /> },
+  { path: "/productos/:productId/variantes/nueva", element: <VariantCreatePage /> },
+  { path: "/productos/:productId/variantes/:variantId", element: <VariantDetailPage /> },
+  { path: "/productos/:productId/variantes/:variantId/editar", element: <VariantEditPage /> },
+  { path: "/productos/:productId/variantes/:variantId/preparacion", element: <VariantPreparationPage /> },
+  {
+    path: "/precios/auditoria",
+    element: <AuditLayout />,
+    children: [
+      {
+        element: <AuditHistoryPage />,
+        children: [
+          { index: true, element: <></> },
+          { path: "asientos/:auditId", element: <AuditDetailPage /> },
+        ],
+      },
+      { path: "exportar/csv", element: <AuditExportPage format="CSV" /> },
+      { path: "exportar/pdf", element: <AuditExportPage format="PDF" /> },
+    ],
+  },
   { path: "/precios", element: <CurrentPricePage /> },
   { path: "/precios/editar", element: <EditPricePage /> },
   { path: "/precios/programaciones", element: <PriceSchedulesPage /> },
@@ -150,5 +203,17 @@ export const productRoutes: RouteObject[] = [
   {
     path: "/cupones/:couponId/limites",
     element: <CouponDetailPage limitsOnly />,
+  },
+  // MK-001: Carga y exportación masiva
+  {
+    path: "/carga-masiva",
+    element: <BulkLayout />,
+    children: [
+      { index: true, element: <BulkUploadPage /> },
+      { path: "revisar", element: <BulkReviewPage /> },
+      { path: "importaciones/:batchId", element: <BulkProgressPage /> },
+      { path: "importaciones/:batchId/resultado", element: <BulkResultPage /> },
+      { path: "descargas", element: <BulkDownloadsPage /> },
+    ],
   },
 ];
