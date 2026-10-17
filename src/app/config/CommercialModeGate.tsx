@@ -17,10 +17,8 @@ export function CommercialModeGate({ children }: { children: ReactNode }) {
   ].some((path) => pathname === path || pathname.startsWith(`${path}/`));
   if (mode === "api" && mockOnly)
     return (
-      <FeedbackAlert semantic="error" title={pathname.startsWith("/combos") ? "Provider API de Combos no configurado" : "Integración API no disponible"}>
-        {pathname.startsWith("/combos")
-          ? "Combos requiere providers API de Combos, Catálogo y Pricing. No se cargan datos mock en este modo."
-          : "Este módulo todavía utiliza un adapter de demostración. En modo API sus operaciones permanecen deshabilitadas hasta configurar su provider."}
+      <FeedbackAlert semantic="error" title="Función no disponible">
+        Esta función no está disponible en el modo actual.
       </FeedbackAlert>
     );
   return children;

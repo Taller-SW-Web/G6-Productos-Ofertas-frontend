@@ -118,12 +118,12 @@ export function createDemoServices(
     campaigns: administrative(base.campaigns),
     recommendations: administrative(base.recommendations),
     catalog: {
-      async products(signal) {
+      async products(signal, retain) {
         if (scenario === "selection-error")
           await checkAdministrationRead("selection-error", signal);
         return scenario === "selection-empty"
           ? []
-          : base.catalog.products(signal);
+          : base.catalog.products(signal, retain);
       },
       categories: (signal) => base.catalog.categories(signal),
     },

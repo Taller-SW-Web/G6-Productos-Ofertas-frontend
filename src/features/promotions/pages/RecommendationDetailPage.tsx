@@ -173,8 +173,7 @@ export function RecommendationDetailPage({
               }
             />
             <Text size="sm" c="dimmed">
-              Precio y disponibilidad por producto: No disponible. La
-              configuración administrativa no depende de estos enriquecimientos.
+              Precio y disponibilidad por producto: No disponible.
             </Text>
             <Group gap="sm">
               <Button

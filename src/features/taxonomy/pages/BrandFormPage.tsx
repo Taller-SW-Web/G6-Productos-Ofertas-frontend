@@ -238,7 +238,6 @@ export function BrandFormPage() {
                   label="Logo (URL, opcional)"
                   value={detalle?.logoUrl ?? ""}
                   disabled
-                  description="La carga de archivos se simula en este piloto."
                 />
                 <Group justify="flex-end" gap="sm">
                   <Button

@@ -180,7 +180,7 @@ function CharacteristicStateContent({
               <Text size="sm" c="dimmed">
                 El identificador de la característica se conserva. La
                 desactivación no elimina sus valores, solo impide su uso en
-                nuevos esquemas (simulado).
+                nuevos esquemas.
               </Text>
               <Group gap="sm">
                 <Button onClick={handleCambiarEstado} loading={procesando}>

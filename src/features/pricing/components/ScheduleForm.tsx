@@ -102,7 +102,6 @@ export function ScheduleForm({
                 label="Moneda"
                 value={form.draft.currency}
                 readOnly
-                description="Moneda de la lectura; no se convierten importes. Su cambio requiere definición del provider."
                 error={form.errors.currency}
               />
               <Select

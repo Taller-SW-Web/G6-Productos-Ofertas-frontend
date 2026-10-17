@@ -81,7 +81,7 @@ export function VariantActivationDialog({
 
         <div>
           <Text size="xs" fw={600} mb="xs">
-            Verificación de Requisitos Técnicos:
+            Requisitos para activar:
           </Text>
           <List size="xs" spacing="xs">
             <List.Item

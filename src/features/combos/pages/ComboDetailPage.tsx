@@ -83,7 +83,7 @@ function ComboDetailForId({ comboId, unavailable }: { comboId: string; unavailab
   // key changes the derived view is "loading" without a synchronous setState in an
   // effect (avoids cascading renders flagged by react-hooks/set-state-in-effect).
   const priceKey = JSON.stringify([comboId, componentsKey, priceRetry, scenario]);
-  const availabilityKey = JSON.stringify([comboId, componentsKey, availabilityRetry, scenario]);
+  const availabilityKey = JSON.stringify([comboId, componentsKey, comboStatus, availabilityRetry, scenario]);
   const priceResult: PriceState =
     combo && priceState.key === priceKey ? priceState : { key: priceKey, status: "loading" };
   const availabilityResult: AvailabilityState =
@@ -167,7 +167,7 @@ function ComboDetailForId({ comboId, unavailable }: { comboId: string; unavailab
     : { state: combo.status === "INACTIVO" ? "COMBO_INACTIVO" : "NO_VERIFICABLE", verifiable: false, quantity: null, freshness: "NO_VERIFICABLE", calculatedAt: null, reason: availabilityResult.status === "error" ? availabilityResult.message : "Consultando disponibilidad…" };
   const comboView: Combo = { ...combo, availability: availabilityInfo };
 
-  if (unavailable && isVerifiedPositiveAvailability(availabilityInfo)) {
+  if (unavailable && combo.status === "ACTIVO" && isVerifiedPositiveAvailability(availabilityInfo)) {
     return <Navigate to={`/combos/${combo.id}`} replace />;
   }
 
@@ -193,7 +193,7 @@ function ComboDetailForId({ comboId, unavailable }: { comboId: string; unavailab
 
       <SectionCard title="Precios de referencia" description="Se consultan las referencias vigentes en Pricing; las referencias almacenadas son históricas y no acreditan vigencia.">
         {priceResult.status === "loading" && <Text size="sm" role="status">Consultando precios vigentes…</Text>}
-        {priceResult.status === "error" && <FeedbackAlert semantic="warning" title="Precios de referencia vigentes no disponibles" actions={<Button variant="outline" onClick={() => setPriceRetry((value) => value + 1)}>Reintentar lectura</Button>}>{priceResult.message} El combo, su estado administrativo y sus componentes se conservan; no se muestra una aprobación económica.</FeedbackAlert>}
+        {priceResult.status === "error" && <FeedbackAlert semantic="warning" title="Precios de referencia vigentes no disponibles" actions={<Button variant="outline" onClick={() => setPriceRetry((value) => value + 1)}>Reintentar lectura</Button>}>{priceResult.message}</FeedbackAlert>}
         {currentTotals && <Group gap="xl" wrap="wrap">
           <div><Text size="sm" c="dimmed">Suma regular vigente</Text><Text fw={600}>{formatMoney(currentTotals.regularMinor)}</Text></div>
           <div><Text size="sm" c="dimmed">Suma pública vigente</Text><Text fw={600}>{formatMoney(currentTotals.publicMinor)}</Text></div>

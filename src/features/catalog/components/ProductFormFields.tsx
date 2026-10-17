@@ -149,8 +149,8 @@ export function ProductFormFields({
               {isEdit && (
                 <Text size="xs" c="dimmed" mt={4}>
                   {isTypeCorrectionEligible
-                    ? "Precondiciones verificadas: borrador sin variantes ni publicación. Corrección de tipo bloqueada hasta resolver Q-06."
-                    : "No se cumplen o no se conocen las precondiciones de corrección. Cambio de tipo bloqueado; Q-06 sigue pendiente."}
+                    ? "El tipo de producto no se puede cambiar en este momento."
+                    : "Completa los requisitos del producto antes de cambiar el tipo."}
                 </Text>
               )}
             </div>
