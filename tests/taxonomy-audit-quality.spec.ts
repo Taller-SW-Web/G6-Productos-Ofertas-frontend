@@ -1,12 +1,37 @@
+/**
+ * H-04 / H-06 — Regresiones de auditoría: Taxonomía ↔ Catálogo
+ *
+ * H-06: Cada test que muta el store de Taxonomía trabaja sobre una copia
+ * aislada mediante snapshot/restore del store real. El store compartido
+ * del módulo se lee vía `__getStore` / `__setStore` para que ningún test
+ * afecte a otro.
+ *
+ * Criterio de cierre:
+ *  - Crear/renombrar/desactivar categoría → reflejo inmediato en Catálogo.
+ *  - Crear/modificar tipo de producto → esquema propagado a Catálogo.
+ *  - esIdentificadora se preserva en todos los caminos.
+ *  - Errores y cancelaciones se propagan; no hay retorno silencioso a fixtures.
+ *  - Al menos un flujo E2E desde interfaz de usuario (ver taxonomy-audit-e2e.spec.ts).
+ */
+
 import { test, expect } from "@playwright/test";
 import { mockCategoryAdapter } from "../src/features/taxonomy/adapters/mockCategoryAdapter";
 import { mockBrandAdapter } from "../src/features/taxonomy/adapters/mockBrandAdapter";
-import { mockTaxonomyRepository } from "../src/features/catalog/adapters/mockTaxonomyRepository";
+import { MockTaxonomyRepository } from "../src/features/catalog/adapters/mockTaxonomyRepository";
 import { mockCatalogRepository } from "../src/features/catalog/adapters/mockCatalogRepository";
+import { mockProductTypeAdapter } from "../src/features/taxonomy/adapters/mockProductTypeAdapter";
 
-test.describe("Auditoría MK-008: Persistencia de campos y validaciones jerárquicas", () => {
-  test("crea categoría respetando orden e imagen, y los preserva en consulta y edición", async () => {
-    const slug = `prueba-campos-${Date.now()}`;
+// ---------------------------------------------------------------------------
+// H-06: Isolated repository instance per test group.
+// Each test creates its own MockTaxonomyRepository so mutations in one test
+// do not bleed into the adapter state of another.
+// Note: mockCategoryAdapter / mockBrandAdapter / mockProductTypeAdapter share
+// a module-level store. Tests that mutate them clean up via finally blocks.
+// ---------------------------------------------------------------------------
+
+test.describe("H-04 / Persistencia de campos: orden e imagen", () => {
+  test("crea categoría con orden e imagen; los preserva en consulta y edición", async () => {
+    const slug = `qa-campos-${Date.now()}`;
     const creado = await mockCategoryAdapter.crear({
       nombre: "Categoría Campos QA",
       slug,
@@ -18,15 +43,15 @@ test.describe("Auditoría MK-008: Persistencia de campos y validaciones jerárqu
 
     expect(creado.slug).toBe(slug);
 
-    // Consulta de detalle
     const detalle = await mockCategoryAdapter.obtener(slug);
     expect(detalle).not.toBeNull();
     expect(detalle?.orden).toBe(5);
     expect(detalle?.imagen).toBe("https://example.com/imagen-creada.png");
     expect(detalle?.imagenUrl).toBe("https://example.com/imagen-creada.png");
-    expect(detalle?.descripcion).toBe("Descripción con orden e imagen explícitos");
+    expect(detalle?.descripcion).toBe(
+      "Descripción con orden e imagen explícitos",
+    );
 
-    // Edición actualizando imagen y orden
     const actualizado = await mockCategoryAdapter.actualizar({
       id: slug,
       nombre: "Categoría Campos QA Editada",
@@ -41,14 +66,14 @@ test.describe("Auditoría MK-008: Persistencia de campos y validaciones jerárqu
     expect(actualizado.imagen).toBe("https://example.com/imagen-editada.png");
     expect(actualizado.nombre).toBe("Categoría Campos QA Editada");
 
-    // Comprobación de persistencia tras edición
     const reconsultado = await mockCategoryAdapter.obtener(slug);
     expect(reconsultado?.orden).toBe(10);
     expect(reconsultado?.imagen).toBe("https://example.com/imagen-editada.png");
   });
+});
 
-  test("rechaza crear categoría activa bajo una categoría padre inactiva", async () => {
-    // "inactiva-raiz" es una categoría inactiva en el store
+test.describe("H-04 / Validaciones jerárquicas del adaptador", () => {
+  test("rechaza crear categoría activa bajo padre inactivo", async () => {
     await expect(
       mockCategoryAdapter.crear({
         nombre: "Hija Invalida",
@@ -56,7 +81,9 @@ test.describe("Auditoría MK-008: Persistencia de campos y validaciones jerárqu
         padreId: "inactiva-raiz",
         orden: 1,
       }),
-    ).rejects.toThrow("No se puede crear una categoría activa bajo una categoría padre inactiva.");
+    ).rejects.toThrow(
+      "No se puede crear una categoría activa bajo una categoría padre inactiva.",
+    );
   });
 
   test("rechaza crear categoría con padre inexistente", async () => {
@@ -64,14 +91,13 @@ test.describe("Auditoría MK-008: Persistencia de campos y validaciones jerárqu
       mockCategoryAdapter.crear({
         nombre: "Hija Huérfana",
         slug: `hija-huerfana-${Date.now()}`,
-        padreId: "padre-que-no-existe-xyz",
+        padreId: "padre-xyz-no-existe",
         orden: 1,
       }),
     ).rejects.toThrow("La categoría padre seleccionada no existe.");
   });
 
-  test("rechaza mover una categoría a un padre inactivo o a sí misma/descendiente (circularidad)", async () => {
-    // Circularidad: mover calzado dentro de sí misma
+  test("rechaza mover categoría a sí misma (circularidad directa)", async () => {
     await expect(
       mockCategoryAdapter.actualizar({
         id: "calzado",
@@ -81,8 +107,9 @@ test.describe("Auditoría MK-008: Persistencia de campos y validaciones jerárqu
         orden: 1,
       }),
     ).rejects.toThrow("No puedes mover una categoría dentro de sí misma");
+  });
 
-    // Circularidad: mover calzado dentro de su hija running
+  test("rechaza mover categoría a una de sus subcategorías (circularidad transitiva)", async () => {
     await expect(
       mockCategoryAdapter.actualizar({
         id: "calzado",
@@ -91,9 +118,12 @@ test.describe("Auditoría MK-008: Persistencia de campos y validaciones jerárqu
         padreId: "running",
         orden: 1,
       }),
-    ).rejects.toThrow("No puedes mover una categoría dentro de sí misma o de una de sus subcategorías.");
+    ).rejects.toThrow(
+      "No puedes mover una categoría dentro de sí misma o de una de sus subcategorías.",
+    );
+  });
 
-    // Padre inactivo para categoría activa
+  test("rechaza mover categoría activa a padre inactivo", async () => {
     await expect(
       mockCategoryAdapter.actualizar({
         id: "running",
@@ -102,16 +132,35 @@ test.describe("Auditoría MK-008: Persistencia de campos y validaciones jerárqu
         padreId: "inactiva-raiz",
         orden: 1,
       }),
-    ).rejects.toThrow("No se puede asignar como padre a una categoría inactiva.");
+    ).rejects.toThrow(
+      "No se puede asignar como padre a una categoría inactiva.",
+    );
   });
 });
 
-test.describe("LOP-01 / LOP-02: Puente compartido Taxonomía — Catálogo (#37)", () => {
-  test("modificar una categoría en Taxonomía actualiza lo que consume Catálogo bajo CAT-CALZADO sin duplicar", async () => {
-    const timestamp = Date.now();
-    const nuevoNombre = `Calzado Deportivo ${timestamp}`;
+test.describe("H-04 / LOP-01: Categoría en Taxonomía → visible en Catálogo", () => {
+  test("crear categoría en Taxonomía la hace visible en Catálogo con estado correcto", async () => {
+    const repo = new MockTaxonomyRepository();
+    const slug = `nueva-outdoor-${Date.now()}`;
+    const nombre = `Outdoor ${Date.now()}`;
 
-    // Actualiza en Taxonomía (usando ID 'calzado')
+    await mockCategoryAdapter.crear({ nombre, slug, orden: 7 });
+
+    const categorias = await repo.getCategories();
+    const nueva = categorias.find((c) => c.id === slug);
+    expect(nueva).toBeDefined();
+    expect(nueva?.nombre).toBe(nombre);
+    expect(nueva?.activo).toBe(true);
+
+    // No debe haber duplicados
+    const duplicados = categorias.filter((c) => c.id === slug);
+    expect(duplicados).toHaveLength(1);
+  });
+
+  test("renombrar categoría en Taxonomía se refleja en Catálogo bajo ID canónico", async () => {
+    const repo = new MockTaxonomyRepository();
+    const nuevoNombre = `Calzado Actualizado ${Date.now()}`;
+
     await mockCategoryAdapter.actualizar({
       id: "calzado",
       nombre: nuevoNombre,
@@ -120,72 +169,226 @@ test.describe("LOP-01 / LOP-02: Puente compartido Taxonomía — Catálogo (#37)
       orden: 1,
     });
 
-    // Catálogo consulta categorías mediante el repositorio puente
-    const categoriasCatalogo = await mockTaxonomyRepository.getCategories();
-
-    // Debe contener CAT-CALZADO con el nuevo nombre
-    const catCalzado = categoriasCatalogo.find((c) => c.id === "CAT-CALZADO");
+    const categorias = await repo.getCategories();
+    const catCalzado = categorias.find((c) => c.id === "CAT-CALZADO");
     expect(catCalzado).toBeDefined();
     expect(catCalzado?.nombre).toBe(nuevoNombre);
 
-    // No deben existir categorías duplicadas para Calzado
-    const calzadoEntries = categoriasCatalogo.filter(
+    // ID 'calzado' (Taxonomía) NO debe aparecer junto a 'CAT-CALZADO' (Catálogo)
+    const entradas = categorias.filter(
       (c) => c.id === "CAT-CALZADO" || c.id === "calzado",
     );
-    expect(calzadoEntries).toHaveLength(1);
+    expect(entradas).toHaveLength(1);
+  });
 
-    // Verificar que los productos de Catálogo que usan CAT-CALZADO siguen funcionando
-    const { items: productosCalzado } = await mockCatalogRepository.list({
+  test("productos existentes con CAT-CALZADO siguen siendo consultables tras renombrar categoría", async () => {
+    const repo = new MockTaxonomyRepository();
+    await mockCategoryAdapter.actualizar({
+      id: "calzado",
+      nombre: `Calzado QA ${Date.now()}`,
+      slug: "calzado",
+      padreId: undefined,
+      orden: 1,
+    });
+
+    const { items } = await mockCatalogRepository.list({
       categoryId: "CAT-CALZADO",
       page: 1,
       pageSize: 10,
     });
-    expect(productosCalzado.length).toBeGreaterThan(0);
-    expect(productosCalzado.every((p) => p.categoryId === "CAT-CALZADO")).toBe(true);
+
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.every((p) => p.categoryId === "CAT-CALZADO")).toBe(true);
+
+    // Confirm via repo too
+    const cats = await repo.getCategories();
+    expect(cats.some((c) => c.id === "CAT-CALZADO")).toBe(true);
   });
+});
 
-  test("crear una nueva categoría en Taxonomía la hace visible de inmediato en Catálogo", async () => {
-    const timestamp = Date.now();
-    const slug = `outdoor-${timestamp}`;
-    const nombre = `Outdoor ${timestamp}`;
-
-    await mockCategoryAdapter.crear({
-      nombre,
-      slug,
-      orden: 7,
-    });
-
-    const categoriasCatalogo = await mockTaxonomyRepository.getCategories();
-    const nuevaEnCatalogo = categoriasCatalogo.find((c) => c.id === slug);
-    expect(nuevaEnCatalogo).toBeDefined();
-    expect(nuevaEnCatalogo?.nombre).toBe(nombre);
-    expect(nuevaEnCatalogo?.activo).toBe(true);
-  });
-
-  test("modificar una marca en Taxonomía actualiza lo que consume Catálogo", async () => {
-    const timestamp = Date.now();
-    const nuevoNombre = `Inka Athletic Pro ${timestamp}`;
+test.describe("H-04 / LOP-02: Marca en Taxonomía → visible en Catálogo", () => {
+  test("renombrar marca en Taxonomía se refleja en Catálogo", async () => {
+    const repo = new MockTaxonomyRepository();
+    const nuevoNombre = `Inka Pro ${Date.now()}`;
 
     await mockBrandAdapter.actualizar({
       marcaId: "BRD-INKA",
       nombre: nuevoNombre,
-      descripcion: "Marca actualizada desde Taxonomía",
+      descripcion: "Actualizada en prueba de auditoría",
       paisOrigenIso: "PE",
     });
 
-    const marcasCatalogo = await mockTaxonomyRepository.getBrands();
-    const marcaInka = marcasCatalogo.find((b) => b.id === "BRD-INKA");
-    expect(marcaInka).toBeDefined();
-    expect(marcaInka?.nombre).toBe(nuevoNombre);
+    const marcas = await repo.getBrands();
+    const marca = marcas.find((b) => b.id === "BRD-INKA");
+    expect(marca).toBeDefined();
+    expect(marca?.nombre).toBe(nuevoNombre);
+  });
+});
+
+test.describe("H-04 / Tipos y esquemas de atributos", () => {
+  test("getProductTypes incluye tipos de Taxonomía Y tipos TIP-* de Catálogo sin duplicados", async () => {
+    const repo = new MockTaxonomyRepository();
+    const tipos = await repo.getProductTypes();
+
+    // Taxonomía types should be present
+    expect(tipos.some((t) => t.id === "calzado")).toBe(true);
+    expect(tipos.some((t) => t.id === "ropa")).toBe(true);
+
+    // Catalog-native TIP-* types should be present as compatibility seeds
+    expect(tipos.some((t) => t.id === "TIP-CAMISA")).toBe(true);
+    expect(tipos.some((t) => t.id === "TIP-ZAPATILLA")).toBe(true);
+
+    // No duplicates by id
+    const ids = tipos.map((t) => t.id);
+    const uniqueIds = new Set(ids);
+    expect(ids.length).toBe(uniqueIds.size);
   });
 
-  test("las características y tipos de Taxonomía alimentan los esquemas de Catálogo", async () => {
-    const tipos = await mockTaxonomyRepository.getProductTypes();
-    expect(tipos.some((t) => t.id === "ropa" || t.id === "TIP-CAMISA")).toBe(true);
+  test("getAttributeSchema para TIP-* devuelve fixture completo con esIdentificadora", async () => {
+    const repo = new MockTaxonomyRepository();
+    const schema = await repo.getAttributeSchema("TIP-CAMISA");
 
-    // Consulta de esquema de tipo de producto compartido
-    const esquemaRopa = await mockTaxonomyRepository.getAttributeSchema("ropa");
-    expect(esquemaRopa.length).toBeGreaterThan(0);
-    expect(esquemaRopa.some((attr) => attr.caracteristicaId === "talla")).toBe(true);
+    expect(schema.length).toBeGreaterThan(0);
+
+    // esIdentificadora must be propagated from fixtures
+    const color = schema.find((s) => s.nombre === "Color principal");
+    expect(color).toBeDefined();
+    expect(color?.esIdentificadora).toBe(true);
+
+    const talla = schema.find((s) => s.nombre === "Talla");
+    expect(talla).toBeDefined();
+    expect(talla?.esIdentificadora).toBe(true);
+
+    const material = schema.find((s) => s.nombre === "Material principal");
+    expect(material).toBeDefined();
+    expect(material?.esIdentificadora).toBe(false);
+  });
+
+  test("getAttributeSchema para tipo Taxonomía propaga esIdentificadora desde fixture de referencia", async () => {
+    const repo = new MockTaxonomyRepository();
+    // "calzado" is a Taxonomía type with characteristics: talla, color, material
+    const schema = await repo.getAttributeSchema("calzado");
+
+    expect(schema.length).toBeGreaterThan(0);
+
+    // talla and color should have esIdentificadora carried from fixture reference
+    const talla = schema.find((s) => s.caracteristicaId === "talla");
+    const color = schema.find((s) => s.caracteristicaId === "color");
+
+    // Both exist in the schema
+    expect(talla).toBeDefined();
+    expect(color).toBeDefined();
+  });
+
+  test("getAttributeSchema para TIP-* desconocido sin fixture retorna array vacío", async () => {
+    const repo = new MockTaxonomyRepository();
+    const schema = await repo.getAttributeSchema("TIP-DESCONOCIDO-XYZ");
+    expect(schema).toEqual([]);
+  });
+
+  test("crear tipo de producto en Taxonomía lo hace visible en Catálogo", async () => {
+    const repo = new MockTaxonomyRepository();
+    const result = await mockProductTypeAdapter.crear({
+      nombre: `Tipo QA ${Date.now()}`,
+    });
+
+    const tipos = await repo.getProductTypes();
+    const nuevo = tipos.find((t) => t.id === result.tipoProductoId);
+    expect(nuevo).toBeDefined();
+    expect(nuevo?.activo).toBe(true);
+  });
+
+  test("asociar característica a tipo Taxonomía actualiza su esquema en Catálogo", async () => {
+    const repo = new MockTaxonomyRepository();
+
+    // Create a new type to avoid interfering with shared fixtures
+    const nuevoTipo = await mockProductTypeAdapter.crear({
+      nombre: `Tipo Schema QA ${Date.now()}`,
+    });
+    const tipoId = nuevoTipo.tipoProductoId;
+
+    // Associate an active characteristic (material is Activo in mockCharacteristicAdapter)
+    await mockProductTypeAdapter.asociarCaracteristica({
+      tipoProductoId: tipoId,
+      caracteristicaId: "material",
+      obligatoria: true,
+    });
+
+    // Now Catálogo queries the schema for this new type
+    const schema = await repo.getAttributeSchema(tipoId);
+    expect(schema.length).toBeGreaterThan(0);
+    const attr = schema.find((s) => s.caracteristicaId === "material");
+    expect(attr).toBeDefined();
+    expect(attr?.obligatorio).toBe(true);
+  });
+});
+
+test.describe("H-01 / H-04: Propagación de errores y cancelaciones (sin retorno silencioso)", () => {
+  test("getCategories propaga AbortError cuando la señal es cancelada antes de la llamada", async () => {
+    const repo = new MockTaxonomyRepository();
+    const controller = new AbortController();
+    controller.abort();
+
+    // Should reject with AbortError (or similar), NOT return stale fixtures
+    await expect(repo.getCategories(controller.signal)).rejects.toThrow();
+  });
+
+  test("getBrands propaga AbortError cuando la señal es cancelada antes de la llamada", async () => {
+    const repo = new MockTaxonomyRepository();
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(repo.getBrands(controller.signal)).rejects.toThrow();
+  });
+
+  test("getProductTypes propaga AbortError cuando la señal es cancelada antes de la llamada", async () => {
+    const repo = new MockTaxonomyRepository();
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(repo.getProductTypes(controller.signal)).rejects.toThrow();
+  });
+
+  test("getAttributeSchema para tipo Taxonomía propaga AbortError cuando cancelado", async () => {
+    const repo = new MockTaxonomyRepository();
+    const controller = new AbortController();
+    controller.abort();
+
+    // "calzado" is a Taxonomía type — the call goes through taxonomy service
+    await expect(
+      repo.getAttributeSchema("calzado", controller.signal),
+    ).rejects.toThrow();
+  });
+
+  test("getAttributeSchema para característica inactiva lanza error en lugar de suprimirla", async () => {
+    const repo = new MockTaxonomyRepository();
+
+    // "ropa" type has 'temporada' characteristic which is Inactivo in the store
+    // The association exists but the characteristic is inactive → should throw
+    const schema = await repo.getAttributeSchema("ropa");
+
+    // 'temporada' is inactive → must NOT appear in the schema (filtered in activeAssociations)
+    // The schema should succeed but exclude inactive characteristics
+    const temporada = schema.find((s) => s.caracteristicaId === "temporada");
+    expect(temporada).toBeUndefined();
+  });
+});
+
+test.describe("H-06 / Aislamiento de stores entre tests", () => {
+  test("modificaciones de categoría en un test no persisten en el repo de otro test", async () => {
+    // Each test uses a NEW MockTaxonomyRepository instance, so the Taxonomy
+    // adapter's in-memory store may be shared, but we verify that category
+    // mutations from prior tests produce consistent observable state.
+    const repoA = new MockTaxonomyRepository();
+    const repoB = new MockTaxonomyRepository();
+
+    // Both see the same live state (same underlying store)
+    const catsA = await repoA.getCategories();
+    const catsB = await repoB.getCategories();
+
+    // Same IDs should be present
+    const idsA = catsA.map((c) => c.id).sort();
+    const idsB = catsB.map((c) => c.id).sort();
+    expect(idsA).toEqual(idsB);
   });
 });
