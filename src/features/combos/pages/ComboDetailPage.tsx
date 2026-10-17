@@ -128,7 +128,7 @@ function ComboDetailForId({ comboId, unavailable }: { comboId: string; unavailab
       const sellable = new Map(resolved.map((entry) => [entry.sku, entry.sellable]));
       const computed = calculateInformativeAvailability(
         comboStatus,
-        components.map((component) => ({ sku: component.sku, quantity: component.quantity, active: sellable.get(component.sku) ?? true })),
+        components.map((component) => ({ sku: component.sku, quantity: component.quantity, active: sellable.get(component.sku) ?? null })),
         new Map(readings.map((reading) => [reading.sku, reading])),
       );
       setAvailabilityState({ key: availabilityKey, status: "success", availability: applyAvailabilityScenario(computed, scenario) });

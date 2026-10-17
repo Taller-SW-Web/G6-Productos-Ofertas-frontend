@@ -10,19 +10,25 @@ export type AvailabilityMessage = { label: string; semantic: "neutral" | "info" 
 export interface AvailabilityComponent {
   sku: string;
   quantity: number;
-  active: boolean;
+  // true  → identity resolved and confirmed sellable.
+  // false → identity resolved and confirmed NOT sellable (inactive product/variant, parent SKU or nested combo).
+  // null  → identity could not be resolved against the shared Catalog; never assume sellable.
+  active: boolean | null;
 }
 
 // Informative availability: min(floor(stockDisponibleSKU / cantidadRequeridaSKU)).
 // It never reserves, never builds a combo balance and never coerces an unknown
-// balance into a confident zero. Unknown/incompatible readings short-circuit to
-// an incomplete or unverifiable state with quantity null.
+// balance into a confident zero. The evaluation order is deliberate: an
+// unresolved identity, an incomplete reading and an invalid quantity are decided
+// BEFORE publishing any positive, zero or stale result, so a partial snapshot can
+// never be presented as a verified availability.
 export function calculateInformativeAvailability(
   status: ComboStatus,
   components: AvailabilityComponent[],
   readings: ReadonlyMap<string, StockReading>,
   calculatedAt: string | null = new Date().toISOString(),
 ): ComboAvailability {
+  // 1. Administrative inactive combo.
   if (status === "INACTIVO") {
     return {
       state: "COMBO_INACTIVO",
@@ -33,6 +39,7 @@ export function calculateInformativeAvailability(
       reason: "El combo está administrativamente inactivo y no se ofrece para nuevas ventas.",
     };
   }
+  // 2. No components to evaluate.
   if (components.length === 0) {
     return {
       state: "INCOMPLETA",
@@ -43,7 +50,19 @@ export function calculateInformativeAvailability(
       reason: "No hay componentes para calcular la disponibilidad.",
     };
   }
-  if (components.some((component) => !component.active)) {
+  // 3. Unresolved SKU identity: the Catalog did not confirm the component.
+  if (components.some((component) => component.active === null)) {
+    return {
+      state: "NO_VERIFICABLE",
+      verifiable: false,
+      quantity: null,
+      freshness: "NO_VERIFICABLE",
+      calculatedAt: null,
+      reason: "No se pudo resolver la identidad de venta de al menos un componente en el catálogo.",
+    };
+  }
+  // 4. Confirmed inactive component.
+  if (components.some((component) => component.active === false)) {
     return {
       state: "COMPONENTE_INACTIVO",
       verifiable: false,
@@ -53,52 +72,51 @@ export function calculateInformativeAvailability(
       reason: "Al menos un componente no está activo y no permite nuevas ventas.",
     };
   }
+  // 5. Invalid quantity.
+  if (components.some((component) => !Number.isSafeInteger(component.quantity) || component.quantity < 1)) {
+    return {
+      state: "NO_VERIFICABLE",
+      verifiable: false,
+      quantity: null,
+      freshness: "NO_VERIFICABLE",
+      calculatedAt: null,
+      reason: "La cantidad de un componente no es verificable.",
+    };
+  }
 
   let min = Number.POSITIVE_INFINITY;
   let stale = false;
-  let incomplete = false;
 
   for (const component of components) {
-    if (!Number.isSafeInteger(component.quantity) || component.quantity < 1) {
-      return {
-        state: "NO_VERIFICABLE",
-        verifiable: false,
-        quantity: null,
-        freshness: "NO_VERIFICABLE",
-        calculatedAt: null,
-        reason: "La cantidad de un componente no es verificable.",
-      };
-    }
     const reading = readings.get(component.sku);
+    // 6. Any missing, unknown, invalid or incompatible reading => incomplete.
+    //    Decided before publishing a stale, zero or positive result.
     if (!reading || !reading.locationsCompatible || reading.stock === null ||
       !Number.isFinite(reading.stock) || reading.stock < 0) {
-      incomplete = true;
-      continue;
+      return {
+        state: "INCOMPLETA",
+        verifiable: false,
+        quantity: null,
+        freshness: "INCOMPLETA",
+        calculatedAt: null,
+        reason: "El snapshot de inventario no permite verificar todos los componentes.",
+      };
     }
     if (reading.stale) stale = true;
     min = Math.min(min, Math.floor(reading.stock / component.quantity));
   }
 
-  if (min === Number.POSITIVE_INFINITY) {
-    return incomplete
-      ? {
-          state: "INCOMPLETA",
-          verifiable: false,
-          quantity: null,
-          freshness: "INCOMPLETA",
-          calculatedAt: null,
-          reason: "El snapshot de inventario no permite verificar todos los componentes.",
-        }
-      : {
-          state: "NO_VERIFICABLE",
-          verifiable: false,
-          quantity: null,
-          freshness: "NO_VERIFICABLE",
-          calculatedAt: null,
-          reason: "No hay datos verificables de disponibilidad para los componentes.",
-        };
+  if (!Number.isFinite(min)) {
+    return {
+      state: "NO_VERIFICABLE",
+      verifiable: false,
+      quantity: null,
+      freshness: "NO_VERIFICABLE",
+      calculatedAt: null,
+      reason: "No hay datos verificables de disponibilidad para los componentes.",
+    };
   }
-
+  // 7. All readings complete but stale: keep the estimate, never a verified positive.
   if (stale) {
     return {
       state: "DESACTUALIZADA",
@@ -109,6 +127,7 @@ export function calculateInformativeAvailability(
       reason: "La información de inventario consultada está desactualizada.",
     };
   }
+  // 8. Confirmed zero.
   if (min === 0) {
     return {
       state: "AGOTADO",
@@ -119,6 +138,7 @@ export function calculateInformativeAvailability(
       reason: "La disponibilidad informativa confirmada es cero.",
     };
   }
+  // 9. Confirmed positive estimate.
   return {
     state: "DISPONIBLE",
     verifiable: true,

@@ -23,7 +23,9 @@ export const priceFixtures: SkuPrice[] = [
   { sku: "ZAP-RUN-41", regularMinor: 24900, offerMinor: null, currency: "PEN", channelId: null, priceVersion: 1, validityId: "vigencia-zap-run-41", validFrom: "2020-10-01T00:00:00Z", validUntil: null },
 ];
 
-const CALCULATED_AT = "2026-10-14T16:00:00-05:00";
+// Demo instant used to seed informative availability. It matches the shared
+// Pricing demo clock so a recomputed read is byte-identical to the seed.
+const CALCULATED_AT = "2026-10-17T12:00:00.000Z";
 
 function priceFor(sku: string): { regularUnitMinor: number | null; publicUnitMinor: number | null } {
   const price = priceFixtures.find((candidate) => candidate.sku === sku);
