@@ -24,7 +24,7 @@ async function start() {
     import.meta.env.DEV,
   );
   const runtime = await createPricingRuntime(mode);
-  const combosRuntime = await createCombosRuntime(mode);
+  const combosRuntime = await createCombosRuntime(mode, runtime);
   root.render(
     <StrictMode>
       <MantineProvider

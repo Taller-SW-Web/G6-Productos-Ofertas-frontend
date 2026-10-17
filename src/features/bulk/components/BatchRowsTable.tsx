@@ -29,7 +29,7 @@ function renderDomainStep(row: BulkImportRow, domain: BulkDomain) {
     );
   } else if (step?.status === "PROCESSING") {
     badge = (
-      <StatusBadge semantic="warning">
+      <StatusBadge semantic="info">
         <span style={{ whiteSpace: "nowrap" }}>En proceso</span>
       </StatusBadge>
     );
@@ -73,7 +73,7 @@ function renderRowStatus(status: BulkRowStatus) {
       break;
     case "PROCESSING":
       badge = (
-        <StatusBadge semantic="warning">
+        <StatusBadge semantic="info">
           <span style={{ whiteSpace: "nowrap" }}>En proceso</span>
         </StatusBadge>
       );

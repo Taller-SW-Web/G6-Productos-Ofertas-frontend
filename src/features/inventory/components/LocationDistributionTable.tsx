@@ -64,7 +64,7 @@ export function LocationDistributionTable({
       title="Distribución de stock por ubicación física"
       description="Consolidado de unidades físicas, reservas, bloqueos y disponibilidad por centro logístico."
     >
-      <Table striped highlightOnHover withTableBorder>
+      <Table highlightOnHover>
         <Table.Thead>
           <Table.Tr>
             <Table.Th>Ubicación</Table.Th>
@@ -99,7 +99,7 @@ export function LocationDistributionTable({
                 {dist.availableTotal}
               </Table.Td>
               <Table.Td>
-                <Group gap={6}>
+                <Group gap={8}>
                   <StatusBadge semantic="success" size="sm">
                     {dist.skusAvailableCount} disp.
                   </StatusBadge>

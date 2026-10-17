@@ -21,6 +21,9 @@ export interface BatchStatusPanelProps {
   onResume?: () => void;
   refreshing?: boolean;
   resuming?: boolean;
+  // Explicit eligibility for the resume action. When omitted, callers that opt
+  // into resume keep the legacy terminal+reconciliation rule.
+  canResume?: boolean;
   showDetailsLink?: boolean;
 }
 
@@ -30,6 +33,7 @@ export function BatchStatusPanel({
   onResume,
   refreshing = false,
   resuming = false,
+  canResume,
   showDetailsLink = false,
 }: BatchStatusPanelProps) {
   const dataMode = useContext(DataModeContext);
@@ -46,15 +50,19 @@ export function BatchStatusPanel({
   const isFailedGeneral = batch.status === "FAILED_GENERAL";
   const isProcessing = batch.status === "PROCESSING";
   const isQueued = batch.status === "QUEUED";
+  const resumeEligible =
+    canResume ?? (isTerminal && batch.needs_reconciliation);
 
   // Semantic presentation for StatusBadge
   const statusSemantic = isSuccess
     ? "success"
-    : isPartial || isProcessing
-      ? "warning"
-      : isFailedGeneral
-        ? "error"
-        : "neutral";
+    : isProcessing
+      ? "info"
+      : isPartial
+        ? "warning"
+        : isFailedGeneral
+          ? "error"
+          : "neutral";
 
   const statusLabel = isSuccess
     ? "Completado"
@@ -231,10 +239,10 @@ export function BatchStatusPanel({
         )}
 
         {/* Action buttons */}
-        {((onResume && isTerminal && batch.needs_reconciliation) ||
+        {((onResume && resumeEligible) ||
           (showDetailsLink && isTerminal)) && (
           <Group justify="flex-end" gap="sm">
-            {onResume && isTerminal && batch.needs_reconciliation && (
+            {onResume && resumeEligible && (
               <Button
                 variant="outline"
                 leftSection={<IconRotateClockwise size={18} stroke={2} aria-hidden="true" />}

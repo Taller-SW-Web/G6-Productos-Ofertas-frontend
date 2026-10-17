@@ -42,17 +42,27 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
     await expect(page.getByText(/Precio inicial de Catálogo: S\/\.\s*129\.90/)).toBeVisible();
 
     // Verify initial variant items
-    await expect(page.getByRole("link", { name: "CAM-OXF-BLA-M" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "CAM-OXF-AZU-L" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "CAM-OXF-NEG-S" })).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "CAM-OXF-BLA-M", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "CAM-OXF-AZU-L", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "CAM-OXF-NEG-S", exact: true }),
+    ).toBeVisible();
 
     // Filter by status "Solo Activas"
     const statusSelect = page.getByRole("combobox", { name: "Filtrar por estado" });
     await statusSelect.click();
     await page.getByRole("option", { name: "Solo Activas" }).click();
 
-    await expect(page.getByRole("link", { name: "CAM-OXF-BLA-M" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "CAM-OXF-NEG-S" })).toHaveCount(0);
+    await expect(
+      page.getByRole("link", { name: "CAM-OXF-BLA-M", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "CAM-OXF-NEG-S", exact: true }),
+    ).toHaveCount(0);
 
     // Capture visual evidence S01
     await page.screenshot({ path: evidencePath("mk004-s01-variantes-1440.png") });
@@ -305,7 +315,9 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
 
     // Now deactivate VAR-OXF-BLA-M (the remaining active variant)
     await page.getByRole("link", { name: "Variantes", exact: true }).click();
-    await page.getByRole("link", { name: "CAM-OXF-BLA-M" }).click();
+    await page
+      .getByRole("link", { name: "CAM-OXF-BLA-M", exact: true })
+      .click();
     await page.getByRole("button", { name: "Desactivar" }).click();
     await page.getByRole("button", { name: "Desactivar Variante" }).click();
     await expect(page.getByText("INACTIVA").first()).toBeVisible();

@@ -170,7 +170,7 @@ export function ThresholdConfigForm({
             No hay excepciones configuradas. Todos los SKUs utilizan el umbral global ({thresholds.globalThreshold} unidades).
           </Text>
         ) : (
-          <Table striped highlightOnHover withTableBorder>
+          <Table highlightOnHover>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>SKU</Table.Th>

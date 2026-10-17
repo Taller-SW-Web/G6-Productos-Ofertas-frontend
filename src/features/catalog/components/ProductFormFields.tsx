@@ -332,15 +332,14 @@ export function ProductFormFields({
               rightSection={<IconPhoto size={16} />}
             />
             {formData.imageUrl.trim() && (
-              <Box mt="xs" p="xs" style={{ border: "1px solid #dee2e6", borderRadius: 8 }} w="fit-content">
+              <Box mt="xs" p="xs" style={{ border: "1px solid var(--po-border)", borderRadius: 8 }} w="fit-content">
                 <Image
                   src={formData.imageUrl}
                   alt="Vista previa de imagen"
                   h={100}
                   w={100}
-                  fit="cover"
+                  fit="contain"
                   radius="sm"
-                  fallbackSrc="https://placehold.co/100x100?text=Sin+imagen"
                 />
               </Box>
             )}

@@ -27,5 +27,5 @@ const availability: CombosAvailabilityPort = {
   async readStocks() { throw unavailable(); },
 };
 export function createUnavailableCombosAdapters(): CombosRuntime {
-  return { combos, catalog, pricing, availability };
+  return { combos, catalog, pricing, availability, now: () => Date.now() };
 }

@@ -65,8 +65,7 @@ export function ProductFilters({
         hasActiveFilters ? (
           <Button
             variant="subtle"
-            color="orange"
-            size="compact-xs"
+            size="sm"
             onClick={onClear}
           >
             Limpiar filtros

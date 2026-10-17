@@ -2,6 +2,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { Button, Skeleton, Stack } from "@mantine/core";
 import { IconArrowLeft } from "@tabler/icons-react";
 import {
+  ContextNote,
   FeedbackAlert,
   PageHeader,
 } from "../../../components/shared";
@@ -52,11 +53,11 @@ export function ThresholdsPage() {
       />
 
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Precedencia de reglas de umbral">
+        <ContextNote title="Precedencia de reglas de umbral">
           El umbral resuelto usa primero la excepción por SKU y, si no existe, el umbral global.
           Cuando el saldo disponible es menor o igual a este valor, el estado comercial pasa a{" "}
           <strong>stock bajo</strong>.
-        </FeedbackAlert>
+        </ContextNote>
 
         {isRevisionMode && <DevScenarioSelector />}
 

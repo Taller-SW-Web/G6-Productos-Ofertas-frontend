@@ -34,12 +34,49 @@ export const priceTargets: PriceTarget[] = [
     sku: "ZAP-TRL-42-BLK",
     productTargetId: "base",
   },
+  // Shared demo targets for the Combos feature (MK-002). They resolve the exact
+  // sellable SKUs of the shared Catalog so Combos and Pricing expose the same
+  // economic reference. Do not duplicate these values elsewhere.
+  {
+    id: "combo-casaca",
+    label: "Casaca Cortaviento Trail · Producto base",
+    productId: "PROD-CAS-001",
+    kind: "product",
+    referenceSku: "CAS-COR-001",
+  },
+  {
+    id: "combo-oxf-base",
+    label: "Camisa Oxford Manga Larga · Producto base",
+    productId: "PROD-OXF-001",
+    kind: "product",
+    referenceSku: "CAM-OXF",
+  },
+  {
+    id: "combo-oxf-bla-m",
+    label: "Color: Blanco · Talla: M — CAM-OXF-BLA-M",
+    productId: "PROD-OXF-001",
+    kind: "variant",
+    sku: "CAM-OXF-BLA-M",
+    productTargetId: "combo-oxf-base",
+  },
+  {
+    id: "combo-oxf-azu-l",
+    label: "Color: Azul Índigo · Talla: L — CAM-OXF-AZU-L",
+    productId: "PROD-OXF-001",
+    kind: "variant",
+    sku: "CAM-OXF-AZU-L",
+    productTargetId: "combo-oxf-base",
+  },
 ];
 export const targetNames: Record<string, string> = {
   base: "Zapatilla Trail Inka Explorer",
   variant40: "Talla 40 · Negro",
   variant41: "Talla 41 · Negro",
   override42: "Talla 42 · Negro",
+  "combo-casaca": "Casaca Cortaviento Trail",
+  "combo-oxf-base": "Camisa Oxford Manga Larga",
+  "combo-oxf-bla-m": "Color: Blanco · Talla: M",
+  "combo-oxf-azu-l": "Color: Azul Índigo · Talla: L",
 };
 export const priceRecords: PriceView[] = [
   {
@@ -89,6 +126,48 @@ export const priceRecords: PriceView[] = [
     offer: null,
     currency: "PEN",
     version: 6,
+    origin: "sku",
+    channel: "global",
+    validFrom: "2026-09-01T00:00:00Z",
+    validUntil: null,
+    inherited: false,
+  },
+  {
+    id: "combo-casaca",
+    name: targetNames["combo-casaca"]!,
+    regular: "179.00",
+    offer: "159.00",
+    currency: "PEN",
+    version: 1,
+    origin: "product",
+    channel: "global",
+    validFrom: "2026-09-01T00:00:00Z",
+    validUntil: null,
+    inherited: false,
+  },
+  {
+    // Base reference for PROD-OXF-001. The Blanco variant inherits this record.
+    id: "combo-oxf-base",
+    name: targetNames["combo-oxf-base"]!,
+    regular: "139.90",
+    offer: "129.90",
+    currency: "PEN",
+    version: 1,
+    origin: "product",
+    channel: "global",
+    validFrom: "2026-09-01T00:00:00Z",
+    validUntil: null,
+    inherited: false,
+  },
+  {
+    // Own override for the Azul variant; it does not inherit the base offer.
+    id: "combo-oxf-azu-l",
+    name: targetNames["combo-oxf-azu-l"]!,
+    sku: "CAM-OXF-AZU-L",
+    regular: "149.90",
+    offer: null,
+    currency: "PEN",
+    version: 1,
     origin: "sku",
     channel: "global",
     validFrom: "2026-09-01T00:00:00Z",

@@ -56,13 +56,20 @@ export class MockCombosRepository implements CombosRepository {
     }
     const all = query.scenario === "list-empty" ? [] : this.combos.filter((item) => query.status === "TODOS" || item.status === query.status);
     const start = (query.page - 1) * query.pageSize;
-    return { items: clone(all.slice(start, start + query.pageSize)), page: query.page, pageSize: query.pageSize, total: all.length };
+    // Availability is derived, never trusted from a snapshot: recompute it at read
+    // time from the injected Catalog/Inventory ports so a stale seed can never be
+    // published as a current reading.
+    const items = await Promise.all(
+      all.slice(start, start + query.pageSize).map((item) => this.withCurrentAvailability(item, signal)),
+    );
+    return { items, page: query.page, pageSize: query.pageSize, total: all.length };
   }
 
   async getById(id: string, signal?: AbortSignal): Promise<Combo | null> {
     throwIfAborted(signal);
-    if (signal?.aborted) throw new DOMException("La consulta fue cancelada.", "AbortError");
-    return clone(this.combos.find((item) => item.id === id) ?? null);
+    const found = this.combos.find((item) => item.id === id) ?? null;
+    if (!found) return null;
+    return this.withCurrentAvailability(found, signal);
   }
 
   async create(payload: ComboPayload, scenario?: string): Promise<Combo> {
@@ -117,20 +124,29 @@ export class MockCombosRepository implements CombosRepository {
     };
   }
 
+  private async withCurrentAvailability(combo: Combo, signal?: AbortSignal): Promise<Combo> {
+    const availability = await this.computeAvailability(combo.status, combo.components, signal);
+    return { ...clone(combo), availability };
+  }
+
   private async computeAvailability(
     status: ComboStatus,
     components: { sku: string; quantity: number }[],
+    signal?: AbortSignal,
   ): Promise<ComboAvailability> {
+    throwIfAborted(signal);
     const skus = components.map((component) => component.sku);
-    const resolved = await this.deps.catalog.resolveSkus(skus);
+    const resolved = await this.deps.catalog.resolveSkus(skus, signal);
     const sellable = new Map(resolved.map((entry) => [entry.sku, entry.sellable]));
-    const readings = await this.deps.availability.readStocks(skus);
+    const readings = await this.deps.availability.readStocks(skus, signal);
     return calculateInformativeAvailability(
       status,
       components.map((component) => ({
         sku: component.sku,
         quantity: component.quantity,
-        active: sellable.get(component.sku) ?? false,
+        // Unresolved identity stays null; it is never coerced into a sellable (true)
+        // nor into a false inactive component.
+        active: sellable.get(component.sku) ?? null,
       })),
       new Map(readings.map((reading) => [reading.sku, reading])),
       new Date(this.now()).toISOString(),
