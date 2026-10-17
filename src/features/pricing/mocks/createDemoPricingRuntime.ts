@@ -25,7 +25,7 @@ export function createDemoPricingRuntime(
     : undefined;
   return {
     service: decorateDemoRepository(
-      createMockPricingRepository(clock, mockPricingAudit.record),
+      createMockPricingRepository(clock, mockPricingAudit.record, { persist: true }),
       control,
     ),
     clock,

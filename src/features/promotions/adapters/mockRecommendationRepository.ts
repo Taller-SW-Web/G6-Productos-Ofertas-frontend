@@ -9,14 +9,56 @@ import type {
   RecommendationRepository,
   RecommendationView,
 } from "../services/recommendationRepository";
+import {
+  isMockPersistenceAvailable,
+  isRecord,
+  publishMockChange,
+  readMockState,
+  saveMockState,
+  subscribeExternalMockChanges,
+} from "../../shared/mockState";
+
+interface MockRecommendationState {
+  records: RecommendationView[];
+  sequence: number;
+}
+
+function isMockRecommendationState(value: unknown): value is MockRecommendationState {
+  return isRecord(value) && Array.isArray(value.records) && typeof value.sequence === "number";
+}
+
 export function createMockRecommendationRepository(
   catalog: () => PromotionCatalogRepository,
   fixtures: readonly RecommendationView[] = recommendationFixtures,
+  options: { persist?: boolean } = {},
 ): RecommendationRepository {
-  const records: RecommendationView[] = fixtures.map((item) =>
-    structuredClone(item),
-  );
-  let sequence = 0;
+  const persistEnabled = options.persist === true && isMockPersistenceAvailable();
+  const restored = persistEnabled
+    ? readMockState<MockRecommendationState>("promotions-recommendations", isMockRecommendationState)
+    : null;
+  const records: RecommendationView[] = restored
+    ? restored.records
+    : fixtures.map((item) => structuredClone(item));
+  let sequence = restored ? restored.sequence : 0;
+  const persist = () => {
+    saveMockState("promotions-recommendations", { records, sequence } satisfies MockRecommendationState);
+    publishMockChange("promotions-recommendations");
+    publishMockChange("promotions");
+  };
+  if (persistEnabled) {
+    subscribeExternalMockChanges("promotions-recommendations", () => {
+      const stored = readMockState<MockRecommendationState>(
+        "promotions-recommendations",
+        isMockRecommendationState,
+      );
+      if (!stored) return;
+      records.length = 0;
+      records.push(...stored.records);
+      sequence = stored.sequence;
+      publishMockChange("promotions-recommendations");
+      publishMockChange("promotions");
+    });
+  }
   return {
     async list(query, signal) {
       signal.throwIfAborted();
@@ -99,6 +141,7 @@ export function createMockRecommendationRepository(
       };
       if (id) records[records.findIndex((item) => item.id === id)] = record;
       else records.push(record);
+      persist();
       return structuredClone(record);
     },
     async changeStatus(id, status, signal) {
@@ -121,6 +164,7 @@ export function createMockRecommendationRepository(
         configuration: { ...previous.configuration, status },
       };
       records[index] = record;
+      persist();
       return structuredClone(record);
     },
   };

@@ -1,29 +1,77 @@
 import type { CouponView } from "../services/couponRepository";
+import {
+  isMockPersistenceAvailable,
+  isRecord,
+  publishMockChange,
+  readMockState,
+  saveMockState,
+  subscribeExternalMockChanges,
+} from "../../shared/mockState";
 
 // Simulated provider history, not a DTO or a capability computed by React.
 export interface PromotionHistoryFacts {
   activated: boolean | undefined;
   used: boolean | undefined;
 }
+
+type PromotionHistoryState = Record<string, PromotionHistoryFacts>;
+
+function isPromotionHistoryState(value: unknown): value is PromotionHistoryState {
+  return isRecord(value);
+}
+
 export function createPromotionHistory(
   initial: Readonly<Record<string, PromotionHistoryFacts>>,
+  options: { persist?: boolean } = {},
 ) {
+  const persistEnabled = options.persist === true && isMockPersistenceAvailable();
+  const restored = persistEnabled
+    ? readMockState<PromotionHistoryState>("promotions-history", isPromotionHistoryState)
+    : null;
   const facts = new Map(
-    Object.entries(initial).map(([id, value]) => [id, { ...value }]),
+    Object.entries(restored ?? initial).map(([id, value]) => [id, { ...value }]),
   );
   const observedCoupons = new Map<
     string,
     { promotionId: string; consumedUses: number | undefined }
   >();
+
+  function persist() {
+    saveMockState("promotions-history", Object.fromEntries(facts) as PromotionHistoryState);
+    publishMockChange("promotions-history");
+    publishMockChange("promotions");
+  }
+
+  if (persistEnabled) {
+    subscribeExternalMockChanges("promotions-history", () => {
+      const stored = readMockState<PromotionHistoryState>(
+        "promotions-history",
+        isPromotionHistoryState,
+      );
+      if (!stored) return;
+      facts.clear();
+      for (const [id, value] of Object.entries(stored)) {
+        facts.set(id, { ...value });
+      }
+      publishMockChange("promotions-history");
+      publishMockChange("promotions");
+    });
+  }
+
   return {
     initialize(id: string, active: boolean) {
       facts.set(id, { activated: active, used: false });
+      if (persistEnabled) persist();
     },
     activate(id: string) {
       const value = facts.get(id);
       facts.set(id, { activated: true, used: value?.used });
+      if (persistEnabled) persist();
     },
     observe(coupon: CouponView) {
+      const signature = persistEnabled
+        ? JSON.stringify([...facts.entries()])
+        : "";
       const value = facts.get(coupon.promotionId);
       const previous = observedCoupons.get(coupon.id);
       observedCoupons.set(coupon.id, {
@@ -51,6 +99,7 @@ export function createPromotionHistory(
         }
       }
       // A reassignment preserves the coupon's total uses; it is not a new use of the destination.
+      if (persistEnabled && JSON.stringify([...facts.entries()]) !== signature) persist();
     },
     capability(
       id: string,

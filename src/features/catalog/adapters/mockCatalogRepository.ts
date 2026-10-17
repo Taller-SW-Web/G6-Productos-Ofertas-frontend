@@ -26,29 +26,92 @@ import {
   isPhysicalProfileComplete,
   hasValidPhysicalValues,
 } from "../services/catalogPresentation";
+import {
+  clearMockState,
+  isMockPersistenceAvailable,
+  isRecord,
+  publishMockChange,
+  readMockState,
+  saveMockState,
+  subscribeExternalMockChanges,
+} from "../../shared/mockState";
+
+interface MockCatalogState {
+  products: ProductDetailView[];
+  variants: VariantDetailView[];
+}
+
+function isMockCatalogState(value: unknown): value is MockCatalogState {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.products) &&
+    Array.isArray(value.variants)
+  );
+}
 
 export class MockCatalogRepository implements CatalogRepository {
   private products: ProductDetailView[] = [];
   private variants: VariantDetailView[] = [];
   private listeners = new Set<() => void>();
   private revisionValue = 0;
+  private readonly persistEnabled: boolean;
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
   };
   revision = () => this.revisionValue;
-  private changed() {
+  private changed(persist = true) {
     this.revisionValue++;
+    if (persist && this.persistEnabled) {
+      saveMockState("catalog", this.snapshot());
+    }
+    publishMockChange("catalog");
     this.listeners.forEach(listener => listener());
   }
 
-  constructor(private readonly taxonomy: TaxonomyRepository = new MockTaxonomyRepository()) {
-    this.reset();
+  constructor(
+    private readonly taxonomy: TaxonomyRepository = new MockTaxonomyRepository(),
+    options: { persist?: boolean } = {},
+  ) {
+    // Directly constructed repositories stay isolated; only the demo singleton
+    // opts into persistence explicitly.
+    this.persistEnabled = options.persist === true && isMockPersistenceAvailable();
+    if (this.persistEnabled) {
+      const stored = readMockState("catalog", isMockCatalogState);
+      if (stored) {
+        this.products = stored.products;
+        this.variants = stored.variants;
+      } else {
+        this.loadFixtures();
+      }
+      subscribeExternalMockChanges("catalog", () => this.hydrateFromStorage());
+    } else {
+      this.loadFixtures();
+    }
+  }
+
+  private snapshot(): MockCatalogState {
+    return { products: this.products, variants: this.variants };
+  }
+
+  private loadFixtures() {
+    this.products = JSON.parse(JSON.stringify(initialProducts));
+    this.variants = JSON.parse(JSON.stringify(initialVariants));
+  }
+
+  private hydrateFromStorage() {
+    if (!this.persistEnabled) return;
+    const stored = readMockState("catalog", isMockCatalogState);
+    if (!stored) return;
+    this.products = stored.products;
+    this.variants = stored.variants;
+    // Notify consumers without re-persisting the value just read.
+    this.changed(false);
   }
 
   reset() {
-    this.products = JSON.parse(JSON.stringify(initialProducts));
-    this.variants = JSON.parse(JSON.stringify(initialVariants));
+    clearMockState("catalog");
+    this.loadFixtures();
     this.changed();
   }
 
@@ -677,6 +740,7 @@ export class MockCatalogRepository implements CatalogRepository {
       }
     }
 
+    this.changed();
     return {
       accepted: true,
       message: "HTTP 202: Reintento admitido. Nuevo ciclo de preparación en curso.",
@@ -1268,6 +1332,7 @@ export class MockCatalogRepository implements CatalogRepository {
     variant.inventoryStatus = "PENDING";
     variant.inventoryManualRetryAllowed = false;
 
+    this.changed();
     return {
       accepted: true,
       message: "HTTP 202 Accepted: Reintento de inventario admitido en Catálogo (CA-19).",
@@ -1276,4 +1341,4 @@ export class MockCatalogRepository implements CatalogRepository {
   }
 }
 
-export const mockCatalogRepository = new MockCatalogRepository(sharedMockTaxonomyRepository);
+export const mockCatalogRepository = new MockCatalogRepository(sharedMockTaxonomyRepository, { persist: true });

@@ -4,6 +4,11 @@ import type {
   CategoryDetail,
   CategoryNode,
 } from "../types";
+import {
+  loadMockArray,
+  persistMockArray,
+  syncMockArrayOnExternalChange,
+} from "../../shared/mockState";
 
 // In-memory flat store for MK-008. No HTTP contract exists yet; writes are simulated
 // and lost on reload. Keeping it flat makes parent/child relationships explicit.
@@ -20,7 +25,7 @@ interface RegistroCategoria {
   productosActivos?: number;
 }
 
-const store: RegistroCategoria[] = [
+const storeFixtures: RegistroCategoria[] = [
   {
     id: "calzado",
     nombre: "Calzado",
@@ -78,6 +83,13 @@ const store: RegistroCategoria[] = [
     productosActivos: 0,
   },
 ];
+
+// Demo state restored from the current-browser session when available; otherwise a
+// fresh clone of the fixtures. Cross-tab writes rehydrate this same array in place.
+const store: RegistroCategoria[] = loadMockArray("taxonomy-categories", storeFixtures);
+syncMockArrayOnExternalChange("taxonomy-categories", store);
+
+const persist = () => persistMockArray("taxonomy-categories", store);
 
 const esperar = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -240,6 +252,7 @@ export const mockCategoryAdapter: CategoryRepository = {
       descripcion: input.descripcion,
       productosActivos: 0,
     });
+    persist();
     return { id, nombre: input.nombre, slug: input.slug };
   },
 
@@ -271,6 +284,7 @@ export const mockCategoryAdapter: CategoryRepository = {
     registro.orden = input.orden;
     registro.descripcion = input.descripcion;
 
+    persist();
     return aDetalle(registro);
   },
 
@@ -362,6 +376,7 @@ export const mockCategoryAdapter: CategoryRepository = {
       categoriaId: id,
       estado: "pendiente",
     });
+    persist();
     return {
       resultado: "verificando",
       categoria: aDetalle(registro),
@@ -389,6 +404,7 @@ export const mockCategoryAdapter: CategoryRepository = {
     if (operacion.estado === "pendiente") {
       operacion.estado = "confirmada";
       registro.estado = "Inactivo";
+      persist();
       return {
         operacionId,
         estado: "confirmada",
@@ -460,6 +476,7 @@ export const mockCategoryAdapter: CategoryRepository = {
     }
 
     registro.estado = "Activo";
+    persist();
     return {
       resultado: "reactivada",
       categoria: aDetalle(registro),

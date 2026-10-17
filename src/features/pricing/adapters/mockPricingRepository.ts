@@ -18,14 +18,46 @@ import {
   validatePrice,
   validateSchedule,
 } from "../services/pricingValidation";
+import {
+  isMockPersistenceAvailable,
+  isRecord,
+  publishMockChange,
+  readMockState,
+  saveMockState,
+  subscribeExternalMockChanges,
+} from "../../shared/mockState";
+
+interface MockPricingState {
+  records: PriceView[];
+  schedules: ScheduleView[];
+  sequence: number;
+}
+
+function isMockPricingState(value: unknown): value is MockPricingState {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.records) &&
+    Array.isArray(value.schedules) &&
+    typeof value.sequence === "number"
+  );
+}
 
 export function createMockPricingRepository(
   clock: Clock,
   onUpdated?: (target: PriceTarget, before: PriceView, after: PriceView, reason: string) => void,
+  options: { persist?: boolean } = {},
 ): PricingRepository {
-  const records = structuredClone(priceRecords);
+  const persistEnabled = options.persist === true && isMockPersistenceAvailable();
+  const restored = persistEnabled
+    ? readMockState<MockPricingState>("pricing", isMockPricingState)
+    : null;
+  const records = restored ? restored.records : structuredClone(priceRecords);
   let targets = structuredClone(priceTargets);
   const names = { ...targetNames };
+  const persist = () => {
+    saveMockState("pricing", { records, schedules, sequence } satisfies MockPricingState);
+    publishMockChange("pricing");
+  };
   async function refreshTargets(signal: AbortSignal) {
     const current = await readMockPricingTargets(signal);
     const identities = new Map(current.map(target => [target.id,
@@ -44,8 +76,20 @@ export function createMockPricingRepository(
         : target.label.split(" — ")[0] ?? target.label;
     }
   }
-  const schedules = structuredClone(scheduleFixtures);
-  let sequence = schedules.length;
+  const schedules = restored ? restored.schedules : structuredClone(scheduleFixtures);
+  let sequence = restored ? restored.sequence : schedules.length;
+  if (persistEnabled) {
+    subscribeExternalMockChanges("pricing", () => {
+      const next = readMockState<MockPricingState>("pricing", isMockPricingState);
+      if (!next) return;
+      records.length = 0;
+      records.push(...next.records);
+      schedules.length = 0;
+      schedules.push(...next.schedules);
+      sequence = next.sequence;
+      publishMockChange("pricing");
+    });
+  }
   function effective(
     id: string,
     channel: PriceChannel,
@@ -200,6 +244,7 @@ export function createMockPricingRepository(
         )
           row.validUntil = clock.now();
       records.push(saved);
+      persist();
       try {
         onUpdated?.(target, current, saved, change.draft.reason);
       } catch (error) {
@@ -261,6 +306,7 @@ export function createMockPricingRepository(
         status: "SCHEDULED",
       };
       schedules.unshift(created);
+      persist();
       return structuredClone(created);
     },
     async readHistorical(query, at, signal) {

@@ -28,7 +28,8 @@ test("VER-01/04: confirmed mock edit survives module navigation and appears in a
   await page.screenshot({ path: evidencePath("ver-01-listado-1440.png"), fullPage: true });
   await page.reload();
   await expect(page.getByRole("table")).toBeVisible();
-  await expect(page.getByRole("row").filter({ hasText: "ZAP-TRL-EXP" })).toHaveCount(0);
+  // La edición confirmada se persiste en este navegador: tras recargar el asiento sigue disponible.
+  await expect(page.getByRole("row").filter({ hasText: "ZAP-TRL-EXP" }).first()).toBeVisible();
 });
 
 test("VER-01/03: provider-consumer contract preserves decimals, nulls, filters, rejected writes and isolation", async () => {
