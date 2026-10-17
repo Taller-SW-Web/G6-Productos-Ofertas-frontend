@@ -126,10 +126,16 @@ function RecommendationEditorProvider({
   );
   const readCatalog = useCallback(
     async (signal: AbortSignal) => ({
-      products: await services.catalog.products(signal),
+      products: await services.catalog.products(signal, initial ? {
+        productIds: [
+          ...(initial.configuration.originType === "product" ? [initial.configuration.originId] : []),
+          ...initial.configuration.candidates.map((candidate) => candidate.productId),
+        ],
+        skus: [],
+      } : undefined),
       categories: await services.catalog.categories(signal),
     }),
-    [services],
+    [services, initial],
   );
   const catalog = useAdministrationRead("catalog", readCatalog);
   if (form.confirmed) {

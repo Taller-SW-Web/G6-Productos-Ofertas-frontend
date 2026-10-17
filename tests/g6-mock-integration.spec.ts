@@ -1,4 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
+import { getCatalogServices } from "../src/features/catalog/services/catalogServices";
+import { createSharedMockTaxonomyRepository } from "../src/features/catalog/adapters/sharedMockTaxonomyRepository";
+import { getTaxonomyServices } from "../src/features/taxonomy/services/taxonomyServices";
 
 async function receive(page: Page, transferCode: string, quantity: number) {
   const navigation = page.getByRole("navigation", { name: "Navegación de la aplicación" });
@@ -14,15 +17,38 @@ async function receive(page: Page, transferCode: string, quantity: number) {
 }
 
 test("Catalog → Pricing → Inventory → Combos comparte identidad, precio y stock en la sesión", async ({ page }) => {
-  await page.goto("/productos");
+  test.setTimeout(90000);
+  await page.goto("/categorias/nueva");
+  const documentStarted = await page.evaluate(() => performance.timeOrigin);
+  const navigation = page.getByRole("navigation", { name: "Navegación de la aplicación" });
+  await page.getByLabel("Nombre", { exact: false }).fill("Categoría integrada Demo");
+  await page.getByRole("button", { name: "Crear categoría", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Crear categoría", exact: true }).click();
+  await expect(page.getByText("Categoría creada", { exact: true })).toBeVisible();
+
+  await navigation.getByRole("link", { name: "Marcas", exact: true }).click();
+  await page.getByRole("button", { name: "Nueva marca", exact: true }).click();
+  await page.getByLabel("Nombre", { exact: false }).fill("Marca integrada Demo");
+  await page.getByRole("button", { name: "Crear marca", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Marca integrada Demo", exact: true })).toBeVisible();
+
+  await navigation.getByRole("link", { name: "Gestión de productos", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Gestión de productos" })).toBeVisible();
   await page.getByRole("link", { name: "Ver detalle de Camisa Oxford Manga Larga" }).click();
   await expect(page.getByRole("heading", { name: "Camisa Oxford Manga Larga" })).toBeVisible();
+  await page.getByRole("link", { name: "Editar", exact: true }).click();
+  await page.getByLabel("Nombre del producto").fill("Camisa Oxford Demo Integrada");
+  await page.getByRole("combobox", { name: "Categoría", exact: false }).click();
+  await page.getByRole("option", { name: "Categoría integrada Demo", exact: true }).click();
+  await page.getByRole("combobox", { name: "Marca", exact: false }).click();
+  await page.getByRole("option", { name: "Marca integrada Demo", exact: true }).click();
+  await page.getByRole("button", { name: "Guardar cambios", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Camisa Oxford Demo Integrada", exact: true })).toBeVisible();
+  await expect(page.getByText("Categoría integrada Demo", { exact: true })).toBeVisible();
+  await expect(page.getByText("Marca integrada Demo", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Gestionar variantes (MK-004)" }).click();
   await expect(page.getByRole("link", { name: "CAM-OXF-BLA-M", exact: true })).toBeVisible();
 
-  const documentStarted = await page.evaluate(() => performance.timeOrigin);
-  const navigation = page.getByRole("navigation", { name: "Navegación de la aplicación" });
   await navigation.getByRole("link", { name: "Consultar precios", exact: true }).click();
   await page.getByRole("combobox", { name: "Producto o SKU" }).click();
   await page.getByRole("option", { name: "Color: Blanco · Talla: M — CAM-OXF-BLA-M", exact: true }).click();
@@ -70,5 +96,62 @@ test("Catalog → Pricing → Inventory → Combos comparte identidad, precio y 
   await expect(comboRow).toContainText("9 combos estimados");
   await comboRow.getByRole("link", { name: "Ver detalle" }).click();
   await expect(page.getByText("9 combos estimados")).toBeVisible();
+
+  await navigation.getByRole("link", { name: "Ofertas y promociones", exact: true }).click();
+  await page.getByRole("link", { name: "Crear promoción", exact: true }).click();
+  await page.getByLabel("Nombre de la promoción", { exact: true }).fill("Promo SKU Oxford demo");
+  await page.getByRole("combobox", { name: "Modalidad comercial", exact: true }).click();
+  await page.getByRole("option", { name: "Con cupón", exact: true }).click();
+  await page.getByRole("combobox", { name: "Estado inicial", exact: true }).click();
+  await page.getByRole("option", { name: "Inactivo", exact: true }).click();
+  await page.getByLabel("Prioridad", { exact: true }).fill("2");
+  await page.getByRole("combobox", { name: "Tipo de beneficio", exact: true }).click();
+  await page.getByRole("option", { name: "Porcentaje", exact: true }).click();
+  await page.getByLabel("Valor del beneficio", { exact: true }).fill("15");
+  await page.getByLabel("Fecha y hora de inicio", { exact: true }).fill("2026-10-18T00:00");
+  await page.getByLabel("Fecha y hora de fin", { exact: true }).fill("2026-11-10T00:00");
+  await page.getByRole("checkbox", { name: "Marketplace", exact: true }).check();
+  await page.getByRole("link", { name: "Seleccionar alcance", exact: true }).click();
+  const oxfordSku = page.getByRole("checkbox", { name: /SKU específico: CAM-OXF-BLA-M/ });
+  await expect(oxfordSku).toBeVisible();
+  await oxfordSku.check();
+  await page.getByRole("button", { name: "Confirmar alcance", exact: true }).click();
+  await page.getByRole("button", { name: "Crear promoción", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Promo SKU Oxford demo", exact: true })).toBeVisible();
+  const savedScope = page.getByRole("region", { name: "Alcance de productos y SKU" });
+  await expect(savedScope).toContainText("Camisa Oxford Demo Integrada");
+  await expect(savedScope).toContainText("CAM-OXF-BLA-M");
+
+  await navigation.getByRole("link", { name: "Gestión de productos", exact: true }).click();
+  await page.getByRole("link", { name: "Ver detalle de Camisa Oxford Demo Integrada", exact: true }).click();
+  await page.getByRole("button", { name: "Desactivar", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Desactivar Producto", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Reactivar producto", exact: true })).toBeVisible();
+  await navigation.getByRole("link", { name: "Ofertas y promociones", exact: true }).click();
+  await page.getByRole("link", { name: "Crear promoción", exact: true }).click();
+  await page.getByRole("link", { name: "Seleccionar alcance", exact: true }).click();
+  await expect(page.getByRole("checkbox", { name: /CAM-OXF-BLA-M/ })).toHaveCount(0);
+  await navigation.getByRole("link", { name: "Gestión de combos", exact: true }).click();
+  comboRow = page.getByRole("row").filter({ hasText: "Conjunto Trail Esencial" });
+  await comboRow.getByRole("link", { name: "Ver detalle" }).click();
+  await expect(page.getByText("Componente inactivo", { exact: true }).first()).toBeVisible();
   expect(await page.evaluate(() => performance.timeOrigin)).toBe(documentStarted);
+});
+
+test("Taxonomy comparte los IDs históricos y valida nuevos IDs al guardar Catalog", async () => {
+  const official = getTaxonomyServices("mock");
+  const taxonomy = createSharedMockTaxonomyRepository();
+  const catalog = getCatalogServices("mock").catalog;
+  const category = await official.category.crear({ nombre: "Categoría ID Demo", slug: "categoria-id-demo" });
+  const brand = await official.brand.crear({ nombre: "Marca ID Demo", descripcion: null, paisOrigenIso: null });
+  const created = await catalog.create({
+    nombre: "Producto con maestros actuales", descripcion: "IDs de Taxonomy sin remapeo",
+    categoriaId: category.id, marcaId: brand.marcaId, tipoProductoId: "TIP-CAMISA",
+    skuBase: "TAXONOMY-ID-DEMO", tieneVariantes: false, precioBaseInicial: 20,
+  });
+  await official.category.actualizar({ id: category.id, nombre: "Categoría ID renombrada", slug: "categoria-id-demo", orden: 1 });
+  await official.brand.actualizar({ marcaId: brand.marcaId, nombre: "Marca ID renombrada", descripcion: null, paisOrigenIso: null });
+  const detail = await catalog.getById(created.id);
+  expect(detail).toMatchObject({ categoryId: category.id, categoryName: "Categoría ID renombrada", brandId: brand.marcaId, brandName: "Marca ID renombrada" });
+  expect((await taxonomy.getCategories()).some(row => row.id === "CAT-ROPA")).toBe(true);
 });

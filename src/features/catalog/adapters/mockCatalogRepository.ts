@@ -18,7 +18,9 @@ import type {
 } from "../services/catalogRepository";
 import { CatalogError } from "../services/catalogRepository";
 import { initialProducts, initialVariants } from "../mocks/catalogFixtures";
-import { initialCategories, initialBrands, initialProductTypes, attributeSchemasByType } from "../mocks/taxonomyFixtures";
+import type { TaxonomyRepository } from "../services/taxonomyRepository";
+import { MockTaxonomyRepository } from "./mockTaxonomyRepository";
+import { sharedMockTaxonomyRepository } from "./sharedMockTaxonomyRepository";
 import {
   normalizePhysicalProfile,
   isPhysicalProfileComplete,
@@ -28,14 +30,26 @@ import {
 export class MockCatalogRepository implements CatalogRepository {
   private products: ProductDetailView[] = [];
   private variants: VariantDetailView[] = [];
+  private listeners = new Set<() => void>();
+  private revisionValue = 0;
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  };
+  revision = () => this.revisionValue;
+  private changed() {
+    this.revisionValue++;
+    this.listeners.forEach(listener => listener());
+  }
 
-  constructor() {
+  constructor(private readonly taxonomy: TaxonomyRepository = new MockTaxonomyRepository()) {
     this.reset();
   }
 
   reset() {
     this.products = JSON.parse(JSON.stringify(initialProducts));
     this.variants = JSON.parse(JSON.stringify(initialVariants));
+    this.changed();
   }
 
   // Test/demo input representing a confirmed asynchronous result; never an HTTP endpoint.
@@ -46,6 +60,7 @@ export class MockCatalogRepository implements CatalogRepository {
     variant.inventoryPreparationStatus = status;
     variant.inventoryStatus = status;
     variant.inventoryManualRetryAllowed = status === "REJECTED" && manualRetryAllowed;
+    this.changed();
   }
 
   async list(
@@ -83,7 +98,15 @@ export class MockCatalogRepository implements CatalogRepository {
       return { items: [], total: 0, page: query.page || 1, pageSize: query.pageSize || 10 };
     }
 
-    let filtered = [...this.products];
+    const [categories, brands, types] = await Promise.all([
+      this.taxonomy.getCategories(signal), this.taxonomy.getBrands(signal), this.taxonomy.getProductTypes(signal),
+    ]);
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    let filtered = this.products.map(product => ({ ...product,
+      categoryName: categories.find(row => row.id === product.categoryId)?.nombre ?? product.categoryName,
+      brandName: brands.find(row => row.id === product.brandId)?.nombre ?? product.brandName,
+      typeName: types.find(row => row.id === product.typeId)?.nombre ?? product.typeName,
+    }));
 
     if (query.q && query.q.trim()) {
       const term = query.q.trim().toLowerCase();
@@ -162,6 +185,13 @@ export class MockCatalogRepository implements CatalogRepository {
     if (!found) return null;
 
     const cloned: ProductDetailView = JSON.parse(JSON.stringify(found));
+    const [categories, brands, types] = await Promise.all([
+      this.taxonomy.getCategories(signal), this.taxonomy.getBrands(signal), this.taxonomy.getProductTypes(signal),
+    ]);
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    cloned.categoryName = categories.find(row => row.id === cloned.categoryId)?.nombre ?? cloned.categoryName;
+    cloned.brandName = brands.find(row => row.id === cloned.brandId)?.nombre ?? cloned.brandName;
+    cloned.typeName = types.find(row => row.id === cloned.typeId)?.nombre ?? cloned.typeName;
 
     // Authoritative variant synchronization for parent product
     if (cloned.hasVariants) {
@@ -266,18 +296,6 @@ export class MockCatalogRepository implements CatalogRepository {
       throw new CatalogError("validation", "El precio base inicial debe ser mayor que cero.");
     }
 
-    // Check SKU duplicate in session
-    const existsSku = this.products.some(
-      (p) => p.skuBase.toUpperCase() === payload.skuBase.trim().toUpperCase(),
-    );
-    if (existsSku) {
-      throw new CatalogError(
-        "duplicate_sku",
-        `El SKU base "${payload.skuBase}" ya está en uso.`,
-        { skuBase: "SKU base duplicado" },
-      );
-    }
-
     // Physical profile validation for simple products: if values supplied, must be > 0
     if (!payload.tieneVariantes && payload.perfilFisico) {
       if (!hasValidPhysicalValues(payload.perfilFisico)) {
@@ -288,9 +306,21 @@ export class MockCatalogRepository implements CatalogRepository {
       }
     }
 
-    const category = initialCategories.find((c) => c.id === payload.categoriaId);
-    const brand = initialBrands.find((b) => b.id === payload.marcaId);
-    const pType = initialProductTypes.find((t) => t.id === payload.tipoProductoId);
+    const [categories, brands, types] = await Promise.all([
+      this.taxonomy.getCategories(signal), this.taxonomy.getBrands(signal), this.taxonomy.getProductTypes(signal),
+    ]);
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    const category = categories.find(c => c.id === payload.categoriaId);
+    const brand = brands.find(b => b.id === payload.marcaId);
+    const pType = types.find(t => t.id === payload.tipoProductoId);
+    if (!category?.activo || !brand?.activo || !pType?.activo) {
+      throw new CatalogError("invalid_master", "Selecciona categoría, marca y tipo activos en Taxonomía.");
+    }
+    // Check after all awaits: concurrent creates share one global SKU namespace.
+    if (this.products.some(p => p.skuBase.toUpperCase() === payload.skuBase.trim().toUpperCase()) ||
+      this.variants.some(v => v.sku.toUpperCase() === payload.skuBase.trim().toUpperCase())) {
+      throw new CatalogError("duplicate_sku", `El SKU base "${payload.skuBase}" ya está en uso.`, { skuBase: "SKU base duplicado" });
+    }
 
     const newId = `PROD-${crypto.randomUUID()}`;
     const newProduct: ProductDetailView = {
@@ -337,6 +367,7 @@ export class MockCatalogRepository implements CatalogRepository {
     };
 
     this.products.unshift(newProduct);
+    this.changed();
     return JSON.parse(JSON.stringify(newProduct));
   }
 
@@ -401,8 +432,18 @@ export class MockCatalogRepository implements CatalogRepository {
       }
     }
 
-    const category = initialCategories.find((c) => c.id === payload.categoriaId);
-    const brand = initialBrands.find((b) => b.id === payload.marcaId);
+    const [categories, brands, types] = await Promise.all([
+      this.taxonomy.getCategories(signal), this.taxonomy.getBrands(signal), this.taxonomy.getProductTypes(signal),
+    ]);
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (this.products[idx]?.catalogVersion !== current.catalogVersion) {
+      throw new CatalogError("version_conflict", "El producto cambió durante la validación. Recarga antes de guardar.");
+    }
+    const category = categories.find(c => c.id === payload.categoriaId);
+    const brand = brands.find(b => b.id === payload.marcaId);
+    if (!category?.activo || !brand?.activo) {
+      throw new CatalogError("invalid_master", "Selecciona categoría y marca activas en Taxonomía.");
+    }
 
     current.name = payload.nombre.trim();
     current.description = payload.descripcion.trim();
@@ -419,7 +460,7 @@ export class MockCatalogRepository implements CatalogRepository {
       !current.hasVariants &&
       !current.publishedCommercially
     ) {
-      const newType = initialProductTypes.find((t) => t.id === payload.tipoProductoId);
+      const newType = types.find(t => t.id === payload.tipoProductoId);
       current.typeId = payload.tipoProductoId;
       current.typeName = newType?.nombre || current.typeName;
     }
@@ -441,6 +482,7 @@ export class MockCatalogRepository implements CatalogRepository {
 
     current.catalogVersion += 1;
     this.products[idx] = current;
+    this.changed();
 
     return JSON.parse(JSON.stringify(current));
   }
@@ -519,7 +561,13 @@ export class MockCatalogRepository implements CatalogRepository {
     }
 
     // 5. Must satisfy required attributes of product type
-    const schemas = attributeSchemasByType[product.typeId] || [];
+    const expectedVersion = product.catalogVersion;
+    const expectedRevision = this.revisionValue;
+    const schemas = await this.taxonomy.getAttributeSchema(product.typeId, signal);
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (this.revisionValue !== expectedRevision || this.products.find(row => row.id === id) !== product || product.catalogVersion !== expectedVersion) {
+      throw new CatalogError("version_conflict", "El producto cambió durante la validación. Consulta su estado antes de activar.");
+    }
     const requiredSchemas = schemas.filter((s) => s.obligatorio);
     for (const req of requiredSchemas) {
       const attr = product.attributes.find((a) => a.caracteristicaId === req.caracteristicaId);
@@ -533,6 +581,7 @@ export class MockCatalogRepository implements CatalogRepository {
 
     product.status = "ACTIVO";
     product.catalogVersion += 1;
+    this.changed();
     return JSON.parse(JSON.stringify(product));
   }
 
@@ -556,6 +605,7 @@ export class MockCatalogRepository implements CatalogRepository {
 
     product.status = "INACTIVO";
     product.catalogVersion += 1;
+    this.changed();
     // Note: variants keep their individual statuses!
     return JSON.parse(JSON.stringify(product));
   }
@@ -842,6 +892,8 @@ export class MockCatalogRepository implements CatalogRepository {
       );
     }
 
+    const schema = await this.taxonomy.getAttributeSchema(parent.typeId, signal);
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     // SKU determination (optional on create, generated by catalog if omitted)
     let assignedSku = payload.sku?.trim().toUpperCase();
     if (!assignedSku) {
@@ -850,7 +902,8 @@ export class MockCatalogRepository implements CatalogRepository {
     }
 
     // SKU global uniqueness check (CA-02)
-    const existsSku = this.variants.some((v) => v.sku.toUpperCase() === assignedSku);
+    const existsSku = this.variants.some((v) => v.sku.toUpperCase() === assignedSku) ||
+      this.products.some(p => p.skuBase.toUpperCase() === assignedSku);
     if (existsSku) {
       throw new CatalogError(
         "duplicate_sku",
@@ -862,8 +915,8 @@ export class MockCatalogRepository implements CatalogRepository {
     const getCombinationKey = (attrs: ProductAttributeValue[]) =>
       attrs
         .map((a) => {
-          const schema = attributeSchemasByType[parent.typeId]?.find(s => s.caracteristicaId === a.caracteristicaId);
-          const valueId = a.valorId ?? schema?.opciones?.find(o => o.valor === String(a.valor))?.id;
+          const attributeSchema = schema.find(s => s.caracteristicaId === a.caracteristicaId);
+          const valueId = a.valorId ?? attributeSchema?.opciones?.find(o => o.valor === String(a.valor))?.id;
           return `${a.caracteristicaId}:${valueId ?? String(a.valor).trim().toUpperCase()}`;
         })
         .sort()
@@ -928,6 +981,7 @@ export class MockCatalogRepository implements CatalogRepository {
       },
     });
 
+    this.changed();
     return JSON.parse(JSON.stringify(newVariant));
   }
 
@@ -1020,6 +1074,7 @@ export class MockCatalogRepository implements CatalogRepository {
       current.physicalProfile = normalizePhysicalProfile(rawPf);
     }
     current.catalogVersion += (payload.catalogVersion ? 1 : 1);
+    this.changed();
 
     return JSON.parse(JSON.stringify(current));
   }
@@ -1066,6 +1121,7 @@ export class MockCatalogRepository implements CatalogRepository {
     }
 
     variant.status = "ACTIVA";
+    this.changed();
 
     // Synchronize parent variant summary
     const parentVar = parent.variants.find((v) => v.variantId === variantId);
@@ -1117,6 +1173,7 @@ export class MockCatalogRepository implements CatalogRepository {
       }
     }
 
+    this.changed();
     return {
       variant: JSON.parse(JSON.stringify(variant)),
       parentStatusChanged,
@@ -1166,6 +1223,7 @@ export class MockCatalogRepository implements CatalogRepository {
     }
 
     variant.status = "ACTIVA";
+    this.changed();
 
     // Synchronize parent variant summary
     const parentVar = parent.variants.find((v) => v.variantId === variantId);
@@ -1218,4 +1276,4 @@ export class MockCatalogRepository implements CatalogRepository {
   }
 }
 
-export const mockCatalogRepository = new MockCatalogRepository();
+export const mockCatalogRepository = new MockCatalogRepository(sharedMockTaxonomyRepository);

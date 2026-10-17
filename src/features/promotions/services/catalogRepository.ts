@@ -11,6 +11,6 @@ export interface CatalogCategoryChoice {
   active: boolean;
 }
 export interface PromotionCatalogRepository {
-  products(signal: AbortSignal): Promise<CatalogProductChoice[]>;
+  products(signal: AbortSignal, retain?: { productIds: string[]; skus: string[] }): Promise<CatalogProductChoice[]>;
   categories(signal: AbortSignal): Promise<CatalogCategoryChoice[]>;
 }

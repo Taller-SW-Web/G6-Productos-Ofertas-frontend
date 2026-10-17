@@ -50,15 +50,21 @@ export function RecommendationDetailPage({
     `${ruleId}:${revision + queryRevision}`,
     read,
   );
+  const record = state.status === "success" ? state.result : null;
   const readCatalog = useCallback(
     async (signal: AbortSignal) => ({
-      products: await confirmedServices.catalog.products(signal),
+      products: await confirmedServices.catalog.products(signal, record ? {
+        productIds: [
+          ...(record.configuration.originType === "product" ? [record.configuration.originId] : []),
+          ...record.configuration.candidates.map((candidate) => candidate.productId),
+        ],
+        skus: [],
+      } : undefined),
       categories: await confirmedServices.catalog.categories(signal),
     }),
-    [confirmedServices],
+    [confirmedServices, record],
   );
-  const catalog = useAdministrationRead("catalog", readCatalog),
-    record = state.status === "success" ? state.result : null;
+  const catalog = useAdministrationRead("catalog", readCatalog);
   useEffect(() => {
     if (record && (location.state?.focusState || updated))
       trigger.current?.focus();

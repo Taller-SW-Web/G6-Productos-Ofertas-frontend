@@ -38,7 +38,20 @@ export function createMockRecommendationRepository(
     async save(id, draft, signal) {
       signal.throwIfAborted();
       const errors = recommendationErrors(draft);
-      const catalogProducts = await catalog().products(signal);
+      const previous = id ? records.find((item) => item.id === id) : null;
+      if (id && !previous)
+        throw new AdministrationError(
+          "rejected",
+          "La regla no está disponible para editar.",
+        );
+      const retained = previous ? {
+        productIds: [
+          ...(previous.configuration.originType === "product" ? [previous.configuration.originId] : []),
+          ...previous.configuration.candidates.map((candidate) => candidate.productId),
+        ],
+        skus: [],
+      } : undefined;
+      const catalogProducts = await catalog().products(signal, retained);
       const catalogCategories = await catalog().categories(signal);
       signal.throwIfAborted();
       const origins =
@@ -54,12 +67,6 @@ export function createMockRecommendationRepository(
           errors[`candidate-${index}`] =
             "El producto recomendado no está disponible o está inactivo.";
       });
-      const previous = id ? records.find((item) => item.id === id) : null;
-      if (id && !previous)
-        throw new AdministrationError(
-          "rejected",
-          "La regla no está disponible para editar.",
-        );
       if (previous && draft.kind !== previous.configuration.kind)
         errors.kind =
           "La edición conserva el tipo de regla. Crea una regla nueva para otro tipo.";

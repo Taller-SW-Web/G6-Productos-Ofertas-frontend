@@ -52,6 +52,8 @@ test("composición global: los cuatro puertos API se inyectan juntos sin escenar
 const campaign = (name: string): CampaignDraft => ({
   ...structuredClone(campaignFixtures[0]!.configuration),
   name,
+  productIds: ["PROD-OXF-001"],
+  skus: ["CAM-OXF-BLA-M"],
   mode: "coupon",
   status: "inactive",
 });
@@ -262,7 +264,7 @@ test("composición: sustituir Recomendaciones no modifica los otros servicios; i
   ).toBeNull();
   expect(
     (await services.catalog.products(signal())).some(
-      (item) => item.id === "running-essential",
+      (item) => item.id === "PROD-OXF-001",
     ),
   ).toBe(true);
 });
