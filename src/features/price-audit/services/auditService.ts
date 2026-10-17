@@ -21,7 +21,7 @@ export async function createAuditRuntime(
   const unavailable = async (): Promise<never> => {
     throw new AuditFailure(
       "configuration",
-      "El adapter API de auditoría de precios no está configurado. No se utilizarán datos simulados como sustitución.",
+      "La consulta del historial de precios no está disponible.",
     );
   };
   return {

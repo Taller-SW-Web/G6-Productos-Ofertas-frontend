@@ -130,7 +130,7 @@ test.describe("MK-001 — regresión de UI de Carga masiva", () => {
 
     await page.goto("/carga-masiva/importaciones/batch-processing");
     await expect(page.getByText("Desglose por dominio", { exact: true })).toBeVisible();
-    await expect(page.getByText(/Muestra preliminar/)).toBeVisible();
+    await expect(page.getByText(/Filas consultadas/)).toBeVisible();
     const section = page.locator("section");
     await expect(section.getByText("Catálogo", { exact: true })).toBeVisible();
     await expect(section.getByText("Precios (Pricing)", { exact: true })).toBeVisible();
@@ -220,7 +220,7 @@ test.describe("MK-001 — regresión de UI de Carga masiva", () => {
     await page.goto("/carga-masiva/descargas?export_id=export-completed-xlsx");
     await expect(page.getByText("XLSX completado sin archivo descargable", { exact: true })).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "Descarga XLSX no disponible en demo", exact: true }),
+      page.getByRole("button", { name: "Descargar archivo XLSX consolidado", exact: true }),
     ).toBeDisabled();
   });
 
@@ -235,7 +235,7 @@ test.describe("MK-001 — regresión de UI de Carga masiva", () => {
     await page.goto("/carga-masiva/descargas?export_id=export-processing");
     await expect(page.getByText("Generando archivo…", { exact: true })).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "Descarga XLSX no disponible en demo", exact: true }),
+      page.getByRole("button", { name: "Descargar archivo XLSX consolidado", exact: true }),
     ).toBeDisabled();
   });
 });

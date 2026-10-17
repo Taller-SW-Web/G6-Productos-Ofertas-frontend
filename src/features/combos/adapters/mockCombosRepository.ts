@@ -125,8 +125,14 @@ export class MockCombosRepository implements CombosRepository {
   }
 
   private async withCurrentAvailability(combo: Combo, signal?: AbortSignal): Promise<Combo> {
-    const availability = await this.computeAvailability(combo.status, combo.components, signal);
-    return { ...clone(combo), availability };
+    const [availability, resolved] = await Promise.all([
+      this.computeAvailability(combo.status, combo.components, signal),
+      this.deps.catalog.resolveSkus(combo.components.map(component => component.sku), signal),
+    ]);
+    const names = new Map(resolved.map(component => [component.sku, component.productName]));
+    return { ...clone(combo), availability, components: combo.components.map(component => ({
+      ...component, productName: names.get(component.sku) ?? component.productName,
+    })) };
   }
 
   private async computeAvailability(
@@ -136,9 +142,11 @@ export class MockCombosRepository implements CombosRepository {
   ): Promise<ComboAvailability> {
     throwIfAborted(signal);
     const skus = components.map((component) => component.sku);
-    const resolved = await this.deps.catalog.resolveSkus(skus, signal);
+    const [resolved, readings] = await Promise.all([
+      this.deps.catalog.resolveSkus(skus, signal),
+      this.deps.availability.readStocks(skus, signal),
+    ]);
     const sellable = new Map(resolved.map((entry) => [entry.sku, entry.sellable]));
-    const readings = await this.deps.availability.readStocks(skus, signal);
     return calculateInformativeAvailability(
       status,
       components.map((component) => ({
@@ -154,8 +162,12 @@ export class MockCombosRepository implements CombosRepository {
   }
 
   private async buildCombo(payload: ComboPayload, id: string, version: number, status: ComboStatus): Promise<Combo> {
-    const prices = await this.deps.pricing.readCurrent(payload.components.map((item) => item.sku));
-    const resolved = await this.deps.catalog.resolveSkus(payload.components.map((item) => item.sku));
+    const skus = payload.components.map(item => item.sku);
+    const [prices, resolved, availability] = await Promise.all([
+      this.deps.pricing.readCurrent(skus),
+      this.deps.catalog.resolveSkus(skus),
+      this.computeAvailability(status, payload.components),
+    ]);
     const nameBySku = new Map(resolved.map((entry) => [entry.sku, entry.productName]));
     const components = payload.components.map((item) => {
       const matches = currentGlobalPricesForSku(item.sku, prices, this.now());
@@ -168,7 +180,6 @@ export class MockCombosRepository implements CombosRepository {
         publicUnitMinor: price ? effectivePublicMinor(price) : null,
       };
     });
-    const availability = await this.computeAvailability(status, payload.components);
     return {
       id,
       name: payload.name.trim(),

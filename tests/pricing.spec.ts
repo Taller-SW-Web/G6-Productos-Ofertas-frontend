@@ -1,10 +1,11 @@
+import { gotoPricingReview } from "./support/pricingReview";
 import { evidencePath } from "./support/evidence";
 import { test, expect } from "@playwright/test";
 
 test("S01 applies selection explicitly, distinguishes inheritance/override and retains context on return", async ({
   page,
 }) => {
-  await page.goto("/precios");
+  await gotoPricingReview(page, "/precios");
   await expect(
     page.getByRole("heading", { name: "Gestión de precios" }),
   ).toBeVisible();
@@ -51,7 +52,7 @@ test("S01 applies selection explicitly, distinguishes inheritance/override and r
   await expect(
     page.getByRole("button", { name: "Componentes de carga masiva" }),
   ).not.toBeVisible();
-  await page.goto("/precios?target=variant40&channel=retail");
+  await gotoPricingReview(page, "/precios?target=variant40&channel=retail");
   await expect(
     page.getByRole("combobox", { name: "Producto o SKU" }),
   ).toHaveValue("Talla 40 · Negro — ZAP-TRL-40-BLK");
@@ -78,12 +79,12 @@ test("S01 applies selection explicitly, distinguishes inheritance/override and r
 test("S01 distinguishes absence from error and marks previous readings without enabling mutation", async ({
   page,
 }) => {
-  await page.goto("/precios");
+  await gotoPricingReview(page, "/precios");
   await expect(
     page.getByRole("combobox", { name: "Escenario de revisión del piloto" }),
   ).not.toBeVisible();
 
-  await page.goto("/precios?modoRevision=1");
+  await gotoPricingReview(page, "/precios?modoRevision=1");
   await expect(
     page.getByRole("region", {
       name: "Zapatilla Trail Inka Explorer",
@@ -142,7 +143,7 @@ test("S01 distinguishes absence from error and marks previous readings without e
 test("Pricing component examples preserve form inputs and do not infer CSV validity or admit imports", async ({
   page,
 }) => {
-  await page.goto("/foundation/pricing?panel=edit");
+  await gotoPricingReview(page, "/foundation/pricing?panel=edit");
   await page
     .getByRole("radio", { name: "Establecer oferta", exact: true })
     .check();
@@ -233,7 +234,7 @@ test("Pricing desktop captures and tab keyboard navigation", async ({
     ["/foundation/pricing?panel=import", "pricing-import-components-1440.png"],
     ["/foundation/pricing?panel=result", "pricing-result-components-1440.png"],
   ]) {
-    await page.goto(route!);
+    await gotoPricingReview(page, route!);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     if (route === "/precios")
       await expect(

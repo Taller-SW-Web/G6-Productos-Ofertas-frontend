@@ -2,7 +2,7 @@ name: Frontend Foundation
 on:
   pull_request:
   push:
-    branches: [vera, master]
+    branches: [vera, castilla, master]
 permissions:
   contents: read
 jobs:

@@ -1,4 +1,5 @@
 import { priceRecords, priceTargets, targetNames } from "../mocks/prices";
+import { readMockPricingTargets } from "../../catalog/adapters/mockCatalogConsumers";
 import {
   mockReports,
   partialBatch,
@@ -23,6 +24,26 @@ export function createMockPricingRepository(
   onUpdated?: (target: PriceTarget, before: PriceView, after: PriceView, reason: string) => void,
 ): PricingRepository {
   const records = structuredClone(priceRecords);
+  let targets = structuredClone(priceTargets);
+  const names = { ...targetNames };
+  async function refreshTargets(signal: AbortSignal) {
+    const current = await readMockPricingTargets(signal);
+    const identities = new Map(current.map(target => [target.id,
+      targets.find(existing => existing.kind === target.kind &&
+        (target.kind === "product" ? existing.productId === target.productId :
+          existing.kind === "variant" && existing.sku === target.sku))?.id ?? target.id,
+    ]));
+    for (const target of current) {
+      const id = identities.get(target.id)!;
+      const resolved: PriceTarget = target.kind === "variant"
+        ? { ...target, id, productTargetId: identities.get(target.productTargetId)! }
+        : { ...target, id };
+      targets = [...targets.filter(existing => existing.id !== id), resolved];
+      names[id] = target.kind === "product"
+        ? target.label.slice(0, target.label.lastIndexOf(" · "))
+        : target.label.split(" — ")[0] ?? target.label;
+    }
+  }
   const schedules = structuredClone(scheduleFixtures);
   let sequence = schedules.length;
   function effective(
@@ -30,7 +51,7 @@ export function createMockPricingRepository(
     channel: PriceChannel,
     at: string,
   ): PriceView | null {
-    const target = priceTargets.find((row) => row.id === id);
+    const target = targets.find((row) => row.id === id);
     if (!target) return null;
     const applicable = (targetId: string, selected: PriceChannel) =>
       records
@@ -56,7 +77,7 @@ export function createMockPricingRepository(
     const result = {
       ...base,
       id,
-      name: targetNames[id] ?? target.label,
+      name: names[id] ?? target.label,
       sku: target.kind === "variant" ? target.sku : undefined,
       inherited,
     };
@@ -103,16 +124,16 @@ export function createMockPricingRepository(
   }
   return {
     async listTargets(signal) {
-      signal.throwIfAborted();
-      return structuredClone(priceTargets);
+      await refreshTargets(signal);
+      return structuredClone(targets);
     },
     async read(query, signal) {
-      signal.throwIfAborted();
-      const selected = priceTargets.find((row) => row.id === query.targetId);
+      await refreshTargets(signal);
+      const selected = targets.find((row) => row.id === query.targetId);
       const channel = selected?.kind === "product" ? "global" : query.channel;
       const price = effective(query.targetId, channel, clock.now());
       if (!price) return null;
-      const breakdown = priceTargets
+      const breakdown = targets
         .filter((row) => row.productId === selected?.productId)
         .flatMap((row) => {
           const resolved = effective(
@@ -125,19 +146,19 @@ export function createMockPricingRepository(
       return structuredClone({ price, breakdown });
     },
     async readEditable(target, signal) {
-      signal.throwIfAborted();
+      await refreshTargets(signal);
       return structuredClone(
         effective(target.targetId, target.channel, clock.now()),
       );
     },
     async update(change, signal) {
-      signal.throwIfAborted();
+      await refreshTargets(signal);
       const current = effective(
         change.target.targetId,
         change.target.channel,
         clock.now(),
       );
-      const target = priceTargets.find(
+      const target = targets.find(
         (row) => row.id === change.target.targetId,
       );
       if (!current || !target)
@@ -200,7 +221,7 @@ export function createMockPricingRepository(
       };
     },
     async schedule(targetId, draft, signal) {
-      signal.throwIfAborted();
+      await refreshTargets(signal);
       const start = localInstant(draft.start);
       const end = draft.end ? localInstant(draft.end) : null;
       const reference = start
@@ -243,7 +264,7 @@ export function createMockPricingRepository(
       return structuredClone(created);
     },
     async readHistorical(query, at, signal) {
-      signal.throwIfAborted();
+      await refreshTargets(signal);
       const price = effective(query.targetId, query.channel, at);
       return price
         ? {
@@ -258,7 +279,7 @@ export function createMockPricingRepository(
         throw new PricingFailure("error", "Selecciona archivo y política.");
       throw new PricingFailure(
         "blocked_contract",
-        "Q-013-01/02: contenido de archivo y admisión parcial pendientes. No se analiza ni admite el archivo.",
+        "No se pudo validar el archivo. La importación no fue iniciada.",
       );
     },
     async readBatch(id, signal) {

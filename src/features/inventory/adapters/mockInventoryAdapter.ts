@@ -1,5 +1,6 @@
 import type { InventoryRepository } from "../services/inventoryRepository";
 import { InventoryError } from "../services/inventoryErrors";
+import { readMockInventoryCatalog } from "../../catalog/adapters/mockCatalogConsumers";
 import {
   isTerminalTransferStatus,
   type DashboardFiltersQuery,
@@ -30,6 +31,15 @@ export class MockInventoryAdapter implements InventoryRepository {
   private alerts: InventoryAlert[] = JSON.parse(JSON.stringify(initialAlerts));
   private processedOperations = new Map<string, TransferItem>();
   private processedOperationKeys = new Map<string, string>();
+
+  private async refreshCatalogMetadata() {
+    const metadata = await readMockInventoryCatalog();
+    for (const item of this.stockItems) {
+      const current = metadata.get(item.sku);
+      if (current) Object.assign(item, current);
+    }
+    return metadata;
+  }
 
   private recalculateStockStatus(item: StockItem): void {
     const effectiveThreshold =
@@ -64,15 +74,16 @@ export class MockInventoryAdapter implements InventoryRepository {
   // no traen esos atributos en el propio traslado.
   private buildSkuCatalog(): Map<
     string,
-    { categoryName: string; brandName: string }
+    { productName: string; categoryName: string; brandName: string }
   > {
     const catalog = new Map<
       string,
-      { categoryName: string; brandName: string }
+      { productName: string; categoryName: string; brandName: string }
     >();
     for (const item of this.stockItems) {
       if (!catalog.has(item.sku)) {
         catalog.set(item.sku, {
+          productName: item.productName,
           categoryName: item.categoryName,
           brandName: item.brandName,
         });
@@ -87,7 +98,7 @@ export class MockInventoryAdapter implements InventoryRepository {
   private matchesTransferFilters(
     transfer: TransferItem,
     filters: DashboardFiltersQuery | undefined,
-    catalog: Map<string, { categoryName: string; brandName: string }>,
+    catalog: Map<string, { productName: string; categoryName: string; brandName: string }>,
   ): boolean {
     if (
       filters?.locationId &&
@@ -101,7 +112,7 @@ export class MockInventoryAdapter implements InventoryRepository {
     if (
       search &&
       !transfer.sku.toLowerCase().includes(search) &&
-      !transfer.productName.toLowerCase().includes(search)
+      !(catalog.get(transfer.sku)?.productName ?? transfer.productName).toLowerCase().includes(search)
     ) {
       return false;
     }
@@ -205,13 +216,15 @@ export class MockInventoryAdapter implements InventoryRepository {
   }
 
   async getStockItems(filters?: StockFiltersQuery): Promise<StockItem[]> {
-    return this.queryStockItems(filters);
+    await this.refreshCatalogMetadata();
+    return this.queryStockItems(filters).map(item => ({ ...item }));
   }
 
   async getStockDetail(
     sku: string,
     locationId: string,
   ): Promise<StockItem | null> {
+    await this.refreshCatalogMetadata();
     const item = this.stockItems.find(
       (s) => s.sku === sku && s.locationId === locationId,
     );
@@ -252,7 +265,11 @@ export class MockInventoryAdapter implements InventoryRepository {
   }
 
   async getTransfers(filters?: TransferFiltersQuery): Promise<TransferItem[]> {
-    let result = [...this.transfers];
+    const metadata = await this.refreshCatalogMetadata();
+    let result = this.transfers.map(transfer => ({
+      ...transfer,
+      productName: metadata.get(transfer.sku)?.productName ?? transfer.productName,
+    }));
 
     if (filters?.targetLocationId && filters.targetLocationId !== "all") {
       result = result.filter(
@@ -398,6 +415,7 @@ export class MockInventoryAdapter implements InventoryRepository {
   async getDashboardKpis(
     filters?: DashboardFiltersQuery,
   ): Promise<InventoryKpiSummary> {
+    await this.refreshCatalogMetadata();
     const items = this.queryStockItems({
       search: filters?.search,
       category: filters?.category,
@@ -498,6 +516,7 @@ export class MockInventoryAdapter implements InventoryRepository {
   async getDashboardAlerts(
     filters?: DashboardFiltersQuery,
   ): Promise<InventoryAlert[]> {
+    await this.refreshCatalogMetadata();
     const items = this.queryStockItems({
       search: filters?.search,
       category: filters?.category,
@@ -583,6 +602,7 @@ export class MockInventoryAdapter implements InventoryRepository {
   async getLocationDistribution(
     filters?: DashboardFiltersQuery,
   ): Promise<LocationDistribution[]> {
+    await this.refreshCatalogMetadata();
     const map = new Map<string, LocationDistribution>();
 
     for (const item of this.queryStockItems({
@@ -620,6 +640,7 @@ return Array.from(map.values());
   }
 
   async getCategories(): Promise<InventoryCategoryOption[]> {
+    await this.refreshCatalogMetadata();
     const categories = new Map<string, InventoryCategoryOption>();
     for (const item of this.stockItems) {
       if (!categories.has(item.categoryName)) {
@@ -638,6 +659,7 @@ return Array.from(map.values());
   }
 
   async getBrands(): Promise<InventoryBrandOption[]> {
+    await this.refreshCatalogMetadata();
     const brands = new Map<string, InventoryBrandOption>();
     for (const item of this.stockItems) {
       if (!brands.has(item.brandName)) {

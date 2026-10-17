@@ -7,7 +7,7 @@ async function choose(page: Page, label: string, option: string) {
 async function fillRule(page: Page, name: string) {
   await page.getByLabel("Nombre de la regla", { exact: true }).fill(name);
   await choose(page, "Tipo de origen", "Producto");
-  await choose(page, "Producto de origen", "Camisa Oxford Manga Larga");
+  await choose(page, "Producto de origen", "Camiseta Running Endurance");
   await choose(page, "Estado inicial", "Inactiva");
   await page.getByLabel("Prioridad", { exact: true }).fill("2");
   await page
@@ -25,7 +25,7 @@ async function add(page: Page, names: string[]) {
     })
     .click();
   await expect(
-    page.getByRole("checkbox", { name: "Camisa Oxford Manga Larga", exact: true }),
+    page.getByRole("checkbox", { name: "Camiseta Running Endurance", exact: true }),
   ).toHaveCount(0);
   for (const name of names)
     await page.getByRole("checkbox", { name, exact: true }).check();
@@ -320,7 +320,7 @@ test("MK-007: seven desktop views and pending submission protection", async ({
       ).toHaveValue("Mejora tu rendimiento");
     else if (file === "s05")
       await expect(
-        page.getByRole("checkbox", { name: "Camisa Oxford Manga Larga", exact: true }),
+        page.getByRole("checkbox", { name: "Camiseta Running Endurance", exact: true }),
       ).toBeVisible();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= 1440),

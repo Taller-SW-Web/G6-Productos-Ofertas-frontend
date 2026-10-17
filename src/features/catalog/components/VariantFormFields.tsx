@@ -87,7 +87,7 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
             <Grid.Col span={{ base: 12, md: 6 }}>
               <TextInput
                 label="SKU de la Variante"
-                placeholder={isEdit ? "" : "Ej. PROD-OXF-AZUL-M (Opcional)"}
+                placeholder={isEdit ? "" : "Ej. PROD-RUN-AZUL-M (Opcional)"}
                 description={
                   isEdit
                     ? "El SKU es inmutable una vez creado."

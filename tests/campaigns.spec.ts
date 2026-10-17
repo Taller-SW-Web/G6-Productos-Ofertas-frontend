@@ -27,12 +27,12 @@ async function selectScope(page: Page) {
     .click();
   await page
     .getByRole("checkbox", {
-      name: "Producto completo: Camisa Oxford Manga Larga",
+      name: "Producto completo: Camiseta Running Endurance",
       exact: true,
     })
     .check();
   await page
-    .getByRole("checkbox", { name: /SKU específico: CAM-OXF-BLA-M/ })
+    .getByRole("checkbox", { name: /SKU específico: CAM-RUN-BLA-M/ })
     .check();
   await page
     .getByRole("button", { name: "Confirmar alcance", exact: true })
@@ -105,7 +105,7 @@ test("MK-006 S02/S04: validate discount/channels and preserve draft and typed sc
     .click();
   await page
     .getByRole("checkbox", {
-      name: "Producto completo: Camisa Oxford Manga Larga",
+      name: "Producto completo: Camiseta Running Endurance",
       exact: true,
     })
     .uncheck();
@@ -119,7 +119,7 @@ test("MK-006 S02/S04: validate discount/channels and preserve draft and typed sc
     .getByRole("link", { name: "Cancelar selección", exact: true })
     .click();
   const scope = page.getByRole("region", { name: "Canales y alcance" });
-  await expect(scope).toContainText("Producto completo: Camisa Oxford Manga Larga");
+  await expect(scope).toContainText("Producto completo: Camiseta Running Endurance");
   await expect(scope).not.toContainText("Producto completo: Casaca");
   await page
     .getByRole("button", { name: "Crear promoción", exact: true })
@@ -131,10 +131,10 @@ test("MK-006 S02/S04: validate discount/channels and preserve draft and typed sc
     name: "Alcance de productos y SKU",
   });
   await expect(savedScope).toContainText(
-    "Producto completo: Camisa Oxford Manga Larga",
+    "Producto completo: Camiseta Running Endurance",
   );
-  await expect(savedScope).not.toContainText("CAM-OXF-AZU-L");
-  await expect(savedScope).toContainText("SKU específico: CAM-OXF-BLA-M");
+  await expect(savedScope).not.toContainText("CAM-RUN-AZU-L");
+  await expect(savedScope).toContainText("SKU específico: CAM-RUN-BLA-M");
 });
 test("MK-006 S03/S06: allowed modality is revalidated and activation history survives deactivation", async ({
   page,
@@ -332,7 +332,7 @@ test("MK-006: desktop evidence for all six views", async ({ page }) => {
     else if (file === "s04")
       await expect(
         page.getByRole("checkbox", {
-          name: "Producto completo: Camisa Oxford Manga Larga",
+          name: "Producto completo: Camiseta Running Endurance",
         }),
       ).toBeVisible();
     expect(

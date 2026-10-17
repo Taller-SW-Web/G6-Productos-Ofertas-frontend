@@ -6,9 +6,10 @@ export function createMockPromotionCatalogRepository(): PromotionCatalogReposito
     async products(signal, retain) {
       signal.throwIfAborted();
       const current = await readMockCatalogProducts(signal);
-      const available = current.filter(item => item.active);
       const retainedIds = new Set(retain?.productIds ?? []);
       const retainedSkus = new Set(retain?.skus ?? []);
+      const available = current.filter(item => item.active || retainedIds.has(item.id) ||
+        item.skus.some(sku => retainedSkus.has(sku.sku)));
       const historical = catalogProducts.filter(item =>
         (retainedIds.has(item.id) || item.skus.some(sku => retainedSkus.has(sku.sku))) &&
         !current.some(row => row.id === item.id),

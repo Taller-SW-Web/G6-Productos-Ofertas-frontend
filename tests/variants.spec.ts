@@ -31,25 +31,25 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
   test("S01: Listado de variantes por producto padre, filtros y alerta para producto simple (CA-01)", async ({
     page,
   }) => {
-    // 1. Visit variant list for product with variants (PROD-OXF-001)
-    await page.goto("/productos/PROD-OXF-001/variantes");
+    // 1. Visit variant list for product with variants (PROD-RUN-001)
+    await page.goto("/productos/PROD-RUN-001/variantes");
     await expect(
-      page.getByRole("heading", { name: "Variantes de Camisa Oxford Manga Larga" }),
+      page.getByRole("heading", { name: "Variantes de Camiseta Running Endurance" }),
     ).toBeVisible();
 
     // Verify context card shows parent info and base price
-    await expect(page.getByText("SKU Base: CAM-OXF")).toBeVisible();
+    await expect(page.getByText("SKU Base: CAM-RUN")).toBeVisible();
     await expect(page.getByText(/Precio inicial de Catálogo: S\/\.\s*129\.90/)).toBeVisible();
 
     // Verify initial variant items
     await expect(
-      page.getByRole("link", { name: "CAM-OXF-BLA-M", exact: true }),
+      page.getByRole("link", { name: "CAM-RUN-BLA-M", exact: true }),
     ).toBeVisible();
     await expect(
-      page.getByRole("link", { name: "CAM-OXF-AZU-L", exact: true }),
+      page.getByRole("link", { name: "CAM-RUN-AZU-L", exact: true }),
     ).toBeVisible();
     await expect(
-      page.getByRole("link", { name: "CAM-OXF-NEG-S", exact: true }),
+      page.getByRole("link", { name: "CAM-RUN-NEG-S", exact: true }),
     ).toBeVisible();
 
     // Filter by status "Solo Activas"
@@ -58,10 +58,10 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
     await page.getByRole("option", { name: "Solo Activas" }).click();
 
     await expect(
-      page.getByRole("link", { name: "CAM-OXF-BLA-M", exact: true }),
+      page.getByRole("link", { name: "CAM-RUN-BLA-M", exact: true }),
     ).toBeVisible();
     await expect(
-      page.getByRole("link", { name: "CAM-OXF-NEG-S", exact: true }),
+      page.getByRole("link", { name: "CAM-RUN-NEG-S", exact: true }),
     ).toHaveCount(0);
 
     // Capture visual evidence S01
@@ -82,14 +82,14 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
   test("S02: Crear nueva variante en BORRADOR y navegación inmediata a S04 (CA-02, CA-03, CA-04)", async ({
     page,
   }) => {
-    await page.goto("/productos/PROD-OXF-001/variantes/nueva");
+    await page.goto("/productos/PROD-RUN-001/variantes/nueva");
     await expect(
       page.getByRole("heading", { name: "Nueva Variante (SKU)" }),
     ).toBeVisible();
 
     // Fill optional SKU (or let catalog generate it)
-    const customSku = `CAM-OXF-ROJ-S-${Date.now().toString().slice(-4)}`;
-    await page.getByPlaceholder("Ej. PROD-OXF-AZUL-M (Opcional)").fill(customSku);
+    const customSku = `CAM-RUN-ROJ-S-${Date.now().toString().slice(-4)}`;
+    await page.getByPlaceholder("Ej. PROD-RUN-AZUL-M (Opcional)").fill(customSku);
 
     // Fill identifying attributes (Color and Talla)
     await fillAttributes(page, "Rojo Carmesí", "XL");
@@ -97,7 +97,7 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
     // Fill mandatory image URL per SPEC-004 / VarianteCreateRequest
     await page
       .getByPlaceholder("https://ejemplo.com/imagenes/variante-azul.jpg")
-      .fill("https://ejemplo.com/imagenes/camisa-roja.jpg");
+      .fill("https://ejemplo.com/imagenes/camiseta deportiva-roja.jpg");
 
     // Fill physical dimensions in kg / cm
     await page.getByRole("textbox", { name: "Peso (kg)" }).fill("0.30");
@@ -113,7 +113,7 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
     await page.getByRole("button", { name: "Guardar Variante" }).first().click();
 
     // Verify immediate redirect to preparation view S04
-    await expect(page).toHaveURL(new RegExp(`/productos/PROD-OXF-001/variantes/.+/preparacion`));
+    await expect(page).toHaveURL(new RegExp(`/productos/PROD-RUN-001/variantes/.+/preparacion`));
     await expect(
       page.getByRole("heading", { name: new RegExp(`Preparación de Inventario: ${customSku}`) }),
     ).toBeVisible();
@@ -123,9 +123,9 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
   test("S03: Ficha de detalle de variante, herencia de precio e inmutabilidad (CA-05, CA-07, CA-11)", async ({
     page,
   }) => {
-    await page.goto("/productos/PROD-OXF-001/variantes/VAR-OXF-BLA-M");
+    await page.goto("/productos/PROD-RUN-001/variantes/VAR-RUN-BLA-M");
     await expect(
-      page.getByRole("heading", { name: "Variante: CAM-OXF-BLA-M" }),
+      page.getByRole("heading", { name: "Variante: CAM-RUN-BLA-M" }),
     ).toBeVisible();
 
     // Verify identifying attributes
@@ -149,9 +149,9 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
   test("S02 Edición: SKU y atributos identificadores son inmutables (CA-11)", async ({
     page,
   }) => {
-    await page.goto("/productos/PROD-OXF-001/variantes/VAR-OXF-BLA-M/editar");
+    await page.goto("/productos/PROD-RUN-001/variantes/VAR-RUN-BLA-M/editar");
     await expect(
-      page.getByRole("heading", { name: "Editar Variante: CAM-OXF-BLA-M" }),
+      page.getByRole("heading", { name: "Editar Variante: CAM-RUN-BLA-M" }),
     ).toBeVisible();
 
     // Verify SKU input is disabled
@@ -172,16 +172,16 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
     // Save changes and verify return to S03
     await fillComplementary(page);
     await page.getByRole("button", { name: "Guardar Cambios" }).first().click();
-    await expect(page).toHaveURL(/\/productos\/PROD-OXF-001\/variantes\/VAR-OXF-BLA-M$/);
+    await expect(page).toHaveURL(/\/productos\/PROD-RUN-001\/variantes\/VAR-RUN-BLA-M$/);
     await expect(page.getByText("0.29 kg")).toBeVisible();
   });
 
   test("S04: Preparación de Inventario y reintento atómico (CA-19, CA-21)", async ({
     page,
   }) => {
-    await page.goto("/productos/PROD-OXF-001/variantes/VAR-OXF-BLA-M/preparacion");
+    await page.goto("/productos/PROD-RUN-001/variantes/VAR-RUN-BLA-M/preparacion");
     await expect(
-      page.getByRole("heading", { name: "Preparación de Inventario: CAM-OXF-BLA-M" }),
+      page.getByRole("heading", { name: "Preparación de Inventario: CAM-RUN-BLA-M" }),
     ).toBeVisible();
 
     // Check completed state
@@ -197,7 +197,7 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
     page,
   }) => {
     // Navigate to variant detail of an active variant
-    await page.goto("/productos/PROD-OXF-001/variantes/VAR-OXF-AZU-L");
+    await page.goto("/productos/PROD-RUN-001/variantes/VAR-RUN-AZU-L");
     await expect(
       page.getByRole("button", { name: "Desactivar" }),
     ).toBeVisible();
@@ -224,7 +224,7 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
     page,
   }) => {
     // Navigate to variant detail of an inactive variant
-    await page.goto("/productos/PROD-OXF-001/variantes/VAR-OXF-NEG-S");
+    await page.goto("/productos/PROD-RUN-001/variantes/VAR-RUN-NEG-S");
     await expect(
       page.getByRole("button", { name: "Reactivar" }),
     ).toBeVisible();
@@ -254,14 +254,14 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
   test("Regla de Negocio: Creación con SKU generado automáticamente", async ({
     page,
   }) => {
-    await page.goto("/productos/PROD-OXF-001/variantes/nueva");
+    await page.goto("/productos/PROD-RUN-001/variantes/nueva");
     await expect(page.getByRole("heading", { name: "Nueva Variante (SKU)" })).toBeVisible();
     // Leave SKU blank to verify automatic generation
     await fillAttributes(page, "Negro Ónix", "L");
 
     await page
       .getByPlaceholder("https://ejemplo.com/imagenes/variante-azul.jpg")
-      .fill("https://ejemplo.com/imagenes/camisa-negra.jpg");
+      .fill("https://ejemplo.com/imagenes/camiseta deportiva-negra.jpg");
 
     await page.getByRole("textbox", { name: "Peso (kg)" }).fill("0.32");
     await page.getByRole("textbox", { name: "Largo (cm)" }).fill("36");
@@ -271,20 +271,20 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
     await page.getByRole("button", { name: "Guardar Variante" }).first().click();
 
     // Should navigate to preparation with auto-generated SKU
-    await expect(page).toHaveURL(/\/productos\/PROD-OXF-001\/variantes\/.+\/preparacion/);
-    await expect(page.getByRole("heading", { name: /Preparación de Inventario: CAM-OXF-V\d+/ })).toBeVisible();
+    await expect(page).toHaveURL(/\/productos\/PROD-RUN-001\/variantes\/.+\/preparacion/);
+    await expect(page.getByRole("heading", { name: /Preparación de Inventario: CAM-RUN-V\d+/ })).toBeVisible();
   });
 
   test("Regla de Negocio: Rechazo de combinación identificadora duplicada (CA-03)", async ({
     page,
   }) => {
     await page.goto(
-      "/productos/PROD-OXF-001/variantes/nueva?modoRevision=1&escenario=create-duplicate-combination",
+      "/productos/PROD-RUN-001/variantes/nueva?modoRevision=1&escenario=create-duplicate-combination",
     );
     await fillAttributes(page, "Blanco", "M");
     await page
       .getByPlaceholder("https://ejemplo.com/imagenes/variante-azul.jpg")
-      .fill("https://ejemplo.com/imagenes/camisa-blanca.jpg");
+      .fill("https://ejemplo.com/imagenes/camiseta deportiva-blanca.jpg");
 
     await page.getByRole("button", { name: "Guardar Variante" }).first().click();
     await expect(
@@ -295,7 +295,7 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
   test("Regla de Negocio: Rechazo de medidas físicas inválidas (<= 0)", async ({
     page,
   }) => {
-    await page.goto("/productos/PROD-OXF-001/variantes/nueva");
+    await page.goto("/productos/PROD-RUN-001/variantes/nueva");
     await fillAttributes(page, "Rojo Carmesí", "M");
     await page.getByPlaceholder("https://ejemplo.com/imagenes/variante-azul.jpg").fill("https://ejemplo.com/foto.jpg");
     await page.getByRole("textbox", { name: "Peso (kg)" }).fill("0");
@@ -307,43 +307,43 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
   test("Flujo B: Desactivar la última variante activa inactiva al producto padre ACTIVO (SPEC-004 CA-12)", async ({
     page,
   }) => {
-    // Navigate to variant detail of VAR-OXF-AZU-L
-    await page.goto("/productos/PROD-OXF-001/variantes/VAR-OXF-AZU-L");
+    // Navigate to variant detail of VAR-RUN-AZU-L
+    await page.goto("/productos/PROD-RUN-001/variantes/VAR-RUN-AZU-L");
     await page.getByRole("button", { name: "Desactivar" }).click();
     await page.getByRole("button", { name: "Desactivar Variante" }).click();
     await expect(page.getByText("INACTIVA").first()).toBeVisible();
 
-    // Now deactivate VAR-OXF-BLA-M (the remaining active variant)
+    // Now deactivate VAR-RUN-BLA-M (the remaining active variant)
     await page.getByRole("link", { name: "Variantes", exact: true }).click();
     await page
-      .getByRole("link", { name: "CAM-OXF-BLA-M", exact: true })
+      .getByRole("link", { name: "CAM-RUN-BLA-M", exact: true })
       .click();
     await page.getByRole("button", { name: "Desactivar" }).click();
     await page.getByRole("button", { name: "Desactivar Variante" }).click();
     await expect(page.getByText("INACTIVA").first()).toBeVisible();
 
     // Navigate to parent product using breadcrumb link (client-side transition)
-    await page.getByRole("link", { name: "Camisa Oxford Manga Larga" }).first().click();
+    await page.getByRole("link", { name: "Camiseta Running Endurance" }).first().click();
     await expect(page.getByText("Inactivo")).toBeVisible();
   });
 
   test("Flujo C: Reactivación de variante inactiva preserva estado del padre (CA-14)", async ({
     page,
   }) => {
-    await page.goto("/productos/PROD-OXF-001/variantes/VAR-OXF-NEG-S");
+    await page.goto("/productos/PROD-RUN-001/variantes/VAR-RUN-NEG-S");
     await page.getByRole("button", { name: "Reactivar" }).click();
     await page.getByRole("button", { name: "Reactivar Variante" }).click();
     await expect(page.getByText("ACTIVA").first()).toBeVisible();
 
     // Parent product remains in its current state, not auto-activated
-    await page.goto("/productos/PROD-OXF-001");
-    await expect(page.getByRole("heading", { name: "Camisa Oxford Manga Larga" })).toBeVisible();
+    await page.goto("/productos/PROD-RUN-001");
+    await expect(page.getByRole("heading", { name: "Camiseta Running Endurance" })).toBeVisible();
   });
 
   test("Flujo D: Preservación de medidas y perfil físico tras edición", async ({
     page,
   }) => {
-    await page.goto("/productos/PROD-OXF-001/variantes/VAR-OXF-BLA-M/editar");
+    await page.goto("/productos/PROD-RUN-001/variantes/VAR-RUN-BLA-M/editar");
     await page.getByRole("textbox", { name: "Largo (cm)" }).fill("38");
     await page.getByRole("textbox", { name: "Ancho (cm)" }).fill("28");
     await page.getByRole("textbox", { name: "Alto (cm)" }).fill("4");
@@ -351,7 +351,7 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
     await page.getByRole("button", { name: "Guardar Cambios" }).first().click();
 
     // Check detail: new dimensions are displayed accurately
-    await expect(page).toHaveURL(/\/productos\/PROD-OXF-001\/variantes\/VAR-OXF-BLA-M$/);
+    await expect(page).toHaveURL(/\/productos\/PROD-RUN-001\/variantes\/VAR-RUN-BLA-M$/);
     await expect(page.getByText("38 cm")).toBeVisible();
     await expect(page.getByText("28 cm")).toBeVisible();
     await expect(page.getByText("4 cm")).toBeVisible();

@@ -5,8 +5,8 @@ import { MockInventoryAdapter } from "../../inventory/adapters/mockInventoryAdap
 import { MockCombosAvailabilityAdapter } from "./mockCombosAvailabilityAdapter";
 
 const item: StockItem = {
-  sku: "CAM-OXF-BLA-M",
-  productName: "Camisa Oxford Manga Larga",
+  sku: "CAM-RUN-BLA-M",
+  productName: "Camiseta Running Endurance",
   categoryName: "Ropa",
   brandName: "Inka Athletic",
   locationId: "ALM-CEN",
@@ -25,7 +25,7 @@ describe("MockCombosAvailabilityAdapter · Inventory compartido", () => {
   it("relee el stock de Inventory y refleja una recepción durante la sesión", async () => {
     const repository = new MockInventoryAdapter();
     // Exercise the same receiving operation exposed by the Inventory UI.
-    const transfer = (await repository.getTransfers()).find((row) => row.id === "tr-oxford-bla-m")!;
+    const transfer = (await repository.getTransfers()).find((row) => row.id === "tr-running-bla-m")!;
     const inventory = repository as Pick<InventoryRepository, "getStockItems">;
     const adapter = new MockCombosAvailabilityAdapter({ inventory });
 

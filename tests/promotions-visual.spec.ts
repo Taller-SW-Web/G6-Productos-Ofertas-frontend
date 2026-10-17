@@ -110,7 +110,7 @@ test("el modo API global bloquea las 19 vistas sin cargar datos ni adapters mock
   await page.goto("/cupones");
   await expect(
     page.getByText("Datos de demostración", { exact: true }),
-  ).toBeVisible();
+  ).toHaveCount(0);
 
   const requests: string[] = [];
   page.on("request", (request) => requests.push(request.url()));

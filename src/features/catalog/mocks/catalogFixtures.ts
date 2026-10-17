@@ -2,28 +2,28 @@ import type { ProductDetailView } from "../services/catalogRepository";
 
 export const initialProducts: ProductDetailView[] = [
   {
-    id: "PROD-OXF-001",
-    name: "Camisa Oxford Manga Larga",
-    skuBase: "CAM-OXF",
+    id: "PROD-RUN-001",
+    name: "Camiseta Running Endurance",
+    skuBase: "CAM-RUN",
     description:
-      "Camisa de algodón pima oxford para alto rendimiento y confort diario.",
+      "Camiseta técnica de running, transpirable y de secado rápido para entrenamientos.",
     hasVariants: true,
     categoryId: "CAT-ROPA",
     categoryName: "Ropa",
-    typeId: "TIP-CAMISA",
-    typeName: "Camisa",
+    typeId: "TIP-CAMISETA",
+    typeName: "Camiseta deportiva",
     brandId: "BRD-INKA",
     brandName: "Inka Athletic",
     status: "ACTIVO",
     preparationSummary: "COMPLETED",
     imageUrl:
-      "https://images.unsplash.com/photo-1598033129183-c4f50c736f10?w=400&auto=format&fit=crop&q=60",
+      "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=400&auto=format&fit=crop&q=60",
     catalogVersion: 1,
     priceInitial: 129.9,
     publishedCommercially: true,
     images: [
       {
-        url: "https://images.unsplash.com/photo-1598033129183-c4f50c736f10?w=400&auto=format&fit=crop&q=60",
+        url: "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=400&auto=format&fit=crop&q=60",
         principal: true,
       },
     ],
@@ -32,7 +32,7 @@ export const initialProducts: ProductDetailView[] = [
         caracteristicaId: "CAR-MAT",
         nombre: "Material principal",
         tipo: "TEXTO",
-        valor: "100% Algodón Pima",
+        valor: "Poliéster técnico reciclado",
       },
       {
         caracteristicaId: "CAR-CUELLO",
@@ -50,7 +50,7 @@ export const initialProducts: ProductDetailView[] = [
     ],
     physicalProfile: null, // Variant parent does NOT have own physical profile
     preparation: {
-      productId: "PROD-OXF-001",
+      productId: "PROD-RUN-001",
       hasVariants: true,
       pricing: {
         status: "COMPLETED",
@@ -60,8 +60,8 @@ export const initialProducts: ProductDetailView[] = [
       inventario: null, // Null for variant parent
       variantes: [
         {
-          variantId: "VAR-OXF-BLA-M",
-          sku: "CAM-OXF-BLA-M",
+          variantId: "VAR-RUN-BLA-M",
+          sku: "CAM-RUN-BLA-M",
           inventario: {
             status: "COMPLETED",
             manualRetryAllowed: false,
@@ -69,8 +69,8 @@ export const initialProducts: ProductDetailView[] = [
           },
         },
         {
-          variantId: "VAR-OXF-AZU-L",
-          sku: "CAM-OXF-AZU-L",
+          variantId: "VAR-RUN-AZU-L",
+          sku: "CAM-RUN-AZU-L",
           inventario: {
             status: "COMPLETED",
             manualRetryAllowed: false,
@@ -81,24 +81,24 @@ export const initialProducts: ProductDetailView[] = [
     },
     variants: [
       {
-        variantId: "VAR-OXF-BLA-M",
-        sku: "CAM-OXF-BLA-M",
+        variantId: "VAR-RUN-BLA-M",
+        sku: "CAM-RUN-BLA-M",
         attributesSummary: "Color: Blanco · Talla: M",
         status: "ACTIVA",
         preparationStatus: "COMPLETED",
         manualRetryAllowed: false,
       },
       {
-        variantId: "VAR-OXF-AZU-L",
-        sku: "CAM-OXF-AZU-L",
+        variantId: "VAR-RUN-AZU-L",
+        sku: "CAM-RUN-AZU-L",
         attributesSummary: "Color: Azul Índigo · Talla: L",
         status: "ACTIVA",
         preparationStatus: "COMPLETED",
         manualRetryAllowed: false,
       },
       {
-        variantId: "VAR-OXF-NEG-S",
-        sku: "CAM-OXF-NEG-S",
+        variantId: "VAR-RUN-NEG-S",
+        sku: "CAM-RUN-NEG-S",
         attributesSummary: "Color: Negro · Talla: S",
         status: "INACTIVA",
         preparationStatus: "COMPLETED",
@@ -319,8 +319,8 @@ export const initialProducts: ProductDetailView[] = [
     hasVariants: false,
     categoryId: "CAT-ROPA",
     categoryName: "Ropa",
-    typeId: "TIP-CAMISA",
-    typeName: "Camisa",
+    typeId: "TIP-CAMISETA",
+    typeName: "Camiseta deportiva",
     brandId: "BRD-INKA",
     brandName: "Inka Athletic",
     status: "BORRADOR",
@@ -375,8 +375,8 @@ export const initialProducts: ProductDetailView[] = [
     hasVariants: false,
     categoryId: "CAT-ROPA",
     categoryName: "Ropa",
-    typeId: "TIP-CAMISA",
-    typeName: "Camisa",
+    typeId: "TIP-CAMISETA",
+    typeName: "Camiseta deportiva",
     brandId: "BRD-ANDES",
     brandName: "Andean Peak",
     status: "BORRADOR",
@@ -496,9 +496,9 @@ import type { VariantDetailView } from "../services/catalogRepository";
 
 export const initialVariants: VariantDetailView[] = [
   {
-    variantId: "VAR-OXF-BLA-M",
-    sku: "CAM-OXF-BLA-M",
-    productId: "PROD-OXF-001",
+    variantId: "VAR-RUN-BLA-M",
+    sku: "CAM-RUN-BLA-M",
+    productId: "PROD-RUN-001",
     status: "ACTIVA",
     identifyingAttributes: [
       {
@@ -519,14 +519,14 @@ export const initialVariants: VariantDetailView[] = [
         caracteristicaId: "CAR-MAT",
         nombre: "Material de confección",
         tipo: "TEXTO",
-        valor: "100% Algodón Pima",
+        valor: "Poliéster técnico reciclado",
       },
     ],
     images: [
-      "https://images.unsplash.com/photo-1598033129183-c4f50c736f10?w=400&auto=format&fit=crop&q=60",
+      "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=400&auto=format&fit=crop&q=60",
     ],
     imageUrl:
-      "https://images.unsplash.com/photo-1598033129183-c4f50c736f10?w=400&auto=format&fit=crop&q=60",
+      "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=400&auto=format&fit=crop&q=60",
     physicalProfile: {
       pesoKg: 0.28,
       largoCm: 35,
@@ -545,9 +545,9 @@ export const initialVariants: VariantDetailView[] = [
     inventoryStatus: "COMPLETED",
   },
   {
-    variantId: "VAR-OXF-AZU-L",
-    sku: "CAM-OXF-AZU-L",
-    productId: "PROD-OXF-001",
+    variantId: "VAR-RUN-AZU-L",
+    sku: "CAM-RUN-AZU-L",
+    productId: "PROD-RUN-001",
     status: "ACTIVA",
     identifyingAttributes: [
       {
@@ -568,14 +568,14 @@ export const initialVariants: VariantDetailView[] = [
         caracteristicaId: "CAR-MAT",
         nombre: "Material de confección",
         tipo: "TEXTO",
-        valor: "100% Algodón Pima",
+        valor: "Poliéster técnico reciclado",
       },
     ],
     images: [
-      "https://images.unsplash.com/photo-1598033129183-c4f50c736f10?w=400&auto=format&fit=crop&q=60",
+      "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=400&auto=format&fit=crop&q=60",
     ],
     imageUrl:
-      "https://images.unsplash.com/photo-1598033129183-c4f50c736f10?w=400&auto=format&fit=crop&q=60",
+      "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=400&auto=format&fit=crop&q=60",
     physicalProfile: {
       pesoKg: 0.32,
       largoCm: 36,
@@ -594,9 +594,9 @@ export const initialVariants: VariantDetailView[] = [
     inventoryStatus: "COMPLETED",
   },
   {
-    variantId: "VAR-OXF-NEG-S",
-    sku: "CAM-OXF-NEG-S",
-    productId: "PROD-OXF-001",
+    variantId: "VAR-RUN-NEG-S",
+    sku: "CAM-RUN-NEG-S",
+    productId: "PROD-RUN-001",
     status: "INACTIVA",
     identifyingAttributes: [
       {
@@ -614,10 +614,10 @@ export const initialVariants: VariantDetailView[] = [
     ],
     nonIdentifyingAttributes: [],
     images: [
-      "https://images.unsplash.com/photo-1598033129183-c4f50c736f10?w=400&auto=format&fit=crop&q=60",
+      "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=400&auto=format&fit=crop&q=60",
     ],
     imageUrl:
-      "https://images.unsplash.com/photo-1598033129183-c4f50c736f10?w=400&auto=format&fit=crop&q=60",
+      "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=400&auto=format&fit=crop&q=60",
     physicalProfile: {
       pesoKg: 0.25,
       largoCm: 34,
