@@ -31,6 +31,7 @@ export interface PriceView {
   validFrom: string;
   validUntil: string | null;
   inherited: boolean;
+  validityId?: string;
 }
 export interface PriceQuery {
   targetId: string;
