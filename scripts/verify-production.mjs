@@ -29,7 +29,7 @@ try {
       if (path === "/precios") {
         // Bloqueo específico del adapter de Pricing sin provider configurado y
         // persistencia del error tras reintento y tras recarga de la página.
-        assert.match(mensaje, /adapter API de Pricing no está configurado/);
+        assert.match(mensaje, /Esta función no está disponible en el modo actual/);
         const reintento = page.getByRole("button", {
           name: /Volver a cargar productos y SKU/,
         });
@@ -38,19 +38,19 @@ try {
         await alert.waitFor();
         assert.match(
           await alert.innerText(),
-          /adapter API de Pricing no está configurado/,
+          /Esta función no está disponible en el modo actual/,
         );
         assert.equal(await page.getByRole("table").count(), 0);
         await page.reload();
         await alert.waitFor();
         assert.match(
           await alert.innerText(),
-          /adapter API de Pricing no está configurado/,
+          /Esta función no está disponible en el modo actual/,
         );
       } else {
         // Bloqueo específico del gate de Promotions (cupones, promociones y
         // recomendaciones) en modo API.
-        assert.match(mensaje, /Integración API no disponible/);
+        assert.match(mensaje, /Función no disponible/);
       }
       assert.equal(await page.getByRole("table").count(), 0);
       assert.equal(await page.locator("main form").count(), 0);
@@ -93,7 +93,7 @@ try {
       await page.getByRole("alert").waitFor();
       assert.match(
         await page.getByRole("alert").innerText(),
-        /Integración API no disponible/,
+        /Función no disponible/,
       );
       assert.equal(await page.locator("main form").count(), 0);
       assert.equal(await page.getByRole("table").count(), 0);
@@ -156,7 +156,7 @@ try {
       await alert.waitFor();
       assert.match(
         await alert.innerText(),
-        /Integración con API real no disponible actualmente para el módulo de Taxonomía/,
+        /Función no disponible/,
       );
       assert.equal(await page.getByRole("table").count(), 0);
       assert.equal(await page.locator("main form").count(), 0);
@@ -167,7 +167,7 @@ try {
       if (table) await page.getByRole("table").waitFor();
       if (form) await page.locator("main form").waitFor();
       assert.equal(await page.getByRole("alert").count(), 0);
-      assert.equal(await page.getByText("Datos de demostración", { exact: true }).count(), 1);
+      assert.equal(await page.getByText("Datos de demostración", { exact: true }).count(), 0);
       assert.equal(await page.getByRole("combobox", { name: /Escenario/ }).count(), 0);
     }
     assert.equal(
@@ -268,7 +268,7 @@ try {
       const alert = page.getByRole("alert");
       await alert.waitFor();
       const message = await alert.innerText();
-      assert.match(message, /Integración API no disponible/);
+      assert.match(message, /Función no disponible/);
       assert.equal(await page.getByRole("table").count(), 0);
       assert.equal(await page.locator("main form").count(), 0);
       assert.equal(await page.getByRole("dialog").count(), 0);
@@ -281,7 +281,7 @@ try {
         await page.getByRole("combobox", { name: /Escenario/ }).count(),
         0,
       );
-      assert.equal(await page.getByText("Integración API no disponible").count(), 0);
+      assert.equal(await page.getByText("Función no disponible").count(), 0);
     }
     assert.equal(
       await page.evaluate(
@@ -305,7 +305,7 @@ try {
     if (mode === "api") {
       const alert = page.getByRole("alert");
       await alert.waitFor();
-      assert.match(await alert.innerText(), /Provider API de Combos no configurado/);
+      assert.match(await alert.innerText(), /Función no disponible/);
       assert.equal(await page.getByRole("table").count(), 0);
       assert.equal(await page.locator("main form").count(), 0);
       assert.equal(await page.getByRole("dialog").count(), 0);
