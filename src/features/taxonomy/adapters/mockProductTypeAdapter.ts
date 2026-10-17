@@ -1,6 +1,11 @@
 import { mockCharacteristicAdapter } from "./mockCharacteristicAdapter";
 import type { ProductTypeRepository } from "../services/productTypeRepository";
 import { PRODUCT_TYPE_ATTRIBUTE_LIMIT } from "../services/productTypeRepository";
+import {
+  loadMockArray,
+  persistMockArray,
+  syncMockArrayOnExternalChange,
+} from "../../shared/mockState";
 import type {
   CharacteristicListItem,
   ProductTypeAssociarInput,
@@ -28,7 +33,7 @@ interface RegistroTipoProducto {
   asociadas: RegistroAsociacion[];
 }
 
-const store: RegistroTipoProducto[] = [
+const storeFixtures: RegistroTipoProducto[] = [
   {
     tipoProductoId: "calzado",
     nombre: "Calzado deportivo",
@@ -62,6 +67,13 @@ const store: RegistroTipoProducto[] = [
     asociadas: [],
   },
 ];
+
+// Demo state restored from the current-browser session when available; otherwise a
+// fresh clone of the fixtures. Cross-tab writes rehydrate this same array in place.
+const store: RegistroTipoProducto[] = loadMockArray("taxonomy-product-types", storeFixtures);
+syncMockArrayOnExternalChange("taxonomy-product-types", store);
+
+const persist = () => persistMockArray("taxonomy-product-types", store);
 
 const esperar = (ms: number) =>
   new Promise((resolve) => setTimeout(resolve, ms));
@@ -191,6 +203,7 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
       asociadas: [],
     };
     store.push(registro);
+    persist();
     const resultado: ProductTypeCreateResult = {
       tipoProductoId: registro.tipoProductoId,
       nombre: registro.nombre,
@@ -258,6 +271,7 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
       obligatoria: input.obligatoria,
     });
     registro.schemaVersion += 1;
+    persist();
     return aDetalle(registro, catalogo);
   },
 
@@ -294,6 +308,7 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
       (item) => item.caracteristicaId !== caracteristicaId,
     );
     registro.schemaVersion += 1;
+    persist();
     return {
       resultado: "exito",
       mensaje:
@@ -328,6 +343,7 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
       } else if (operacion.tipo === "desactivacion") {
         registro.estado = "Inactivo";
       }
+      persist();
     }
 
     const mensaje =
@@ -377,6 +393,7 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
       };
     }
     registro.estado = "Inactivo";
+    persist();
     return {
       resultado: "exito",
       mensaje: "El tipo de producto se desactivó correctamente.",

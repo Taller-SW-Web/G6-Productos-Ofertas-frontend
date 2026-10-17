@@ -1,16 +1,60 @@
 import type { PriceTarget, PriceView } from "../../pricing/services/pricingRepository";
 import { decimalLess } from "../../pricing/services/pricingValidation";
 import type { AuditEntry } from "../services/auditRepository";
+import {
+  isMockPersistenceAvailable,
+  isRecord,
+  publishMockChange,
+  readMockState,
+  saveMockState,
+  subscribeExternalMockChanges,
+} from "../../shared/mockState";
 
-// Browser-session demo only. Never imported by API composition or persisted.
-export function createMockPricingAudit() {
-  const entries: AuditEntry[] = [];
-  let sequence = 0;
+interface MockPricingAuditState {
+  entries: AuditEntry[];
+  sequence: number;
+}
+
+function isMockPricingAuditState(value: unknown): value is MockPricingAuditState {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.entries) &&
+    typeof value.sequence === "number"
+  );
+}
+
+// Demonstration audit log fed by confirmed Precios edits. It is only restored and
+// persisted inside the mock browser demonstration; API composition never imports it.
+export function createMockPricingAudit(options: { persist?: boolean } = {}) {
+  const persistEnabled = options.persist === true && isMockPersistenceAvailable();
+  const restored = persistEnabled
+    ? readMockState<MockPricingAuditState>("price-audit", isMockPricingAuditState)
+    : null;
+  const entries: AuditEntry[] = restored ? restored.entries : [];
+  let sequence = restored ? restored.sequence : 0;
+
+  function persist() {
+    saveMockState("price-audit", { entries, sequence } satisfies MockPricingAuditState);
+    publishMockChange("price-audit");
+  }
+
+  if (persistEnabled) {
+    subscribeExternalMockChanges("price-audit", () => {
+      const next = readMockState<MockPricingAuditState>("price-audit", isMockPricingAuditState);
+      if (!next) return;
+      entries.length = 0;
+      entries.push(...next.entries);
+      sequence = next.sequence;
+      publishMockChange("price-audit");
+    });
+  }
+
   return {
     read: () => structuredClone(entries),
     record(target: PriceTarget, before: PriceView, after: PriceView, reason: string) {
       const sku = target.kind === "variant" ? target.sku : target.referenceSku;
       if (!sku) return; // A product ID is never substituted for an unknown SKU.
+      let changed = false;
       for (const priceType of ["REGULAR", "OFERTA"] as const) {
         const previous = priceType === "REGULAR" ? before.regular : before.offer;
         const next = priceType === "REGULAR" ? after.regular : after.offer;
@@ -33,7 +77,9 @@ export function createMockPricingAudit() {
           ip: null,
           at: after.validFrom,
         });
+        changed = true;
       }
+      if (changed) persist();
     },
   };
 }
@@ -51,4 +97,4 @@ function percentage(before: string, after: string) {
   return `${value < 0n ? "-" : ""}${absolute / 10_000n}.${String(absolute % 10_000n).padStart(4, "0")}`;
 }
 
-export const mockPricingAudit = createMockPricingAudit();
+export const mockPricingAudit = createMockPricingAudit({ persist: true });

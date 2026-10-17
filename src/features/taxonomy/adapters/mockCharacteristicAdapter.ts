@@ -1,5 +1,10 @@
 import type { CharacteristicRepository } from "../services/characteristicRepository";
 import { characteristicConfigDefaults } from "../services/characteristicRepository";
+import {
+  loadMockArray,
+  persistMockArray,
+  syncMockArrayOnExternalChange,
+} from "../../shared/mockState";
 import type {
   BloqueoDependencia,
   CharacteristicDetail,
@@ -27,7 +32,7 @@ interface RegistroCaracteristica {
   valores?: RegistroValor[];
 }
 
-const store: RegistroCaracteristica[] = [
+const storeFixtures: RegistroCaracteristica[] = [
   {
     id: "talla",
     nombre: "Talla",
@@ -78,6 +83,13 @@ const store: RegistroCaracteristica[] = [
     ],
   },
 ];
+
+// Demo state restored from the current-browser session when available; otherwise a
+// fresh clone of the fixtures. Cross-tab writes rehydrate this same array in place.
+const store: RegistroCaracteristica[] = loadMockArray("taxonomy-characteristics", storeFixtures);
+syncMockArrayOnExternalChange("taxonomy-characteristics", store);
+
+const persist = () => persistMockArray("taxonomy-characteristics", store);
 
 const esperar = (ms: number) =>
   new Promise((resolve) => setTimeout(resolve, ms));
@@ -206,6 +218,7 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
       valores: input.tipo === "LISTA" ? [] : undefined,
     };
     store.push(registro);
+    persist();
     return {
       id: registro.id,
       nombre: registro.nombre,
@@ -232,6 +245,7 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
     }
     registro.nombre = input.nombre;
     registro.unidad = registro.tipo === "NUMERO" ? input.unidad : undefined;
+    persist();
     return aDetalle(registro);
   },
 
@@ -280,6 +294,7 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
     if (!r.valores) r.valores = [];
     r.valores.push(v);
     r.valoresActivos = contarActivos(r.valores);
+    persist();
     return { ...v };
   },
 
@@ -345,6 +360,7 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
     if (r.valores) {
       r.valoresActivos = contarActivos(r.valores);
     }
+    persist();
     return {
       resultado: "exito",
       valor: {
@@ -379,6 +395,7 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
       v.estado = "Inactivo";
       v.version += 1;
       r.valoresActivos = contarActivos(r.valores ?? []);
+      persist();
       return {
         operacionId,
         estado: "confirmada",
@@ -403,6 +420,7 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
     const r = hallar(id);
     if (!r) return null;
     r.estado = estado;
+    persist();
     return aDetalle(r);
   },
 };

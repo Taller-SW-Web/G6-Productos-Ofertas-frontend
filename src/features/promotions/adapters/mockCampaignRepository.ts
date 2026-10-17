@@ -10,6 +10,24 @@ import type {
   CampaignView,
 } from "../services/campaignRepository";
 import type { PromotionCatalogRepository } from "../services/catalogRepository";
+import {
+  isMockPersistenceAvailable,
+  isRecord,
+  publishMockChange,
+  readMockState,
+  saveMockState,
+  subscribeExternalMockChanges,
+} from "../../shared/mockState";
+
+interface MockCampaignState {
+  records: CampaignView[];
+  sequence: number;
+}
+
+function isMockCampaignState(value: unknown): value is MockCampaignState {
+  return isRecord(value) && Array.isArray(value.records) && typeof value.sequence === "number";
+}
+
 export function createMockCampaignRepository(
   dependencies: {
     catalog: () => PromotionCatalogRepository;
@@ -17,9 +35,33 @@ export function createMockCampaignRepository(
     history: PromotionHistory;
   },
   fixtures: readonly CampaignView[] = campaignFixtures,
+  options: { persist?: boolean } = {},
 ): CampaignRepository {
-  const records = fixtures.map((item) => structuredClone(item));
-  let sequence = 0;
+  const persistEnabled = options.persist === true && isMockPersistenceAvailable();
+  const restored = persistEnabled
+    ? readMockState<MockCampaignState>("promotions-campaigns", isMockCampaignState)
+    : null;
+  const records = restored ? restored.records : fixtures.map((item) => structuredClone(item));
+  let sequence = restored ? restored.sequence : 0;
+  const persist = () => {
+    saveMockState("promotions-campaigns", { records, sequence } satisfies MockCampaignState);
+    publishMockChange("promotions-campaigns");
+    publishMockChange("promotions");
+  };
+  if (persistEnabled) {
+    subscribeExternalMockChanges("promotions-campaigns", () => {
+      const stored = readMockState<MockCampaignState>(
+        "promotions-campaigns",
+        isMockCampaignState,
+      );
+      if (!stored) return;
+      records.length = 0;
+      records.push(...stored.records);
+      sequence = stored.sequence;
+      publishMockChange("promotions-campaigns");
+      publishMockChange("promotions");
+    });
+  }
   async function snapshot(record: CampaignView, signal: AbortSignal) {
     const hasCoupons = await dependencies.hasCoupons(record.id, signal);
     signal.throwIfAborted();
@@ -123,6 +165,7 @@ export function createMockCampaignRepository(
         dependencies.history.initialize(record.id, status === "active");
       if (id) records[records.findIndex((item) => item.id === id)] = record;
       else records.push(record);
+      persist();
       return snapshot(record, signal);
     },
     async changeStatus(id, status, signal) {
@@ -146,6 +189,7 @@ export function createMockCampaignRepository(
       };
       if (status === "active") dependencies.history.activate(id);
       records[index] = record;
+      persist();
       return snapshot(record, signal);
     },
   };

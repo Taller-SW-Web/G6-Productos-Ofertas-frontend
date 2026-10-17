@@ -110,8 +110,10 @@ test("MK-006: unknown normalized edit and state reconcile without a duplicate wr
       .getByRole("main")
       .getByRole("button", { name: "Activar promoción", exact: true }),
   ).toBeFocused();
+  // La desactivación confirmada de "carrera" ahora persiste al navegar. La revisión de
+  // estado sin confirmar se ejercita sobre otra promoción que sigue activa.
   await page.goto(
-    "/promociones/carrera/estado?modoRevision=1&escenario=unknown-result",
+    "/promociones/running/estado?modoRevision=1&escenario=unknown-result",
   );
   await page
     .getByRole("dialog")

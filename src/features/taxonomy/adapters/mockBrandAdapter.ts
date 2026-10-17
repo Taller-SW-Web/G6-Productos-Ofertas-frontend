@@ -6,6 +6,11 @@ import type {
   BrandListItem,
   BrandUpdateInput,
 } from "../types";
+import {
+  loadMockArray,
+  persistMockArray,
+  syncMockArrayOnExternalChange,
+} from "../../shared/mockState";
 
 interface RegistroMarca {
   marcaId: string;
@@ -23,7 +28,7 @@ interface OperacionBaja {
   estado: "verificando" | "completada" | "no-concluyente";
 }
 
-const store: RegistroMarca[] = [
+const storeFixtures: RegistroMarca[] = [
   {
     marcaId: "nike",
     nombre: "Nike",
@@ -52,6 +57,13 @@ const store: RegistroMarca[] = [
     version: 1,
   },
 ];
+
+// Demo state restored from the current-browser session when available; otherwise a
+// fresh clone of the fixtures. Cross-tab writes rehydrate this same array in place.
+const store: RegistroMarca[] = loadMockArray("taxonomy-brands", storeFixtures);
+syncMockArrayOnExternalChange("taxonomy-brands", store);
+
+const persist = () => persistMockArray("taxonomy-brands", store);
 
 const operacionesBaja: OperacionBaja[] = [
   { operacionId: "op-marca-adidas", marcaId: "adidas", estado: "verificando" },
@@ -139,6 +151,7 @@ export const mockBrandAdapter: BrandRepository = {
       version: 1,
     };
     store.push(r);
+    persist();
     return aDetalle(r);
   },
 
@@ -152,6 +165,7 @@ export const mockBrandAdapter: BrandRepository = {
     r.descripcion = input.descripcion ?? null;
     r.paisOrigenIso = input.paisOrigenIso ?? null;
     r.version += 1;
+    persist();
     return aDetalle(r);
   },
 
@@ -181,8 +195,8 @@ export const mockBrandAdapter: BrandRepository = {
       return result;
     }
     const op = operacionesBaja.find((o) => o.marcaId === id);
-    const operacionId =
-      op?.operacionId ?? `op-marca-${id}-${Date.now().toString(36)}`;
+    // Deterministic id: re-requesting a baja never creates a duplicate operation.
+    const operacionId = op?.operacionId ?? `op-marca-${id}`;
     if (!op) {
       operacionesBaja.push({
         operacionId,
@@ -211,6 +225,7 @@ export const mockBrandAdapter: BrandRepository = {
       if (r) {
         r.estado = "Inactivo";
         r.version += 1;
+        persist();
       }
       return {
         resultado: "exito",

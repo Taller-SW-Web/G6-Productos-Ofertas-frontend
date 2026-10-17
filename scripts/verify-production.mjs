@@ -252,6 +252,7 @@ try {
       path: "/inventario/traslados",
       mockCheck: async (p) => {
         await p.getByRole("heading", { level: 1 }).waitFor();
+        await p.getByRole("table").or(p.getByText("No hay traslados", { exact: false })).first().waitFor();
         assert.ok(await p.getByRole("heading", { level: 1 }).isVisible());
         const hasTable = (await p.getByRole("table").count()) > 0;
         const hasEmpty =
@@ -263,6 +264,8 @@ try {
       path: "/inventario/dashboard",
       mockCheck: async (p) => {
         await p.getByRole("heading", { level: 1 }).waitFor();
+        await p.getByRole("table").or(p.getByText("Total unidades físicas", { exact: false }))
+          .or(p.getByText("Unidades disponibles", { exact: false })).first().waitFor();
         assert.ok(await p.getByRole("heading", { level: 1 }).isVisible());
         const hasKpi =
           (await p.getByText("Total unidades físicas", { exact: false }).count()) > 0 ||

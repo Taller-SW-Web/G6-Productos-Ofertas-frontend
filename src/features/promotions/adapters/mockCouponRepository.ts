@@ -12,14 +12,56 @@ import {
   type CouponConfiguration,
 } from "../services/couponValidation";
 import { pageOf } from "../services/administration";
+import {
+  isMockPersistenceAvailable,
+  isRecord,
+  publishMockChange,
+  readMockState,
+  saveMockState,
+  subscribeExternalMockChanges,
+} from "../../shared/mockState";
+
+interface MockCouponState {
+  records: CouponView[];
+  sequence: number;
+}
+
+function isMockCouponState(value: unknown): value is MockCouponState {
+  return isRecord(value) && Array.isArray(value.records) && typeof value.sequence === "number";
+}
+
 export function createMockCouponRepository(
   dependencies: {
     promotions: (signal: AbortSignal) => Promise<CouponPromotion[]>;
   },
   fixtures: readonly CouponView[] = couponFixtures,
+  options: { persist?: boolean } = {},
 ): CouponRepository {
-  const records = fixtures.map((item) => structuredClone(item));
-  let sequence = 0;
+  const persistEnabled = options.persist === true && isMockPersistenceAvailable();
+  const restored = persistEnabled
+    ? readMockState<MockCouponState>("promotions-coupons", isMockCouponState)
+    : null;
+  const records = restored ? restored.records : fixtures.map((item) => structuredClone(item));
+  let sequence = restored ? restored.sequence : 0;
+  const persist = () => {
+    saveMockState("promotions-coupons", { records, sequence } satisfies MockCouponState);
+    publishMockChange("promotions-coupons");
+    publishMockChange("promotions");
+  };
+  if (persistEnabled) {
+    subscribeExternalMockChanges("promotions-coupons", () => {
+      const stored = readMockState<MockCouponState>(
+        "promotions-coupons",
+        isMockCouponState,
+      );
+      if (!stored) return;
+      records.length = 0;
+      records.push(...stored.records);
+      sequence = stored.sequence;
+      publishMockChange("promotions-coupons");
+      publishMockChange("promotions");
+    });
+  }
   async function configure(
     values: CouponConfiguration,
     signal: AbortSignal,
@@ -98,6 +140,7 @@ export function createMockCouponRepository(
         remainingUses: values.globalLimit === null ? null : undefined,
       };
       records.push(coupon);
+      persist();
       return structuredClone(coupon);
     },
     async update(id, values, signal) {
@@ -128,6 +171,7 @@ export function createMockCouponRepository(
               : undefined,
       };
       records[records.findIndex((item) => item.id === id)] = coupon;
+      persist();
       return structuredClone(coupon);
     },
     async changeStatus(id, status, signal) {
@@ -147,6 +191,7 @@ export function createMockCouponRepository(
         );
       const coupon = { ...previous, status };
       records[index] = coupon;
+      persist();
       return structuredClone(coupon);
     },
     async list(query, signal) {

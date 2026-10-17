@@ -23,6 +23,35 @@ import {
   initialThresholds,
   initialTransfers,
 } from "../mocks/inventoryFixtures";
+import {
+  isMockPersistenceAvailable,
+  isRecord,
+  publishMockChange,
+  readMockState,
+  saveMockState,
+  subscribeExternalMockChanges,
+} from "../../shared/mockState";
+
+interface MockInventoryState {
+  stockItems: StockItem[];
+  thresholds: ThresholdConfig;
+  transfers: TransferItem[];
+  alerts: InventoryAlert[];
+  processedOperations: [string, TransferItem][];
+  processedOperationKeys: [string, string][];
+}
+
+function isMockInventoryState(value: unknown): value is MockInventoryState {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.stockItems) &&
+    isRecord(value.thresholds) &&
+    Array.isArray(value.transfers) &&
+    Array.isArray(value.alerts) &&
+    Array.isArray(value.processedOperations) &&
+    Array.isArray(value.processedOperationKeys)
+  );
+}
 
 export class MockInventoryAdapter implements InventoryRepository {
   private stockItems: StockItem[] = JSON.parse(JSON.stringify(initialStockItems));
@@ -31,6 +60,48 @@ export class MockInventoryAdapter implements InventoryRepository {
   private alerts: InventoryAlert[] = JSON.parse(JSON.stringify(initialAlerts));
   private processedOperations = new Map<string, TransferItem>();
   private processedOperationKeys = new Map<string, string>();
+  private readonly persistEnabled: boolean;
+
+  constructor(options: { persist?: boolean } = {}) {
+    // Directly constructed adapters (tests, injection) stay isolated; only the demo
+    // singleton opts into persistence explicitly.
+    this.persistEnabled = options.persist === true && isMockPersistenceAvailable();
+    if (this.persistEnabled) {
+      const stored = readMockState<MockInventoryState>("inventory", isMockInventoryState);
+      if (stored) {
+        this.hydrate(stored);
+      }
+      subscribeExternalMockChanges("inventory", () => {
+        const next = readMockState<MockInventoryState>("inventory", isMockInventoryState);
+        if (!next) return;
+        this.hydrate(next);
+        publishMockChange("inventory");
+      });
+    }
+  }
+
+  private hydrate(stored: MockInventoryState): void {
+    this.stockItems = stored.stockItems;
+    this.thresholds = stored.thresholds;
+    this.transfers = stored.transfers;
+    this.alerts = stored.alerts;
+    // Idempotency records must survive a reload as maps, never as derived balances.
+    this.processedOperations = new Map(stored.processedOperations);
+    this.processedOperationKeys = new Map(stored.processedOperationKeys);
+  }
+
+  private persist(): void {
+    if (!this.persistEnabled) return;
+    saveMockState("inventory", {
+      stockItems: this.stockItems,
+      thresholds: this.thresholds,
+      transfers: this.transfers,
+      alerts: this.alerts,
+      processedOperations: [...this.processedOperations.entries()],
+      processedOperationKeys: [...this.processedOperationKeys.entries()],
+    } satisfies MockInventoryState);
+    publishMockChange("inventory");
+  }
 
   private async refreshCatalogMetadata() {
     const metadata = await readMockInventoryCatalog();
@@ -246,6 +317,7 @@ export class MockInventoryAdapter implements InventoryRepository {
     }
     this.thresholds.globalThreshold = threshold;
     this.stockItems.forEach((item) => this.recalculateStockStatus(item));
+    this.persist();
     return JSON.parse(JSON.stringify(this.thresholds));
   }
 
@@ -261,6 +333,7 @@ export class MockInventoryAdapter implements InventoryRepository {
     }
     this.thresholds.skuOverrides[sku] = threshold;
     this.stockItems.forEach((item) => this.recalculateStockStatus(item));
+    this.persist();
     return JSON.parse(JSON.stringify(this.thresholds));
   }
 
@@ -409,6 +482,7 @@ export class MockInventoryAdapter implements InventoryRepository {
     const result: TransferItem = { ...transfer };
     this.processedOperations.set(payload.operationId, result);
     this.processedOperationKeys.set(payload.operationId, intent);
+    this.persist();
     return result;
   }
 

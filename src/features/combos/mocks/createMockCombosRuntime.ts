@@ -16,6 +16,6 @@ export function createMockCombosRuntime(pricingRuntime: PricingRuntime): CombosR
   const pricing = new PricingCombosAdapter({ pricing: pricingRuntime.service });
   const now = () => Date.parse(pricingRuntime.clock.now());
   const availability = new MockCombosAvailabilityAdapter({ inventory: getInventoryRepository() });
-  const combos = new MockCombosRepository({ catalog, pricing, availability, now });
+  const combos = new MockCombosRepository({ catalog, pricing, availability, now, persist: true });
   return { combos, catalog, pricing, availability, now };
 }

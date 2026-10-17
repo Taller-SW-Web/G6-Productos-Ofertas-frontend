@@ -16,6 +16,15 @@ import type {
 } from "../services/bulkRepository";
 import { BulkRepositoryError } from "../services/bulkErrors";
 import { canMockProvideImportReport } from "../services/reportAvailability";
+import {
+  clearMockState,
+  isMockPersistenceAvailable,
+  isRecord,
+  publishMockChange,
+  readMockState,
+  saveMockState,
+  subscribeExternalMockChanges,
+} from "../../shared/mockState";
 
 export const DEMO_CONFIG = {
   PROCESSING_DELAY_MS: 1200,
@@ -32,6 +41,67 @@ const resumingBatches = new Set<string>();
 let batchSequence = 1000;
 let exportSequence = 1000;
 let createImportCallCount = 0;
+
+interface MockBulkState {
+  batches: [string, BulkImportBatch][];
+  exports: [string, BulkExportJob][];
+  batchSequence: number;
+  exportSequence: number;
+  createImportCallCount: number;
+}
+
+function isMockBulkState(value: unknown): value is MockBulkState {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.batches) &&
+    Array.isArray(value.exports) &&
+    typeof value.batchSequence === "number" &&
+    typeof value.exportSequence === "number" &&
+    typeof value.createImportCallCount === "number"
+  );
+}
+
+// Dynamic loads and exports live in the mock demonstration only. When a real browser
+// session is available they are restored and persisted per browser, without promising
+// cross-device synchronization.
+const persistEnabled = isMockPersistenceAvailable();
+
+function persistBulkState(): void {
+  if (!persistEnabled) return;
+  saveMockState("bulk", {
+    batches: [...dynamicBatches.entries()],
+    exports: [...dynamicExports.entries()],
+    batchSequence,
+    exportSequence,
+    createImportCallCount,
+  } satisfies MockBulkState);
+  publishMockChange("bulk");
+}
+
+function hydrateBulkStateFromStorage(): void {
+  if (!persistEnabled) return;
+  const stored = readMockState<MockBulkState>("bulk", isMockBulkState);
+  if (!stored) return;
+  dynamicBatches.clear();
+  for (const [id, batch] of stored.batches) dynamicBatches.set(id, batch);
+  dynamicExports.clear();
+  for (const [id, job] of stored.exports) dynamicExports.set(id, job);
+  batchSequence = stored.batchSequence;
+  exportSequence = stored.exportSequence;
+  createImportCallCount = stored.createImportCallCount;
+  // In-flight work lost its timers on reload: reschedule it deterministically.
+  for (const [id, batch] of dynamicBatches) {
+    if (batch.status === "QUEUED" || batch.status === "PROCESSING") {
+      scheduleImportSimulation(id);
+    }
+  }
+  for (const [id, job] of dynamicExports) {
+    if (job.status === "QUEUED" || job.status === "PROCESSING") {
+      scheduleExportSimulation(id);
+    }
+  }
+  publishMockChange("bulk");
+}
 
 function deepCloneBatch(batch: BulkImportBatch): BulkImportBatch {
   return JSON.parse(JSON.stringify(batch)) as BulkImportBatch;
@@ -53,6 +123,7 @@ function scheduleImportSimulation(batchId: string) {
       batch.completed_rows = total !== null ? Math.floor(total * 0.7) : 0;
       batch.failed_rows = 0;
       batch.updated_at = new Date().toISOString();
+      persistBulkState();
     }
   }, DEMO_CONFIG.PROCESSING_DELAY_MS);
   activeTimers.add(t1);
@@ -78,6 +149,7 @@ function scheduleImportSimulation(batchId: string) {
           batch.rows = [];
         }
       }
+      persistBulkState();
     }
   }, DEMO_CONFIG.COMPLETION_DELAY_MS);
   activeTimers.add(t2);
@@ -131,6 +203,7 @@ function scheduleResumeSimulation(batchId: string) {
     if (batch && batch.status === "QUEUED") {
       batch.status = "PROCESSING";
       batch.updated_at = new Date().toISOString();
+      persistBulkState();
     }
   }, DEMO_CONFIG.PROCESSING_DELAY_MS);
   activeTimers.add(t1);
@@ -140,6 +213,7 @@ function scheduleResumeSimulation(batchId: string) {
     const batch = dynamicBatches.get(batchId);
     if (batch && (batch.status === "PROCESSING" || batch.status === "QUEUED")) {
       applyReconciliationCompletion(batch);
+      persistBulkState();
     }
   }, DEMO_CONFIG.COMPLETION_DELAY_MS);
   activeTimers.add(t2);
@@ -154,6 +228,7 @@ function scheduleExportSimulation(exportId: string) {
     if (job && job.status === "QUEUED") {
       job.status = "PROCESSING";
       job.updated_at = new Date().toISOString();
+      persistBulkState();
     }
   }, DEMO_CONFIG.PROCESSING_DELAY_MS);
   activeTimers.add(t1);
@@ -171,6 +246,7 @@ function scheduleExportSimulation(exportId: string) {
       } else {
         job.file_name = `catalogo_completo_${exportId}.xlsx`;
       }
+      persistBulkState();
     }
   }, DEMO_CONFIG.COMPLETION_DELAY_MS);
   activeTimers.add(t2);
@@ -266,6 +342,7 @@ export const mockBulkRepository: BulkRepository & {
 
     dynamicBatches.set(batchId, newBatch);
     scheduleImportSimulation(batchId);
+    persistBulkState();
 
     return deepCloneBatch(newBatch);
   },
@@ -372,6 +449,7 @@ export const mockBulkRepository: BulkRepository & {
 
     dynamicBatches.set(batchId, resumedBatch);
     scheduleResumeSimulation(batchId);
+    persistBulkState();
     // The demo returns the 202-shaped response synchronously. The guard remains active
     // until the next turn so a rapid duplicate cannot schedule a second run.
     queueMicrotask(() => resumingBatches.delete(batchId));
@@ -397,6 +475,7 @@ export const mockBulkRepository: BulkRepository & {
 
     dynamicExports.set(exportId, newJob);
     scheduleExportSimulation(exportId);
+    persistBulkState();
 
     return deepCloneExport(newJob);
   },
@@ -483,6 +562,7 @@ export const mockBulkRepository: BulkRepository & {
       applyReconciliationCompletion(batch);
     }
 
+    persistBulkState();
     return deepCloneBatch(batch);
   },
 
@@ -516,6 +596,7 @@ export const mockBulkRepository: BulkRepository & {
       job.updated_at = new Date().toISOString();
     }
 
+    persistBulkState();
     return deepCloneExport(job);
   },
 
@@ -541,5 +622,16 @@ export const mockBulkRepository: BulkRepository & {
     batchSequence = 1000;
     exportSequence = 1000;
     createImportCallCount = 0;
+    if (persistEnabled) {
+      clearMockState("bulk");
+      publishMockChange("bulk");
+    }
   },
 };
+
+// Restore this session's dynamic bulk work before the first query and keep it in sync
+// with other tabs. No-op outside a real mock browser session (tests, SSR, API mode).
+if (persistEnabled) {
+  subscribeExternalMockChanges("bulk", hydrateBulkStateFromStorage);
+  hydrateBulkStateFromStorage();
+}
