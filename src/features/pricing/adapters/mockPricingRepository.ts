@@ -132,9 +132,6 @@ export function createMockPricingRepository(
     }
   };
   async function refreshTargets(signal?: AbortSignal) {
-    if (!persistEnabled) {
-      return;
-    }
     signal?.throwIfAborted();
     flushPendingAudit();
     const current = await readMockPricingTargets(signal ?? new AbortController().signal);
@@ -154,7 +151,7 @@ export function createMockPricingRepository(
             names[existing.id] = catalogName;
           }
         }
-      } else {
+      } else if (persistEnabled) {
         const newTarget: PriceTarget = structuredClone(catalogTarget);
         if (newTarget.kind === "variant") {
           const parent = targets.find(t => t.kind === "product" && t.productId === newTarget.productId);
