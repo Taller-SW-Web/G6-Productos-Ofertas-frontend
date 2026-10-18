@@ -1147,3 +1147,125 @@ test("R3 P1-04-Transversal: fallo de persistencia en resumeImport y baja de taxo
     }
   });
 });
+
+test("R4 P1-01: exportación de auditoría persiste tras F5, recupera el mismo trabajo y descarga contenido conectado a filtros", async ({
+  page,
+}) => {
+  await page.goto("/precios/auditoria?sku=CAM-BASE");
+  await expect(page.getByRole("heading", { name: "Historial de precios" })).toBeVisible();
+
+  await page.getByRole("link", { name: "Exportar CSV" }).click();
+  await expect(page.getByRole("heading", { name: "Exportar historial en CSV" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Solicitar CSV" }).click();
+  await expect(page.getByRole("button", { name: "Descargar CSV" })).toBeEnabled();
+
+  const urlBeforeReload = page.url();
+  const exportId = new URL(urlBeforeReload).searchParams.get("exportId");
+  expect(exportId).toBeTruthy();
+
+  await page.reload();
+
+  await expect(page.getByText("Exportación no disponible")).toHaveCount(0);
+  await expect(page.getByText(`Referencia: ${exportId}`)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Descargar CSV" })).toBeEnabled();
+
+  const downloading = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Descargar CSV" }).click();
+  const file = await downloading;
+  expect(file.suggestedFilename()).toBe(`reporte_auditoria_${exportId!.toLowerCase()}.csv`);
+
+  const stream = (await file.createReadStream())!;
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+  const content = Buffer.concat(chunks).toString("utf-8");
+
+  expect(content.startsWith("id_auditoria,sku,product_id")).toBe(true);
+  expect(content).toContain("CAM-BASE");
+  expect(content).not.toContain("RUN-41");
+  expect(content).not.toContain("demo-pricing");
+});
+
+test("R4 P1-02: conciliación automática de pendingAudit al entrar directamente a /precios/auditoria tras fallo y F5", async ({
+  page,
+}) => {
+  await page.goto("/precios");
+  await expect(page.getByRole("heading", { name: "Gestión de precios" })).toBeVisible();
+
+  await page.evaluate(async () => {
+    const originalSetItem = Storage.prototype.setItem;
+    (window as unknown as { __originalSetItem?: typeof originalSetItem }).__originalSetItem = originalSetItem;
+    Storage.prototype.setItem = function (key: string, value: string) {
+      if (key.endsWith("price-audit")) {
+        throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+      }
+      return originalSetItem.call(this, key, value);
+    };
+
+    const pricingSpecifier = "/src/features/pricing/services/pricingService.ts";
+    const { createPricingRuntime } = await import(/* @vite-ignore */ pricingSpecifier);
+    const runtime = await createPricingRuntime("mock");
+    const signal = new AbortController().signal;
+
+    const currentResult = await runtime.service.read({ targetId: "base", channel: "global" }, signal);
+    if (!currentResult?.price) throw new Error("No se encontró el precio base");
+
+    await runtime.service.update(
+      {
+        target: { targetId: "base", channel: "global" },
+        version: currentResult.price.version,
+        draft: {
+          regular: "289.90",
+          offer: "",
+          offerAction: "CONSERVAR",
+          currency: "PEN",
+          reason: "Prueba E2E conciliacion directa historial",
+        },
+      },
+      signal,
+    );
+  });
+
+  await page.evaluate(() => {
+    const original = (window as unknown as { __originalSetItem?: typeof Storage.prototype.setItem }).__originalSetItem;
+    if (original) Storage.prototype.setItem = original;
+  });
+
+  const hasPendingBefore = await page.evaluate(() => {
+    const raw = localStorage.getItem("g6-productos-ofertas:mock:v1:pricing");
+    if (!raw) return false;
+    const envelope = JSON.parse(raw);
+    const state = envelope.data ?? envelope;
+    return Array.isArray(state.pendingAudit) && state.pendingAudit.length > 0;
+  });
+  expect(hasPendingBefore).toBe(true);
+
+  // Navegación directa a /precios/auditoria sin pasar por /precios
+  await page.goto("/precios/auditoria");
+  await expect(page.getByRole("heading", { name: "Historial de precios" })).toBeVisible();
+
+  const row = page.getByRole("row").filter({ hasText: "ZAP-TRL-EXP" }).first();
+  await expect(row).toBeVisible();
+
+  // F5 directo en historial: recuperación y asiento visible exactamente una vez
+  await page.reload();
+  await expect(page.getByRole("table")).toBeVisible();
+  const matchingRows = page.getByRole("row").filter({ hasText: "289,90" });
+  await expect(matchingRows).toHaveCount(1);
+
+  await matchingRows.getByRole("link", { name: /Ver detalle/ }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("Prueba E2E conciliacion directa historial");
+  await expect(dialog).not.toContainText("demo-pricing");
+  await expect(dialog).toContainText("ZAP-TRL-EXP");
+
+  const pendingCountAfter = await page.evaluate(() => {
+    const raw = localStorage.getItem("g6-productos-ofertas:mock:v1:pricing");
+    if (!raw) return -1;
+    const envelope = JSON.parse(raw);
+    const state = envelope.data ?? envelope;
+    return state.pendingAudit ? state.pendingAudit.length : 0;
+  });
+  expect(pendingCountAfter).toBe(0);
+});

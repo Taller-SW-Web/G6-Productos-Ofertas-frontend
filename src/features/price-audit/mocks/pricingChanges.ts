@@ -10,9 +10,28 @@ import {
   subscribeExternalMockChanges,
 } from "../../shared/mockState";
 
+export interface StoredAuditJob {
+  id: string;
+  format: "CSV" | "PDF";
+  status: "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED_GENERAL";
+  createdAt: string;
+  completedAt: string | null;
+  fileAvailable: boolean;
+  filters: {
+    sku: string;
+    desde: string;
+    hasta: string;
+    usuarioId: string;
+    canal: string;
+    batchId: string;
+  };
+}
+
 interface MockPricingAuditState {
   entries: AuditEntry[];
   sequence: number;
+  jobs?: StoredAuditJob[];
+  jobSequence?: number;
 }
 
 function isAuditEntryRecord(value: unknown): value is AuditEntry {
@@ -30,6 +49,23 @@ function isAuditEntryRecord(value: unknown): value is AuditEntry {
   );
 }
 
+function isStoredAuditJob(value: unknown): value is StoredAuditJob {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    value.id.trim().length > 0 &&
+    (value.format === "CSV" || value.format === "PDF") &&
+    (value.status === "QUEUED" ||
+      value.status === "PROCESSING" ||
+      value.status === "COMPLETED" ||
+      value.status === "FAILED_GENERAL") &&
+    typeof value.createdAt === "string" &&
+    (value.completedAt === null || typeof value.completedAt === "string") &&
+    typeof value.fileAvailable === "boolean" &&
+    isRecord(value.filters)
+  );
+}
+
 function isMockPricingAuditState(value: unknown): value is MockPricingAuditState {
   return (
     isRecord(value) &&
@@ -37,8 +73,44 @@ function isMockPricingAuditState(value: unknown): value is MockPricingAuditState
     value.entries.every(isAuditEntryRecord) &&
     typeof value.sequence === "number" &&
     Number.isFinite(value.sequence) &&
-    value.sequence >= 0
+    value.sequence >= 0 &&
+    (value.jobs === undefined ||
+      (Array.isArray(value.jobs) && value.jobs.every(isStoredAuditJob))) &&
+    (value.jobSequence === undefined ||
+      (typeof value.jobSequence === "number" &&
+        Number.isFinite(value.jobSequence) &&
+        value.jobSequence >= 0))
   );
+}
+
+function reconcilePendingFromPricing(
+  recordFn: (target: PriceTarget, before: PriceView, after: PriceView, reason: string) => void,
+) {
+  if (!isMockPersistenceAvailable()) return;
+  const pricingData = readMockState<Record<string, unknown>>("pricing", isRecord);
+  if (!pricingData || !Array.isArray(pricingData.pendingAudit) || pricingData.pendingAudit.length === 0) {
+    return;
+  }
+  const pending = pricingData.pendingAudit as Array<{
+    id: string;
+    target: PriceTarget;
+    before: PriceView;
+    after: PriceView;
+    reason: string;
+  }>;
+  const remaining: typeof pending = [];
+  for (const item of pending) {
+    try {
+      recordFn(item.target, item.before, item.after, item.reason);
+    } catch {
+      remaining.push(item);
+    }
+  }
+  if (remaining.length !== pending.length) {
+    pricingData.pendingAudit = remaining;
+    saveMockState("pricing", pricingData);
+    publishMockChange("pricing");
+  }
 }
 
 // Demonstration audit log fed by confirmed Precios edits. It is only restored and
@@ -50,12 +122,21 @@ export function createMockPricingAudit(options: { persist?: boolean } = {}) {
     : null;
   const entries: AuditEntry[] = restored ? restored.entries : [];
   let sequence = restored ? restored.sequence : 0;
+  const jobs: StoredAuditJob[] = restored?.jobs
+    ? structuredClone(restored.jobs)
+    : [];
+  let jobSequence = restored?.jobSequence ?? 0;
 
   // A non-persistent instance (persist: false) must never touch `localStorage`.
   function persist(): boolean {
     let ok = true;
     if (persistEnabled) {
-      ok = saveMockState("price-audit", { entries, sequence } satisfies MockPricingAuditState);
+      ok = saveMockState("price-audit", {
+        entries,
+        sequence,
+        jobs,
+        jobSequence,
+      } satisfies MockPricingAuditState);
     }
     if (ok) {
       publishMockChange("price-audit");
@@ -63,75 +144,110 @@ export function createMockPricingAudit(options: { persist?: boolean } = {}) {
     return ok;
   }
 
+  function record(target: PriceTarget, before: PriceView, after: PriceView, reason: string) {
+    const sku = target.kind === "variant" ? target.sku : target.referenceSku;
+    if (!sku) return; // A product ID is never substituted for an unknown SKU.
+    let changed = false;
+    const addedEntries: AuditEntry[] = [];
+    const prevSequence = sequence;
+    for (const priceType of ["REGULAR", "OFERTA"] as const) {
+      const previous = priceType === "REGULAR" ? before.regular : before.offer;
+      const next = priceType === "REGULAR" ? after.regular : after.offer;
+      if (previous === next || (previous !== null && next !== null &&
+        !decimalLess(previous, next) && !decimalLess(next, previous))) continue;
+      const channelKey = `${after.channel}-v${after.version}`;
+      const stableId = `demo-pricing-${target.id}-${sku}-${channelKey}-${priceType.toLowerCase()}`;
+      const alreadyRecorded = entries.some(
+        (e) =>
+          e.id === stableId ||
+          (e.sku === sku &&
+            e.productId === target.productId &&
+            e.priceType === priceType &&
+            e.id.includes(`-${channelKey}-`)),
+      );
+      if (alreadyRecorded) continue;
+      const entry: AuditEntry = {
+        id: stableId,
+        sku,
+        productId: target.productId,
+        priceType,
+        before: previous,
+        after: next,
+        variation: previous === null || next === null ? null : percentage(previous, next),
+        operation: next === null ? "RETIRO_OFERTA" : previous === null ? "CREACION" : "MODIFICACION",
+        origin: "BACKOFFICE",
+        reason,
+        batchId: null,
+        actorId: "demo-pricing",
+        email: null,
+        ip: null,
+        at: after.validFrom,
+      };
+      entries.unshift(entry);
+      addedEntries.push(entry);
+      changed = true;
+    }
+    if (changed) {
+      const persisted = persist();
+      if (!persisted && persistEnabled) {
+        for (const item of addedEntries) {
+          const idx = entries.indexOf(item);
+          if (idx !== -1) {
+            entries.splice(idx, 1);
+          }
+        }
+        sequence = prevSequence;
+        throw new Error("No se pudo guardar el asiento de auditoría en el almacenamiento local.");
+      }
+    }
+  }
+
   if (persistEnabled) {
+    reconcilePendingFromPricing(record);
     subscribeExternalMockChanges("price-audit", () => {
       const next = readMockState<MockPricingAuditState>("price-audit", isMockPricingAuditState);
       if (!next) return;
       entries.length = 0;
       entries.push(...next.entries);
       sequence = next.sequence;
+      jobs.length = 0;
+      if (next.jobs) {
+        jobs.push(...next.jobs);
+      }
+      jobSequence = next.jobSequence ?? 0;
       publishMockChange("price-audit");
+    });
+    subscribeExternalMockChanges("pricing", () => {
+      reconcilePendingFromPricing(record);
     });
   }
 
   return {
-    read: () => structuredClone(entries),
-    record(target: PriceTarget, before: PriceView, after: PriceView, reason: string) {
-      const sku = target.kind === "variant" ? target.sku : target.referenceSku;
-      if (!sku) return; // A product ID is never substituted for an unknown SKU.
-      let changed = false;
-      const addedEntries: AuditEntry[] = [];
-      const prevSequence = sequence;
-      for (const priceType of ["REGULAR", "OFERTA"] as const) {
-        const previous = priceType === "REGULAR" ? before.regular : before.offer;
-        const next = priceType === "REGULAR" ? after.regular : after.offer;
-        if (previous === next || (previous !== null && next !== null &&
-          !decimalLess(previous, next) && !decimalLess(next, previous))) continue;
-        const channelKey = `${after.channel}-v${after.version}`;
-        const stableId = `demo-pricing-${target.id}-${sku}-${channelKey}-${priceType.toLowerCase()}`;
-        const alreadyRecorded = entries.some(
-          (e) =>
-            e.id === stableId ||
-            (e.sku === sku &&
-              e.productId === target.productId &&
-              e.priceType === priceType &&
-              e.id.includes(`-${channelKey}-`)),
-        );
-        if (alreadyRecorded) continue;
-        const entry: AuditEntry = {
-          id: stableId,
-          sku,
-          productId: target.productId,
-          priceType,
-          before: previous,
-          after: next,
-          variation: previous === null || next === null ? null : percentage(previous, next),
-          operation: next === null ? "RETIRO_OFERTA" : previous === null ? "CREACION" : "MODIFICACION",
-          origin: "BACKOFFICE",
-          reason,
-          batchId: null,
-          actorId: "demo-pricing",
-          email: null,
-          ip: null,
-          at: after.validFrom,
-        };
-        entries.unshift(entry);
-        addedEntries.push(entry);
-        changed = true;
+    read: () => {
+      if (persistEnabled) {
+        reconcilePendingFromPricing(record);
       }
-      if (changed) {
-        const persisted = persist();
-        if (!persisted && persistEnabled) {
-          for (const item of addedEntries) {
-            const idx = entries.indexOf(item);
-            if (idx !== -1) {
-              entries.splice(idx, 1);
-            }
-          }
-          sequence = prevSequence;
-          throw new Error("No se pudo guardar el asiento de auditoría en el almacenamiento local.");
-        }
+      return structuredClone(entries);
+    },
+    record,
+    getJobs: () => structuredClone(jobs),
+    getJob: (id: string) => {
+      const found = jobs.find((j) => j.id === id);
+      return found ? structuredClone(found) : null;
+    },
+    saveJob: (job: StoredAuditJob) => {
+      const idx = jobs.findIndex((j) => j.id === job.id);
+      if (idx !== -1) {
+        jobs[idx] = structuredClone(job);
+      } else {
+        jobs.push(structuredClone(job));
       }
+      return persist();
+    },
+    nextJobId: (format: "CSV" | "PDF") => {
+      jobSequence++;
+      persist();
+      return `exp-014-${format.toLowerCase()}-${jobSequence}`;
     },
   };
 }

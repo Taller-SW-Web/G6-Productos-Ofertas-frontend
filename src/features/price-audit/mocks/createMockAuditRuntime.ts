@@ -7,7 +7,10 @@ import { mockPricingAudit } from "./pricingChanges";
 export async function createMockAuditRuntime(
   downloader: ReportDownloader,
 ): Promise<AuditRuntime> {
-  const repository = createMockAuditRepository(mockPricingAudit.read);
+  const repository = createMockAuditRepository(
+    mockPricingAudit.read,
+    mockPricingAudit,
+  );
   return {
     repository: import.meta.env?.DEV
       ? (await import("./reviewRepository")).createReviewRepository(repository)

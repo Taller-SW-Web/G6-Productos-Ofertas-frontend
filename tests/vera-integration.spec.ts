@@ -19,8 +19,8 @@ test("VER-01/04: confirmed mock edit survives module navigation and appears in a
   await expect(page.getByText("Precio actualizado", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Historial de precios", exact: true }).click();
   await page.getByRole("row").filter({ hasText: "ZAP-TRL-EXP" }).getByRole("link", { name: /Ver detalle/ }).first().click();
-  await expect(page.getByRole("dialog")).toContainText("Trazabilidad simulada VER-01");
-  await expect(page.getByRole("dialog")).toContainText("demo-pricing");
+  await expect(page.getByRole("dialog")).not.toContainText("demo-pricing");
+  await expect(page.getByRole("dialog")).toContainText("ZAP-TRL-EXP");
   await page.screenshot({ path: evidencePath("ver-01-detalle-1440.png") });
   await page.getByRole("button", { name: "Volver al historial", exact: true }).click();
   await expect(page.getByText(/no hay auditoría real/)).toHaveCount(0);

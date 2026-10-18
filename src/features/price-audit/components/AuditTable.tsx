@@ -8,6 +8,7 @@ import {
 } from "../../../components/shared";
 import {
   dateLabel,
+  displayAuditId,
   nextValue,
   operationLabel,
   previousValue,
@@ -80,7 +81,7 @@ export function AuditTable({
           to={`/precios/auditoria/asientos/${encodeURIComponent(entry.id)}${suffix}`}
           state={{ auditOpener: entry.id }}
           data-audit-id={entry.id}
-          aria-label={`Ver detalle de ${entry.id}`}
+          aria-label={`Ver detalle de ${displayAuditId(entry.id)}`}
           title="Ver detalle"
         >
           <IconEye size={16} />

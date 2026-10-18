@@ -59,7 +59,7 @@ export function AuditHistoryPage() {
     <>
       <PageHeader
         title="Historial de precios"
-        description="Bitácora de cambios confirmados, solo lectura. Es distinta de la consulta del precio vigente o en una fecha."
+        description="Bitácora de cambios confirmados."
         breadcrumbs={[
           { label: "Precios", to: "/precios" },
           { label: "Historial de precios" },
