@@ -92,7 +92,7 @@ export function createMockPricingRepository(
     ? readMockState<MockPricingState>("pricing", isMockPricingState)
     : null;
   const records = restored ? restored.records : structuredClone(priceRecords);
-  let targets = structuredClone(priceTargets);
+  const targets = structuredClone(priceTargets);
   const names = { ...targetNames };
   // A non-persistent instance (persist: false) must never touch `localStorage`;
   // it still notifies in-session listeners so local tests keep working.
