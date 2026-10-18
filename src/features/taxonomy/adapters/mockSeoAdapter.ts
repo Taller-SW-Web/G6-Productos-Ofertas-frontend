@@ -60,10 +60,11 @@ const historial: Record<string, HistorialSlug[]> = persisted
   ? persisted.history
   : (structuredClone(historialFixtures) as Record<string, HistorialSlug[]>);
 
-function persist() {
-  saveMockState("taxonomy-seo", { records: store, history: historial } satisfies MockSeoState);
+function persist(): boolean {
+  const ok = saveMockState("taxonomy-seo", { records: store, history: historial } satisfies MockSeoState);
   publishMockChange("taxonomy-seo");
   publishMockChange("taxonomy");
+  return ok;
 }
 
 if (isMockPersistenceAvailable()) {
@@ -149,7 +150,9 @@ export const mockSeoAdapter: SeoRepository = {
     if (duplicado) {
       throw new SeoConflictError(slugNormalizado);
     }
-    if (slugNormalizado !== r.slug) {
+    const prev = { ...r };
+    const slugCambiado = slugNormalizado !== r.slug;
+    if (slugCambiado) {
       const historialDe = historial[id] ?? [];
       historialDe.push({
         slugAnterior: r.slug,
@@ -163,7 +166,14 @@ export const mockSeoAdapter: SeoRepository = {
     }
     r.metaTitulo = metaTitulo;
     r.metaDescripcion = metaDescripcion;
-    persist();
+    const ok = persist();
+    if (!ok && isMockPersistenceAvailable()) {
+      Object.assign(r, prev);
+      if (slugCambiado) {
+        historial[id]?.pop();
+      }
+      throw new Error("No se pudo guardar la configuración SEO. Vuelve a intentarlo.");
+    }
     return aRegistro(r);
   },
 

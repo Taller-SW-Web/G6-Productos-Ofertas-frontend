@@ -28,6 +28,7 @@ import {
 } from "../../shared/mockState";
 
 interface PendingAuditRecord {
+  id: string;
   target: PriceTarget;
   before: PriceView;
   after: PriceView;
@@ -77,6 +78,19 @@ function isScheduleRecord(value: unknown): value is ScheduleView {
   );
 }
 
+function isPendingAuditRecord(value: unknown): value is PendingAuditRecord {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    value.id.trim().length > 0 &&
+    isRecord(value.target) &&
+    typeof value.target.id === "string" &&
+    isPriceRecord(value.before) &&
+    isPriceRecord(value.after) &&
+    typeof value.reason === "string"
+  );
+}
+
 function isMockPricingState(value: unknown): value is MockPricingState {
   return (
     isRecord(value) &&
@@ -86,7 +100,10 @@ function isMockPricingState(value: unknown): value is MockPricingState {
     value.schedules.every(isScheduleRecord) &&
     typeof value.sequence === "number" &&
     Number.isFinite(value.sequence) &&
-    value.sequence >= 0
+    value.sequence >= 0 &&
+    (value.pendingAudit === undefined ||
+      (Array.isArray(value.pendingAudit) &&
+        value.pendingAudit.every(isPendingAuditRecord)))
   );
 }
 
@@ -135,6 +152,7 @@ export function createMockPricingRepository(
     signal?.throwIfAborted();
     flushPendingAudit();
     const current = await readMockPricingTargets(signal ?? new AbortController().signal);
+    let targetsUpdated = false;
     for (const catalogTarget of current) {
       const existing = targets.find((t) =>
         t.kind === catalogTarget.kind &&
@@ -163,10 +181,32 @@ export function createMockPricingRepository(
         if (newTarget.kind === "product") {
           const catalogName = newTarget.label.slice(0, newTarget.label.lastIndexOf(" · "));
           names[newTarget.id] = catalogName || newTarget.label;
+          if (newTarget.initialRegular) {
+            const hasExisting = records.some((r) => r.id === newTarget.id);
+            if (!hasExisting) {
+              records.push({
+                id: newTarget.id,
+                name: catalogName || newTarget.label,
+                regular: newTarget.initialRegular,
+                offer: null,
+                currency: "PEN",
+                version: 1,
+                origin: "product",
+                channel: "global",
+                validFrom: clock.now(),
+                validUntil: null,
+                inherited: false,
+              });
+              targetsUpdated = true;
+            }
+          }
         } else {
           names[newTarget.id] = newTarget.label.split(" — ")[0] || newTarget.label;
         }
       }
+    }
+    if (targetsUpdated) {
+      persist();
     }
   }
   const schedules = restored ? restored.schedules : structuredClone(scheduleFixtures);
@@ -180,6 +220,10 @@ export function createMockPricingRepository(
       schedules.length = 0;
       schedules.push(...next.schedules);
       sequence = next.sequence;
+      pendingAudit.length = 0;
+      if (next.pendingAudit) {
+        pendingAudit.push(...next.pendingAudit);
+      }
       publishMockChange("pricing");
     });
   }
@@ -337,31 +381,38 @@ export function createMockPricingRepository(
         )
           row.validUntil = clock.now();
       records.push(saved);
-      let auditFailed = false;
-      try {
-        onUpdated?.(target, current, saved, change.draft.reason);
-      } catch (error) {
-        auditFailed = true;
-        pendingAudit.push({
-          target,
-          before: current,
-          after: saved,
-          reason: change.draft.reason,
-        });
-        console.warn(
-          "Fallo en la notificación onUpdated tras guardar el precio:",
-          error,
-        );
-      }
+      const operationId = `op-audit-${target.id}-${change.target.channel}-v${saved.version}`;
+      const pendingRecord: PendingAuditRecord = {
+        id: operationId,
+        target,
+        before: current,
+        after: saved,
+        reason: change.draft.reason,
+      };
+      pendingAudit.push(pendingRecord);
+
       const persisted = persist();
       if (!persisted && persistEnabled) {
+        records.pop();
+        pendingAudit.pop();
         throw new PricingFailure(
           "error",
           "No se pudo guardar el cambio. Vuelve a intentarlo.",
         );
       }
-      if (!auditFailed) {
-        flushPendingAudit();
+
+      try {
+        onUpdated?.(target, current, saved, change.draft.reason);
+        const idx = pendingAudit.findIndex((p) => p.id === operationId);
+        if (idx !== -1) {
+          pendingAudit.splice(idx, 1);
+          persist();
+        }
+      } catch (error) {
+        console.warn(
+          "Fallo en la notificación onUpdated tras guardar el precio:",
+          error,
+        );
       }
       return structuredClone(saved);
     },
@@ -416,7 +467,14 @@ export function createMockPricingRepository(
         status: "SCHEDULED",
       };
       schedules.unshift(created);
-      persist();
+      const schedulePersisted = persist();
+      if (!schedulePersisted && persistEnabled) {
+        schedules.shift();
+        throw new PricingFailure(
+          "error",
+          "No se pudo guardar la programación. Vuelve a intentarlo.",
+        );
+      }
       return structuredClone(created);
     },
     async readHistorical(query, at, signal) {

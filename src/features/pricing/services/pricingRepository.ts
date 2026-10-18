@@ -16,7 +16,7 @@ interface TargetContext {
   productId: string;
 }
 export type PriceTarget =
-  | (TargetContext & { kind: "product"; referenceSku?: string })
+  | (TargetContext & { kind: "product"; referenceSku?: string; initialRegular?: string })
   | (TargetContext & { kind: "variant"; sku: string; productTargetId: string });
 export interface PriceView {
   id: string;

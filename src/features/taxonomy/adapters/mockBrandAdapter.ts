@@ -7,6 +7,7 @@ import type {
   BrandUpdateInput,
 } from "../types";
 import {
+  isMockPersistenceAvailable,
   loadMockArray,
   persistMockArray,
   syncMockArrayOnExternalChange,
@@ -29,6 +30,15 @@ interface OperacionBaja {
 }
 
 const storeFixtures: RegistroMarca[] = [
+  {
+    marcaId: "BRD-INKA",
+    nombre: "Inka Athletic",
+    estado: "Activo",
+    logoUrl: null,
+    paisOrigenIso: "PE",
+    descripcion: "Marca deportiva nacional",
+    version: 1,
+  },
   {
     marcaId: "nike",
     nombre: "Nike",
@@ -184,7 +194,11 @@ export const mockBrandAdapter: BrandRepository = {
       version: 1,
     };
     store.push(r);
-    persist();
+    const ok = persist();
+    if (!ok && isMockPersistenceAvailable()) {
+      store.pop();
+      throw new Error("No se pudo guardar la marca. Vuelve a intentarlo.");
+    }
     return aDetalle(r);
   },
 
@@ -194,11 +208,16 @@ export const mockBrandAdapter: BrandRepository = {
     signal?.throwIfAborted();
     const r = store.find((item) => item.marcaId === input.marcaId);
     if (!r) return null;
+    const prev = { ...r };
     r.nombre = input.nombre.trim();
     r.descripcion = input.descripcion ?? null;
     r.paisOrigenIso = input.paisOrigenIso ?? null;
     r.version += 1;
-    persist();
+    const ok = persist();
+    if (!ok && isMockPersistenceAvailable()) {
+      Object.assign(r, prev);
+      throw new Error("No se pudo guardar la marca. Vuelve a intentarlo.");
+    }
     return aDetalle(r);
   },
 

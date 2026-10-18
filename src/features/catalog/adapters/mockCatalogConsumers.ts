@@ -37,8 +37,17 @@ export async function readMockPricingTargets(signal: AbortSignal): Promise<Price
   for (let page = 1; ; page++) {
     const result = await mockCatalogRepository.list({ page, pageSize: 100 }, undefined, signal);
     for (const product of result.items) {
-      targets.push({ id: product.id, productId: product.id, kind: "product", referenceSku: product.skuBase,
-        label: `${product.name} · ${product.skuBase}` });
+      targets.push({
+        id: product.id,
+        productId: product.id,
+        kind: "product",
+        referenceSku: product.skuBase,
+        label: `${product.name} · ${product.skuBase}`,
+        initialRegular:
+          product.priceInitial !== null && product.priceInitial !== undefined
+            ? Number(product.priceInitial).toFixed(2)
+            : undefined,
+      });
       if (product.hasVariants) for (let variantPage = 1; ; variantPage++) {
         const variants = await mockCatalogRepository.listVariants(product.id, { page: variantPage, pageSize: 100 }, undefined, signal);
         targets.push(...variants.items.map(variant => ({ id: variant.variantId, productId: product.id,

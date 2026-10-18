@@ -116,9 +116,9 @@ function isMockBulkState(value: unknown): value is MockBulkState {
 // cross-device synchronization.
 const persistEnabled = isMockPersistenceAvailable();
 
-function persistBulkState(): void {
-  if (!persistEnabled) return;
-  saveMockState("bulk", {
+function persistBulkState(): boolean {
+  if (!persistEnabled) return true;
+  const ok = saveMockState("bulk", {
     batches: [...dynamicBatches.entries()],
     exports: [...dynamicExports.entries()],
     batchSequence,
@@ -126,6 +126,7 @@ function persistBulkState(): void {
     createImportCallCount,
   } satisfies MockBulkState);
   publishMockChange("bulk");
+  return ok;
 }
 
 function hydrateBulkStateFromStorage(): void {
@@ -401,8 +402,15 @@ export const mockBulkRepository: BulkRepository & {
     };
 
     dynamicBatches.set(batchId, newBatch);
+    const ok = persistBulkState();
+    if (!ok && persistEnabled) {
+      dynamicBatches.delete(batchId);
+      throw new BulkRepositoryError(
+        "No se pudo iniciar la importación. Vuelve a intentarlo.",
+        "communication",
+      );
+    }
     scheduleImportSimulation(batchId);
-    persistBulkState();
 
     return deepCloneBatch(newBatch);
   },
@@ -534,8 +542,15 @@ export const mockBulkRepository: BulkRepository & {
     };
 
     dynamicExports.set(exportId, newJob);
+    const ok = persistBulkState();
+    if (!ok && persistEnabled) {
+      dynamicExports.delete(exportId);
+      throw new BulkRepositoryError(
+        "No se pudo iniciar la exportación. Vuelve a intentarlo.",
+        "communication",
+      );
+    }
     scheduleExportSimulation(exportId);
-    persistBulkState();
 
     return deepCloneExport(newJob);
   },
@@ -622,7 +637,13 @@ export const mockBulkRepository: BulkRepository & {
       applyReconciliationCompletion(batch);
     }
 
-    persistBulkState();
+    const ok = persistBulkState();
+    if (!ok && persistEnabled) {
+      throw new BulkRepositoryError(
+        "No se pudo reanudar la importación. Vuelve a intentarlo.",
+        "communication",
+      );
+    }
     return deepCloneBatch(batch);
   },
 

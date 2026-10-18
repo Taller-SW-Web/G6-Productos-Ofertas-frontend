@@ -42,13 +42,15 @@ export function createPromotionHistory(
     { promotionId: string; consumedUses: number | undefined }
   >();
 
-  function persist() {
+  function persist(): boolean {
     // A non-persistent instance (persist: false) must never touch `localStorage`.
+    let ok = true;
     if (persistEnabled) {
-      saveMockState("promotions-history", Object.fromEntries(facts) as PromotionHistoryState);
+      ok = saveMockState("promotions-history", Object.fromEntries(facts) as PromotionHistoryState);
     }
     publishMockChange("promotions-history");
     publishMockChange("promotions");
+    return ok;
   }
 
   if (persistEnabled) {
@@ -70,12 +72,25 @@ export function createPromotionHistory(
   return {
     initialize(id: string, active: boolean) {
       facts.set(id, { activated: active, used: false });
-      if (persistEnabled) persist();
+      if (persistEnabled) {
+        const ok = persist();
+        if (!ok) {
+          facts.delete(id);
+          throw new Error("No se pudo guardar el historial de la promoción.");
+        }
+      }
     },
     activate(id: string) {
       const value = facts.get(id);
       facts.set(id, { activated: true, used: value?.used });
-      if (persistEnabled) persist();
+      if (persistEnabled) {
+        const ok = persist();
+        if (!ok) {
+          if (value) facts.set(id, value);
+          else facts.delete(id);
+          throw new Error("No se pudo actualizar el estado de la promoción.");
+        }
+      }
     },
     observe(coupon: CouponView) {
       const signature = persistEnabled

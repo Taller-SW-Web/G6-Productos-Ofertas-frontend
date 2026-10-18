@@ -166,6 +166,8 @@ test("R3 P1-1: los repositorios con persist: false no escriben en el almacenamie
   page,
 }) => {
   await page.goto("/precios");
+  await expect(page.getByRole("heading", { name: "Gestión de precios" })).toBeVisible();
+  await page.waitForFunction(() => localStorage.getItem("g6-productos-ofertas:mock:v1:pricing") !== null);
   const result = await page.evaluate(async () => {
     const specifier = "/src/features/pricing/adapters/mockPricingRepository.ts";
     const { createMockPricingRepository } = await import(
@@ -428,39 +430,76 @@ test("R3 P1-05: sincronización de stock a combos mediante operación pública (
   await expect(page.getByText("7 combos estimados")).toBeVisible();
 });
 
-test("R3 P1-06a: producto nuevo creado en catálogo aparece en Pricing con ausencia de precio y persiste tras F5", async ({
+test("R3 P1-04: integración económica Catalog–Pricing con precioBaseInicial, edición, auditoría y F5", async ({
   page,
 }) => {
-  await page.goto("/productos");
+  await page.goto("/precios");
+  await expect(page.getByRole("heading", { name: "Gestión de precios" })).toBeVisible();
   const newProd = await page.evaluate(async () => {
     const catSpecifier = "/src/features/catalog/services/catalogServices.ts";
     const { getCatalogServices } = await import(
       /* @vite-ignore */ catSpecifier
     );
     return await getCatalogServices("mock").catalog.create({
-      nombre: "Casaca Polar Andina",
+      nombre: "Cortaviento Trail Explorer",
       marcaId: "BRD-INKA",
       categoriaId: "CAT-ROPA",
       tipoProductoId: "TIP-CASACA",
-      descripcion: "Casaca térmica para alta montaña",
-      skuBase: "CAS-POL-001",
+      descripcion: "Cortaviento ultra liviano",
+      skuBase: "COR-TRL-001",
       tieneVariantes: false,
-      precioBaseInicial: 180,
+      precioBaseInicial: 159.9,
     });
   });
   expect(newProd.id).toBeDefined();
 
-  // Ir a precios consultando el nuevo producto
+  // 1. Verificar precio inicial en Pricing
   await page.goto(`/precios?target=${newProd.id}&channel=global`);
   await expect(page.getByText(newProd.name).first()).toBeVisible();
-  await expect(page.getByText("Sin precio aplicable")).toBeVisible();
-  await expect(page.getByText("No hay un precio disponible para la selección.")).toBeVisible();
+  await expect(page.getByText("159.90").first()).toBeVisible();
 
-  // F5 y comprobación de persistencia
+  // 2. Editar el precio en Pricing
+  await page.evaluate(async (targetId) => {
+    const pricingSpecifier = "/src/features/pricing/services/pricingService.ts";
+    const { createPricingRuntime } = await import(
+      /* @vite-ignore */ pricingSpecifier
+    );
+    const pricing = await createPricingRuntime("mock");
+    await pricing.service.update(
+      {
+        target: { targetId, channel: "global" },
+        version: 1,
+        draft: {
+          regular: "179.90",
+          offer: "",
+          offerAction: "CONSERVAR",
+          currency: "PEN",
+          reason: "Ajuste inflacionario trimestral",
+        },
+      },
+      new AbortController().signal,
+    );
+  }, newProd.id);
+
   await page.reload();
-  await expect(page.getByText(newProd.name).first()).toBeVisible();
-  await expect(page.getByText("Sin precio aplicable")).toBeVisible();
-  await expect(page.getByText("No hay un precio disponible para la selección.")).toBeVisible();
+  await expect(page.getByText("179.90").first()).toBeVisible();
+
+  // 3. Comprobar el asiento en Auditoría (fila y detalle con motivo)
+  await page.goto("/precios/auditoria");
+  const auditRow = page.getByRole("row").filter({ hasText: "COR-TRL-001" });
+  await expect(auditRow).toBeVisible();
+  await expect(auditRow.getByText(/179,90/)).toBeVisible();
+  await auditRow.getByRole("link", { name: /Ver detalle/ }).click();
+  await expect(page.getByText("Ajuste inflacionario trimestral")).toBeVisible();
+
+  // 4. F5 y verificación de persistencia en Auditoría y Pricing
+  await page.reload();
+  await expect(page.getByText("Ajuste inflacionario trimestral")).toBeVisible();
+  await expect(page.getByText(/179,90/).first()).toBeVisible();
+
+  await page.goto(`/precios?target=${newProd.id}&channel=global`);
+  await page.reload();
+  await expect(page.getByText("179.90").first()).toBeVisible();
 });
 
 test("R3 P1-06b: variante nueva en catálogo aparece en Pricing, respeta herencia o ausencia y persiste tras F5", async ({
@@ -632,49 +671,195 @@ test("R3 P1-06e: combo creado y editado tras F5 preserva cambios e integridad", 
   await expect(page.getByText("Combo Alpinismo R3 Editado")).toBeVisible();
 });
 
-test("R3 P1-06f: marca o categoría renombrada en Taxonomy se propaga a Catálogo e Inventario", async ({
+test("R3 P1-06f: marca y categoría renombradas en Taxonomy se propagan a Catálogo e Inventario y persisten tras F5", async ({
   page,
 }) => {
-  await page.goto("/taxonomia/marcas");
-  // Renombrar la marca "nike" a "Nike Internacional R3"
-  await page.evaluate(async () => {
-    const taxSpecifier = "/src/features/taxonomy/adapters/mockBrandAdapter.ts";
-    const { mockBrandAdapter } = await import(
-      /* @vite-ignore */ taxSpecifier
-    );
-    await mockBrandAdapter.actualizar(
-      {
-        marcaId: "nike",
-        nombre: "Nike Internacional R3",
-        descripcion: "Marca deportiva global renovada",
-      },
-      new AbortController().signal,
-    );
-  });
+  // 1. Renombrar la marca BRD-INKA en /marcas
+  await page.goto("/marcas/BRD-INKA/editar");
+  const brandInput = page.getByRole("textbox", { name: /Nombre/ });
+  await brandInput.fill("Inka Renombrada R3");
+  await page.getByRole("button", { name: "Guardar cambios" }).click();
+  await expect(page).toHaveURL(/\/marcas\/BRD-INKA$/);
+  await expect(page.getByText("Inka Renombrada R3").first()).toBeVisible();
 
-  // Ir a productos (Catálogo) y verificar que la marca actualizada se refleja en el listado
-  await page.goto("/productos");
-  const catalogHasBrand = await page.evaluate(async () => {
-    const catSpecifier = "/src/features/catalog/services/catalogServices.ts";
-    const { getCatalogServices } = await import(
-      /* @vite-ignore */ catSpecifier
-    );
-    const list = await getCatalogServices("mock").catalog.list({ page: 1, pageSize: 20 });
-    return list.items.some((item: { brandName: string }) => item.brandName.includes("Nike") || item.brandName.includes("Inka"));
-  });
-  expect(catalogHasBrand).toBe(true);
+  // Verificar en Catálogo (producto PROD-RUN-001)
+  await page.goto("/productos/PROD-RUN-001");
+  await expect(page.getByText("Inka Renombrada R3")).toBeVisible();
 
-  // Ir a inventario y verificar que el metadata de catálogo se propaga
+  // Verificar en Inventario (fila de su SKU CAM-RUN-BLA-M)
   await page.goto("/inventario");
-  const invHasBrand = await page.evaluate(async () => {
-    const invSpecifier = "/src/features/inventory/services/inventoryProvider.ts";
-    const { getInventoryRepository } = await import(
-      /* @vite-ignore */ invSpecifier
-    );
-    const items = await getInventoryRepository().getStockItems();
-    return items.length > 0;
+  const invRowBrand = page.getByRole("row").filter({ hasText: "CAM-RUN-BLA-M" });
+  await expect(invRowBrand.getByText(/Inka Renombrada R3/)).toBeVisible();
+
+  // 2. Renombrar la categoría CAT-ROPA en /categorias
+  await page.goto("/categorias/CAT-ROPA/editar");
+  const catInput = page.getByRole("textbox", { name: "Nombre" });
+  await catInput.fill("Ropa Renombrada R3");
+  await page.getByRole("button", { name: "Guardar cambios" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Guardar cambios" }).click();
+  await expect(page.getByText(/Se actualizó «Ropa Renombrada R3»/)).toBeVisible();
+
+  // Verificar en Catálogo (producto PROD-RUN-001)
+  await page.goto("/productos/PROD-RUN-001");
+  await expect(page.getByText("Ropa Renombrada R3")).toBeVisible();
+
+  // Verificar en Inventario (fila de su SKU CAM-RUN-BLA-M)
+  await page.goto("/inventario");
+  const invRowCat = page.getByRole("row").filter({ hasText: "CAM-RUN-BLA-M" });
+  await expect(invRowCat.getByText(/Ropa Renombrada R3/)).toBeVisible();
+
+  // 3. Recargar con F5 y verificar de nuevo en ambos módulos
+  await page.reload();
+  const invRowAfterF5 = page.getByRole("row").filter({ hasText: "CAM-RUN-BLA-M" });
+  await expect(invRowAfterF5.getByText(/Inka Renombrada R3/)).toBeVisible();
+  await expect(invRowAfterF5.getByText(/Ropa Renombrada R3/)).toBeVisible();
+
+  await page.goto("/productos/PROD-RUN-001");
+  await page.reload();
+  await expect(page.getByText("Inka Renombrada R3")).toBeVisible();
+  await expect(page.getByText("Ropa Renombrada R3")).toBeVisible();
+});
+
+test("R3 P1-02: unicidad de asientos por canal sin colisión entre global y retail", async () => {
+  const audit = createMockPricingAudit();
+  const target: PriceTarget = {
+    id: "base",
+    label: "Zapatilla Trail Inka Explorer · Producto base",
+    productId: "fixture-product-013",
+    kind: "product",
+    referenceSku: "ZAP-TRL-EXP",
+  };
+
+  const beforeGlobal: PriceView = {
+    id: target.id,
+    name: target.label,
+    regular: "249.90",
+    offer: "219.90",
+    currency: "PEN",
+    version: 3,
+    origin: "product",
+    channel: "global",
+    validFrom: "2026-10-01T00:00:00Z",
+    validUntil: null,
+    inherited: false,
+  };
+  const afterGlobal: PriceView = {
+    ...beforeGlobal,
+    regular: "249.90",
+    offer: null,
+    version: 4,
+    validFrom: "2026-10-18T10:00:00Z",
+  };
+
+  const beforeRetail: PriceView = {
+    id: target.id,
+    name: target.label,
+    regular: "249.90",
+    offer: null,
+    currency: "PEN",
+    version: 3,
+    origin: "product",
+    channel: "retail",
+    validFrom: "2026-10-01T00:00:00Z",
+    validUntil: null,
+    inherited: false,
+  };
+  const afterRetail: PriceView = {
+    ...beforeRetail,
+    regular: "259.90",
+    version: 4,
+    validFrom: "2026-10-18T10:05:00Z",
+  };
+
+  // Cambio 1 en canal global a versión 4
+  audit.record(target, beforeGlobal, afterGlobal, "Ajuste en canal global");
+
+  // Cambio 2 en canal retail a la misma versión (4) con precio y motivo distintos
+  audit.record(target, beforeRetail, afterRetail, "Ajuste en canal retail");
+
+  // Reintento idéntico del canal global: no debe duplicar
+  audit.record(target, beforeGlobal, afterGlobal, "Ajuste en canal global");
+
+  const records = audit.read();
+  expect(records).toHaveLength(2);
+  const globalRecord = records.find((r) => r.id.includes("-global-v4-") || r.reason.includes("global"));
+  const retailRecord = records.find((r) => r.id.includes("-retail-v4-") || r.reason.includes("retail"));
+  expect(globalRecord).toBeDefined();
+  expect(retailRecord).toBeDefined();
+  expect(globalRecord?.operation).toBe("RETIRO_OFERTA");
+  expect(retailRecord?.after).toBe("259.90");
+});
+
+test("R3 P1-03: fallos de persistencia (QuotaExceededError) en Pricing, Taxonomy, Bulk y Promotions", async ({
+  page,
+}) => {
+  await page.goto("/precios");
+  await page.evaluate(async () => {
+    const originalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function () {
+      throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+    };
+
+    try {
+      // 1. Pricing schedule falla al persistir
+      const pricingSpecifier = "/src/features/pricing/services/pricingService.ts";
+      const { createPricingRuntime } = await import(/* @vite-ignore */ pricingSpecifier);
+      const pricing = await createPricingRuntime("mock");
+      let pricingFailed = false;
+      try {
+        await pricing.prices.schedule("base", {
+          kind: "OFFER",
+          amount: "199.90",
+          currency: "PEN",
+          channel: "global",
+          start: "2026-11-01T00:00:00Z",
+          end: "2026-11-05T00:00:00Z",
+        });
+      } catch {
+        pricingFailed = true;
+      }
+      if (!pricingFailed) throw new Error("Pricing schedule debió fallar al no poder persistir");
+
+      // 2. Taxonomy brand crear falla al persistir
+      const brandSpecifier = "/src/features/taxonomy/services/brandService.ts";
+      const { brandService } = await import(/* @vite-ignore */ brandSpecifier);
+      let brandFailed = false;
+      try {
+        await brandService.crear({ nombre: "Marca Fallo Cuota" }, new AbortController().signal);
+      } catch {
+        brandFailed = true;
+      }
+      if (!brandFailed) throw new Error("Taxonomy brand crear debió fallar al no poder persistir");
+
+      // 3. Bulk createImport falla al persistir
+      const bulkSpecifier = "/src/features/bulk/services/bulkService.ts";
+      const { getBulkRepository } = await import(/* @vite-ignore */ bulkSpecifier);
+      const fakeFile = new File(["sku,nombre\nTEST,Test\n"], "test.csv", { type: "text/csv" });
+      let bulkFailed = false;
+      try {
+        await getBulkRepository("mock").createImport(fakeFile);
+      } catch {
+        bulkFailed = true;
+      }
+      if (!bulkFailed) throw new Error("Bulk createImport debió fallar al no poder persistir");
+
+      // 4. Promotions history activate falla al persistir
+      const promoHistSpecifier = "/src/features/promotions/mocks/promotionHistory.ts";
+      const { createPromotionHistory } = await import(/* @vite-ignore */ promoHistSpecifier);
+      const history = createPromotionHistory({ test: { activated: false, used: false } }, { persist: true });
+      let promoFailed = false;
+      try {
+        history.activate("test");
+      } catch {
+        promoFailed = true;
+      }
+      if (!promoFailed) throw new Error("Promotion history activate debió fallar al no poder persistir");
+    } finally {
+      Storage.prototype.setItem = originalSetItem;
+    }
   });
-  expect(invHasBrand).toBe(true);
 });
 
 test("R3 P1-06g: fallo de notificación en guardado de precio y conciliación con auditoría sin duplicar asientos", async () => {

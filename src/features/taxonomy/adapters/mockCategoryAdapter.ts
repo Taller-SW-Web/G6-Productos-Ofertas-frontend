@@ -5,6 +5,7 @@ import type {
   CategoryNode,
 } from "../types";
 import {
+  isMockPersistenceAvailable,
   loadMockArray,
   persistMockArray,
   syncMockArrayOnExternalChange,
@@ -27,11 +28,21 @@ interface RegistroCategoria {
 
 const storeFixtures: RegistroCategoria[] = [
   {
+    id: "CAT-ROPA",
+    nombre: "Ropa",
+    slug: "cat-ropa",
+    padreId: null,
+    orden: 1,
+    estado: "Activo",
+    descripcion: "Prendas de vestir.",
+    productosActivos: 0,
+  },
+  {
     id: "calzado",
     nombre: "Calzado",
     slug: "calzado",
     padreId: null,
-    orden: 1,
+    orden: 2,
     estado: "Activo",
     descripcion: "Calzado para dama y caballero.",
     productosActivos: 0,
@@ -41,7 +52,7 @@ const storeFixtures: RegistroCategoria[] = [
     nombre: "Ropa",
     slug: "ropa",
     padreId: null,
-    orden: 2,
+    orden: 3,
     estado: "Activo",
     descripcion: "Prendas de vestir.",
     productosActivos: 0,
@@ -273,7 +284,7 @@ export const mockCategoryAdapter: CategoryRepository = {
 
     const padreId = input.padreId ?? null;
     const id = input.slug;
-    store.push({
+    const creado: RegistroCategoria = {
       id,
       nombre: input.nombre,
       slug: input.slug,
@@ -282,8 +293,13 @@ export const mockCategoryAdapter: CategoryRepository = {
       estado: "Activo",
       descripcion: input.descripcion,
       productosActivos: 0,
-    });
-    persist();
+    };
+    store.push(creado);
+    const ok = persist();
+    if (!ok && isMockPersistenceAvailable()) {
+      store.pop();
+      throw new Error("No se pudo guardar la categoría. Vuelve a intentarlo.");
+    }
     return { id, nombre: input.nombre, slug: input.slug };
   },
 
@@ -309,13 +325,18 @@ export const mockCategoryAdapter: CategoryRepository = {
       );
     }
 
+    const prev = { ...registro };
     registro.nombre = input.nombre;
     registro.slug = input.slug;
     registro.padreId = padreId;
     registro.orden = input.orden;
     registro.descripcion = input.descripcion;
 
-    persist();
+    const ok = persist();
+    if (!ok && isMockPersistenceAvailable()) {
+      Object.assign(registro, prev);
+      throw new Error("No se pudo guardar la categoría. Vuelve a intentarlo.");
+    }
     return aDetalle(registro);
   },
 
@@ -401,9 +422,11 @@ export const mockCategoryAdapter: CategoryRepository = {
       }
     }
 
+    const prevEstado = registro.estado;
     registro.estado = "Verificando baja";
     const operacionId = `op-baja-categoria-${id}`;
     const op = operacionesBaja.find((item) => item.operacionId === operacionId);
+    let inserted = false;
     if (op) {
       op.estado = "pendiente";
     } else {
@@ -412,9 +435,15 @@ export const mockCategoryAdapter: CategoryRepository = {
         categoriaId: id,
         estado: "pendiente",
       });
+      inserted = true;
     }
-    persist();
-    persistCategoriaBaja();
+    const ok1 = persist();
+    const ok2 = persistCategoriaBaja();
+    if ((!ok1 || !ok2) && isMockPersistenceAvailable()) {
+      registro.estado = prevEstado;
+      if (inserted) operacionesBaja.pop();
+      throw new Error("No se pudo registrar la solicitud de baja. Vuelve a intentarlo.");
+    }
     return {
       resultado: "verificando",
       categoria: aDetalle(registro),
@@ -441,9 +470,15 @@ export const mockCategoryAdapter: CategoryRepository = {
 
     if (operacion.estado === "pendiente") {
       operacion.estado = "confirmada";
+      const prevEstado = registro.estado;
       registro.estado = "Inactivo";
-      persist();
-      persistCategoriaBaja();
+      const ok1 = persist();
+      const ok2 = persistCategoriaBaja();
+      if ((!ok1 || !ok2) && isMockPersistenceAvailable()) {
+        registro.estado = prevEstado;
+        operacion.estado = "pendiente";
+        throw new Error("No se pudo confirmar la baja de la categoría. Vuelve a intentarlo.");
+      }
       return {
         operacionId,
         estado: "confirmada",
@@ -514,8 +549,13 @@ export const mockCategoryAdapter: CategoryRepository = {
       };
     }
 
+    const prev = registro.estado;
     registro.estado = "Activo";
-    persist();
+    const ok = persist();
+    if (!ok && isMockPersistenceAvailable()) {
+      registro.estado = prev;
+      throw new Error("No se pudo reactivar la categoría. Vuelve a intentarlo.");
+    }
     return {
       resultado: "reactivada",
       categoria: aDetalle(registro),

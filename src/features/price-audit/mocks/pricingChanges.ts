@@ -52,11 +52,13 @@ export function createMockPricingAudit(options: { persist?: boolean } = {}) {
   let sequence = restored ? restored.sequence : 0;
 
   // A non-persistent instance (persist: false) must never touch `localStorage`.
-  function persist() {
+  function persist(): boolean {
+    let ok = true;
     if (persistEnabled) {
-      saveMockState("price-audit", { entries, sequence } satisfies MockPricingAuditState);
+      ok = saveMockState("price-audit", { entries, sequence } satisfies MockPricingAuditState);
     }
     publishMockChange("price-audit");
+    return ok;
   }
 
   if (persistEnabled) {
@@ -81,18 +83,19 @@ export function createMockPricingAudit(options: { persist?: boolean } = {}) {
         const next = priceType === "REGULAR" ? after.regular : after.offer;
         if (previous === next || (previous !== null && next !== null &&
           !decimalLess(previous, next) && !decimalLess(next, previous))) continue;
-        const channelSuffix = `${after.channel}-v${after.version}`;
+        const channelKey = `${after.channel}-v${after.version}`;
+        const stableId = `demo-pricing-${target.id}-${sku}-${channelKey}-${priceType.toLowerCase()}`;
         const alreadyRecorded = entries.some(
           (e) =>
-            e.sku === sku &&
-            e.productId === target.productId &&
-            e.priceType === priceType &&
-            (e.id.endsWith(`-${channelSuffix}`) ||
-              e.id.endsWith(`-v${after.version}`)),
+            e.id === stableId ||
+            (e.sku === sku &&
+              e.productId === target.productId &&
+              e.priceType === priceType &&
+              e.id.includes(`-${channelKey}-`)),
         );
         if (alreadyRecorded) continue;
         entries.unshift({
-          id: `demo-pricing-${++sequence}-${channelSuffix}`,
+          id: stableId,
           sku,
           productId: target.productId,
           priceType,
@@ -110,7 +113,12 @@ export function createMockPricingAudit(options: { persist?: boolean } = {}) {
         });
         changed = true;
       }
-      if (changed) persist();
+      if (changed) {
+        const persisted = persist();
+        if (!persisted && persistEnabled) {
+          throw new Error("No se pudo guardar el asiento de auditoría en el almacenamiento local.");
+        }
+      }
     },
   };
 }
