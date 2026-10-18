@@ -77,4 +77,5 @@ export interface PricingRepository {
   ): Promise<PrevalidationView>;
   readBatch(id: string, signal: AbortSignal): Promise<BatchView | null>;
   report(id: string, signal: AbortSignal): Promise<ReportFile>;
+  reconcileAudit?(): void;
 }

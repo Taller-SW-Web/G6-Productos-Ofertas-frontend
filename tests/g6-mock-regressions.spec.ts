@@ -912,3 +912,238 @@ test("R3 P1-06g: fallo de notificación en guardado de precio y conciliación co
   repo.reconcileAudit?.();
   expect(audit.read()).toHaveLength(1);
 });
+
+test("R3 P1-02-E2E: QuotaExceededError exclusivamente en price-audit, conciliación tras recuperar storage y persistencia de un solo asiento tras F5", async ({
+  page,
+}) => {
+  await page.goto("/precios");
+  await expect(page.getByRole("heading", { name: "Gestión de precios" })).toBeVisible();
+
+  await page.evaluate(async () => {
+    const originalSetItem = Storage.prototype.setItem;
+    (window as unknown as { __originalSetItem?: typeof originalSetItem }).__originalSetItem = originalSetItem;
+    Storage.prototype.setItem = function (key: string, value: string) {
+      if (key.endsWith("price-audit")) {
+        throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+      }
+      return originalSetItem.call(this, key, value);
+    };
+
+    const pricingSpecifier = "/src/features/pricing/services/pricingService.ts";
+    const { createPricingRuntime } = await import(/* @vite-ignore */ pricingSpecifier);
+    const runtime = await createPricingRuntime("mock");
+    const signal = new AbortController().signal;
+
+    // Actualizar precio de target "base"
+    const currentResult = await runtime.service.read({ targetId: "base", channel: "global" }, signal);
+    if (!currentResult?.price) throw new Error("No se encontró el precio base");
+
+    await runtime.service.update(
+      {
+        target: { targetId: "base", channel: "global" },
+        version: currentResult.price.version,
+        draft: {
+          regular: "279.90",
+          offer: "",
+          offerAction: "CONSERVAR",
+          currency: "PEN",
+          reason: "Prueba E2E cuota audit exclusiva",
+        },
+      },
+      signal,
+    );
+
+    // Pricing persistió pero price-audit falló
+    const pricingRaw = localStorage.getItem("g6-productos-ofertas:mock:v1:pricing");
+    if (!pricingRaw) throw new Error("pricing debió persistir en localStorage");
+    const pricingEnvelope = JSON.parse(pricingRaw);
+    const pricingState = pricingEnvelope.data ?? pricingEnvelope;
+    if (!pricingState.pendingAudit || pricingState.pendingAudit.length === 0) {
+      throw new Error("pricing debió conservar el asiento en pendingAudit");
+    }
+  });
+
+  // Rehabilitar almacenamiento y ejecutar conciliación
+  await page.evaluate(async () => {
+    const original = (window as unknown as { __originalSetItem?: typeof Storage.prototype.setItem }).__originalSetItem;
+    if (original) Storage.prototype.setItem = original;
+    const pricingSpecifier = "/src/features/pricing/services/pricingService.ts";
+    const { createPricingRuntime } = await import(/* @vite-ignore */ pricingSpecifier);
+    const runtime = await createPricingRuntime("mock");
+    runtime.service.reconcileAudit?.();
+  });
+
+  // Recargar la página (F5)
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Gestión de precios" })).toBeVisible();
+
+  // Verificar en bitácora de auditoría que hay exactamente un asiento para este cambio
+  await page.goto("/precios/auditoria");
+  await expect(page.getByRole("heading", { name: "Historial de precios" })).toBeVisible();
+  const row = page.locator("tbody tr").filter({ hasText: /279[,.]90/ });
+  await expect(row).toHaveCount(1);
+
+  // Una segunda recarga conserva exactamente un asiento sin duplicación
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Historial de precios" })).toBeVisible();
+  const rowAfterReload = page.locator("tbody tr").filter({ hasText: /279[,.]90/ });
+  await expect(rowAfterReload).toHaveCount(1);
+});
+
+test("R3 P1-03-Rollback: fallo de almacenamiento al actualizar precio, consulta del mismo objetivo sin recargar conserva vigencia y versión anterior", async ({
+  page,
+}) => {
+  await page.goto("/precios");
+  await expect(page.getByRole("heading", { name: "Gestión de precios" })).toBeVisible();
+
+  await page.evaluate(async () => {
+    const originalSetItem = Storage.prototype.setItem;
+    const pricingSpecifier = "/src/features/pricing/services/pricingService.ts";
+    const { createPricingRuntime } = await import(/* @vite-ignore */ pricingSpecifier);
+    const runtime = await createPricingRuntime("mock");
+    const signal = new AbortController().signal;
+
+    // 1. Consultar precio inicial del objetivo "base"
+    const initialResult = await runtime.service.read({ targetId: "base", channel: "global" }, signal);
+    if (!initialResult?.price) throw new Error("No se encontró el precio inicial");
+    const expectedRegular = initialResult.price.regular;
+    const expectedVersion = initialResult.price.version;
+    const expectedValidUntil = initialResult.price.validUntil;
+
+    // 2. Provocar fallo de almacenamiento exclusivo para "pricing"
+    Storage.prototype.setItem = function (key: string, value: string) {
+      if (key.endsWith("pricing")) {
+        throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+      }
+      return originalSetItem.call(this, key, value);
+    };
+
+    let updateFailed = false;
+    try {
+      await runtime.service.update(
+        {
+          target: { targetId: "base", channel: "global" },
+          version: expectedVersion,
+          draft: {
+            regular: "399.90",
+            offer: "",
+            offerAction: "CONSERVAR",
+            currency: "PEN",
+            reason: "Intento fallido por cuota",
+          },
+        },
+        signal,
+      );
+    } catch {
+      updateFailed = true;
+    }
+    if (!updateFailed) throw new Error("La actualización debió fallar al no poder persistir");
+
+    // 3. Consultar nuevamente el mismo objetivo SIN RECARGAR
+    const rereadResult = await runtime.service.read({ targetId: "base", channel: "global" }, signal);
+    if (!rereadResult?.price) throw new Error("El precio anterior debió seguir disponible");
+    if (rereadResult.price.regular !== expectedRegular) {
+      throw new Error(`El precio regular cambió a ${rereadResult.price.regular}, se esperaba ${expectedRegular}`);
+    }
+    if (rereadResult.price.version !== expectedVersion) {
+      throw new Error(`La versión cambió a ${rereadResult.price.version}, se esperaba ${expectedVersion}`);
+    }
+    if (rereadResult.price.validUntil !== expectedValidUntil) {
+      throw new Error(`validUntil cambió a ${rereadResult.price.validUntil}, se esperaba ${expectedValidUntil}`);
+    }
+
+    // 4. Restaurar Storage y confirmar que el precio anterior sigue siendo editable con la versión correcta
+    Storage.prototype.setItem = originalSetItem;
+    const successfulUpdate = await runtime.service.update(
+      {
+        target: { targetId: "base", channel: "global" },
+        version: expectedVersion,
+        draft: {
+          regular: "289.90",
+          offer: "",
+          offerAction: "CONSERVAR",
+          currency: "PEN",
+          reason: "Actualización exitosa tras recuperación de storage",
+        },
+      },
+      signal,
+    );
+    if (successfulUpdate.version !== expectedVersion + 1) {
+      throw new Error("La versión debió incrementarse desde la versión anterior confirmada");
+    }
+    if (successfulUpdate.regular !== "289.90") {
+      throw new Error("El precio regular debió quedar actualizado a 289.90");
+    }
+  });
+});
+
+test("R3 P1-04-Transversal: fallo de persistencia en resumeImport y baja de taxonomía realizan rollback coherente", async ({
+  page,
+}) => {
+  await page.goto("/precios");
+  await page.evaluate(async () => {
+    const originalSetItem = Storage.prototype.setItem;
+
+    try {
+      // 1. Bulk resumeImport falla si el almacenamiento local falla
+      const bulkSpecifier = "/src/features/bulk/services/bulkService.ts";
+      const { createBulkRepository } = await import(/* @vite-ignore */ bulkSpecifier);
+      const bulkRepo = createBulkRepository("mock");
+
+      // Forzar fallo de almacenamiento en bulk
+      Storage.prototype.setItem = function (key: string, value: string) {
+        if (key.endsWith("bulk")) {
+          throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+        }
+        return originalSetItem.call(this, key, value);
+      };
+
+      let resumeFailed = false;
+      try {
+        await bulkRepo.resumeImport("batch-partial");
+      } catch {
+        resumeFailed = true;
+      }
+      if (!resumeFailed) throw new Error("resumeImport debió fallar al no poder persistir");
+
+      // Restaurar storage y verificar que el lote conserva su estado original
+      Storage.prototype.setItem = originalSetItem;
+      const batchAfterFailure = await bulkRepo.getImport("batch-partial");
+      if (!batchAfterFailure || batchAfterFailure.status === "QUEUED") {
+        throw new Error("El lote no debió quedar en estado QUEUED tras fallar la persistencia de reanudación");
+      }
+
+      // 2. Taxonomy Brand consultarResultadoBaja rollback ante fallo de almacenamiento
+      const brandSpecifier = "/src/features/taxonomy/services/brandService.ts";
+      const { brandService } = await import(/* @vite-ignore */ brandSpecifier);
+
+      // Iniciar baja de adidas (que pasa a verificando)
+      await brandService.solicitarBaja("adidas", new AbortController().signal);
+
+      // Provocar fallo de almacenamiento para taxonomy-brands
+      Storage.prototype.setItem = function (key: string, value: string) {
+        if (key.endsWith("taxonomy-brands")) {
+          throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+        }
+        return originalSetItem.call(this, key, value);
+      };
+
+      let bajaFailed = false;
+      try {
+        await brandService.consultarResultadoBaja("op-marca-adidas", new AbortController().signal);
+      } catch {
+        bajaFailed = true;
+      }
+      if (!bajaFailed) throw new Error("consultarResultadoBaja debió fallar al no poder persistir");
+
+      // Restaurar storage y verificar que la marca no quedó en estado Inactivo
+      Storage.prototype.setItem = originalSetItem;
+      const adidas = await brandService.obtener("adidas", new AbortController().signal);
+      if (adidas && adidas.estado === "Inactivo") {
+        throw new Error("La marca adidas no debió quedar Inactiva tras fallar la persistencia");
+      }
+    } finally {
+      Storage.prototype.setItem = originalSetItem;
+    }
+  });
+});

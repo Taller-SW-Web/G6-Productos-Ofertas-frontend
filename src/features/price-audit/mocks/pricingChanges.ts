@@ -57,7 +57,9 @@ export function createMockPricingAudit(options: { persist?: boolean } = {}) {
     if (persistEnabled) {
       ok = saveMockState("price-audit", { entries, sequence } satisfies MockPricingAuditState);
     }
-    publishMockChange("price-audit");
+    if (ok) {
+      publishMockChange("price-audit");
+    }
     return ok;
   }
 
@@ -78,6 +80,8 @@ export function createMockPricingAudit(options: { persist?: boolean } = {}) {
       const sku = target.kind === "variant" ? target.sku : target.referenceSku;
       if (!sku) return; // A product ID is never substituted for an unknown SKU.
       let changed = false;
+      const addedEntries: AuditEntry[] = [];
+      const prevSequence = sequence;
       for (const priceType of ["REGULAR", "OFERTA"] as const) {
         const previous = priceType === "REGULAR" ? before.regular : before.offer;
         const next = priceType === "REGULAR" ? after.regular : after.offer;
@@ -94,7 +98,7 @@ export function createMockPricingAudit(options: { persist?: boolean } = {}) {
               e.id.includes(`-${channelKey}-`)),
         );
         if (alreadyRecorded) continue;
-        entries.unshift({
+        const entry: AuditEntry = {
           id: stableId,
           sku,
           productId: target.productId,
@@ -110,12 +114,21 @@ export function createMockPricingAudit(options: { persist?: boolean } = {}) {
           email: null,
           ip: null,
           at: after.validFrom,
-        });
+        };
+        entries.unshift(entry);
+        addedEntries.push(entry);
         changed = true;
       }
       if (changed) {
         const persisted = persist();
         if (!persisted && persistEnabled) {
+          for (const item of addedEntries) {
+            const idx = entries.indexOf(item);
+            if (idx !== -1) {
+              entries.splice(idx, 1);
+            }
+          }
+          sequence = prevSequence;
           throw new Error("No se pudo guardar el asiento de auditoría en el almacenamiento local.");
         }
       }

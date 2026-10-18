@@ -107,11 +107,6 @@ test("el modo API global bloquea las 19 vistas sin cargar datos ni adapters mock
   page,
 }) => {
   test.setTimeout(90000);
-  await page.goto("/cupones");
-  await expect(
-    page.getByText("Datos de demostración", { exact: true }),
-  ).toHaveCount(0);
-
   const requests: string[] = [];
   page.on("request", (request) => requests.push(request.url()));
   // Exercise the real application entry point with the same globally resolved
@@ -123,6 +118,11 @@ test("el modo API global bloquea las 19 vistas sin cargar datos ni adapters mock
     expect(body).toMatch(selection);
     await route.fulfill({ response, body: body.replace(selection, '"api"') });
   });
+
+  await page.goto("/cupones");
+  await expect(
+    page.getByText("Datos de demostración", { exact: true }),
+  ).toHaveCount(0);
   for (const [, path] of views) {
     await page.goto(`${path}?modoRevision=1&escenario=forbidden`);
     await expect(page.getByRole("alert")).toContainText(

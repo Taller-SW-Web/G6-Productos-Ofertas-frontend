@@ -175,9 +175,12 @@ export function decorateDemoRepository(
             ],
             { type: "text/csv;charset=utf-8" },
           ),
-          filename: `reporte-ficticio-${id}.csv`,
+          filename: `reporte_precios_${id}.csv`,
         };
       return repository.report(id, signal);
+    },
+    reconcileAudit() {
+      repository.reconcileAudit?.();
     },
   };
 }

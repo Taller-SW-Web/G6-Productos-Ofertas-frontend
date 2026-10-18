@@ -363,6 +363,9 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
 
     if (operacion.estado === "pendiente") {
       operacion.estado = "confirmada";
+      const prevAsociadas = registro.asociadas;
+      const prevSchemaVersion = registro.schemaVersion;
+      const prevEstado = registro.estado;
       if (operacion.tipo === "desasocio" && operacion.caracteristicaId) {
         registro.asociadas = registro.asociadas.filter(
           (item) => item.caracteristicaId !== operacion.caracteristicaId,
@@ -371,7 +374,14 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
       } else if (operacion.tipo === "desactivacion") {
         registro.estado = "Inactivo";
       }
-      persist();
+      const ok = persist();
+      if (!ok && isMockPersistenceAvailable()) {
+        operacion.estado = "pendiente";
+        registro.asociadas = prevAsociadas;
+        registro.schemaVersion = prevSchemaVersion;
+        registro.estado = prevEstado;
+        throw new Error("No se pudo confirmar la operación del tipo de producto. Vuelve a intentarlo.");
+      }
     }
 
     const mensaje =

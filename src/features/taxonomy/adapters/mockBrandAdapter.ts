@@ -255,7 +255,11 @@ export const mockBrandAdapter: BrandRepository = {
         marcaId: id,
         estado: "verificando",
       });
-      persistBaja();
+      const okBaja = persistBaja();
+      if (!okBaja && isMockPersistenceAvailable()) {
+        operacionesBaja.pop();
+        throw new Error("No se pudo registrar la operación de baja en el almacenamiento local.");
+      }
     }
     return {
       resultado: "pendiente",
@@ -274,12 +278,24 @@ export const mockBrandAdapter: BrandRepository = {
     }
     if (op.marcaId === "adidas" && op.estado === "verificando") {
       op.estado = "completada";
-      persistBaja();
       const r = store.find((item) => item.marcaId === op.marcaId);
+      const prevEstado = r?.estado;
+      const prevVersion = r?.version;
       if (r) {
         r.estado = "Inactivo";
         r.version += 1;
+      }
+      const ok1 = persistBaja();
+      const ok2 = r ? persist() : true;
+      if ((!ok1 || !ok2) && isMockPersistenceAvailable()) {
+        op.estado = "verificando";
+        if (r && prevEstado !== undefined && prevVersion !== undefined) {
+          r.estado = prevEstado;
+          r.version = prevVersion;
+        }
+        persistBaja();
         persist();
+        throw new Error("No se pudo completar la baja de la marca en el almacenamiento local.");
       }
       return {
         resultado: "exito",
@@ -295,7 +311,11 @@ export const mockBrandAdapter: BrandRepository = {
       };
     }
     op.estado = "no-concluyente";
-    persistBaja();
+    const okNoConc = persistBaja();
+    if (!okNoConc && isMockPersistenceAvailable()) {
+      op.estado = "verificando";
+      throw new Error("No se pudo actualizar el estado de la operación de baja.");
+    }
     return {
       resultado: "no-concluyente",
       mensaje: "La verificación no fue concluyente. La marca conserva su estado actual.",

@@ -491,7 +491,7 @@ test("MK-013-S05: queued, processing, partial, missing rows, failed refresh and 
     .getByRole("button", { name: "Descargar reporte", exact: true })
     .click();
   expect((await downloadPromise).suggestedFilename()).toBe(
-    "reporte-ficticio-batch-013-01.csv",
+    "reporte_precios_batch-013-01.csv",
   );
   await select(page, "Escenario del lote", "Error de refresco");
   await expect(

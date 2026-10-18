@@ -111,7 +111,7 @@ export function createMockPricingRepository(
   clock: Clock,
   onUpdated?: (target: PriceTarget, before: PriceView, after: PriceView, reason: string) => void,
   options: { persist?: boolean } = {},
-): PricingRepository & { reconcileAudit?: () => void } {
+): PricingRepository {
   const persistEnabled = options.persist === true && isMockPersistenceAvailable();
   const restored = persistEnabled
     ? readMockState<MockPricingState>("pricing", isMockPricingState)
@@ -129,7 +129,9 @@ export function createMockPricingRepository(
     if (persistEnabled) {
       ok = saveMockState("pricing", { records, schedules, sequence, pendingAudit } satisfies MockPricingState);
     }
-    publishMockChange("pricing");
+    if (ok) {
+      publishMockChange("pricing");
+    }
     return ok;
   };
   const flushPendingAudit = () => {
@@ -153,6 +155,8 @@ export function createMockPricingRepository(
     flushPendingAudit();
     const current = await readMockPricingTargets(signal ?? new AbortController().signal);
     let targetsUpdated = false;
+    const addedTargets: PriceTarget[] = [];
+    const addedRecords: PriceView[] = [];
     for (const catalogTarget of current) {
       const existing = targets.find((t) =>
         t.kind === catalogTarget.kind &&
@@ -178,13 +182,14 @@ export function createMockPricingRepository(
           }
         }
         targets.push(newTarget);
+        addedTargets.push(newTarget);
         if (newTarget.kind === "product") {
           const catalogName = newTarget.label.slice(0, newTarget.label.lastIndexOf(" · "));
           names[newTarget.id] = catalogName || newTarget.label;
           if (newTarget.initialRegular) {
             const hasExisting = records.some((r) => r.id === newTarget.id);
             if (!hasExisting) {
-              records.push({
+              const newRec: PriceView = {
                 id: newTarget.id,
                 name: catalogName || newTarget.label,
                 regular: newTarget.initialRegular,
@@ -196,7 +201,9 @@ export function createMockPricingRepository(
                 validFrom: clock.now(),
                 validUntil: null,
                 inherited: false,
-              });
+              };
+              records.push(newRec);
+              addedRecords.push(newRec);
               targetsUpdated = true;
             }
           }
@@ -206,7 +213,17 @@ export function createMockPricingRepository(
       }
     }
     if (targetsUpdated) {
-      persist();
+      const ok = persist();
+      if (!ok && persistEnabled) {
+        for (const t of addedTargets) {
+          const idx = targets.indexOf(t);
+          if (idx !== -1) targets.splice(idx, 1);
+        }
+        for (const r of addedRecords) {
+          const idx = records.indexOf(r);
+          if (idx !== -1) records.splice(idx, 1);
+        }
+      }
     }
   }
   const schedules = restored ? restored.schedules : structuredClone(scheduleFixtures);
@@ -371,6 +388,7 @@ export function createMockPricingRepository(
         version: current.version + 1,
         validFrom: clock.now(),
       };
+      const previousValidUntils = new Map<PriceView, string | null>();
       for (const row of records)
         if (
           row.id === target.id &&
@@ -378,8 +396,10 @@ export function createMockPricingRepository(
           Date.parse(row.validFrom) <= Date.parse(clock.now()) &&
           (!row.validUntil ||
             Date.parse(row.validUntil) > Date.parse(clock.now()))
-        )
+        ) {
+          previousValidUntils.set(row, row.validUntil);
           row.validUntil = clock.now();
+        }
       records.push(saved);
       const operationId = `op-audit-${target.id}-${change.target.channel}-v${saved.version}`;
       const pendingRecord: PendingAuditRecord = {
@@ -395,6 +415,9 @@ export function createMockPricingRepository(
       if (!persisted && persistEnabled) {
         records.pop();
         pendingAudit.pop();
+        for (const [row, originalValidUntil] of previousValidUntils) {
+          row.validUntil = originalValidUntil;
+        }
         throw new PricingFailure(
           "error",
           "No se pudo guardar el cambio. Vuelve a intentarlo.",
@@ -470,6 +493,7 @@ export function createMockPricingRepository(
       const schedulePersisted = persist();
       if (!schedulePersisted && persistEnabled) {
         schedules.shift();
+        sequence--;
         throw new PricingFailure(
           "error",
           "No se pudo guardar la programación. Vuelve a intentarlo.",
@@ -511,7 +535,7 @@ export function createMockPricingRepository(
         data: new Blob([mockReports.partial], {
           type: "text/csv;charset=utf-8",
         }),
-        filename: `reporte-ficticio-${id}.csv`,
+        filename: `reporte_precios_${id}.csv`,
       };
     },
     reconcileAudit() {

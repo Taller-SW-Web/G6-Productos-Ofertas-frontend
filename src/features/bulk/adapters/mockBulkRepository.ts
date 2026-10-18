@@ -174,12 +174,16 @@ function scheduleImportSimulation(batchId: string) {
     activeTimers.delete(t1);
     const batch = dynamicBatches.get(batchId);
     if (batch && batch.status === "QUEUED") {
+      const prev = deepCloneBatch(batch);
       batch.status = "PROCESSING";
       const total = typeof batch.total_rows === "number" ? batch.total_rows : null;
       batch.completed_rows = total !== null ? Math.floor(total * 0.7) : 0;
       batch.failed_rows = 0;
       batch.updated_at = new Date().toISOString();
-      persistBulkState();
+      const ok = persistBulkState();
+      if (!ok && persistEnabled) {
+        dynamicBatches.set(batchId, prev);
+      }
     }
   }, DEMO_CONFIG.PROCESSING_DELAY_MS);
   activeTimers.add(t1);
@@ -189,6 +193,7 @@ function scheduleImportSimulation(batchId: string) {
     activeBatchSimulations.delete(batchId);
     const batch = dynamicBatches.get(batchId);
     if (batch && (batch.status === "PROCESSING" || batch.status === "QUEUED")) {
+      const prev = deepCloneBatch(batch);
       const total = typeof batch.total_rows === "number" ? batch.total_rows : null;
       // An XLSX without verified rows in browser does not finalize as COMPLETED with 0 rows in simulation
       if (total === null && (!batch.rows || batch.rows.length === 0)) {
@@ -206,7 +211,10 @@ function scheduleImportSimulation(batchId: string) {
           batch.rows = [];
         }
       }
-      persistBulkState();
+      const ok = persistBulkState();
+      if (!ok && persistEnabled) {
+        dynamicBatches.set(batchId, prev);
+      }
     }
   }, DEMO_CONFIG.COMPLETION_DELAY_MS);
   activeTimers.add(t2);
@@ -259,9 +267,13 @@ function scheduleResumeSimulation(batchId: string) {
     activeTimers.delete(t1);
     const batch = dynamicBatches.get(batchId);
     if (batch && batch.status === "QUEUED") {
+      const prev = deepCloneBatch(batch);
       batch.status = "PROCESSING";
       batch.updated_at = new Date().toISOString();
-      persistBulkState();
+      const ok = persistBulkState();
+      if (!ok && persistEnabled) {
+        dynamicBatches.set(batchId, prev);
+      }
     }
   }, DEMO_CONFIG.PROCESSING_DELAY_MS);
   activeTimers.add(t1);
@@ -271,8 +283,12 @@ function scheduleResumeSimulation(batchId: string) {
     activeBatchSimulations.delete(batchId);
     const batch = dynamicBatches.get(batchId);
     if (batch && (batch.status === "PROCESSING" || batch.status === "QUEUED")) {
+      const prev = deepCloneBatch(batch);
       applyReconciliationCompletion(batch);
-      persistBulkState();
+      const ok = persistBulkState();
+      if (!ok && persistEnabled) {
+        dynamicBatches.set(batchId, prev);
+      }
     }
   }, DEMO_CONFIG.COMPLETION_DELAY_MS);
   activeTimers.add(t2);
@@ -286,9 +302,13 @@ function scheduleExportSimulation(exportId: string) {
     activeTimers.delete(t1);
     const job = dynamicExports.get(exportId);
     if (job && job.status === "QUEUED") {
+      const prev = structuredClone(job);
       job.status = "PROCESSING";
       job.updated_at = new Date().toISOString();
-      persistBulkState();
+      const ok = persistBulkState();
+      if (!ok && persistEnabled) {
+        dynamicExports.set(exportId, prev);
+      }
     }
   }, DEMO_CONFIG.PROCESSING_DELAY_MS);
   activeTimers.add(t1);
@@ -298,6 +318,7 @@ function scheduleExportSimulation(exportId: string) {
     activeExportSimulations.delete(exportId);
     const job = dynamicExports.get(exportId);
     if (job && (job.status === "PROCESSING" || job.status === "QUEUED")) {
+      const prev = structuredClone(job);
       job.status = "COMPLETED";
       job.updated_at = new Date().toISOString();
       if (job.format === "CSV") {
@@ -307,7 +328,10 @@ function scheduleExportSimulation(exportId: string) {
       } else {
         job.file_name = `catalogo_completo_${exportId}.xlsx`;
       }
-      persistBulkState();
+      const ok = persistBulkState();
+      if (!ok && persistEnabled) {
+        dynamicExports.set(exportId, prev);
+      }
     }
   }, DEMO_CONFIG.COMPLETION_DELAY_MS);
   activeTimers.add(t2);
@@ -515,9 +539,24 @@ export const mockBulkRepository: BulkRepository & {
       updated_at: new Date().toISOString(),
     };
 
+    const previousBatch = dynamicBatches.get(batchId)
+      ? deepCloneBatch(dynamicBatches.get(batchId)!)
+      : undefined;
     dynamicBatches.set(batchId, resumedBatch);
+    const ok = persistBulkState();
+    if (!ok && persistEnabled) {
+      if (previousBatch) {
+        dynamicBatches.set(batchId, previousBatch);
+      } else {
+        dynamicBatches.delete(batchId);
+      }
+      resumingBatches.delete(batchId);
+      throw new BulkRepositoryError(
+        "No se pudo reanudar la importación. Vuelve a intentarlo.",
+        "communication",
+      );
+    }
     scheduleResumeSimulation(batchId);
-    persistBulkState();
     // The demo returns the 202-shaped response synchronously. The guard remains active
     // until the next turn so a rapid duplicate cannot schedule a second run.
     queueMicrotask(() => resumingBatches.delete(batchId));
