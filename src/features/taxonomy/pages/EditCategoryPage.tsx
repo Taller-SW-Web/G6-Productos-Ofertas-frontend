@@ -245,6 +245,7 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
         title="Confirmar slug SEO"
         confirmLabel="Guardar cambios"
         submitting={phase === "guardando"}
+        confirmDisabled={phase !== "confirmando" || !slugCheck}
         onCancel={cerrar}
         onConfirm={handleConfirmar}
         error={
