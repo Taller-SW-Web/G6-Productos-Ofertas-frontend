@@ -23,7 +23,7 @@ test("VER-01/04: confirmed mock edit survives module navigation and appears in a
   await expect(page.getByRole("dialog")).toContainText("demo-pricing");
   await page.screenshot({ path: evidencePath("ver-01-detalle-1440.png") });
   await page.getByRole("button", { name: "Volver al historial", exact: true }).click();
-  await expect(page.getByText(/no hay auditoría real/)).toBeVisible();
+  await expect(page.getByText(/no hay auditoría real/)).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: evidencePath("ver-01-listado-1440.png"), fullPage: true });
   await page.reload();

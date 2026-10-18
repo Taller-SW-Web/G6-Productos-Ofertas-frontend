@@ -37,9 +37,20 @@ function isPriceRecord(value: unknown): value is PriceView {
   return (
     isRecord(value) &&
     typeof value.id === "string" &&
+    value.id.trim().length > 0 &&
     typeof value.regular === "string" &&
+    /^\d+(\.\d+)?$/.test(value.regular) &&
+    Number(value.regular) >= 0 &&
+    (value.offer === null ||
+      value.offer === undefined ||
+      (typeof value.offer === "string" &&
+        /^\d+(\.\d+)?$/.test(value.offer) &&
+        Number(value.offer) >= 0)) &&
     typeof value.currency === "string" &&
+    value.currency.trim().length > 0 &&
     typeof value.version === "number" &&
+    Number.isFinite(value.version) &&
+    value.version >= 0 &&
     typeof value.validFrom === "string"
   );
 }
@@ -48,9 +59,13 @@ function isScheduleRecord(value: unknown): value is ScheduleView {
   return (
     isRecord(value) &&
     typeof value.id === "string" &&
+    value.id.trim().length > 0 &&
     typeof value.targetId === "string" &&
+    value.targetId.trim().length > 0 &&
     typeof value.start === "string" &&
-    typeof value.amount === "string"
+    typeof value.amount === "string" &&
+    /^\d+(\.\d+)?$/.test(value.amount) &&
+    Number(value.amount) >= 0
   );
 }
 
@@ -61,7 +76,9 @@ function isMockPricingState(value: unknown): value is MockPricingState {
     value.records.every(isPriceRecord) &&
     Array.isArray(value.schedules) &&
     value.schedules.every(isScheduleRecord) &&
-    typeof value.sequence === "number"
+    typeof value.sequence === "number" &&
+    Number.isFinite(value.sequence) &&
+    value.sequence >= 0
   );
 }
 
@@ -87,22 +104,23 @@ export function createMockPricingRepository(
   };
   async function refreshTargets(signal?: AbortSignal) {
     signal?.throwIfAborted();
-    if (!persistEnabled) return;
     const current = await readMockPricingTargets(signal ?? new AbortController().signal);
-    const identities = new Map(current.map(target => [target.id,
-      targets.find(existing => existing.kind === target.kind &&
-        (target.kind === "product" ? existing.productId === target.productId :
-          existing.kind === "variant" && existing.sku === target.sku))?.id ?? target.id,
-    ]));
-    for (const target of current) {
-      const id = identities.get(target.id)!;
-      const resolved: PriceTarget = target.kind === "variant"
-        ? { ...target, id, productTargetId: identities.get(target.productTargetId)! }
-        : { ...target, id };
-      targets = [...targets.filter(existing => existing.id !== id), resolved];
-      names[id] = target.kind === "product"
-        ? target.label.slice(0, target.label.lastIndexOf(" · "))
-        : target.label.split(" — ")[0] ?? target.label;
+    for (const catalogTarget of current) {
+      const existing = targets.find((t) =>
+        t.kind === catalogTarget.kind &&
+        (catalogTarget.kind === "product"
+          ? t.productId === catalogTarget.productId
+          : t.kind === "variant" && t.sku === catalogTarget.sku),
+      );
+      if (!existing) continue;
+
+      if (catalogTarget.kind === "product" && existing.kind === "product") {
+        const catalogName = catalogTarget.label.slice(0, catalogTarget.label.lastIndexOf(" · "));
+        if (catalogName && catalogName !== targetNames[existing.id]) {
+          existing.label = `${catalogName} · ${existing.referenceSku}`;
+          names[existing.id] = catalogName;
+        }
+      }
     }
   }
   const schedules = restored ? restored.schedules : structuredClone(scheduleFixtures);
@@ -339,7 +357,7 @@ export function createMockPricingRepository(
       return structuredClone(created);
     },
     async readHistorical(query, at, signal) {
-      await refreshTargets(signal);
+      signal?.throwIfAborted();
       const price = effective(query.targetId, query.channel, at);
       return price
         ? {

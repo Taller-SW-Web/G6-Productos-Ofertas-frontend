@@ -1,17 +1,20 @@
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Button, Skeleton, Stack } from "@mantine/core";
 import { IconArrowLeft } from "@tabler/icons-react";
 import {
-  ContextNote,
   FeedbackAlert,
   PageHeader,
 } from "../../../components/shared";
 import { ThresholdConfigForm } from "../components/ThresholdConfigForm";
+import { DevScenarioSelector } from "../dev/DevScenarioSelector";
 import { useInventoryStock } from "../hooks/useInventoryStock";
 import { useThresholds } from "../hooks/useThresholds";
 import type { StockFiltersQuery } from "../services/inventoryTypes";
 
 export function ThresholdsPage() {
+  const [params] = useSearchParams();
+  const isRevisionMode =
+    import.meta.env.DEV && params.get("modoRevision") === "1";
   const {
     thresholds,
     loading,
@@ -47,11 +50,7 @@ export function ThresholdsPage() {
       />
 
       <Stack gap="lg">
-        <ContextNote title="Precedencia de reglas de umbral">
-          El umbral resuelto usa primero la excepción por SKU y, si no existe, el umbral global.
-          Cuando el saldo disponible es menor o igual a este valor, el estado comercial pasa a{" "}
-          <strong>stock bajo</strong>.
-        </ContextNote>
+        {isRevisionMode && <DevScenarioSelector />}
 
         {loading && !thresholds && (
           <Stack gap="md">

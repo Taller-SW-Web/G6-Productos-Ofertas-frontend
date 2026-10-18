@@ -126,7 +126,7 @@ test("el modo API global bloquea las 19 vistas sin cargar datos ni adapters mock
   for (const [, path] of views) {
     await page.goto(`${path}?modoRevision=1&escenario=forbidden`);
     await expect(page.getByRole("alert")).toContainText(
-      "Integración API no disponible",
+      "Función no disponible",
     );
     await expect(
       page.getByText("Datos de demostración", { exact: true }),

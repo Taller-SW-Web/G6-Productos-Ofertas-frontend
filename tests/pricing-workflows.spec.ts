@@ -449,7 +449,7 @@ test("MK-013-S04: changing file or policy invalidates simulated preview; import 
       exact: true,
     })
     .click();
-  await expect(page.getByRole("alert")).toContainText("Archivo no analizable");
+  await expect(page.getByRole("alert")).toContainText("No se pudo analizar el archivo");
   await page
     .getByRole("link", { name: "Consultar lote de ejemplo", exact: true })
     .click();

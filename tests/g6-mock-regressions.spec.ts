@@ -165,54 +165,170 @@ test("R3 P1-1: los repositorios con persist: false no escriben en el almacenamie
   page,
 }) => {
   await page.goto("/precios");
-  const leakedKeys = await page.evaluate(() => {
-    return Object.keys(localStorage).filter((k) => k.includes("pricing-isolated-leak"));
+  const result = await page.evaluate(async () => {
+    const specifier = "/src/features/pricing/adapters/mockPricingRepository.ts";
+    const { createMockPricingRepository } = await import(
+      /* @vite-ignore */ specifier
+    );
+    const keysBefore = Object.keys(localStorage);
+    const isolatedRepo = createMockPricingRepository(
+      { now: () => "2026-10-17T12:00:00Z" },
+      undefined,
+      { persist: false },
+    );
+    await isolatedRepo.update({
+      target: { targetId: "base", channel: "global" },
+      version: 4,
+      draft: {
+        regular: "987.65",
+        offer: "",
+        offerAction: "CONSERVAR",
+        currency: "PEN",
+        reason: "Aislamiento verificado",
+      },
+    });
+    const keysAfter = Object.keys(localStorage);
+    const leakedData = keysAfter.some((k) => {
+      const val = localStorage.getItem(k) ?? "";
+      return val.includes("987.65") || val.includes("Aislamiento verificado");
+    });
+    return {
+      newKeys: keysAfter.filter((k) => !keysBefore.includes(k)),
+      leakedData,
+    };
   });
-  expect(leakedKeys).toHaveLength(0);
+  expect(result.newKeys).toHaveLength(0);
+  expect(result.leakedData).toBe(false);
 });
 
-test("R3 P1-2: publishMockChange emite evento reactivo que actualiza suscriptores", async ({
+test("R3 P1-2: las mutaciones de un módulo actualizan reactivamente a los módulos dependientes sin F5", async ({
   page,
 }) => {
   await page.goto("/combos");
-  const eventDispatched = await page.evaluate(async () => {
-    return new Promise<boolean>((resolve) => {
-      const handler = (e: Event) => {
-        const detail = (e as CustomEvent).detail;
-        if (detail?.domain === "pricing") {
-          window.removeEventListener("g6:mock-state-change", handler);
-          resolve(true);
-        }
+  await expect(page.getByRole("heading", { name: "Gestión de combos" })).toBeVisible();
+  const row = page.getByRole("row", { name: /Conjunto Trail Esencial/ });
+  await expect(row).toBeVisible();
+  await expect(row.getByText(/combos estimados/)).toBeVisible();
+
+  // En el mismo navegador y sin recargar la página, mutamos el stock disponible en Inventario a 0
+  await page.evaluate(async () => {
+    const invSpecifier =
+      "/src/features/inventory/services/inventoryProvider.ts";
+    const stateSpecifier = "/src/features/shared/mockState.ts";
+    const { getInventoryRepository } = await import(
+      /* @vite-ignore */ invSpecifier
+    );
+    const { publishMockChange } = await import(
+      /* @vite-ignore */ stateSpecifier
+    );
+    interface ModifiableStock {
+      stockItems?: Array<{ sku: string; onHand: number; available: number }>;
+      delegate?: {
+        stockItems?: Array<{ sku: string; onHand: number; available: number }>;
       };
-      window.addEventListener("g6:mock-state-change", handler);
-      window.dispatchEvent(
-        new CustomEvent("g6:mock-state-change", { detail: { domain: "pricing" } }),
-      );
-    });
+      base?: { stockItems?: Array<{ sku: string; onHand: number; available: number }> };
+    }
+    const repo = getInventoryRepository() as unknown as ModifiableStock;
+    const items = repo.stockItems ?? repo.delegate?.stockItems ?? repo.base?.stockItems;
+    const target = items?.find((i) => i.sku === "CAS-COR-001");
+    if (target) {
+      target.onHand = 0;
+      target.available = 0;
+    }
+    publishMockChange("inventory");
   });
-  expect(eventDispatched).toBe(true);
+
+  // La disponibilidad del combo en la tabla reacciona y cambia a "Agotado (0 confirmado)" de inmediato sin recarga
+  await expect(row.getByText(/Agotado/)).toBeVisible();
 });
 
-test("R3 P1-4: sobre corrupto con campos superficiales inválidos se descarta y revierte a fixtures", async ({
+test("R3 P1-4: sobre corrupto (versión incompatible, valores negativos, tipos erróneos) se descarta y revierte a fixtures", async ({
   page,
 }) => {
-  await page.goto("/productos");
+  await page.goto("/inventario");
+  // Inyectar sobre de inventario corrupto con saldo negativo y tipos erróneos
   await page.evaluate((key) => {
     localStorage.setItem(
       key,
       JSON.stringify({
         version: 1,
+        savedAt: new Date().toISOString(),
         data: {
-          products: [{ id: "corrupto", name: "Corrupto", skuBase: "COR", status: "STATUS_INVALIDO" }],
-          variants: [],
+          stockItems: [
+            { sku: "SKU-CORRUPTO", locationId: "LOC-1", onHand: -50, available: -50, reserved: 0, blocked: 0 },
+          ],
+          thresholds: { globalThreshold: -10, skuThresholds: [] },
+          transfers: [],
+          alerts: [],
+          processedOperations: [],
+          processedOperationKeys: [],
         },
+      }),
+    );
+  }, `${PREFIX}inventory`);
+
+  await page.reload();
+  // El sobre corrupto con saldo negativo debe ser descartado y revertido a fixtures
+  await expect(page.getByText("SKU-CORRUPTO")).toHaveCount(0);
+  await expect(page.getByRole("row").filter({ hasText: "ZAP-TRL-40-BLK" })).toBeVisible();
+
+  // Inyectar sobre con versión errónea (ej. version 99) en catálogo
+  await page.evaluate((key) => {
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        version: 99,
+        savedAt: new Date().toISOString(),
+        data: { products: [{ id: "prod-99", name: "Incompatible", skuBase: "INC", status: "ACTIVO", version: 1 }], variants: [] },
       }),
     );
   }, `${PREFIX}catalog`);
 
-  await page.reload();
-  await expect(page.getByText("Corrupto")).toHaveCount(0);
+  await page.goto("/productos");
+  await expect(page.getByText("Incompatible")).toHaveCount(0);
   await expect(page.getByRole("link", { name: /Camiseta Running Endurance/ })).toBeVisible();
+});
+
+test("R3 P1-7: fallo en localStorage (QuotaExceededError) no bloquea la sesión y registra advertencia", async ({
+  page,
+}) => {
+  const warnings: string[] = [];
+  page.on("console", (msg) => {
+    if (msg.type() === "warning") warnings.push(msg.text());
+  });
+
+  await page.goto("/inventario/umbrales");
+  await expect(page.getByRole("heading", { name: /Configuración de umbrales/ })).toBeVisible();
+
+  // Simular fallo de cuota en localStorage.setItem
+  await page.evaluate(() => {
+    const originalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function () {
+      throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+    };
+    (window as unknown as { __restoreStorage?: () => void }).__restoreStorage = () => {
+      Storage.prototype.setItem = originalSetItem;
+    };
+  });
+
+  // Guardar un cambio de umbral
+  const globalInput = page.getByRole("textbox", { name: "Umbral global de stock bajo" });
+  await globalInput.fill("15");
+  await page.getByRole("button", { name: "Guardar umbral global" }).click();
+
+  // La UI no colapsa, confirma el cambio operativo
+  await expect(page.getByText(/Umbral global (guardado|actualizado)/)).toBeVisible();
+
+  // Se registró la advertencia en consola
+  expect(warnings.some((w) => w.includes("[mock-state] No se pudo persistir"))).toBe(true);
+
+  // Restaurar storage en la página
+  await page.evaluate(() => {
+    const win = window as unknown as { __restoreStorage?: () => void };
+    if (typeof win.__restoreStorage === "function") {
+      win.__restoreStorage();
+    }
+  });
 });
 
 test("R3 P1-5: aviso de datos de auditoría preserva consistencia y no muestra error espurio", async ({

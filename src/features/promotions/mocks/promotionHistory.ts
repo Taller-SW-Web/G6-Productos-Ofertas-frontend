@@ -17,7 +17,13 @@ export interface PromotionHistoryFacts {
 type PromotionHistoryState = Record<string, PromotionHistoryFacts>;
 
 function isPromotionHistoryState(value: unknown): value is PromotionHistoryState {
-  return isRecord(value);
+  if (!isRecord(value)) return false;
+  for (const [k, v] of Object.entries(value)) {
+    if (typeof k !== "string" || k.trim().length === 0 || !isRecord(v)) return false;
+    if (v.activated !== undefined && typeof v.activated !== "boolean") return false;
+    if (v.used !== undefined && typeof v.used !== "boolean") return false;
+  }
+  return true;
 }
 
 export function createPromotionHistory(

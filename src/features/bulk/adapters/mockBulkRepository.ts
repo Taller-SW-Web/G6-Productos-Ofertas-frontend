@@ -55,13 +55,41 @@ interface MockBulkState {
 function isBatchEntry(entry: unknown): boolean {
   if (!Array.isArray(entry) || entry.length !== 2) return false;
   const [id, batch] = entry;
-  return typeof id === "string" && isRecord(batch) && typeof batch.batch_id === "string" && typeof batch.status === "string";
+  return (
+    typeof id === "string" &&
+    isRecord(batch) &&
+    typeof batch.batch_id === "string" &&
+    batch.batch_id === id &&
+    typeof batch.status === "string" &&
+    ["QUEUED", "PROCESSING", "COMPLETED", "FAILED_GENERAL"].includes(batch.status) &&
+    (batch.total_rows === undefined || batch.total_rows === null || (typeof batch.total_rows === "number" && Number.isFinite(batch.total_rows) && batch.total_rows >= 0)) &&
+    typeof batch.completed_rows === "number" &&
+    Number.isFinite(batch.completed_rows) &&
+    batch.completed_rows >= 0 &&
+    typeof batch.failed_rows === "number" &&
+    Number.isFinite(batch.failed_rows) &&
+    batch.failed_rows >= 0 &&
+    typeof batch.needs_reconciliation === "boolean" &&
+    typeof batch.created_at === "string" &&
+    typeof batch.updated_at === "string"
+  );
 }
 
 function isExportEntry(entry: unknown): boolean {
   if (!Array.isArray(entry) || entry.length !== 2) return false;
   const [id, job] = entry;
-  return typeof id === "string" && isRecord(job) && typeof job.export_id === "string" && typeof job.status === "string";
+  return (
+    typeof id === "string" &&
+    isRecord(job) &&
+    typeof job.export_id === "string" &&
+    job.export_id === id &&
+    typeof job.status === "string" &&
+    ["QUEUED", "PROCESSING", "COMPLETED", "FAILED_GENERAL"].includes(job.status) &&
+    typeof job.format === "string" &&
+    ["CSV", "XLSX"].includes(job.format) &&
+    typeof job.created_at === "string" &&
+    typeof job.updated_at === "string"
+  );
 }
 
 function isMockBulkState(value: unknown): value is MockBulkState {
@@ -72,8 +100,14 @@ function isMockBulkState(value: unknown): value is MockBulkState {
     Array.isArray(value.exports) &&
     value.exports.every(isExportEntry) &&
     typeof value.batchSequence === "number" &&
+    Number.isFinite(value.batchSequence) &&
+    value.batchSequence >= 0 &&
     typeof value.exportSequence === "number" &&
-    typeof value.createImportCallCount === "number"
+    Number.isFinite(value.exportSequence) &&
+    value.exportSequence >= 0 &&
+    typeof value.createImportCallCount === "number" &&
+    Number.isFinite(value.createImportCallCount) &&
+    value.createImportCallCount >= 0
   );
 }
 

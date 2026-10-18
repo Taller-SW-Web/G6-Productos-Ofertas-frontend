@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
-test("MK-006/MK-007: access guards apply to list, direct creation, edit and state routes", async ({
-  page,
-}) => {
-  for (const scenario of ["session", "forbidden"]) {
+for (const scenario of ["session", "forbidden"]) {
+  test(`MK-006/MK-007: access guards (${scenario}) apply to list, direct creation, edit and state routes`, async ({
+    page,
+  }) => {
     for (const [route, action] of [
       ["/promociones", "Crear promoción"],
       ["/recomendaciones", "Crear venta cruzada"],
@@ -32,8 +32,8 @@ test("MK-006/MK-007: access guards apply to list, direct creation, edit and stat
         0,
       );
     }
-  }
-});
+  });
+}
 test("MK-006/MK-007: loading, empty, missing and retry are distinct and preserve list filters", async ({
   page,
 }) => {

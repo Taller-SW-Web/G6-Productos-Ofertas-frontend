@@ -29,12 +29,22 @@ function isCombo(value: unknown): value is Combo {
   if (!isRecord(value)) return false;
   return (
     typeof value.id === "string" &&
+    value.id.trim().length > 0 &&
     typeof value.name === "string" &&
+    value.name.trim().length > 0 &&
     typeof value.sku === "string" &&
+    value.sku.trim().length > 0 &&
     (value.status === "ACTIVO" || value.status === "INACTIVO") &&
     Array.isArray(value.components) &&
+    value.components.length > 0 &&
     value.components.every(
-      (c) => isRecord(c) && typeof c.sku === "string" && typeof c.quantity === "number",
+      (c) =>
+        isRecord(c) &&
+        typeof c.sku === "string" &&
+        c.sku.trim().length > 0 &&
+        typeof c.quantity === "number" &&
+        Number.isFinite(c.quantity) &&
+        c.quantity > 0,
     )
   );
 }
@@ -86,8 +96,9 @@ export class MockCombosRepository implements CombosRepository {
   }
 
   private persist(): void {
-    if (!this.persistEnabled) return;
-    saveMockState("combos", this.combos);
+    if (this.persistEnabled) {
+      saveMockState("combos", this.combos);
+    }
     publishMockChange("combos");
   }
 

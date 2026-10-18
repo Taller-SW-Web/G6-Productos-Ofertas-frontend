@@ -45,8 +45,21 @@ function isStockItemRecord(value: unknown): value is StockItem {
   return (
     isRecord(value) &&
     typeof value.sku === "string" &&
+    value.sku.trim().length > 0 &&
     typeof value.locationId === "string" &&
-    typeof value.onHand === "number"
+    value.locationId.trim().length > 0 &&
+    typeof value.onHand === "number" &&
+    Number.isFinite(value.onHand) &&
+    value.onHand >= 0 &&
+    typeof value.reserved === "number" &&
+    Number.isFinite(value.reserved) &&
+    value.reserved >= 0 &&
+    typeof value.blocked === "number" &&
+    Number.isFinite(value.blocked) &&
+    value.blocked >= 0 &&
+    typeof value.available === "number" &&
+    Number.isFinite(value.available) &&
+    value.available >= 0
   );
 }
 
@@ -54,8 +67,38 @@ function isTransferRecord(value: unknown): value is TransferItem {
   return (
     isRecord(value) &&
     typeof value.id === "string" &&
+    value.id.trim().length > 0 &&
     typeof value.transferCode === "string" &&
+    value.transferCode.trim().length > 0 &&
+    typeof value.sku === "string" &&
+    value.sku.trim().length > 0 &&
+    typeof value.sourceLocationId === "string" &&
+    value.sourceLocationId.trim().length > 0 &&
+    typeof value.targetLocationId === "string" &&
+    value.targetLocationId.trim().length > 0 &&
+    typeof value.quantityShipped === "number" &&
+    Number.isFinite(value.quantityShipped) &&
+    value.quantityShipped >= 0 &&
+    typeof value.quantityReceived === "number" &&
+    Number.isFinite(value.quantityReceived) &&
+    value.quantityReceived >= 0 &&
+    typeof value.quantityPending === "number" &&
+    Number.isFinite(value.quantityPending) &&
+    value.quantityPending >= 0 &&
     typeof value.status === "string"
+  );
+}
+
+function isThresholdConfig(value: unknown): value is ThresholdConfig {
+  return (
+    isRecord(value) &&
+    typeof value.globalThreshold === "number" &&
+    Number.isFinite(value.globalThreshold) &&
+    value.globalThreshold >= 0 &&
+    isRecord(value.skuOverrides) &&
+    Object.values(value.skuOverrides).every(
+      (v) => typeof v === "number" && Number.isFinite(v) && v >= 0,
+    )
   );
 }
 
@@ -64,12 +107,26 @@ function isMockInventoryState(value: unknown): value is MockInventoryState {
     isRecord(value) &&
     Array.isArray(value.stockItems) &&
     value.stockItems.every(isStockItemRecord) &&
-    isRecord(value.thresholds) &&
+    isThresholdConfig(value.thresholds) &&
     Array.isArray(value.transfers) &&
     value.transfers.every(isTransferRecord) &&
     Array.isArray(value.alerts) &&
     Array.isArray(value.processedOperations) &&
-    Array.isArray(value.processedOperationKeys)
+    value.processedOperations.every(
+      (entry) =>
+        Array.isArray(entry) &&
+        entry.length === 2 &&
+        typeof entry[0] === "string" &&
+        isTransferRecord(entry[1]),
+    ) &&
+    Array.isArray(value.processedOperationKeys) &&
+    value.processedOperationKeys.every(
+      (entry) =>
+        Array.isArray(entry) &&
+        entry.length === 2 &&
+        typeof entry[0] === "string" &&
+        typeof entry[1] === "string",
+    )
   );
 }
 
@@ -111,15 +168,16 @@ export class MockInventoryAdapter implements InventoryRepository {
   }
 
   private persist(): void {
-    if (!this.persistEnabled) return;
-    saveMockState("inventory", {
-      stockItems: this.stockItems,
-      thresholds: this.thresholds,
-      transfers: this.transfers,
-      alerts: this.alerts,
-      processedOperations: [...this.processedOperations.entries()],
-      processedOperationKeys: [...this.processedOperationKeys.entries()],
-    } satisfies MockInventoryState);
+    if (this.persistEnabled) {
+      saveMockState("inventory", {
+        stockItems: this.stockItems,
+        thresholds: this.thresholds,
+        transfers: this.transfers,
+        alerts: this.alerts,
+        processedOperations: [...this.processedOperations.entries()],
+        processedOperationKeys: [...this.processedOperationKeys.entries()],
+      } satisfies MockInventoryState);
+    }
     publishMockChange("inventory");
   }
 

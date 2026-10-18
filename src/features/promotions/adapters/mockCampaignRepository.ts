@@ -25,7 +25,15 @@ interface MockCampaignState {
 }
 
 function isCampaignRecord(value: unknown): value is CampaignView {
-  return isRecord(value) && typeof value.id === "string" && typeof value.name === "string" && typeof value.status === "string";
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    value.id.trim().length > 0 &&
+    typeof value.name === "string" &&
+    value.name.trim().length > 0 &&
+    typeof value.status === "string" &&
+    ["active", "inactive", "draft", "expired", "scheduled"].includes(value.status)
+  );
 }
 
 function isMockCampaignState(value: unknown): value is MockCampaignState {
@@ -33,7 +41,9 @@ function isMockCampaignState(value: unknown): value is MockCampaignState {
     isRecord(value) &&
     Array.isArray(value.records) &&
     value.records.every(isCampaignRecord) &&
-    typeof value.sequence === "number"
+    typeof value.sequence === "number" &&
+    Number.isFinite(value.sequence) &&
+    value.sequence >= 0
   );
 }
 

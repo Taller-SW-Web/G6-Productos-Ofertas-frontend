@@ -247,7 +247,7 @@ function AuditExportFlow({
                       )}
                     {job.status === "COMPLETED" && !job.fileAvailable && (
                       <Text size="sm">
-                        El archivo aún no está disponible.
+                        El servicio todavía no informa un archivo disponible.
                       </Text>
                     )}
                     {job.status === "FAILED_GENERAL" && (

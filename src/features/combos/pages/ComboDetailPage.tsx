@@ -49,7 +49,8 @@ function ComboDetailForId({ comboId, unavailable }: { comboId: string; unavailab
   const [submitting, setSubmitting] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const identity = useRef(new RequestIdentity());
-  const requestKey = JSON.stringify([comboId, retry, scenario]);
+  const combosRevision = useMockStateRevision(["combos"]);
+  const requestKey = JSON.stringify([comboId, retry, scenario, combosRevision]);
 
   useEffect(() => {
     const controller = new AbortController();

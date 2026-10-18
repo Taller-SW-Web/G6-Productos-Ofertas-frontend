@@ -27,7 +27,15 @@ interface MockCouponState {
 }
 
 function isCouponRecord(value: unknown): value is CouponView {
-  return isRecord(value) && typeof value.id === "string" && typeof value.code === "string" && typeof value.status === "string";
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    value.id.trim().length > 0 &&
+    typeof value.code === "string" &&
+    value.code.trim().length > 0 &&
+    typeof value.status === "string" &&
+    ["active", "inactive", "expired"].includes(value.status)
+  );
 }
 
 function isMockCouponState(value: unknown): value is MockCouponState {
@@ -35,7 +43,9 @@ function isMockCouponState(value: unknown): value is MockCouponState {
     isRecord(value) &&
     Array.isArray(value.records) &&
     value.records.every(isCouponRecord) &&
-    typeof value.sequence === "number"
+    typeof value.sequence === "number" &&
+    Number.isFinite(value.sequence) &&
+    value.sequence >= 0
   );
 }
 

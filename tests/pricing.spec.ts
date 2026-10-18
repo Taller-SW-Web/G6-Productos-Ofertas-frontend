@@ -215,7 +215,7 @@ test("Pricing component examples preserve form inputs and do not infer CSV valid
     .click();
   await expect(
     page.getByText("Completado parcialmente — ejemplo", { exact: true }),
-  ).toBeVisible();
+  ).toHaveCount(0);
   await expect(page.getByRole("table")).toContainText("CAM-RO-L");
 });
 

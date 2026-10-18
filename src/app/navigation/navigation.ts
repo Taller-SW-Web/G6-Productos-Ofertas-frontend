@@ -61,7 +61,7 @@ export const productNavigation: NavigationItem[] = [
     label: "Gestión de productos",
     icon: IconPackage,
     group: "Catálogo",
-    matchPaths: ["/productos", "/MK-004"],
+    matchPaths: ["/productos"],
   },
   {
     to: "/recomendaciones",

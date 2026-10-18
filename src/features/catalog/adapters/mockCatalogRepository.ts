@@ -45,9 +45,15 @@ function isCatalogProduct(value: unknown): boolean {
   if (!isRecord(value)) return false;
   return (
     typeof value.id === "string" &&
+    value.id.trim().length > 0 &&
     typeof value.name === "string" &&
+    value.name.trim().length > 0 &&
     typeof value.skuBase === "string" &&
-    (value.status === "ACTIVO" || value.status === "INACTIVO" || value.status === "BORRADOR")
+    value.skuBase.trim().length > 0 &&
+    (value.status === "ACTIVO" || value.status === "INACTIVO" || value.status === "BORRADOR") &&
+    typeof value.catalogVersion === "number" &&
+    Number.isFinite(value.catalogVersion) &&
+    value.catalogVersion >= 0
   );
 }
 
@@ -55,9 +61,15 @@ function isCatalogVariant(value: unknown): boolean {
   if (!isRecord(value)) return false;
   return (
     typeof value.variantId === "string" &&
+    value.variantId.trim().length > 0 &&
     typeof value.productId === "string" &&
+    value.productId.trim().length > 0 &&
     typeof value.sku === "string" &&
-    (value.status === "ACTIVA" || value.status === "INACTIVA" || value.status === "BORRADOR")
+    value.sku.trim().length > 0 &&
+    (value.status === "ACTIVA" || value.status === "INACTIVA" || value.status === "BORRADOR") &&
+    typeof value.catalogVersion === "number" &&
+    Number.isFinite(value.catalogVersion) &&
+    value.catalogVersion >= 0
   );
 }
 

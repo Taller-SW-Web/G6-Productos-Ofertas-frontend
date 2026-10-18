@@ -24,7 +24,15 @@ interface MockRecommendationState {
 }
 
 function isRecommendationRecord(value: unknown): value is RecommendationView {
-  return isRecord(value) && typeof value.id === "string" && typeof value.name === "string" && typeof value.status === "string";
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    value.id.trim().length > 0 &&
+    typeof value.name === "string" &&
+    value.name.trim().length > 0 &&
+    typeof value.status === "string" &&
+    ["active", "inactive", "draft"].includes(value.status)
+  );
 }
 
 function isMockRecommendationState(value: unknown): value is MockRecommendationState {
@@ -32,7 +40,9 @@ function isMockRecommendationState(value: unknown): value is MockRecommendationS
     isRecord(value) &&
     Array.isArray(value.records) &&
     value.records.every(isRecommendationRecord) &&
-    typeof value.sequence === "number"
+    typeof value.sequence === "number" &&
+    Number.isFinite(value.sequence) &&
+    value.sequence >= 0
   );
 }
 

@@ -19,10 +19,14 @@ function isAuditEntryRecord(value: unknown): value is AuditEntry {
   return (
     isRecord(value) &&
     typeof value.id === "string" &&
+    value.id.trim().length > 0 &&
     typeof value.sku === "string" &&
+    value.sku.trim().length > 0 &&
     typeof value.productId === "string" &&
-    typeof value.priceType === "string" &&
-    typeof value.at === "string"
+    value.productId.trim().length > 0 &&
+    (value.priceType === "REGULAR" || value.priceType === "OFERTA") &&
+    typeof value.at === "string" &&
+    (value.operation === "CREACION" || value.operation === "MODIFICACION" || value.operation === "RETIRO_OFERTA")
   );
 }
 
@@ -31,7 +35,9 @@ function isMockPricingAuditState(value: unknown): value is MockPricingAuditState
     isRecord(value) &&
     Array.isArray(value.entries) &&
     value.entries.every(isAuditEntryRecord) &&
-    typeof value.sequence === "number"
+    typeof value.sequence === "number" &&
+    Number.isFinite(value.sequence) &&
+    value.sequence >= 0
   );
 }
 
@@ -75,6 +81,14 @@ export function createMockPricingAudit(options: { persist?: boolean } = {}) {
         const next = priceType === "REGULAR" ? after.regular : after.offer;
         if (previous === next || (previous !== null && next !== null &&
           !decimalLess(previous, next) && !decimalLess(next, previous))) continue;
+        const alreadyRecorded = entries.some(
+          (e) =>
+            e.sku === sku &&
+            e.productId === target.productId &&
+            e.priceType === priceType &&
+            e.id.endsWith(`-v${after.version}`),
+        );
+        if (alreadyRecorded) continue;
         entries.unshift({
           id: `demo-pricing-${++sequence}-v${after.version}`,
           sku,
