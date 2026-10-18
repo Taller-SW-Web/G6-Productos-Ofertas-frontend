@@ -4,6 +4,7 @@ import type {
   VariantDetailView,
 } from "../services/catalogRepository";
 import { useCatalogServices } from "./useCatalogServices";
+import { useMockStateRevision } from "../../shared/useMockStateRevision";
 
 export interface UseVariantDetailResult {
   product: ProductDetailView | null;
@@ -20,7 +21,8 @@ export function useVariantDetail(
 ): UseVariantDetailResult {
   const { catalog: catalogService } = useCatalogServices();
   const [revision, setRevision] = useState<number>(0);
-  const key = JSON.stringify([productId, variantId, scenario, revision]);
+  const mockRevision = useMockStateRevision(["catalog", "inventory"]);
+  const key = JSON.stringify([productId, variantId, scenario, revision + mockRevision]);
 
   const [response, setResponse] = useState<{
     key: string;

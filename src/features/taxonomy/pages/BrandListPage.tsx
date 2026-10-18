@@ -13,12 +13,14 @@ import {
 } from "../../../components/shared";
 import { useBrandList } from "../hooks/useBrandList";
 import type { BrandListItem } from "../types";
+import { useMockStateRevision } from "../../shared/useMockStateRevision";
 
 export function BrandListPage() {
   const navigate = useNavigate();
   const [revision, setRevision] = useState(0);
+  const mockRevision = useMockStateRevision(["taxonomy", "taxonomy-brands"]);
   const [busqueda, setBusqueda] = useState("");
-  const { state } = useBrandList(revision);
+  const { state } = useBrandList(revision + mockRevision);
 
   const resultado = state.status === "success" ? state.result : undefined;
   const marcas = useMemo(() => resultado?.items ?? [], [resultado]);

@@ -81,7 +81,7 @@ export function CampaignEditorLayout() {
 }
 function CampaignEditorProvider({ initial }: { initial: CampaignView | null }) {
   const [params] = useSearchParams();
-  const { services, confirmedServices, clearTransientParams } =
+  const { services, confirmedServices, clearTransientParams, revision } =
     usePromotionServices();
   const suffix = params.size ? `?${params}` : "";
   const root = initial
@@ -107,7 +107,7 @@ function CampaignEditorProvider({ initial }: { initial: CampaignView | null }) {
       : undefined),
     [services, initial],
   );
-  const catalog = useAdministrationRead("catalog", readProducts);
+  const catalog = useAdministrationRead(`catalog:${revision}:${initial?.id ?? "new"}`, readProducts);
   if (form.confirmed) {
     const next = clearTransientParams(params);
     return (

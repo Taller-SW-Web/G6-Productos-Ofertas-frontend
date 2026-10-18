@@ -49,7 +49,7 @@ function ComboDetailForId({ comboId, unavailable }: { comboId: string; unavailab
   const [submitting, setSubmitting] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const identity = useRef(new RequestIdentity());
-  const combosRevision = useMockStateRevision(["combos"]);
+  const combosRevision = useMockStateRevision(["combos", "catalog", "pricing"]);
   const requestKey = JSON.stringify([comboId, retry, scenario, combosRevision]);
 
   useEffect(() => {

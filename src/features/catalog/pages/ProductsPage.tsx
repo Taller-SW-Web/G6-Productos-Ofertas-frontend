@@ -18,12 +18,21 @@ import {
 } from "../services/catalogPresentation";
 import type { CatalogQuery, ProductView } from "../services/catalogRepository";
 import { useTaxonomyFilters } from "../hooks/useTaxonomyFilters";
+import { useMockStateRevision } from "../../shared/useMockStateRevision";
 
 export function ProductsPage() {
   const [params, setParams] = useSearchParams();
   const location = useLocation();
   const [revision, setRevision] = useState(0);
-  const taxonomy = useTaxonomyFilters(revision);
+  const mockRevision = useMockStateRevision([
+    "catalog",
+    "taxonomy",
+    "taxonomy-categories",
+    "taxonomy-brands",
+    "taxonomy-product-types",
+  ]);
+  const effectiveRevision = revision + mockRevision;
+  const taxonomy = useTaxonomyFilters(effectiveRevision);
 
   const query: CatalogQuery = {
     q: params.get("q") || undefined,
@@ -36,7 +45,7 @@ export function ProductsPage() {
   };
 
   const scenario = readCatalogScenario(params);
-  const state = useProductList(query, scenario, revision);
+  const state = useProductList(query, scenario, effectiveRevision);
 
   const updateQuery = (patch: Partial<CatalogQuery>) => {
     setParams((current) => {

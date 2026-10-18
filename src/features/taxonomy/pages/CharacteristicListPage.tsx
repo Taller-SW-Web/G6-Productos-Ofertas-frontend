@@ -35,6 +35,7 @@ import type {
   CharacteristicCatalogConfig,
   CharacteristicListItem,
 } from "../types";
+import { useMockStateRevision } from "../../shared/useMockStateRevision";
 
 const configVacia: CharacteristicCatalogConfig = {
   maxTexto: 0,
@@ -44,8 +45,9 @@ const configVacia: CharacteristicCatalogConfig = {
 export function CharacteristicListPage() {
   const navigate = useNavigate();
   const [revision, setRevision] = useState(0);
+  const mockRevision = useMockStateRevision(["taxonomy", "taxonomy-characteristics"]);
   const [busqueda, setBusqueda] = useState("");
-  const { state } = useCharacteristicList(revision);
+  const { state } = useCharacteristicList(revision + mockRevision);
 
   const resultado = state.status === "success" ? state.result : undefined;
   const caracteristicas = useMemo(

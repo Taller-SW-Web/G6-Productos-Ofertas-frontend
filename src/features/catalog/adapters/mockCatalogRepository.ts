@@ -147,6 +147,68 @@ export class MockCatalogRepository implements CatalogRepository {
     this.changed(false);
   }
 
+  applyBulkProducts(
+    items: Array<{
+      sku: string;
+      name: string;
+      description?: string;
+      categoryName?: string;
+      brandName?: string;
+      priceInitial?: number;
+    }>,
+  ): void {
+    let hasChanges = false;
+    for (const item of items) {
+      const skuUpper = item.sku.trim().toUpperCase();
+      const existing = this.products.find(
+        (p) => p.skuBase.toUpperCase() === skuUpper,
+      );
+      if (existing) {
+        existing.name = item.name.trim() || existing.name;
+        if (item.description) existing.description = item.description.trim();
+        if (item.priceInitial !== undefined) existing.priceInitial = item.priceInitial;
+        hasChanges = true;
+      } else {
+        const newId = `PROD-${crypto.randomUUID()}`;
+        const newProduct: ProductDetailView = {
+          id: newId,
+          name: item.name.trim(),
+          skuBase: skuUpper,
+          description:
+            item.description?.trim() || "Producto importado mediante carga masiva",
+          hasVariants: false,
+          categoryId: "cat-calzado",
+          categoryName: item.categoryName || "Calzado",
+          typeId: "tipo-calzado",
+          typeName: "Calzado Deportivo",
+          brandId: "marca-nike",
+          brandName: item.brandName || "Nike",
+          status: "ACTIVO",
+          preparationSummary: "COMPLETED",
+          catalogVersion: 1,
+          priceInitial: item.priceInitial,
+          publishedCommercially: true,
+          images: [],
+          attributes: [],
+          physicalProfile: null,
+          variants: [],
+          preparation: {
+            productId: newId,
+            hasVariants: false,
+            pricing: { status: "COMPLETED", manualRetryAllowed: false, code: null },
+            inventario: { status: "COMPLETED", manualRetryAllowed: false, code: null },
+            variantes: [],
+          },
+        };
+        this.products.unshift(newProduct);
+        hasChanges = true;
+      }
+    }
+    if (hasChanges) {
+      this.changed();
+    }
+  }
+
   reset() {
     clearMockState("catalog");
     this.loadFixtures();

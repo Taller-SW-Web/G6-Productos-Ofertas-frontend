@@ -243,6 +243,10 @@ export function createMockPricingRepository(
       }
       publishMockChange("pricing");
     });
+    subscribeExternalMockChanges("catalog", async () => {
+      await refreshTargets();
+      publishMockChange("pricing");
+    });
   }
   function effective(
     id: string,

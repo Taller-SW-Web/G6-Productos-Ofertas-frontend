@@ -60,6 +60,8 @@ export interface BulkImportRow {
   code?: BulkErrorCode | null;
   detail?: string | null;
   steps: BulkDomainStep[];
+  precio_regular?: number;
+  stock_inicial?: number;
 }
 
 export interface BulkImportBatch {

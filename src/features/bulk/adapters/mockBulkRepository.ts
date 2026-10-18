@@ -9,6 +9,7 @@ import type {
   BulkExportFormat,
   BulkExportJob,
   BulkImportBatch,
+  BulkImportRow,
 } from "../types/bulk";
 import type {
   BulkRepository,
@@ -16,6 +17,8 @@ import type {
 } from "../services/bulkRepository";
 import { BulkRepositoryError } from "../services/bulkErrors";
 import { canMockProvideImportReport } from "../services/reportAvailability";
+import { mockCatalogRepository } from "../../catalog/adapters/mockCatalogRepository";
+import { sharedMockInventoryAdapter } from "../../inventory/adapters/mockInventoryAdapter";
 import {
   clearMockState,
   isMockPersistenceAvailable,
@@ -166,6 +169,91 @@ function deepCloneExport(job: BulkExportJob): BulkExportJob {
   return JSON.parse(JSON.stringify(job)) as BulkExportJob;
 }
 
+function applyBatchRowsToConsumerModules(batch: BulkImportBatch) {
+  if (!batch.rows || batch.rows.length === 0) return;
+
+  const catalogItems: Array<{
+    sku: string;
+    name: string;
+    description?: string;
+    categoryName?: string;
+    brandName?: string;
+    priceInitial?: number;
+  }> = [];
+
+  const inventoryItems: Array<{
+    sku: string;
+    productName: string;
+    categoryName?: string;
+    brandName?: string;
+    stock?: number;
+  }> = [];
+
+  for (const row of batch.rows) {
+    if (!row.sku || !row.nombre) continue;
+    if (row.status === "FAILED") continue;
+
+    let price: number | undefined = row.precio_regular;
+    if (price === undefined) {
+      const priceStep = row.steps.find((s) => s.domain === "PRICING");
+      if (priceStep && priceStep.detail) {
+        const match = priceStep.detail.match(/S\/\s*([0-9]+(\.[0-9]+)?)/);
+        if (match && match[1]) price = parseFloat(match[1]);
+      }
+    }
+    let stock: number | undefined = row.stock_inicial;
+    if (stock === undefined) {
+      const invStep = row.steps.find((s) => s.domain === "INVENTARIO");
+      if (invStep && invStep.detail) {
+        const match = invStep.detail.match(/stock\s*([0-9]+)\s*u/);
+        if (match && match[1]) stock = parseInt(match[1], 10);
+      }
+    }
+
+    catalogItems.push({
+      sku: row.sku,
+      name: row.nombre,
+      priceInitial: price,
+    });
+
+    inventoryItems.push({
+      sku: row.sku,
+      productName: row.nombre,
+      stock,
+    });
+
+    row.status = "COMPLETED";
+    row.applied_domains = ["CATALOGO", "PRICING", "INVENTARIO"];
+    row.failed_domain = null;
+    row.needs_reconciliation = false;
+    row.detail = "Producto, precio base y SKU inicializados correctamente";
+    row.steps = [
+      { domain: "CATALOGO", status: "COMPLETED", detail: "Borrador creado e inicializado" },
+      { domain: "PRICING", status: "COMPLETED", detail: price !== undefined ? `Precio regular S/ ${price.toFixed(2)} registrado` : "Precio regular registrado" },
+      { domain: "INVENTARIO", status: "COMPLETED", detail: stock !== undefined ? `SKU inicializado y stock ${stock} u. aplicado` : "SKU inicializado" },
+    ];
+  }
+
+  if (catalogItems.length > 0) {
+    try {
+      mockCatalogRepository.applyBulkProducts(catalogItems);
+    } catch {
+      // Ignored
+    }
+  }
+
+  if (inventoryItems.length > 0) {
+    try {
+      sharedMockInventoryAdapter.applyBulkStock(inventoryItems);
+    } catch {
+      // Ignored
+    }
+  }
+
+  publishMockChange("pricing");
+  publishMockChange("inventory");
+}
+
 function scheduleImportSimulation(batchId: string) {
   if (!DEMO_CONFIG.AUTO_ADVANCE || activeBatchSimulations.has(batchId)) return;
   activeBatchSimulations.add(batchId);
@@ -179,6 +267,13 @@ function scheduleImportSimulation(batchId: string) {
       const total = typeof batch.total_rows === "number" ? batch.total_rows : null;
       batch.completed_rows = total !== null ? Math.floor(total * 0.7) : 0;
       batch.failed_rows = 0;
+      if (batch.rows && batch.rows.length > 0) {
+        for (const row of batch.rows) {
+          row.status = "PROCESSING";
+          row.detail = "Procesando dominios";
+          row.steps = row.steps.map((s) => ({ ...s, status: "PROCESSING" }));
+        }
+      }
       batch.updated_at = new Date().toISOString();
       const ok = persistBulkState();
       if (!ok && persistEnabled) {
@@ -203,9 +298,14 @@ function scheduleImportSimulation(batchId: string) {
         batch.updated_at = new Date().toISOString();
       } else {
         batch.status = "COMPLETED";
-        batch.completed_rows = total ?? batch.rows?.length ?? 0;
-        batch.failed_rows = 0;
-        batch.needs_reconciliation = false;
+        applyBatchRowsToConsumerModules(batch);
+        batch.completed_rows = batch.rows && batch.rows.length > 0
+          ? batch.rows.filter(r => r.status === "COMPLETED").length
+          : (total ?? 0);
+        batch.failed_rows = batch.rows && batch.rows.length > 0
+          ? batch.rows.filter(r => r.status === "FAILED").length
+          : 0;
+        batch.needs_reconciliation = batch.failed_rows > 0;
         batch.updated_at = new Date().toISOString();
         if (!batch.rows) {
           batch.rows = [];
@@ -243,6 +343,7 @@ function applyReconciliationCompletion(batch: BulkImportBatch) {
         newlyCompleted++;
       }
     }
+    applyBatchRowsToConsumerModules(batch);
     const total = typeof batch.total_rows === "number" ? batch.total_rows : null;
     batch.completed_rows = total !== null
       ? Math.min(total, batch.completed_rows + newlyCompleted)
@@ -402,12 +503,67 @@ export const mockBulkRepository: BulkRepository & {
       );
     }
 
-    // Determine observed row count for CSV using the same parser as local check
-    // The review stage already streamed and counted CSV rows; do not read the file again.
-    // For XLSX the browser cannot verify row count, so leave it unknown.
-    const estimatedRows = lowerName.endsWith(".csv")
-      ? localSummary?.detectedRows
-      : undefined;
+    if (!lowerName.endsWith(".csv") && !lowerName.endsWith(".xlsx")) {
+      throw new BulkRepositoryError(
+        `Formato no admitido. Se requiere un archivo con extensión .csv o .xlsx (recibido: ${file.name})`,
+        "rejected",
+      );
+    }
+
+    const parsedRows: BulkImportRow[] = [];
+    if (lowerName.endsWith(".csv")) {
+      try {
+        const text = await file.text();
+        const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+        if (lines.length > 1 && lines[0]) {
+          const headers = lines[0].split(",").map((h) => h.trim().toLowerCase().replace(/^["']|["']$/g, ""));
+          const skuIdx = headers.findIndex((h) => h === "sku" || h === "codigo");
+          const nameIdx = headers.findIndex((h) => h === "nombre" || h === "name" || h === "producto");
+          const priceIdx = headers.findIndex((h) => h.includes("precio") || h === "price");
+          const stockIdx = headers.findIndex((h) => h.includes("stock") || h === "cantidad" || h === "qty");
+
+          if (skuIdx !== -1 && nameIdx !== -1) {
+            for (let i = 1; i < lines.length; i++) {
+              const rowLine = lines[i];
+              if (!rowLine) continue;
+              const cols = rowLine.split(",").map((c) => c.trim().replace(/^["']|["']$/g, ""));
+              const sku = cols[skuIdx];
+              const nombre = cols[nameIdx];
+              if (sku && nombre) {
+                const priceVal = priceIdx !== -1 && cols[priceIdx] ? parseFloat(cols[priceIdx]) : undefined;
+                const stockVal = stockIdx !== -1 && cols[stockIdx] ? parseInt(cols[stockIdx], 10) : undefined;
+                parsedRows.push({
+                  row_id: i,
+                  sku,
+                  nombre,
+                  status: "PENDING",
+                  applied_domains: [],
+                  failed_domain: null,
+                  needs_reconciliation: false,
+                  detail: "Pendiente de procesamiento",
+                  precio_regular: priceVal,
+                  stock_inicial: stockVal,
+                  steps: [
+                    { domain: "CATALOGO", status: "PENDING", detail: "Pendiente" },
+                    { domain: "PRICING", status: "PENDING", detail: priceVal !== undefined ? `Precio regular S/ ${priceVal.toFixed(2)} registrado` : "Sin precio inicial" },
+                    { domain: "INVENTARIO", status: "PENDING", detail: stockVal !== undefined ? `SKU inicializado y stock ${stockVal} u. aplicado` : "SKU inicializado" },
+                  ],
+                });
+              }
+            }
+          }
+        }
+      } catch {
+        // Fallback gracefully
+      }
+    }
+
+    // Determine observed row count for CSV using parsed count or local check summary
+    const estimatedRows = parsedRows.length > 0
+      ? parsedRows.length
+      : lowerName.endsWith(".csv")
+        ? localSummary?.detectedRows
+        : undefined;
 
     batchSequence++;
     const batchId = `lote-imp-${batchSequence}-${Math.random().toString(36).slice(2, 6)}`;
@@ -422,7 +578,7 @@ export const mockBulkRepository: BulkRepository & {
       updated_at: new Date().toISOString(),
       file_name: file.name,
       file_size: file.size,
-      rows: [],
+      rows: parsedRows,
     };
 
     dynamicBatches.set(batchId, newBatch);

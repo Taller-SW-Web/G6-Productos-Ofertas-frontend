@@ -154,6 +154,10 @@ export class MockInventoryAdapter implements InventoryRepository {
         this.hydrate(next);
         publishMockChange("inventory");
       });
+      subscribeExternalMockChanges("catalog", async () => {
+        await this.refreshCatalogMetadata();
+        publishMockChange("inventory");
+      });
     }
   }
 
@@ -189,7 +193,103 @@ export class MockInventoryAdapter implements InventoryRepository {
       const current = metadata.get(item.sku);
       if (current) Object.assign(item, current);
     }
+    for (const transfer of this.transfers) {
+      const current = metadata.get(transfer.sku);
+      if (current) transfer.productName = current.productName;
+    }
+    let hasNewItems = false;
+    for (const [sku, desc] of metadata) {
+      const exists = this.stockItems.some((s) => s.sku === sku);
+      if (!exists && desc.vendible) {
+        const newItem: StockItem = {
+          sku,
+          productName: desc.productName,
+          categoryName: desc.categoryName,
+          brandName: desc.brandName,
+          locationId: "ALM-CEN",
+          locationName: "Almacén Central Lima",
+          onHand: 0,
+          reserved: 0,
+          blocked: 0,
+          available: 0,
+          threshold:
+            this.thresholds.skuOverrides[sku] ?? this.thresholds.globalThreshold,
+          status: "AGOTADO",
+          stockVersion: 0,
+          updatedAt: new Date().toISOString(),
+        };
+        this.stockItems.push(newItem);
+        hasNewItems = true;
+
+        const existingTransfer = this.transfers.find((t) => t.sku === sku);
+        if (!existingTransfer) {
+          const newTransfer: TransferItem = {
+            id: `TRF-${sku.replace(/[^A-Za-z0-9]/g, "-")}`,
+            transferCode: `TRF-${sku}`,
+            sku,
+            productName: desc.productName,
+            sourceLocationId: "ALM-NOR",
+            sourceLocationName: "Almacén Regional Norte",
+            targetLocationId: "ALM-CEN",
+            targetLocationName: "Almacén Central Lima",
+            quantityShipped: 25,
+            quantityReceived: 0,
+            quantityPending: 25,
+            status: "EN_TRANSITO",
+            shippedAt: new Date().toISOString(),
+          };
+          this.transfers.unshift(newTransfer);
+        }
+      }
+    }
+    if (hasNewItems && this.persistEnabled) {
+      this.persist();
+    }
     return metadata;
+  }
+
+  applyBulkStock(
+    items: Array<{
+      sku: string;
+      productName: string;
+      categoryName?: string;
+      brandName?: string;
+      stock?: number;
+    }>,
+  ): void {
+    for (const data of items) {
+      const existing = this.stockItems.find((s) => s.sku === data.sku);
+      const stockQty = data.stock ?? 0;
+      if (existing) {
+        existing.productName = data.productName || existing.productName;
+        if (data.categoryName) existing.categoryName = data.categoryName;
+        if (data.brandName) existing.brandName = data.brandName;
+        if (stockQty > 0) {
+          existing.onHand += stockQty;
+        }
+        this.recalculateStockStatus(existing);
+      } else {
+        const created: StockItem = {
+          sku: data.sku,
+          productName: data.productName,
+          categoryName: data.categoryName || "Calzado",
+          brandName: data.brandName || "Inka Athletic",
+          locationId: "ALM-CEN",
+          locationName: "Almacén Central Lima",
+          onHand: stockQty,
+          reserved: 0,
+          blocked: 0,
+          available: stockQty,
+          threshold:
+            this.thresholds.skuOverrides[data.sku] ?? this.thresholds.globalThreshold,
+          status: stockQty > 0 ? "DISPONIBLE" : "AGOTADO",
+          stockVersion: 1,
+          updatedAt: new Date().toISOString(),
+        };
+        this.stockItems.push(created);
+      }
+    }
+    this.persist();
   }
 
   private recalculateStockStatus(item: StockItem): void {
@@ -860,3 +960,5 @@ return Array.from(map.values());
     return Array.from(locations.values());
   }
 }
+
+export const sharedMockInventoryAdapter = new MockInventoryAdapter({ persist: true });

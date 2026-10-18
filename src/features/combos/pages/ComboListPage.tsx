@@ -21,7 +21,7 @@ export function ComboListPage() {
   const [params, setParams] = useSearchParams();
   const [state, setState] = useState<ListState>({ key: "", status: "loading" });
   const [refresh, setRefresh] = useState(0);
-  const revision = useMockStateRevision(["combos", "inventory", "catalog"]);
+  const revision = useMockStateRevision(["combos", "inventory", "catalog", "pricing"]);
   const [deactivationTarget, setDeactivationTarget] = useState<Combo | null>(null);
   const [deactivating, setDeactivating] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);

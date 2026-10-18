@@ -36,6 +36,7 @@ import {
 } from "../services/catalogPresentation";
 import { ProductActivationDialog } from "../components/ProductActivationDialog";
 import { ProductDeactivationDialog } from "../components/ProductDeactivationDialog";
+import { useMockStateRevision } from "../../shared/useMockStateRevision";
 
 interface ProductDetailPageProps {
   initialDialog?: "activar" | "desactivar";
@@ -47,8 +48,14 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
   const location = useLocation();
   const scenario = readCatalogScenario(params);
   const [revision, setRevision] = useState(0);
+  const mockRevision = useMockStateRevision([
+    "catalog",
+    "taxonomy",
+    "pricing",
+    "inventory",
+  ]);
 
-  const detailState = useProductDetail(productId || "", scenario, revision);
+  const detailState = useProductDetail(productId || "", scenario, revision + mockRevision);
 
   // Dialog states
   const dialogParam = params.get("dialog");
