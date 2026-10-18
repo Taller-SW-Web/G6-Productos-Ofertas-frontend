@@ -32,8 +32,6 @@ function isCombo(value: unknown): value is Combo {
     value.id.trim().length > 0 &&
     typeof value.name === "string" &&
     value.name.trim().length > 0 &&
-    typeof value.sku === "string" &&
-    value.sku.trim().length > 0 &&
     (value.status === "ACTIVO" || value.status === "INACTIVO") &&
     Array.isArray(value.components) &&
     value.components.length > 0 &&
@@ -95,11 +93,13 @@ export class MockCombosRepository implements CombosRepository {
     }
   }
 
-  private persist(): void {
+  private persist(): boolean {
+    let ok = true;
     if (this.persistEnabled) {
-      saveMockState("combos", this.combos);
+      ok = saveMockState("combos", this.combos);
     }
     publishMockChange("combos");
+    return ok;
   }
 
   async list(query: ComboQuery, signal?: AbortSignal): Promise<{ items: Combo[]; page: number; pageSize: number; total: number }> {
@@ -138,7 +138,9 @@ export class MockCombosRepository implements CombosRepository {
     await validateMockComboPayload(payload, this.validationContext());
     const combo = await this.buildCombo(payload, `combo-${this.combos.length + 1}`, 1, "ACTIVO");
     this.combos.unshift(combo);
-    this.persist();
+    if (!this.persist() && this.persistEnabled) {
+      throw new ComboError("unknown", "No se pudo guardar el cambio. Vuelve a intentarlo.");
+    }
     return clone(combo);
   }
 
@@ -153,7 +155,7 @@ export class MockCombosRepository implements CombosRepository {
       this.persist();
       throw new ComboError("version_conflict", "Este combo cambió desde que comenzaste a editarlo.", clone(current));
     }
-    if (payload.version !== current.version) {
+    if (payload.version !== undefined && payload.version !== current.version) {
       throw new ComboError("version_conflict", "Este combo cambió desde que comenzaste a editarlo.", clone(current));
     }
     if (scenario === "server-price-rejected") {
@@ -162,7 +164,9 @@ export class MockCombosRepository implements CombosRepository {
     await validateMockComboPayload(payload, this.validationContext());
     const updated = await this.buildCombo(payload, current.id, current.version + 1, current.status);
     this.combos = this.combos.map((item) => item.id === id ? updated : item);
-    this.persist();
+    if (!this.persist() && this.persistEnabled) {
+      throw new ComboError("unknown", "No se pudo guardar el cambio. Vuelve a intentarlo.");
+    }
     return clone(updated);
   }
 
@@ -174,7 +178,9 @@ export class MockCombosRepository implements CombosRepository {
       : calculateInformativeAvailability("INACTIVO", [], new Map(), null);
     const updated: Combo = { ...current, status: "INACTIVO", version: current.version + 1, availability };
     this.combos = this.combos.map((item) => item.id === id ? updated : item);
-    this.persist();
+    if (!this.persist() && this.persistEnabled) {
+      throw new ComboError("unknown", "No se pudo guardar el cambio. Vuelve a intentarlo.");
+    }
     return clone(updated);
   }
 

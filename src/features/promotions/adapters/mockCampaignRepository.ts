@@ -62,13 +62,15 @@ export function createMockCampaignRepository(
     : null;
   const records = restored ? restored.records : fixtures.map((item) => structuredClone(item));
   let sequence = restored ? restored.sequence : 0;
-  const persist = () => {
+  const persist = (): boolean => {
     // A non-persistent instance (persist: false) must never touch `localStorage`.
+    let ok = true;
     if (persistEnabled) {
-      saveMockState("promotions-campaigns", { records, sequence } satisfies MockCampaignState);
+      ok = saveMockState("promotions-campaigns", { records, sequence } satisfies MockCampaignState);
     }
     publishMockChange("promotions-campaigns");
     publishMockChange("promotions");
+    return ok;
   };
   if (persistEnabled) {
     subscribeExternalMockChanges("promotions-campaigns", () => {
@@ -187,7 +189,12 @@ export function createMockCampaignRepository(
         dependencies.history.initialize(record.id, status === "active");
       if (id) records[records.findIndex((item) => item.id === id)] = record;
       else records.push(record);
-      persist();
+      if (!persist() && persistEnabled) {
+        throw new AdministrationError(
+          "rejected",
+          "No se pudo guardar el cambio. Vuelve a intentarlo.",
+        );
+      }
       return snapshot(record, signal);
     },
     async changeStatus(id, status, signal) {
@@ -211,7 +218,12 @@ export function createMockCampaignRepository(
       };
       if (status === "active") dependencies.history.activate(id);
       records[index] = record;
-      persist();
+      if (!persist() && persistEnabled) {
+        throw new AdministrationError(
+          "rejected",
+          "No se pudo guardar el cambio. Vuelve a intentarlo.",
+        );
+      }
       return snapshot(record, signal);
     },
   };

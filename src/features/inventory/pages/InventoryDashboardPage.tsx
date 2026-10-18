@@ -272,12 +272,9 @@ export function InventoryDashboardPage() {
             fontSize: 14,
             lineHeight: "20px",
           }}
+          fw={600}
         >
-          <Text component="span" inherit fw={600}>
-            Panel de solo lectura
-          </Text>{" "}
-          Este panel resume indicadores clave del catálogo y almacenes. Para registrar recepciones de traslados
-          o ajustar umbrales, utiliza las vistas operativas de control de stock.
+          Panel de solo lectura
         </Text>
 
         {isRevisionMode && <DevScenarioSelector />}

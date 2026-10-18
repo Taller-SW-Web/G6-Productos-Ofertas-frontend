@@ -59,13 +59,15 @@ export function createMockRecommendationRepository(
     ? restored.records
     : fixtures.map((item) => structuredClone(item));
   let sequence = restored ? restored.sequence : 0;
-  const persist = () => {
+  const persist = (): boolean => {
     // A non-persistent instance (persist: false) must never touch `localStorage`.
+    let ok = true;
     if (persistEnabled) {
-      saveMockState("promotions-recommendations", { records, sequence } satisfies MockRecommendationState);
+      ok = saveMockState("promotions-recommendations", { records, sequence } satisfies MockRecommendationState);
     }
     publishMockChange("promotions-recommendations");
     publishMockChange("promotions");
+    return ok;
   };
   if (persistEnabled) {
     subscribeExternalMockChanges("promotions-recommendations", () => {
@@ -163,7 +165,12 @@ export function createMockRecommendationRepository(
       };
       if (id) records[records.findIndex((item) => item.id === id)] = record;
       else records.push(record);
-      persist();
+      if (!persist() && persistEnabled) {
+        throw new AdministrationError(
+          "rejected",
+          "No se pudo guardar el cambio. Vuelve a intentarlo.",
+        );
+      }
       return structuredClone(record);
     },
     async changeStatus(id, status, signal) {
@@ -186,7 +193,12 @@ export function createMockRecommendationRepository(
         configuration: { ...previous.configuration, status },
       };
       records[index] = record;
-      persist();
+      if (!persist() && persistEnabled) {
+        throw new AdministrationError(
+          "rejected",
+          "No se pudo guardar el cambio. Vuelve a intentarlo.",
+        );
+      }
       return structuredClone(record);
     },
   };

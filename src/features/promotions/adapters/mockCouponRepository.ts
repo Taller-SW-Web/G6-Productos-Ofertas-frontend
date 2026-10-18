@@ -62,13 +62,15 @@ export function createMockCouponRepository(
     : null;
   const records = restored ? restored.records : fixtures.map((item) => structuredClone(item));
   let sequence = restored ? restored.sequence : 0;
-  const persist = () => {
+  const persist = (): boolean => {
     // A non-persistent instance (persist: false) must never touch `localStorage`.
+    let ok = true;
     if (persistEnabled) {
-      saveMockState("promotions-coupons", { records, sequence } satisfies MockCouponState);
+      ok = saveMockState("promotions-coupons", { records, sequence } satisfies MockCouponState);
     }
     publishMockChange("promotions-coupons");
     publishMockChange("promotions");
+    return ok;
   };
   if (persistEnabled) {
     subscribeExternalMockChanges("promotions-coupons", () => {
@@ -162,7 +164,12 @@ export function createMockCouponRepository(
         remainingUses: values.globalLimit === null ? null : undefined,
       };
       records.push(coupon);
-      persist();
+      if (!persist() && persistEnabled) {
+        throw new CouponWriteError(
+          "rejected",
+          "No se pudo guardar el cambio. Vuelve a intentarlo.",
+        );
+      }
       return structuredClone(coupon);
     },
     async update(id, values, signal) {
@@ -193,7 +200,12 @@ export function createMockCouponRepository(
               : undefined,
       };
       records[records.findIndex((item) => item.id === id)] = coupon;
-      persist();
+      if (!persist() && persistEnabled) {
+        throw new CouponWriteError(
+          "rejected",
+          "No se pudo guardar el cambio. Vuelve a intentarlo.",
+        );
+      }
       return structuredClone(coupon);
     },
     async changeStatus(id, status, signal) {
@@ -213,7 +225,12 @@ export function createMockCouponRepository(
         );
       const coupon = { ...previous, status };
       records[index] = coupon;
-      persist();
+      if (!persist() && persistEnabled) {
+        throw new CouponWriteError(
+          "rejected",
+          "No se pudo guardar el cambio. Vuelve a intentarlo.",
+        );
+      }
       return structuredClone(coupon);
     },
     async list(query, signal) {

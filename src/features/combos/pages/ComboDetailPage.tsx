@@ -187,7 +187,7 @@ function ComboDetailForId({ comboId, unavailable }: { comboId: string; unavailab
     {isUnavailable && <FeedbackAlert semantic={availabilityInfo.state === "DISPONIBLE" ? "info" : "warning"} title={availabilityMessageText(comboView)}>{availabilityInfo.reason ?? "El estado administrativo se conserva; la disponibilidad es informativa y no garantiza stock."}</FeedbackAlert>}
 
     <Stack mt="lg" gap="lg">
-      <SectionCard title="Resumen comercial" description="El precio comercial guardado es independiente de las referencias de Pricing.">
+      <SectionCard title="Resumen comercial">
         <Group gap="xl" wrap="wrap">
           <div><Text size="sm" c="dimmed">Estado</Text><StatusBadge>{combo.status}</StatusBadge></div>
           <div><Text size="sm" c="dimmed">Precio comercial guardado</Text><Text fw={600}>{formatMoney(combo.priceMinor)}</Text></div>
@@ -195,7 +195,7 @@ function ComboDetailForId({ comboId, unavailable }: { comboId: string; unavailab
         </Group>
       </SectionCard>
 
-      <SectionCard title="Precios de referencia" description="Se consultan las referencias vigentes en Pricing; las referencias almacenadas son históricas y no acreditan vigencia.">
+      <SectionCard title="Precios de referencia">
         {priceResult.status === "loading" && <Text size="sm" role="status">Consultando precios vigentes…</Text>}
         {priceResult.status === "error" && <FeedbackAlert semantic="warning" title="Precios de referencia vigentes no disponibles" actions={<Button variant="outline" onClick={() => setPriceRetry((value) => value + 1)}>Reintentar lectura</Button>}>{priceResult.message}</FeedbackAlert>}
         {currentTotals && <Group gap="xl" wrap="wrap">
@@ -203,7 +203,7 @@ function ComboDetailForId({ comboId, unavailable }: { comboId: string; unavailab
           <div><Text size="sm" c="dimmed">Suma pública vigente</Text><Text fw={600}>{formatMoney(currentTotals.publicMinor)}</Text></div>
           <div><Text size="sm" c="dimmed">Referencias vigentes confirmadas</Text><Text fw={600}>{currentTotals.confirmed} / {combo.components.length}</Text></div>
         </Group>}
-        {currentTotals && !currentTotals.complete && <FeedbackAlert semantic="warning" title="Referencias vigentes parciales">No se confirmó una referencia global vigente única para todos los componentes. La suma vigente no se presenta como válida.</FeedbackAlert>}
+        {currentTotals && !currentTotals.complete && <FeedbackAlert semantic="warning" title="Referencias vigentes parciales">No se confirmó una referencia global vigente única para todos los componentes.</FeedbackAlert>}
         <Text size="sm" c="dimmed" mt="md">Referencias almacenadas en el combo (histórico):</Text>
         <Group gap="xl" wrap="wrap">
           <div><Text size="sm" c="dimmed">Suma regular almacenada</Text><Text>{formatMoney(storedRegularTotal)}</Text></div>
@@ -227,7 +227,7 @@ function ComboDetailForId({ comboId, unavailable }: { comboId: string; unavailab
         })}</Table.Tbody></Table></Table.ScrollContainer>
       </SectionCard>
 
-      {availabilityResult.status === "error" && <FeedbackAlert semantic="warning" title="Disponibilidad no verificable" actions={<Button variant="outline" onClick={() => setAvailabilityRetry((value) => value + 1)}>Reintentar disponibilidad</Button>}>{availabilityResult.message} No se presenta un cero inventado.</FeedbackAlert>}
+      {availabilityResult.status === "error" && <FeedbackAlert semantic="warning" title="Disponibilidad no verificable" actions={<Button variant="outline" onClick={() => setAvailabilityRetry((value) => value + 1)}>Reintentar disponibilidad</Button>}>{availabilityResult.message}</FeedbackAlert>}
 
       <Group>{unavailable && <Button component={Link} to={`/combos/${combo.id}`} variant="outline">Ver definición</Button>}{!unavailable && isUnavailable && <Button component={Link} to={`/combos/${combo.id}/no-disponible`} variant="outline">Ver situación de disponibilidad</Button>}<Button component={Link} to="/combos" variant="subtle">Volver a combos</Button></Group>
     </Stack>

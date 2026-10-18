@@ -27,10 +27,18 @@ import {
   subscribeExternalMockChanges,
 } from "../../shared/mockState";
 
+interface PendingAuditRecord {
+  target: PriceTarget;
+  before: PriceView;
+  after: PriceView;
+  reason: string;
+}
+
 interface MockPricingState {
   records: PriceView[];
   schedules: ScheduleView[];
   sequence: number;
+  pendingAudit?: PendingAuditRecord[];
 }
 
 function isPriceRecord(value: unknown): value is PriceView {
@@ -86,7 +94,7 @@ export function createMockPricingRepository(
   clock: Clock,
   onUpdated?: (target: PriceTarget, before: PriceView, after: PriceView, reason: string) => void,
   options: { persist?: boolean } = {},
-): PricingRepository {
+): PricingRepository & { reconcileAudit?: () => void } {
   const persistEnabled = options.persist === true && isMockPersistenceAvailable();
   const restored = persistEnabled
     ? readMockState<MockPricingState>("pricing", isMockPricingState)
@@ -94,16 +102,41 @@ export function createMockPricingRepository(
   const records = restored ? restored.records : structuredClone(priceRecords);
   const targets = structuredClone(priceTargets);
   const names = { ...targetNames };
+  const pendingAudit: PendingAuditRecord[] = restored?.pendingAudit
+    ? structuredClone(restored.pendingAudit)
+    : [];
   // A non-persistent instance (persist: false) must never touch `localStorage`;
   // it still notifies in-session listeners so local tests keep working.
-  const persist = () => {
+  const persist = (): boolean => {
+    let ok = true;
     if (persistEnabled) {
-      saveMockState("pricing", { records, schedules, sequence } satisfies MockPricingState);
+      ok = saveMockState("pricing", { records, schedules, sequence, pendingAudit } satisfies MockPricingState);
     }
     publishMockChange("pricing");
+    return ok;
+  };
+  const flushPendingAudit = () => {
+    if (!onUpdated || pendingAudit.length === 0) return;
+    const remaining: PendingAuditRecord[] = [];
+    for (const item of pendingAudit) {
+      try {
+        onUpdated(item.target, item.before, item.after, item.reason);
+      } catch {
+        remaining.push(item);
+      }
+    }
+    if (remaining.length !== pendingAudit.length) {
+      pendingAudit.length = 0;
+      pendingAudit.push(...remaining);
+      persist();
+    }
   };
   async function refreshTargets(signal?: AbortSignal) {
+    if (!persistEnabled) {
+      return;
+    }
     signal?.throwIfAborted();
+    flushPendingAudit();
     const current = await readMockPricingTargets(signal ?? new AbortController().signal);
     for (const catalogTarget of current) {
       const existing = targets.find((t) =>
@@ -112,13 +145,29 @@ export function createMockPricingRepository(
           ? t.productId === catalogTarget.productId
           : t.kind === "variant" && t.sku === catalogTarget.sku),
       );
-      if (!existing) continue;
 
-      if (catalogTarget.kind === "product" && existing.kind === "product") {
-        const catalogName = catalogTarget.label.slice(0, catalogTarget.label.lastIndexOf(" · "));
-        if (catalogName && catalogName !== targetNames[existing.id]) {
-          existing.label = `${catalogName} · ${existing.referenceSku}`;
-          names[existing.id] = catalogName;
+      if (existing) {
+        if (catalogTarget.kind === "product" && existing.kind === "product") {
+          const catalogName = catalogTarget.label.slice(0, catalogTarget.label.lastIndexOf(" · "));
+          if (catalogName && catalogName !== targetNames[existing.id]) {
+            existing.label = `${catalogName} · ${existing.referenceSku}`;
+            names[existing.id] = catalogName;
+          }
+        }
+      } else {
+        const newTarget: PriceTarget = structuredClone(catalogTarget);
+        if (newTarget.kind === "variant") {
+          const parent = targets.find(t => t.kind === "product" && t.productId === newTarget.productId);
+          if (parent) {
+            newTarget.productTargetId = parent.id;
+          }
+        }
+        targets.push(newTarget);
+        if (newTarget.kind === "product") {
+          const catalogName = newTarget.label.slice(0, newTarget.label.lastIndexOf(" · "));
+          names[newTarget.id] = catalogName || newTarget.label;
+        } else {
+          names[newTarget.id] = newTarget.label.split(" — ")[0] || newTarget.label;
         }
       }
     }
@@ -291,14 +340,31 @@ export function createMockPricingRepository(
         )
           row.validUntil = clock.now();
       records.push(saved);
-      persist();
+      let auditFailed = false;
       try {
         onUpdated?.(target, current, saved, change.draft.reason);
       } catch (error) {
+        auditFailed = true;
+        pendingAudit.push({
+          target,
+          before: current,
+          after: saved,
+          reason: change.draft.reason,
+        });
         console.warn(
           "Fallo en la notificación onUpdated tras guardar el precio:",
           error,
         );
+      }
+      const persisted = persist();
+      if (!persisted && persistEnabled) {
+        throw new PricingFailure(
+          "error",
+          "No se pudo guardar el cambio. Vuelve a intentarlo.",
+        );
+      }
+      if (!auditFailed) {
+        flushPendingAudit();
       }
       return structuredClone(saved);
     },
@@ -392,6 +458,9 @@ export function createMockPricingRepository(
         }),
         filename: `reporte-ficticio-${id}.csv`,
       };
+    },
+    reconcileAudit() {
+      flushPendingAudit();
     },
   };
 }

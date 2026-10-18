@@ -96,11 +96,15 @@ export class MockCatalogRepository implements CatalogRepository {
   revision = () => this.revisionValue;
   private changed(persist = true) {
     this.revisionValue++;
+    let ok = true;
     if (persist && this.persistEnabled) {
-      saveMockState("catalog", this.snapshot());
+      ok = saveMockState("catalog", this.snapshot());
     }
     publishMockChange("catalog");
     this.listeners.forEach(listener => listener());
+    if (!ok && persist && this.persistEnabled) {
+      throw new CatalogError("unknown", "No se pudo guardar el cambio. Vuelve a intentarlo.");
+    }
   }
 
   constructor(

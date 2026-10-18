@@ -81,16 +81,18 @@ export function createMockPricingAudit(options: { persist?: boolean } = {}) {
         const next = priceType === "REGULAR" ? after.regular : after.offer;
         if (previous === next || (previous !== null && next !== null &&
           !decimalLess(previous, next) && !decimalLess(next, previous))) continue;
+        const channelSuffix = `${after.channel}-v${after.version}`;
         const alreadyRecorded = entries.some(
           (e) =>
             e.sku === sku &&
             e.productId === target.productId &&
             e.priceType === priceType &&
-            e.id.endsWith(`-v${after.version}`),
+            (e.id.endsWith(`-${channelSuffix}`) ||
+              e.id.endsWith(`-v${after.version}`)),
         );
         if (alreadyRecorded) continue;
         entries.unshift({
-          id: `demo-pricing-${++sequence}-v${after.version}`,
+          id: `demo-pricing-${++sequence}-${channelSuffix}`,
           sku,
           productId: target.productId,
           priceType,

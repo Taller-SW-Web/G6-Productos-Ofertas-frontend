@@ -167,9 +167,10 @@ export class MockInventoryAdapter implements InventoryRepository {
     this.processedOperationKeys = new Map(stored.processedOperationKeys);
   }
 
-  private persist(): void {
+  private persist(): boolean {
+    let ok = true;
     if (this.persistEnabled) {
-      saveMockState("inventory", {
+      ok = saveMockState("inventory", {
         stockItems: this.stockItems,
         thresholds: this.thresholds,
         transfers: this.transfers,
@@ -179,6 +180,7 @@ export class MockInventoryAdapter implements InventoryRepository {
       } satisfies MockInventoryState);
     }
     publishMockChange("inventory");
+    return ok;
   }
 
   private async refreshCatalogMetadata() {
@@ -395,7 +397,12 @@ export class MockInventoryAdapter implements InventoryRepository {
     }
     this.thresholds.globalThreshold = threshold;
     this.stockItems.forEach((item) => this.recalculateStockStatus(item));
-    this.persist();
+    if (!this.persist() && this.persistEnabled) {
+      throw new InventoryError(
+        "OPERATIVO",
+        "No se pudo guardar el cambio. Vuelve a intentarlo.",
+      );
+    }
     return JSON.parse(JSON.stringify(this.thresholds));
   }
 
@@ -411,7 +418,12 @@ export class MockInventoryAdapter implements InventoryRepository {
     }
     this.thresholds.skuOverrides[sku] = threshold;
     this.stockItems.forEach((item) => this.recalculateStockStatus(item));
-    this.persist();
+    if (!this.persist() && this.persistEnabled) {
+      throw new InventoryError(
+        "OPERATIVO",
+        "No se pudo guardar el cambio. Vuelve a intentarlo.",
+      );
+    }
     return JSON.parse(JSON.stringify(this.thresholds));
   }
 
@@ -560,7 +572,12 @@ export class MockInventoryAdapter implements InventoryRepository {
     const result: TransferItem = { ...transfer };
     this.processedOperations.set(payload.operationId, result);
     this.processedOperationKeys.set(payload.operationId, intent);
-    this.persist();
+    if (!this.persist() && this.persistEnabled) {
+      throw new InventoryError(
+        "OPERATIVO",
+        "No se pudo guardar el cambio. Vuelve a intentarlo.",
+      );
+    }
     return result;
   }
 
