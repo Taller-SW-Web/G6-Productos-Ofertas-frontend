@@ -53,7 +53,7 @@ export const priceTargets: PriceTarget[] = [
   },
   {
     id: "combo-run-bla-m",
-    label: "Color: Blanco · Talla: M — CAM-RUN-BLA-M",
+    label: "Color principal: Blanco · Talla: M — CAM-RUN-BLA-M",
     productId: "PROD-RUN-001",
     kind: "variant",
     sku: "CAM-RUN-BLA-M",
@@ -61,7 +61,7 @@ export const priceTargets: PriceTarget[] = [
   },
   {
     id: "combo-run-azu-l",
-    label: "Color: Azul Índigo · Talla: L — CAM-RUN-AZU-L",
+    label: "Color principal: Azul Índigo · Talla: L — CAM-RUN-AZU-L",
     productId: "PROD-RUN-001",
     kind: "variant",
     sku: "CAM-RUN-AZU-L",
@@ -75,8 +75,8 @@ export const targetNames: Record<string, string> = {
   override42: "Talla 42 · Negro",
   "combo-casaca": "Casaca Cortaviento Trail",
   "combo-run-base": "Camiseta Running Endurance",
-  "combo-run-bla-m": "Color: Blanco · Talla: M",
-  "combo-run-azu-l": "Color: Azul Índigo · Talla: L",
+  "combo-run-bla-m": "Color principal: Blanco · Talla: M",
+  "combo-run-azu-l": "Color principal: Azul Índigo · Talla: L",
 };
 export const priceRecords: PriceView[] = [
   {
