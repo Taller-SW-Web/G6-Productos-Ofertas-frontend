@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mockBulkRepository } from "../src/features/bulk/adapters/mockBulkRepository";
 import { BulkRepositoryError, createBulkRepository } from "../src/features/bulk/services/bulkService";
 import { canRequestImportReport } from "../src/features/bulk/services/bulkRepository";
@@ -111,6 +111,27 @@ describe("Bulk mock repository and global data mode", () => {
     expect(batch.status).toBe("QUEUED");
     expect(batch.total_rows).toBe(2);
     expect(batch.file_name).toBe("catalogo.csv");
+  });
+
+  it("rejects XLSX imports as unconfigured without creating a batch or scheduling timers", async () => {
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+    try {
+      await expect(
+        mockBulkRepository.createImport(new File(["fake workbook"], "catalogo.xlsx")),
+      ).rejects.toMatchObject({
+        name: "BulkRepositoryError",
+        message: "La importación Excel no está disponible en este entorno.",
+        category: "configuration",
+      });
+      expect(setTimeoutSpy).not.toHaveBeenCalled();
+    } finally {
+      setTimeoutSpy.mockRestore();
+    }
+
+    const next = await mockBulkRepository.createImport(
+      new File([MOCK_CSV_SAMPLE_DATA], "valid.csv", { type: "text/csv" }),
+    );
+    expect(next.batch_id).toMatch(/^lote-imp-1001-/);
   });
 
   it("keeps batch refresh reads free of import writes", async () => {

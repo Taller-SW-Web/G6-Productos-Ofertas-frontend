@@ -729,6 +729,12 @@ export const mockBulkRepository: BulkRepository & {
     signal?.throwIfAborted();
 
     const lowerName = file.name.toLowerCase();
+    if (lowerName.endsWith(".xlsx")) {
+      throw new BulkRepositoryError(
+        "La importación Excel no está disponible en este entorno.",
+        "configuration",
+      );
+    }
 
     // Rejection scenarios based on scenario param or file naming
     if (lowerName.includes("invalido")) {
