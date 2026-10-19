@@ -9,14 +9,80 @@ import type {
   RecommendationRepository,
   RecommendationView,
 } from "../services/recommendationRepository";
+import {
+  isMockPersistenceAvailable,
+  isRecord,
+  publishMockChange,
+  readMockState,
+  saveMockState,
+  subscribeExternalMockChanges,
+} from "../../shared/mockState";
+
+interface MockRecommendationState {
+  records: RecommendationView[];
+  sequence: number;
+}
+
+function isRecommendationRecord(value: unknown): value is RecommendationView {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    value.id.trim().length > 0 &&
+    typeof value.name === "string" &&
+    value.name.trim().length > 0 &&
+    typeof value.status === "string" &&
+    ["active", "inactive", "draft"].includes(value.status)
+  );
+}
+
+function isMockRecommendationState(value: unknown): value is MockRecommendationState {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.records) &&
+    value.records.every(isRecommendationRecord) &&
+    typeof value.sequence === "number" &&
+    Number.isFinite(value.sequence) &&
+    value.sequence >= 0
+  );
+}
+
 export function createMockRecommendationRepository(
   catalog: () => PromotionCatalogRepository,
   fixtures: readonly RecommendationView[] = recommendationFixtures,
+  options: { persist?: boolean } = {},
 ): RecommendationRepository {
-  const records: RecommendationView[] = fixtures.map((item) =>
-    structuredClone(item),
-  );
-  let sequence = 0;
+  const persistEnabled = options.persist === true && isMockPersistenceAvailable();
+  const restored = persistEnabled
+    ? readMockState<MockRecommendationState>("promotions-recommendations", isMockRecommendationState)
+    : null;
+  const records: RecommendationView[] = restored
+    ? restored.records
+    : fixtures.map((item) => structuredClone(item));
+  let sequence = restored ? restored.sequence : 0;
+  const persist = (): boolean => {
+    // A non-persistent instance (persist: false) must never touch `localStorage`.
+    let ok = true;
+    if (persistEnabled) {
+      ok = saveMockState("promotions-recommendations", { records, sequence } satisfies MockRecommendationState);
+    }
+    publishMockChange("promotions-recommendations");
+    publishMockChange("promotions");
+    return ok;
+  };
+  if (persistEnabled) {
+    subscribeExternalMockChanges("promotions-recommendations", () => {
+      const stored = readMockState<MockRecommendationState>(
+        "promotions-recommendations",
+        isMockRecommendationState,
+      );
+      if (!stored) return;
+      records.length = 0;
+      records.push(...stored.records);
+      sequence = stored.sequence;
+      publishMockChange("promotions-recommendations");
+      publishMockChange("promotions");
+    });
+  }
   return {
     async list(query, signal) {
       signal.throwIfAborted();
@@ -99,6 +165,12 @@ export function createMockRecommendationRepository(
       };
       if (id) records[records.findIndex((item) => item.id === id)] = record;
       else records.push(record);
+      if (!persist() && persistEnabled) {
+        throw new AdministrationError(
+          "rejected",
+          "No se pudo guardar el cambio. Vuelve a intentarlo.",
+        );
+      }
       return structuredClone(record);
     },
     async changeStatus(id, status, signal) {
@@ -121,6 +193,12 @@ export function createMockRecommendationRepository(
         configuration: { ...previous.configuration, status },
       };
       records[index] = record;
+      if (!persist() && persistEnabled) {
+        throw new AdministrationError(
+          "rejected",
+          "No se pudo guardar el cambio. Vuelve a intentarlo.",
+        );
+      }
       return structuredClone(record);
     },
   };

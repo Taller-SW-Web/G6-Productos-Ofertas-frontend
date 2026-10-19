@@ -16,7 +16,6 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import {
-  ContextNote,
   EntityTable,
   FeedbackAlert,
   FilterBar,
@@ -29,6 +28,7 @@ import { DashboardAlerts } from "../components/DashboardAlerts";
 import { DashboardKpiGrid } from "../components/DashboardKpiGrid";
 import { LocationDistributionTable } from "../components/LocationDistributionTable";
 import { StockDetailDrawer } from "../components/StockDetailDrawer";
+import { DevScenarioSelector } from "../dev/DevScenarioSelector";
 import { useInventoryDashboard } from "../hooks/useInventoryDashboard";
 import { useInventoryFilterOptions } from "../hooks/useInventoryFilterOptions";
 import type {
@@ -70,6 +70,9 @@ export function InventoryDashboardPage() {
   } = useInventoryFilterOptions();
 
   const [selectedItem, setSelectedItem] = useState<StockItem | null>(null);
+
+  const isRevisionMode =
+    import.meta.env.DEV && params.get("modoRevision") === "1";
 
   const handleFilterChange = (key: keyof DashboardFiltersQuery, val: string | null) => {
     setParams((prev) => {
@@ -262,10 +265,19 @@ export function InventoryDashboardPage() {
       />
 
       <Stack gap="xl">
-        <ContextNote title="Panel de solo lectura">
-          Este panel resume indicadores clave del catálogo y almacenes. Para registrar recepciones de traslados
-          o ajustar umbrales, utiliza las vistas operativas de control de stock.
-        </ContextNote>
+        <Text
+          size="sm"
+          style={{
+            color: "var(--po-secondary)",
+            fontSize: 14,
+            lineHeight: "20px",
+          }}
+          fw={600}
+        >
+          Panel de solo lectura
+        </Text>
+
+        {isRevisionMode && <DevScenarioSelector />}
 
 
         {(catalogErrors.categories ||

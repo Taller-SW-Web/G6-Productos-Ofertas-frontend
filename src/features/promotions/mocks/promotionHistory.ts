@@ -1,29 +1,101 @@
 import type { CouponView } from "../services/couponRepository";
+import {
+  isMockPersistenceAvailable,
+  isRecord,
+  publishMockChange,
+  readMockState,
+  saveMockState,
+  subscribeExternalMockChanges,
+} from "../../shared/mockState";
 
 // Simulated provider history, not a DTO or a capability computed by React.
 export interface PromotionHistoryFacts {
   activated: boolean | undefined;
   used: boolean | undefined;
 }
+
+type PromotionHistoryState = Record<string, PromotionHistoryFacts>;
+
+function isPromotionHistoryState(value: unknown): value is PromotionHistoryState {
+  if (!isRecord(value)) return false;
+  for (const [k, v] of Object.entries(value)) {
+    if (typeof k !== "string" || k.trim().length === 0 || !isRecord(v)) return false;
+    if (v.activated !== undefined && typeof v.activated !== "boolean") return false;
+    if (v.used !== undefined && typeof v.used !== "boolean") return false;
+  }
+  return true;
+}
+
 export function createPromotionHistory(
   initial: Readonly<Record<string, PromotionHistoryFacts>>,
+  options: { persist?: boolean } = {},
 ) {
+  const persistEnabled = options.persist === true && isMockPersistenceAvailable();
+  const restored = persistEnabled
+    ? readMockState<PromotionHistoryState>("promotions-history", isPromotionHistoryState)
+    : null;
   const facts = new Map(
-    Object.entries(initial).map(([id, value]) => [id, { ...value }]),
+    Object.entries(restored ?? initial).map(([id, value]) => [id, { ...value }]),
   );
   const observedCoupons = new Map<
     string,
     { promotionId: string; consumedUses: number | undefined }
   >();
+
+  function persist(): boolean {
+    // A non-persistent instance (persist: false) must never touch `localStorage`.
+    let ok = true;
+    if (persistEnabled) {
+      ok = saveMockState("promotions-history", Object.fromEntries(facts) as PromotionHistoryState);
+    }
+    publishMockChange("promotions-history");
+    publishMockChange("promotions");
+    return ok;
+  }
+
+  if (persistEnabled) {
+    subscribeExternalMockChanges("promotions-history", () => {
+      const stored = readMockState<PromotionHistoryState>(
+        "promotions-history",
+        isPromotionHistoryState,
+      );
+      if (!stored) return;
+      facts.clear();
+      for (const [id, value] of Object.entries(stored)) {
+        facts.set(id, { ...value });
+      }
+      publishMockChange("promotions-history");
+      publishMockChange("promotions");
+    });
+  }
+
   return {
     initialize(id: string, active: boolean) {
       facts.set(id, { activated: active, used: false });
+      if (persistEnabled) {
+        const ok = persist();
+        if (!ok) {
+          facts.delete(id);
+          throw new Error("No se pudo guardar el historial de la promoción.");
+        }
+      }
     },
     activate(id: string) {
       const value = facts.get(id);
       facts.set(id, { activated: true, used: value?.used });
+      if (persistEnabled) {
+        const ok = persist();
+        if (!ok) {
+          if (value) facts.set(id, value);
+          else facts.delete(id);
+          throw new Error("No se pudo actualizar el estado de la promoción.");
+        }
+      }
     },
     observe(coupon: CouponView) {
+      const signature = persistEnabled
+        ? JSON.stringify([...facts.entries()])
+        : "";
       const value = facts.get(coupon.promotionId);
       const previous = observedCoupons.get(coupon.id);
       observedCoupons.set(coupon.id, {
@@ -51,6 +123,7 @@ export function createPromotionHistory(
         }
       }
       // A reassignment preserves the coupon's total uses; it is not a new use of the destination.
+      if (persistEnabled && JSON.stringify([...facts.entries()]) !== signature) persist();
     },
     capability(
       id: string,

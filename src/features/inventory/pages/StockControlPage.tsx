@@ -8,7 +8,6 @@ import {
   IconTruckDelivery,
 } from "@tabler/icons-react";
 import {
-  ContextNote,
   EntityTable,
   PageHeader,
   StatusBadge,
@@ -16,6 +15,7 @@ import {
 } from "../../../components/shared";
 import { StockFilters } from "../components/StockFilters";
 import { StockDetailDrawer } from "../components/StockDetailDrawer";
+import { DevScenarioSelector } from "../dev/DevScenarioSelector";
 import { useInventoryStock } from "../hooks/useInventoryStock";
 import { useInventoryFilterOptions } from "../hooks/useInventoryFilterOptions";
 import type { StockFiltersQuery, StockItem } from "../services/inventoryTypes";
@@ -35,6 +35,9 @@ export function StockControlPage() {
   const { items, loading, error, refetch } = useInventoryStock(filters);
   const { locations, loading: catalogLoading } = useInventoryFilterOptions();
   const [selectedItem, setSelectedItem] = useState<StockItem | null>(null);
+
+  const isRevisionMode =
+    import.meta.env.DEV && params.get("modoRevision") === "1";
 
   const handleFiltersChange = (next: StockFiltersQuery) => {
     setParams((prev) => {
@@ -239,11 +242,7 @@ export function StockControlPage() {
       />
 
       <Stack gap="lg">
-        <ContextNote title="Disponibilidad autoritativa multicanal">
-          El saldo disponible se calcula a partir de las unidades físicas menos las reservadas y las
-          bloqueadas, sin valores negativos. Los canales de venta consultan este saldo sin modificar
-          físicamente el inventario.
-        </ContextNote>
+        {isRevisionMode && <DevScenarioSelector />}
 
 
         <StockFilters

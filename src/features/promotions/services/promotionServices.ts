@@ -14,6 +14,9 @@ import {
   createPromotionHistory,
   promotionHistoryFixtures,
 } from "../mocks/promotionHistory";
+import { campaignFixtures } from "../mocks/campaigns";
+import { couponFixtures } from "../mocks/coupons";
+import { recommendationFixtures } from "../mocks/recommendations";
 import { createReviewServiceResolver } from "../dev/reviewServices";
 import type { DataMode } from "../../../app/config/dataMode";
 
@@ -49,7 +52,7 @@ export function createPromotionRuntime(
     throw new Error("La administración de promociones no está disponible.");
   const services =
     mode === "mock"
-      ? createMockPromotionServices()
+      ? createMockPromotionServices(undefined, { persist: true })
       : createPromotionServices(dependencies.api!());
   const context: PromotionServiceContext = {
     services,
@@ -78,8 +81,9 @@ export function createPromotionServices(
 
 export function createMockPromotionServices(
   overrides: Partial<PromotionServices> = {},
+  options: { persist?: boolean } = {},
 ): PromotionServices {
-  const history = createPromotionHistory(promotionHistoryFixtures);
+  const history = createPromotionHistory(promotionHistoryFixtures, options);
   const observe = (record: CouponView | null) => {
     if (record) history.observe(record);
     return record;
@@ -126,9 +130,9 @@ export function createMockPromotionServices(
       history,
       hasCoupons: async (id, signal) =>
         (await observeAll(signal)).some((coupon) => coupon.promotionId === id),
-    });
+    }, campaignFixtures, options);
   const couponAdapter =
-    overrides.coupons ?? createMockCouponRepository({ promotions });
+    overrides.coupons ?? createMockCouponRepository({ promotions }, couponFixtures, options);
   const coupons: CouponRepository = {
     promotions: (signal) => couponAdapter.promotions(signal),
     async list(query, signal) {
@@ -159,7 +163,7 @@ export function createMockPromotionServices(
   };
   const recommendations =
     overrides.recommendations ??
-    createMockRecommendationRepository(() => catalog);
+    createMockRecommendationRepository(() => catalog, recommendationFixtures, options);
   return createPromotionServices({
     coupons,
     campaigns,

@@ -10,19 +10,21 @@ export function decorateDemoRepository(
 ): PricingRepository {
   async function check(
     operation: keyof PricingRepository,
-    signal: AbortSignal,
+    signal?: AbortSignal,
   ) {
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     const scenario = control.scenario(operation);
-    if (scenario === "loading")
+    if (scenario === "loading") {
+      const activeSignal = signal ?? new AbortController().signal;
       await new Promise<never>((_, reject) =>
-        signal.addEventListener(
+        activeSignal.addEventListener(
           "abort",
           () => reject(new DOMException("Aborted", "AbortError")),
           { once: true },
         ),
       );
-    signal.throwIfAborted();
+    }
+    signal?.throwIfAborted();
     if (scenario === "error")
       throw new PricingFailure(
         "error",
@@ -173,9 +175,12 @@ export function decorateDemoRepository(
             ],
             { type: "text/csv;charset=utf-8" },
           ),
-          filename: `reporte-ficticio-${id}.csv`,
+          filename: `reporte_precios_${id}.csv`,
         };
       return repository.report(id, signal);
+    },
+    reconcileAudit() {
+      repository.reconcileAudit?.();
     },
   };
 }

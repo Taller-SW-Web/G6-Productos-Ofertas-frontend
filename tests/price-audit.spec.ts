@@ -509,8 +509,8 @@ test("MK-014 S01–S05: 1440px screenshots, keyboard modal and prepared CSV/PDF 
     const downloading = page.waitForEvent("download");
     await page.getByRole("button", { name: `Descargar ${format}` }).click();
     const file = await downloading;
-    expect(file.suggestedFilename()).toBe(
-      `muestra-auditoria.${format!.toLowerCase()}`,
+    expect(file.suggestedFilename()).toMatch(
+      new RegExp(`^reporte_auditoria_.*\\.${format!.toLowerCase()}$`),
     );
     const stream = (await file.createReadStream())!;
     const chunks: Buffer[] = [];

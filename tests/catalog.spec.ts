@@ -10,7 +10,7 @@ async function noPageOverflow(page: Page) {
 }
 
 test.describe("MK-003 Gestión de productos (CRUD principal)", () => {
-  test("S01: listado, búsqueda, filtros combinados y conservación de contexto", async ({
+  test("@smoke S01: listado, búsqueda, filtros combinados y conservación de contexto", async ({
     page,
   }) => {
     await page.goto("/productos");
@@ -108,7 +108,7 @@ test.describe("MK-003 Gestión de productos (CRUD principal)", () => {
     await expect(
       page.getByRole("heading", { name: "Preparación del producto" }),
     ).toBeVisible();
-    await expect(page.getByText("Borrador guardado exitosamente.")).toBeVisible();
+    await expect(page.getByText("Borrador guardado.", { exact: true })).toBeVisible();
     await noPageOverflow(page);
   });
 
@@ -264,8 +264,9 @@ test.describe("MK-003 Gestión de productos (CRUD principal)", () => {
     // Execute retry (HTTP 202)
     await retryBtn.click();
     await expect(
-      page.getByText("Reintento admitido (HTTP 202)"),
+      page.getByText("Reintento solicitado", { exact: true }),
     ).toBeVisible();
+    await expect(page.getByText("Inicialización de SKU simple en curso.", { exact: false })).toBeVisible();
     await noPageOverflow(page);
   });
 

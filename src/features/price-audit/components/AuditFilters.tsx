@@ -42,15 +42,7 @@ export function AuditFilters({
               label={filterLabels[field]}
               style={{ flex: "1 1 280px", minWidth: 0 }}
               type={date ? "datetime-local" : "text"}
-              description={
-                date
-                  ? "America/Bogota (UTC−5)"
-                  : field === "usuarioId"
-                    ? "Referencia conocida; no correo electrónico"
-                    : field === "canal"
-                      ? "Referencia conocida del origen; sin catálogo de canales supuesto"
-                      : undefined
-              }
+              description={date ? "America/Bogota (UTC−5)" : undefined}
               value={date ? toLocal(draft[field]) : draft[field]}
               error={field === "desde" ? error : undefined}
               onChange={(event) => {

@@ -10,6 +10,43 @@ import type {
   CampaignView,
 } from "../services/campaignRepository";
 import type { PromotionCatalogRepository } from "../services/catalogRepository";
+import {
+  isMockPersistenceAvailable,
+  isRecord,
+  publishMockChange,
+  readMockState,
+  saveMockState,
+  subscribeExternalMockChanges,
+} from "../../shared/mockState";
+
+interface MockCampaignState {
+  records: CampaignView[];
+  sequence: number;
+}
+
+function isCampaignRecord(value: unknown): value is CampaignView {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    value.id.trim().length > 0 &&
+    typeof value.name === "string" &&
+    value.name.trim().length > 0 &&
+    typeof value.status === "string" &&
+    ["active", "inactive", "draft", "expired", "scheduled"].includes(value.status)
+  );
+}
+
+function isMockCampaignState(value: unknown): value is MockCampaignState {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.records) &&
+    value.records.every(isCampaignRecord) &&
+    typeof value.sequence === "number" &&
+    Number.isFinite(value.sequence) &&
+    value.sequence >= 0
+  );
+}
+
 export function createMockCampaignRepository(
   dependencies: {
     catalog: () => PromotionCatalogRepository;
@@ -17,9 +54,38 @@ export function createMockCampaignRepository(
     history: PromotionHistory;
   },
   fixtures: readonly CampaignView[] = campaignFixtures,
+  options: { persist?: boolean } = {},
 ): CampaignRepository {
-  const records = fixtures.map((item) => structuredClone(item));
-  let sequence = 0;
+  const persistEnabled = options.persist === true && isMockPersistenceAvailable();
+  const restored = persistEnabled
+    ? readMockState<MockCampaignState>("promotions-campaigns", isMockCampaignState)
+    : null;
+  const records = restored ? restored.records : fixtures.map((item) => structuredClone(item));
+  let sequence = restored ? restored.sequence : 0;
+  const persist = (): boolean => {
+    // A non-persistent instance (persist: false) must never touch `localStorage`.
+    let ok = true;
+    if (persistEnabled) {
+      ok = saveMockState("promotions-campaigns", { records, sequence } satisfies MockCampaignState);
+    }
+    publishMockChange("promotions-campaigns");
+    publishMockChange("promotions");
+    return ok;
+  };
+  if (persistEnabled) {
+    subscribeExternalMockChanges("promotions-campaigns", () => {
+      const stored = readMockState<MockCampaignState>(
+        "promotions-campaigns",
+        isMockCampaignState,
+      );
+      if (!stored) return;
+      records.length = 0;
+      records.push(...stored.records);
+      sequence = stored.sequence;
+      publishMockChange("promotions-campaigns");
+      publishMockChange("promotions");
+    });
+  }
   async function snapshot(record: CampaignView, signal: AbortSignal) {
     const hasCoupons = await dependencies.hasCoupons(record.id, signal);
     signal.throwIfAborted();
@@ -123,6 +189,12 @@ export function createMockCampaignRepository(
         dependencies.history.initialize(record.id, status === "active");
       if (id) records[records.findIndex((item) => item.id === id)] = record;
       else records.push(record);
+      if (!persist() && persistEnabled) {
+        throw new AdministrationError(
+          "rejected",
+          "No se pudo guardar el cambio. Vuelve a intentarlo.",
+        );
+      }
       return snapshot(record, signal);
     },
     async changeStatus(id, status, signal) {
@@ -146,6 +218,12 @@ export function createMockCampaignRepository(
       };
       if (status === "active") dependencies.history.activate(id);
       records[index] = record;
+      if (!persist() && persistEnabled) {
+        throw new AdministrationError(
+          "rejected",
+          "No se pudo guardar el cambio. Vuelve a intentarlo.",
+        );
+      }
       return snapshot(record, signal);
     },
   };

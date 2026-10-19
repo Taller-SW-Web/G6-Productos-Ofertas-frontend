@@ -14,12 +14,14 @@ import {
 import { useProductTypeList } from "../hooks/useProductTypeList";
 import { estadoCaracteristicaSemantic } from "../services/estadoSemantic";
 import type { ProductTypeListItem } from "../types";
+import { useMockStateRevision } from "../../shared/useMockStateRevision";
 
 export function ProductTypeListPage() {
   const navigate = useNavigate();
   const [revision, setRevision] = useState(0);
+  const mockRevision = useMockStateRevision(["taxonomy", "taxonomy-product-types"]);
   const [busqueda, setBusqueda] = useState("");
-  const { state } = useProductTypeList(revision);
+  const { state } = useProductTypeList(revision + mockRevision);
 
   const resultado = state.status === "success" ? state.result : undefined;
   const tipos = useMemo(() => resultado?.items ?? [], [resultado]);

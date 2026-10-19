@@ -19,10 +19,12 @@ import {
   selectBatchQueryView,
   type BatchQueryState,
 } from "./bulkQueryState";
+import { useMockStateRevision } from "../../shared/useMockStateRevision";
 
 export function useBulkBatch(batchId: string | undefined) {
   const repository = useBulkRepository();
   const [revision, setRevision] = useState(0);
+  const mockRevision = useMockStateRevision(["bulk"]);
   const [response, setResponse] = useState<{
     key: string;
     state: BatchQueryState;
@@ -38,7 +40,7 @@ export function useBulkBatch(batchId: string | undefined) {
   const resumeInFlight = useRef(false);
   const reportInFlight = useRef(false);
 
-  const requestKey = JSON.stringify([batchId, revision]);
+  const requestKey = JSON.stringify([batchId, revision + mockRevision]);
 
   useEffect(() => {
     if (!batchId) return;

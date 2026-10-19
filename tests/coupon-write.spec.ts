@@ -187,7 +187,9 @@ test("MK-005 S06: cancellation and rejection retain state/usage; confirmation ch
       .getByRole("region", { name: "Uso global y límites", exact: true })
       .getByText("28", { exact: true }),
   ).toBeVisible();
-  await page.goto("/cupones/bienvenida15?modoRevision=1&escenario=rejected");
+  // La baja confirmada de arriba ahora persiste en el navegador (ya no se reinicia al
+  // navegar). El escenario de rechazo se prueba sobre otro cupón que sigue activo.
+  await page.goto("/cupones/run10?modoRevision=1&escenario=rejected");
   await page
     .getByRole("button", { name: "Desactivar cupón", exact: true })
     .click();

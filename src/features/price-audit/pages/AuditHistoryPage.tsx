@@ -16,6 +16,7 @@ import { AuditScope } from "../components/AuditScope";
 import { AuditTable } from "../components/AuditTable";
 import { AuditDataNotice } from "../components/AuditDataNotice";
 import type { AuditHistoryContext } from "../hooks/useAuditHistoryContext";
+import { useMockStateRevision } from "../../shared/useMockStateRevision";
 
 export function AuditHistoryPage() {
   const [params, setParams] = useSearchParams();
@@ -23,7 +24,9 @@ export function AuditHistoryPage() {
   const query = useMemo(() => readAuditQuery(params), [params]);
   const key = JSON.stringify(query);
   const { repository } = useAuditRuntime();
-  const [revision, setRevision] = useState(0);
+  const [localRevision, setLocalRevision] = useState(0);
+  const externalRevision = useMockStateRevision(["price-audit", "pricing"]);
+  const revision = localRevision + externalRevision;
   const [denied, setDenied] = useState<string>();
   const inputError = validateAuditFilters(query);
   const read = useCallback(
@@ -56,7 +59,7 @@ export function AuditHistoryPage() {
     <>
       <PageHeader
         title="Historial de precios"
-        description="Bitácora de cambios confirmados, solo lectura. Es distinta de la consulta del precio vigente o en una fecha."
+        description="Bitácora de cambios confirmados."
         breadcrumbs={[
           { label: "Precios", to: "/precios" },
           { label: "Historial de precios" },
@@ -88,7 +91,7 @@ export function AuditHistoryPage() {
           key={key}
           query={query}
           onApply={(filters) => {
-            setRevision((value) => value + 1);
+            setLocalRevision((value) => value + 1);
             setParams(
               writeAuditQuery(
                 { ...filters, page: 1, size: query.size },
@@ -107,7 +110,7 @@ export function AuditHistoryPage() {
             {accessError}
             <Button
               variant="outline"
-              onClick={() => setRevision((value) => value + 1)}
+              onClick={() => setLocalRevision((value) => value + 1)}
             >
               Volver a consultar
             </Button>
@@ -143,7 +146,7 @@ export function AuditHistoryPage() {
               actions={
                 <Button
                   variant="outline"
-                  onClick={() => setRevision((value) => value + 1)}
+                  onClick={() => setLocalRevision((value) => value + 1)}
                 >
                   Volver a consultar
                 </Button>

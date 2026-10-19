@@ -150,6 +150,7 @@ export class CatalogError extends Error {
   constructor(
     public readonly kind:
       | "validation"
+      | "conflict"
       | "duplicate_sku"
       | "duplicate_combination"
       | "product_not_variants"

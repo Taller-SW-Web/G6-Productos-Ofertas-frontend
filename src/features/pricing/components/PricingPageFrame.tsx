@@ -2,7 +2,6 @@ import { Suspense, type ReactNode } from "react";
 import { Button, Group, Stack, Text } from "@mantine/core";
 import { Link } from "react-router-dom";
 import {
-  ContextNote,
   EmptyState,
   FeedbackAlert,
   PageHeader,
@@ -52,11 +51,6 @@ export function PricingPageFrame({
         }
       />
       <Stack gap="lg">
-        {runtime.notice && (
-          <ContextNote title={runtime.notice.title}>
-            {runtime.notice.description}
-          </ContextNote>
-        )}
         {Tools && (
           <Suspense fallback={null}>
             <Tools />

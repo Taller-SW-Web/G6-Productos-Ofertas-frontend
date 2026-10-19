@@ -30,7 +30,16 @@ export function CouponStateDialog({
   const command = usePromotionCommand<CouponView>();
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string>();
-  const target = coupon.status === "active" ? "inactive" : "active";
+  const [target, setTarget] = useState<"active" | "inactive">(
+    coupon.status === "active" ? "inactive" : "active",
+  );
+  const [prevOpened, setPrevOpened] = useState(false);
+  if (opened && !prevOpened) {
+    setPrevOpened(true);
+    setTarget(coupon.status === "active" ? "inactive" : "active");
+  } else if (!opened && prevOpened) {
+    setPrevOpened(false);
+  }
   const unknown =
     command.error instanceof CouponWriteError &&
     command.error.kind === "unknown";

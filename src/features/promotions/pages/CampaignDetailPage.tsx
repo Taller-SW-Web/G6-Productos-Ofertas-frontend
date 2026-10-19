@@ -20,7 +20,7 @@ import { AdministrationStateDialog } from "../components/AdministrationStateDial
 import { CampaignScope } from "../components/CampaignScope";
 import { useAdministrationRead } from "../hooks/useAdministrationRead";
 
-import { channelChoices } from "../services/campaignRepository";
+import { channelChoices, type CampaignView } from "../services/campaignRepository";
 import { couponStatusLabel } from "../services/couponPresentation";
 export function CampaignDetailPage({
   changeState = false,
@@ -51,7 +51,13 @@ export function CampaignDetailPage({
     `${promotionId}:${revision + queryRevision}`,
     read,
   );
-  const record = state.status === "success" ? state.result : null;
+  const [cachedRecord, setCachedRecord] = useState<CampaignView | null>(null);
+  const [prevResult, setPrevResult] = useState<CampaignView | null>(null);
+  if (state.status === "success" && state.result !== prevResult) {
+    setPrevResult(state.result);
+    setCachedRecord(state.result);
+  }
+  const record = state.status === "success" ? state.result : cachedRecord;
   const catalogRead = useCallback(
     (signal: AbortSignal) => confirmedServices.catalog.products(signal, record
       ? { productIds: record.configuration.productIds, skus: record.configuration.skus }
@@ -97,7 +103,7 @@ export function CampaignDetailPage({
             El cambio fue confirmado. Los pedidos históricos no se modifican.
           </FeedbackAlert>
         )}
-        {state.status === "loading" && (
+        {state.status === "loading" && !record && (
           <Text role="status">Consultando promoción…</Text>
         )}
         {state.status === "error" && (
@@ -154,7 +160,7 @@ export function CampaignDetailPage({
                 Canales:{" "}
                 {record.configuration.channels
                   .map(
-                    (value) =>
+                    (value: string) =>
                       channelChoices.find((item) => item.value === value)
                         ?.label ?? "No disponible",
                   )

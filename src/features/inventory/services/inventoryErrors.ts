@@ -5,7 +5,8 @@ export type InventoryErrorCode =
   | "CANTIDAD_INVALIDA"
   | "CANTIDAD_RECIBIDA_EXCEDE_TRASLADO"
   | "DISPOSICION_RECEPCION_INVALIDA"
-  | "IDEMPOTENCY_CONFLICT";
+  | "IDEMPOTENCY_CONFLICT"
+  | "OPERATIVO";
 
 export class InventoryError extends Error {
   readonly code: InventoryErrorCode;

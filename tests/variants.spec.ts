@@ -185,8 +185,8 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
     ).toBeVisible();
 
     // Check completed state
-    await expect(page.getByText("Preparación Completada (COMPLETED)")).toBeVisible();
-    await expect(page.getByText("El SKU se encuentra registrado y validado")).toBeVisible();
+    await expect(page.getByText("Preparación completada")).toBeVisible();
+    await expect(page.getByText("La preparación del SKU fue completada.")).toBeVisible();
 
     // Capture visual evidence S04
     await page.screenshot({ path: evidencePath("mk004-s04-preparacion-1440.png") });

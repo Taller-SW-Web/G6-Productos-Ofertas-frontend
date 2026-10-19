@@ -16,7 +16,7 @@ export function createDemoPricingRuntime(
 ): PricingRuntime {
   const clock = { now: () => demoNow };
   const control = new DemoControl();
-  const Panel = options.reviewTools && import.meta.env.DEV
+  const Panel = (options.reviewTools ?? true) && import.meta.env.DEV
     ? lazy(() =>
         import("./PricingDemoPanel").then((module) => ({
           default: module.PricingDemoPanel,
@@ -25,7 +25,7 @@ export function createDemoPricingRuntime(
     : undefined;
   return {
     service: decorateDemoRepository(
-      createMockPricingRepository(clock, mockPricingAudit.record),
+      createMockPricingRepository(clock, mockPricingAudit.record, { persist: true }),
       control,
     ),
     clock,

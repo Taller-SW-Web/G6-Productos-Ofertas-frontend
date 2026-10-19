@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mockBulkRepository } from "../src/features/bulk/adapters/mockBulkRepository";
 import { BulkRepositoryError, createBulkRepository } from "../src/features/bulk/services/bulkService";
 import { canRequestImportReport } from "../src/features/bulk/services/bulkRepository";
@@ -17,7 +17,13 @@ import { getDownloadFailureMessage, getUnavailableDownloadMessage } from "../src
 import { AdmissionCoordinator, LatestTaskCoordinator, runSingleFlight } from "../src/features/bulk/utils/asyncGuards";
 import { checkLocalFile, parseCsvSafely } from "../src/features/bulk/utils/localFileCheck";
 import { getGenuineMinimalXlsxArrayBuffer } from "./fixtures/genuineXlsxFixture";
-import { mockBatches, mockExports } from "../src/features/bulk/mocks/bulkFixtures";
+import { MOCK_CSV_SAMPLE_DATA, mockBatches, mockExports } from "../src/features/bulk/mocks/bulkFixtures";
+import { parseCsvRecords } from "../src/features/bulk/adapters/mockBulkRepository";
+import {
+  generateAuditPdf,
+  parsePdfStructure,
+} from "../src/features/price-audit/adapters/mockAuditRepository";
+import type { AuditEntry, AuditFilters } from "../src/features/price-audit/services/auditRepository";
 
 function fileWithBytes(name: string, bytes: Uint8Array) {
   const copy = new Uint8Array(bytes.byteLength);
@@ -105,6 +111,27 @@ describe("Bulk mock repository and global data mode", () => {
     expect(batch.status).toBe("QUEUED");
     expect(batch.total_rows).toBe(2);
     expect(batch.file_name).toBe("catalogo.csv");
+  });
+
+  it("rejects XLSX imports as unconfigured without creating a batch or scheduling timers", async () => {
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+    try {
+      await expect(
+        mockBulkRepository.createImport(new File(["fake workbook"], "catalogo.xlsx")),
+      ).rejects.toMatchObject({
+        name: "BulkRepositoryError",
+        message: "La importación Excel no está disponible en este entorno.",
+        category: "configuration",
+      });
+      expect(setTimeoutSpy).not.toHaveBeenCalled();
+    } finally {
+      setTimeoutSpy.mockRestore();
+    }
+
+    const next = await mockBulkRepository.createImport(
+      new File([MOCK_CSV_SAMPLE_DATA], "valid.csv", { type: "text/csv" }),
+    );
+    expect(next.batch_id).toMatch(/^lote-imp-1001-/);
   });
 
   it("keeps batch refresh reads free of import writes", async () => {
@@ -548,5 +575,254 @@ describe("Bulk reconciliation gating and export download eligibility", () => {
     expect(canDownloadExport({ job: mockExports["export-completed-xlsx"]!, isStale: false, dataMode: "api" })).toBe(true);
     expect(canDownloadExport({ job: mockExports["export-failed"]!, isStale: false, dataMode: "api" })).toBe(false);
     expect(canDownloadExport({ job: undefined, isStale: false, dataMode: "mock" })).toBe(false);
+  });
+});
+
+function createDummyAuditEntry(index: number, overrides: Partial<AuditEntry> = {}): AuditEntry {
+  return {
+    id: `aud-${String(index).padStart(4, "0")}`,
+    sku: `SKU-DUMMY-${index}`,
+    productId: `prod-${index}`,
+    priceType: "REGULAR",
+    before: "100.00",
+    after: "120.00",
+    variation: "+20.00%",
+    operation: "MODIFICACION",
+    origin: "global",
+    reason: `Motivo estándar ${index}`,
+    batchId: null,
+    actorId: "user-admin",
+    email: "admin@tienda.com",
+    ip: "192.168.1.1",
+    at: new Date(1700000000000 + index * 60000).toISOString(),
+    ...overrides,
+  };
+}
+
+const dummyFilters: AuditFilters = {
+  sku: "",
+  desde: "",
+  hasta: "",
+  usuarioId: "",
+  canal: "",
+  batchId: "",
+};
+
+describe("P1 CSV parsing and formatting validations", () => {
+  beforeEach(() => mockBulkRepository.resetMockState?.());
+  afterEach(() => mockBulkRepository.resetMockState?.());
+
+  it("admit exactly the three rows from the downloadable CSV template without structural rejection", async () => {
+    const resource = await mockBulkRepository.getTemplate("CSV");
+    expect(resource).not.toBeNull();
+    const content = await resource!.blob.text();
+    const batch = await mockBulkRepository.createImport(
+      new File([content], resource!.fileName, { type: "text/csv" }),
+    );
+    expect(batch.total_rows).toBe(3);
+    expect(batch.rows).toHaveLength(3);
+    expect(batch.rows?.every((row) => row.status === "PENDING")).toBe(true);
+    expect(batch.rows?.every((row) => row.code !== "VALIDACION" && row.code !== "DATOS_INCOMPLETOS")).toBe(true);
+  });
+
+  it.each([
+    ["empty CSV", "", "empty.csv"],
+    ["header-only CSV", "sku,nombre,descripcion,categoria,marca,tipo_producto,precio_regular,moneda,stock_inicial", "header.csv"],
+    ["malformed header without complete rows", '"sku,nombre,descripcion', "malformed-header.csv"],
+  ])("rejects %s without creating a batch", async (_label, content, filename) => {
+    await expect(mockBulkRepository.createImport(new File([content], filename, { type: "text/csv" }), { detectedRows: 99 }))
+      .rejects.toMatchObject({ name: "BulkRepositoryError", category: "rejected" });
+    const next = await mockBulkRepository.createImport(new File([MOCK_CSV_SAMPLE_DATA], "valid.csv", { type: "text/csv" }));
+    expect(next.batch_id).toMatch(/^lote-imp-1001-/);
+  });
+
+  it("reports a CSV read failure as a communication error", async () => {
+    const file = new File(["x"], "read-failure.csv", { type: "text/csv" });
+    Object.defineProperty(file, "text", { value: () => Promise.reject(new Error("read failed")) });
+    await expect(mockBulkRepository.createImport(file)).rejects.toMatchObject({
+      name: "BulkRepositoryError",
+      category: "communication",
+    });
+    const next = await mockBulkRepository.createImport(new File([MOCK_CSV_SAMPLE_DATA], "valid.csv", { type: "text/csv" }));
+    expect(next.batch_id).toMatch(/^lote-imp-1001-/);
+  });
+
+  it('parses descriptions with commas, such as "Casaca, impermeable"', () => {
+    const csv = 'sku,nombre,descripcion,categoria,marca,tipo_producto,precio_regular,moneda,stock_inicial\nCAS-01,Casaca,"Casaca, impermeable",Calzado,Nike,Simple,150.00,PEN,10\n';
+    const records = parseCsvRecords(csv);
+    expect(records).toHaveLength(2);
+    expect(records[1]?.columns[2]).toBe("Casaca, impermeable");
+  });
+
+  it("preserves newlines within quoted fields", () => {
+    const csv = 'sku,nombre,descripcion,categoria,marca,tipo_producto,precio_regular,moneda,stock_inicial\nCAS-02,Casaca,"Casaca\ncon forro térmico",Calzado,Nike,Simple,150.00,PEN,10\n';
+    const records = parseCsvRecords(csv);
+    expect(records).toHaveLength(2);
+    expect(records[1]?.columns[2]).toBe("Casaca\ncon forro térmico");
+  });
+
+  it('correctly decodes escaped quotes "" inside quoted fields', () => {
+    const csv = 'sku,nombre,descripcion,categoria,marca,tipo_producto,precio_regular,moneda,stock_inicial\nCAS-03,Casaca,"Casaca ""Edición Especial""",Calzado,Nike,Simple,150.00,PEN,10\n';
+    const records = parseCsvRecords(csv);
+    expect(records).toHaveLength(2);
+    expect(records[1]?.columns[2]).toBe('Casaca "Edición Especial"');
+  });
+
+  it("supports CRLF line endings without leaving carriage return characters", () => {
+    const csv = "sku,nombre,descripcion,categoria,marca,tipo_producto,precio_regular,moneda,stock_inicial\r\nCAS-04,Casaca,Impermeable,Calzado,Nike,Simple,150.00,PEN,10\r\n";
+    const records = parseCsvRecords(csv);
+    expect(records).toHaveLength(2);
+    expect(records[1]?.columns[0]).toBe("CAS-04");
+    expect(records[1]?.columns[8]).toBe("10");
+  });
+
+  it("marks unclosed quotes as syntax error and rejects row upon import", async () => {
+    const csv = 'sku,nombre,descripcion,categoria,marca,tipo_producto,precio_regular,moneda,stock_inicial\nCAS-05,Casaca,"Casaca sin comilla de cierre,Calzado,Nike,Simple,150.00,PEN,10\n';
+    const records = parseCsvRecords(csv);
+    expect(records[1]?.hasUnclosedQuote).toBe(true);
+
+    const file = new File([csv], "unclosed.csv", { type: "text/csv" });
+    const batch = await mockBulkRepository.createImport(file);
+    expect(batch.rows).toBeDefined();
+    expect(batch.rows![0]?.status).toBe("FAILED");
+    expect(batch.rows![0]?.code).toBe("VALIDACION");
+  });
+
+  it("rejects rows with missing price without creating products or stock", async () => {
+    const csv = "sku,nombre,descripcion,categoria,marca,tipo_producto,precio_regular,moneda,stock_inicial\nCAS-06,Casaca,Desc,Calzado,Nike,Simple,,PEN,10\n";
+    const file = new File([csv], "no_price.csv", { type: "text/csv" });
+    const batch = await mockBulkRepository.createImport(file);
+    expect(batch.rows![0]?.status).toBe("FAILED");
+    expect(batch.rows![0]?.code).toBe("PRECIO_INVALIDO");
+  });
+
+  it("rejects rows with missing or non-PEN currency", async () => {
+    const csv = "sku,nombre,descripcion,categoria,marca,tipo_producto,precio_regular,moneda,stock_inicial\nCAS-07,Casaca,Desc,Calzado,Nike,Simple,150.00,USD,10\n";
+    const file = new File([csv], "bad_currency.csv", { type: "text/csv" });
+    const batch = await mockBulkRepository.createImport(file);
+    expect(batch.rows![0]?.status).toBe("FAILED");
+    expect(batch.rows![0]?.code).toBe("PRECIO_INVALIDO");
+  });
+
+  it("rejects rows with incomplete columns count compared to header", async () => {
+    const csv = "sku,nombre,descripcion,categoria,marca,tipo_producto,precio_regular,moneda,stock_inicial\nCAS-08,Casaca,Desc,Calzado\n";
+    const file = new File([csv], "incomplete.csv", { type: "text/csv" });
+    const batch = await mockBulkRepository.createImport(file);
+    expect(batch.rows![0]?.status).toBe("FAILED");
+    expect(batch.rows![0]?.code).toBe("VALIDACION");
+  });
+
+  it("rejects file whose header omits mandatory columns such as precio_regular or moneda", async () => {
+    const csv = "sku,nombre,descripcion,categoria,marca,tipo_producto,stock_inicial\nCAS-09,Casaca,Desc,Calzado,Nike,Simple,10\n";
+    const file = new File([csv], "missing_cols_header.csv", { type: "text/csv" });
+    const batch = await mockBulkRepository.createImport(file);
+    expect(batch.rows![0]?.status).toBe("FAILED");
+    expect(batch.rows![0]?.code).toBe("DATOS_INCOMPLETOS");
+  });
+});
+
+describe("P1 Price Audit PDF generation and structural verification", () => {
+  it("generates a valid 1-seat PDF with compliant xref and object graph", async () => {
+    const entry = createDummyAuditEntry(1, { sku: "ZAP-001" });
+    const blob = generateAuditPdf([entry], dummyFilters);
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const parsed = parsePdfStructure(bytes);
+
+    expect(parsed.headerValid).toBe(true);
+    expect(parsed.xrefValid).toBe(true);
+    expect(parsed.totalPages).toBe(1);
+    expect(parsed.pageObjectsCount).toBe(1);
+    expect(parsed.rawText).toContain("ZAP-001");
+    expect(Math.max(...parsed.pageLineCounts)).toBeLessThanOrEqual(64);
+    expect(Math.max(...parsed.pageSeatCounts)).toBeLessThanOrEqual(30);
+  });
+
+  it("generates a valid 2-page PDF for 31 seats", async () => {
+    const entries = Array.from({ length: 31 }, (_, i) => createDummyAuditEntry(i + 1));
+    const blob = generateAuditPdf(entries, dummyFilters);
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const parsed = parsePdfStructure(bytes);
+
+    expect(parsed.headerValid).toBe(true);
+    expect(parsed.xrefValid).toBe(true);
+    expect(parsed.totalPages).toBe(2);
+    expect(parsed.pageObjectsCount).toBe(2);
+    expect(Math.max(...parsed.pageLineCounts)).toBeLessThanOrEqual(64);
+    expect(Math.max(...parsed.pageSeatCounts)).toBeLessThanOrEqual(30);
+    for (let i = 1; i <= 31; i++) expect(parsed.rawText).toContain(`aud-${String(i).padStart(4, "0")}`);
+  });
+
+  it("generates a valid PDF for 500 seats with intact object graph and no page over 64 lines", async () => {
+    const entries = Array.from({ length: 500 }, (_, i) => createDummyAuditEntry(i + 1));
+    const blob = generateAuditPdf(entries, dummyFilters);
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const parsed = parsePdfStructure(bytes);
+
+    expect(parsed.headerValid).toBe(true);
+    expect(parsed.xrefValid).toBe(true);
+    expect(parsed.totalPages).toBeGreaterThanOrEqual(17);
+    expect(parsed.pageObjectsCount).toBe(parsed.totalPages);
+    expect(parsed.objectCount).toBe(4 + 2 * parsed.totalPages);
+    expect(Math.max(...parsed.pageLineCounts)).toBeLessThanOrEqual(64);
+    expect(Math.max(...parsed.pageSeatCounts)).toBeLessThanOrEqual(30);
+    for (let i = 1; i <= 500; i++) {
+      expect(parsed.rawText).toContain(`aud-${String(i).padStart(4, "0")}`);
+    }
+  });
+
+  it("encodes Spanish accents, «ñ», and commercial characters in WinAnsi without visible escape sequences", async () => {
+    const reasonText = "Actualización de campaña «Verano» con descuento especial — S/. 199.90 y € 50";
+    const entry = createDummyAuditEntry(1, { reason: reasonText });
+    const blob = generateAuditPdf([entry], dummyFilters);
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const parsed = parsePdfStructure(bytes);
+
+    expect(parsed.xrefValid).toBe(true);
+    expect(parsed.rawText.replace(/\s+/g, " ")).toContain(reasonText.replace(/\s+/g, " "));
+    expect(parsed.rawText).toContain("Actualización de campaña «Verano»");
+    expect(parsed.rawText).toContain("€ 50");
+    expect(parsed.rawText).not.toContain("\\341");
+    expect(parsed.rawText).not.toContain("\\361");
+    expect(parsed.rawText).not.toContain("\\227");
+    expect(parsed.rawText).not.toContain("\\253");
+    expect(parsed.rawText).not.toContain("\\273");
+    expect(parsed.rawText).not.toContain("\\200");
+  });
+
+  it("wraps very long audit entry text cleanly without character truncation", async () => {
+    const longReason = "Ajuste comercial extraordinario por variación de costos logísticos y promociones regionales del proveedor nacional durante el trimestre";
+    const entry = createDummyAuditEntry(1, { reason: longReason });
+    const blob = generateAuditPdf([entry], dummyFilters);
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const parsed = parsePdfStructure(bytes);
+
+    expect(parsed.xrefValid).toBe(true);
+    expect(parsed.rawText).toContain("Ajuste comercial extraordinario");
+    expect(parsed.rawText).toContain("proveedor nacional durante el trimestre");
+  });
+
+  it("distributes 30 seats with extended reasons without exceeding 64 rendered lines per page", async () => {
+    const entries = Array.from({ length: 30 }, (_, i) => createDummyAuditEntry(i + 1, {
+      reason: `Motivo extenso ${i + 1} ${"detalle comercial adicional ".repeat(32)}`,
+    }));
+    const parsed = parsePdfStructure(new Uint8Array(await generateAuditPdf(entries, dummyFilters).arrayBuffer()));
+    expect(parsed.xrefValid).toBe(true);
+    expect(Math.max(...parsed.pageLineCounts)).toBeLessThanOrEqual(64);
+    expect(Math.max(...parsed.pageSeatCounts)).toBeLessThanOrEqual(30);
+    for (let i = 1; i <= 30; i++) expect(parsed.rawText).toContain(`aud-${String(i).padStart(4, "0")}`);
+    expect(parsed.rawText).toContain("Motivo extenso 30");
+  });
+
+  it("continues one exceptionally long seat across pages without truncating its reason", async () => {
+    const reason = `Motivo excepcional ${"detalle completo ".repeat(1800)} fin del motivo excepcional`;
+    const parsed = parsePdfStructure(new Uint8Array(await generateAuditPdf([
+      createDummyAuditEntry(1, { reason }),
+    ], dummyFilters).arrayBuffer()));
+    expect(parsed.xrefValid).toBe(true);
+    expect(parsed.totalPages).toBeGreaterThan(1);
+    expect(Math.max(...parsed.pageLineCounts)).toBeLessThanOrEqual(64);
+    expect(Math.max(...parsed.pageSeatCounts)).toBeLessThanOrEqual(30);
+    expect(parsed.rawText).toContain("aud-0001");
+    expect(parsed.rawText.replace(/\s+/g, " ")).toContain("fin del motivo excepcional");
   });
 });

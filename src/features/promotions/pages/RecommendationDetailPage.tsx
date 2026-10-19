@@ -20,7 +20,10 @@ import { AdministrationStateDialog } from "../components/AdministrationStateDial
 import { RecommendationCandidates } from "../components/RecommendationCandidates";
 import { useAdministrationRead } from "../hooks/useAdministrationRead";
 
-import { recommendationKindLabel } from "../services/recommendationRepository";
+import {
+  recommendationKindLabel,
+  type RecommendationView,
+} from "../services/recommendationRepository";
 export function RecommendationDetailPage({
   changeState = false,
 }: {
@@ -50,7 +53,13 @@ export function RecommendationDetailPage({
     `${ruleId}:${revision + queryRevision}`,
     read,
   );
-  const record = state.status === "success" ? state.result : null;
+  const [cachedRecord, setCachedRecord] = useState<RecommendationView | null>(null);
+  const [prevResult, setPrevResult] = useState<RecommendationView | null>(null);
+  if (state.status === "success" && state.result !== prevResult) {
+    setPrevResult(state.result);
+    setCachedRecord(state.result);
+  }
+  const record = state.status === "success" ? state.result : cachedRecord;
   const readCatalog = useCallback(
     async (signal: AbortSignal) => ({
       products: await confirmedServices.catalog.products(signal, record ? {
@@ -64,7 +73,7 @@ export function RecommendationDetailPage({
     }),
     [confirmedServices, record],
   );
-  const catalog = useAdministrationRead("catalog", readCatalog);
+  const catalog = useAdministrationRead(`catalog:${revision + queryRevision}:${record?.id ?? ""}`, readCatalog);
   useEffect(() => {
     if (record && (location.state?.focusState || updated))
       trigger.current?.focus();

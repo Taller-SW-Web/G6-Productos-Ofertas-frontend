@@ -37,8 +37,17 @@ export async function readMockPricingTargets(signal: AbortSignal): Promise<Price
   for (let page = 1; ; page++) {
     const result = await mockCatalogRepository.list({ page, pageSize: 100 }, undefined, signal);
     for (const product of result.items) {
-      targets.push({ id: product.id, productId: product.id, kind: "product", referenceSku: product.skuBase,
-        label: `${product.name} · ${product.skuBase}` });
+      targets.push({
+        id: product.id,
+        productId: product.id,
+        kind: "product",
+        referenceSku: product.skuBase,
+        label: `${product.name} · ${product.skuBase}`,
+        initialRegular:
+          product.priceInitial !== null && product.priceInitial !== undefined
+            ? Number(product.priceInitial).toFixed(2)
+            : undefined,
+      });
       if (product.hasVariants) for (let variantPage = 1; ; variantPage++) {
         const variants = await mockCatalogRepository.listVariants(product.id, { page: variantPage, pageSize: 100 }, undefined, signal);
         targets.push(...variants.items.map(variant => ({ id: variant.variantId, productId: product.id,
@@ -61,16 +70,39 @@ export async function readMockCatalogCategories(signal: AbortSignal) {
 
 // Join current descriptive data by sellable SKU; stock remains owned by Inventory.
 export async function readMockInventoryCatalog() {
-  const metadata = new Map<string, { productName: string; categoryName: string; brandName: string }>();
+  const metadata = new Map<
+    string,
+    {
+      productName: string;
+      categoryName: string;
+      brandName: string;
+      vendible: boolean;
+    }
+  >();
   for (let page = 1; ; page++) {
     const products = await mockCatalogRepository.list({ page, pageSize: 100 });
     for (const product of products.items) {
-      const description = { productName: product.name, categoryName: product.categoryName, brandName: product.brandName };
-      if (!product.hasVariants) metadata.set(product.skuBase, description);
-      else for (let variantPage = 1; ; variantPage++) {
-        const variants = await mockCatalogRepository.listVariants(product.id, { page: variantPage, pageSize: 100 });
-        for (const variant of variants.items) metadata.set(variant.sku, description);
-        if (variantPage * variants.pageSize >= variants.total || !variants.items.length) break;
+      const description = {
+        productName: product.name,
+        categoryName: product.categoryName,
+        brandName: product.brandName,
+      };
+      if (!product.hasVariants) {
+        metadata.set(product.skuBase, {
+          ...description,
+          vendible: product.status !== "INACTIVO",
+        });
+      } else {
+        for (let variantPage = 1; ; variantPage++) {
+          const variants = await mockCatalogRepository.listVariants(product.id, { page: variantPage, pageSize: 100 });
+          for (const variant of variants.items) {
+            metadata.set(variant.sku, {
+              ...description,
+              vendible: variant.status !== "INACTIVA",
+            });
+          }
+          if (variantPage * variants.pageSize >= variants.total || !variants.items.length) break;
+        }
       }
     }
     if (page * products.pageSize >= products.total || !products.items.length) break;

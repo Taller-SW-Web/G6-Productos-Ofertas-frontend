@@ -2,7 +2,7 @@ import { gotoPricingReview } from "./support/pricingReview";
 import { evidencePath } from "./support/evidence";
 import { test, expect } from "@playwright/test";
 
-test("S01 applies selection explicitly, distinguishes inheritance/override and retains context on return", async ({
+test("@smoke S01 applies selection explicitly, distinguishes inheritance/override and retains context on return", async ({
   page,
 }) => {
   await gotoPricingReview(page, "/precios");
@@ -215,7 +215,7 @@ test("Pricing component examples preserve form inputs and do not infer CSV valid
     .click();
   await expect(
     page.getByText("Completado parcialmente — ejemplo", { exact: true }),
-  ).toBeVisible();
+  ).toHaveCount(0);
   await expect(page.getByRole("table")).toContainText("CAM-RO-L");
 });
 

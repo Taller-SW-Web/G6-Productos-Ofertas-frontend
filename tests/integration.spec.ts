@@ -55,7 +55,7 @@ test("N03: API mode blocks mock-only modules and never loads their adapters", as
       "/tests/harness/pricing-adapter.html?" + new URLSearchParams({ path }),
     );
     await expect(page.getByRole("alert")).toContainText(
-      "Integración API no disponible",
+      "Función no disponible",
     );
     await expect(page.getByRole("textbox")).toHaveCount(0);
   }

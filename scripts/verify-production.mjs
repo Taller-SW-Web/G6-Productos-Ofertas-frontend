@@ -252,6 +252,7 @@ try {
       path: "/inventario/traslados",
       mockCheck: async (p) => {
         await p.getByRole("heading", { level: 1 }).waitFor();
+        await p.getByRole("table").or(p.getByText("No hay traslados", { exact: false })).first().waitFor();
         assert.ok(await p.getByRole("heading", { level: 1 }).isVisible());
         const hasTable = (await p.getByRole("table").count()) > 0;
         const hasEmpty =
@@ -263,6 +264,8 @@ try {
       path: "/inventario/dashboard",
       mockCheck: async (p) => {
         await p.getByRole("heading", { level: 1 }).waitFor();
+        await p.getByRole("table").or(p.getByText("Total unidades físicas", { exact: false }))
+          .or(p.getByText("Unidades disponibles", { exact: false })).first().waitFor();
         assert.ok(await p.getByRole("heading", { level: 1 }).isVisible());
         const hasKpi =
           (await p.getByText("Total unidades físicas", { exact: false }).count()) > 0 ||
@@ -352,7 +355,11 @@ try {
     const detail = page.getByRole("dialog");
     await detail.getByText(/VER-01 producción simulada/).waitFor();
     assert.match(await detail.innerText(), /VER-01 producción simulada/);
-    assert.match(await detail.innerText(), /demo-pricing/);
+    const detailText = await detail.innerText();
+
+    assert.match(detailText, /aud-/);
+    assert.doesNotMatch(detailText, /demo-pricing/);
+    assert.match(detailText, /ZAP-TRL-EXP/);
     await page.getByRole("button", { name: "Volver al historial", exact: true }).click();
     await verifyCommercialCopy();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);

@@ -14,12 +14,12 @@ import {
   EntityTable,
   FeedbackAlert,
   FilterBar,
-  ContextNote,
   PageHeader,
   StatusBadge,
   type TableColumn,
 } from "../../../components/shared";
 import { ReceiveTransferModal } from "../components/ReceiveTransferModal";
+import { DevScenarioSelector } from "../dev/DevScenarioSelector";
 import { useTransfers } from "../hooks/useTransfers";
 import { useInventoryFilterOptions } from "../hooks/useInventoryFilterOptions";
 import {
@@ -55,6 +55,9 @@ export function TransfersPage() {
 
   const { locations, loading: catalogLoading } = useInventoryFilterOptions();
   const [activeTransfer, setActiveTransfer] = useState<TransferItem | null>(null);
+
+  const isRevisionMode =
+    import.meta.env.DEV && params.get("modoRevision") === "1";
 
   const handleFilterChange = (key: keyof TransferFiltersQuery, val: string | null) => {
     setParams((prev) => {
@@ -258,10 +261,6 @@ export function TransfersPage() {
       />
 
       <Stack gap="lg">
-        <ContextNote title="Recepción física y disposición contable">
-          Al recibir un traslado, las unidades se acreditan al saldo físico de destino según su disposición
-          (reingreso a disponible o reingreso bloqueado). Las mermas no acreditan stock vendible.
-        </ContextNote>
 
         {successMessage && (
           <FeedbackAlert
@@ -277,6 +276,8 @@ export function TransfersPage() {
           </FeedbackAlert>
         )}
 
+
+        {isRevisionMode && <DevScenarioSelector />}
 
         <FilterBar>
           <Select
