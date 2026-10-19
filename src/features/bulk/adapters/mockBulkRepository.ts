@@ -722,7 +722,7 @@ export const mockBulkRepository: BulkRepository & {
 
   async createImport(
     file: File,
-    localSummary?: { detectedRows?: number },
+    _localSummary?: { detectedRows?: number },
     signal?: AbortSignal,
   ): Promise<BulkImportBatch> {
     createImportCallCount++;
@@ -768,11 +768,30 @@ export const mockBulkRepository: BulkRepository & {
     }
     const parsedRows: BulkImportRow[] = [];
     if (lowerName.endsWith(".csv")) {
+      let text: string;
       try {
-        const text = await file.text();
-        const records = parseCsvRecords(text);
+        text = await file.text();
+      } catch {
+        throw new BulkRepositoryError(
+          "No se pudo leer el archivo CSV. Vuelve a intentarlo.",
+          "communication",
+        );
+      }
 
-        if (records.length > 0) {
+      if (!text.trim()) {
+        throw new BulkRepositoryError("El archivo CSV está vacío.", "rejected");
+      }
+
+      const records = parseCsvRecords(text);
+      if (records.length === 0 || (records.length === 1 && !records[0]!.columns.some((column) => column.trim()))) {
+        throw new BulkRepositoryError("El archivo CSV no contiene filas de datos.", "rejected");
+      }
+      const headerRecord = records[0]!;
+      if (records.length === 1 && (headerRecord.hasUnclosedQuote || headerRecord.syntaxError)) {
+        throw new BulkRepositoryError("La cabecera del archivo CSV está malformada.", "rejected");
+      }
+
+      if (records.length > 0) {
           const headerRow = records[0]!;
           const MANDATORY_COLUMNS = [
             "sku",
@@ -1024,18 +1043,15 @@ export const mockBulkRepository: BulkRepository & {
               ],
             });
           }
-        }
-      } catch {
-        // Fallback gracefully
+      }
+
+      if (parsedRows.length === 0) {
+        throw new BulkRepositoryError("El archivo CSV no contiene filas procesables.", "rejected");
       }
     }
 
-    // Determine observed row count for CSV using parsed count or local check summary
-    const estimatedRows = parsedRows.length > 0
-      ? parsedRows.length
-      : lowerName.endsWith(".csv")
-        ? localSummary?.detectedRows
-        : undefined;
+    // CSV row counts come only from the content parsed by this repository.
+    const estimatedRows = parsedRows.length > 0 ? parsedRows.length : undefined;
 
     batchSequence++;
     const batchId = `lote-imp-${batchSequence}-${Math.random().toString(36).slice(2, 6)}`;

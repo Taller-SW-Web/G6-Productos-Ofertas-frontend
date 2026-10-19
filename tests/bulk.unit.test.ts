@@ -17,7 +17,7 @@ import { getDownloadFailureMessage, getUnavailableDownloadMessage } from "../src
 import { AdmissionCoordinator, LatestTaskCoordinator, runSingleFlight } from "../src/features/bulk/utils/asyncGuards";
 import { checkLocalFile, parseCsvSafely } from "../src/features/bulk/utils/localFileCheck";
 import { getGenuineMinimalXlsxArrayBuffer } from "./fixtures/genuineXlsxFixture";
-import { mockBatches, mockExports } from "../src/features/bulk/mocks/bulkFixtures";
+import { MOCK_CSV_SAMPLE_DATA, mockBatches, mockExports } from "../src/features/bulk/mocks/bulkFixtures";
 import { parseCsvRecords } from "../src/features/bulk/adapters/mockBulkRepository";
 import {
   generateAuditPdf,
@@ -588,6 +588,44 @@ const dummyFilters: AuditFilters = {
 };
 
 describe("P1 CSV parsing and formatting validations", () => {
+  beforeEach(() => mockBulkRepository.resetMockState?.());
+  afterEach(() => mockBulkRepository.resetMockState?.());
+
+  it("admit exactly the three rows from the downloadable CSV template without structural rejection", async () => {
+    const resource = await mockBulkRepository.getTemplate("CSV");
+    expect(resource).not.toBeNull();
+    const content = await resource!.blob.text();
+    const batch = await mockBulkRepository.createImport(
+      new File([content], resource!.fileName, { type: "text/csv" }),
+    );
+    expect(batch.total_rows).toBe(3);
+    expect(batch.rows).toHaveLength(3);
+    expect(batch.rows?.every((row) => row.status === "PENDING")).toBe(true);
+    expect(batch.rows?.every((row) => row.code !== "VALIDACION" && row.code !== "DATOS_INCOMPLETOS")).toBe(true);
+  });
+
+  it.each([
+    ["empty CSV", "", "empty.csv"],
+    ["header-only CSV", "sku,nombre,descripcion,categoria,marca,tipo_producto,precio_regular,moneda,stock_inicial", "header.csv"],
+    ["malformed header without complete rows", '"sku,nombre,descripcion', "malformed-header.csv"],
+  ])("rejects %s without creating a batch", async (_label, content, filename) => {
+    await expect(mockBulkRepository.createImport(new File([content], filename, { type: "text/csv" }), { detectedRows: 99 }))
+      .rejects.toMatchObject({ name: "BulkRepositoryError", category: "rejected" });
+    const next = await mockBulkRepository.createImport(new File([MOCK_CSV_SAMPLE_DATA], "valid.csv", { type: "text/csv" }));
+    expect(next.batch_id).toMatch(/^lote-imp-1001-/);
+  });
+
+  it("reports a CSV read failure as a communication error", async () => {
+    const file = new File(["x"], "read-failure.csv", { type: "text/csv" });
+    Object.defineProperty(file, "text", { value: () => Promise.reject(new Error("read failed")) });
+    await expect(mockBulkRepository.createImport(file)).rejects.toMatchObject({
+      name: "BulkRepositoryError",
+      category: "communication",
+    });
+    const next = await mockBulkRepository.createImport(new File([MOCK_CSV_SAMPLE_DATA], "valid.csv", { type: "text/csv" }));
+    expect(next.batch_id).toMatch(/^lote-imp-1001-/);
+  });
+
   it('parses descriptions with commas, such as "Casaca, impermeable"', () => {
     const csv = 'sku,nombre,descripcion,categoria,marca,tipo_producto,precio_regular,moneda,stock_inicial\nCAS-01,Casaca,"Casaca, impermeable",Calzado,Nike,Simple,150.00,PEN,10\n';
     const records = parseCsvRecords(csv);
@@ -674,6 +712,8 @@ describe("P1 Price Audit PDF generation and structural verification", () => {
     expect(parsed.totalPages).toBe(1);
     expect(parsed.pageObjectsCount).toBe(1);
     expect(parsed.rawText).toContain("ZAP-001");
+    expect(Math.max(...parsed.pageLineCounts)).toBeLessThanOrEqual(64);
+    expect(Math.max(...parsed.pageSeatCounts)).toBeLessThanOrEqual(30);
   });
 
   it("generates a valid 2-page PDF for 31 seats", async () => {
@@ -686,9 +726,12 @@ describe("P1 Price Audit PDF generation and structural verification", () => {
     expect(parsed.xrefValid).toBe(true);
     expect(parsed.totalPages).toBe(2);
     expect(parsed.pageObjectsCount).toBe(2);
+    expect(Math.max(...parsed.pageLineCounts)).toBeLessThanOrEqual(64);
+    expect(Math.max(...parsed.pageSeatCounts)).toBeLessThanOrEqual(30);
+    for (let i = 1; i <= 31; i++) expect(parsed.rawText).toContain(`aud-${String(i).padStart(4, "0")}`);
   });
 
-  it("generates a valid 17-page PDF for 500 seats with intact object graph", async () => {
+  it("generates a valid PDF for 500 seats with intact object graph and no page over 64 lines", async () => {
     const entries = Array.from({ length: 500 }, (_, i) => createDummyAuditEntry(i + 1));
     const blob = generateAuditPdf(entries, dummyFilters);
     const bytes = new Uint8Array(await blob.arrayBuffer());
@@ -696,9 +739,14 @@ describe("P1 Price Audit PDF generation and structural verification", () => {
 
     expect(parsed.headerValid).toBe(true);
     expect(parsed.xrefValid).toBe(true);
-    expect(parsed.totalPages).toBe(17);
-    expect(parsed.pageObjectsCount).toBe(17);
-    expect(parsed.objectCount).toBe(4 + 2 * 17);
+    expect(parsed.totalPages).toBeGreaterThanOrEqual(17);
+    expect(parsed.pageObjectsCount).toBe(parsed.totalPages);
+    expect(parsed.objectCount).toBe(4 + 2 * parsed.totalPages);
+    expect(Math.max(...parsed.pageLineCounts)).toBeLessThanOrEqual(64);
+    expect(Math.max(...parsed.pageSeatCounts)).toBeLessThanOrEqual(30);
+    for (let i = 1; i <= 500; i++) {
+      expect(parsed.rawText).toContain(`aud-${String(i).padStart(4, "0")}`);
+    }
   });
 
   it("encodes Spanish accents, «ñ», and commercial characters in WinAnsi without visible escape sequences", async () => {
@@ -730,5 +778,30 @@ describe("P1 Price Audit PDF generation and structural verification", () => {
     expect(parsed.xrefValid).toBe(true);
     expect(parsed.rawText).toContain("Ajuste comercial extraordinario");
     expect(parsed.rawText).toContain("proveedor nacional durante el trimestre");
+  });
+
+  it("distributes 30 seats with extended reasons without exceeding 64 rendered lines per page", async () => {
+    const entries = Array.from({ length: 30 }, (_, i) => createDummyAuditEntry(i + 1, {
+      reason: `Motivo extenso ${i + 1} ${"detalle comercial adicional ".repeat(32)}`,
+    }));
+    const parsed = parsePdfStructure(new Uint8Array(await generateAuditPdf(entries, dummyFilters).arrayBuffer()));
+    expect(parsed.xrefValid).toBe(true);
+    expect(Math.max(...parsed.pageLineCounts)).toBeLessThanOrEqual(64);
+    expect(Math.max(...parsed.pageSeatCounts)).toBeLessThanOrEqual(30);
+    for (let i = 1; i <= 30; i++) expect(parsed.rawText).toContain(`aud-${String(i).padStart(4, "0")}`);
+    expect(parsed.rawText).toContain("Motivo extenso 30");
+  });
+
+  it("continues one exceptionally long seat across pages without truncating its reason", async () => {
+    const reason = `Motivo excepcional ${"detalle completo ".repeat(1800)} fin del motivo excepcional`;
+    const parsed = parsePdfStructure(new Uint8Array(await generateAuditPdf([
+      createDummyAuditEntry(1, { reason }),
+    ], dummyFilters).arrayBuffer()));
+    expect(parsed.xrefValid).toBe(true);
+    expect(parsed.totalPages).toBeGreaterThan(1);
+    expect(Math.max(...parsed.pageLineCounts)).toBeLessThanOrEqual(64);
+    expect(Math.max(...parsed.pageSeatCounts)).toBeLessThanOrEqual(30);
+    expect(parsed.rawText).toContain("aud-0001");
+    expect(parsed.rawText.replace(/\s+/g, " ")).toContain("fin del motivo excepcional");
   });
 });

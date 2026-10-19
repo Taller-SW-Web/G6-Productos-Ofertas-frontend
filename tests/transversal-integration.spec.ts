@@ -670,9 +670,70 @@ test.describe("P0 — Integración transversal completa de módulos con persiste
     await expect(page.getByText("Archivo generado").first()).toBeVisible();
   });
 
+  test("La plantilla CSV descargable procesa y conserva sus tres productos en Catalog, Pricing e Inventory", async ({ page }) => {
+    await page.goto("/");
+    const imported = await page.evaluate(async () => {
+      const specifier = "/src/features/bulk/adapters/mockBulkRepository.ts";
+      const { mockBulkRepository } = await import(/* @vite-ignore */ specifier);
+      const template = await mockBulkRepository.getTemplate("CSV");
+      if (!template) throw new Error("No se encontró la plantilla CSV");
+      const content = await template.blob.text();
+      const batch = await mockBulkRepository.createImport(
+        new File([content], template.fileName, { type: "text/csv" }),
+      );
+      return { batchId: batch.batch_id, totalRows: batch.total_rows, rowStatuses: batch.rows?.map((row: { status: string }) => row.status) };
+    });
+    expect(imported.totalRows).toBe(3);
+    expect(imported.rowStatuses).toEqual(["PENDING", "PENDING", "PENDING"]);
+
+    await page.waitForFunction((batchId) => {
+      const raw = localStorage.getItem("g6-productos-ofertas:mock:v1:bulk");
+      const data = raw ? JSON.parse(raw).data : null;
+      const batch = data?.batches?.find(([id]: [string]) => id === batchId)?.[1];
+      return batch?.status === "COMPLETED" && batch.rows?.length === 3 && batch.rows.every((row: { status: string }) => row.status === "COMPLETED");
+    }, imported.batchId, { timeout: 30000 });
+
+    const expected = [
+      { sku: "NK-RN-001-42", price: "299.00", stock: "50" },
+      { sku: "AD-TR-002-M", price: "89.00", stock: "30" },
+      { sku: "INK-FT-004-L", price: "79.00", stock: "20" },
+    ];
+    const assertProducts = async () => {
+      await page.goto("/productos");
+      for (const item of expected) await expect(page.getByText(item.sku, { exact: true })).toHaveCount(1);
+      await page.goto("/precios");
+      for (const item of expected) {
+        await page.getByRole("combobox", { name: "Producto o SKU" }).click();
+        const option = page.getByRole("option", { name: new RegExp(item.sku), exact: false });
+        await expect(option).toHaveCount(1);
+        await option.click();
+        await page.getByRole("button", { name: "Consultar", exact: true }).click();
+        await expect(page.getByText(item.sku).first()).toBeVisible();
+        await expect(page.getByText(`S/ ${Number(item.price).toFixed(2)}`).first()).toBeVisible();
+      }
+      await page.goto("/inventario");
+      for (const item of expected) {
+        const row = page.getByRole("row").filter({ hasText: item.sku });
+        await expect(row).toHaveCount(1);
+        await expect(row).toContainText(item.stock);
+      }
+    };
+    await assertProducts();
+    await page.reload();
+    await assertProducts();
+    const persistedBatch = await page.evaluate(async (batchId) => {
+      const specifier = "/src/features/bulk/adapters/mockBulkRepository.ts";
+      const { mockBulkRepository } = await import(/* @vite-ignore */ specifier);
+      return mockBulkRepository.getImport(batchId);
+    }, imported.batchId);
+    expect(persistedBatch?.status).toBe("COMPLETED");
+    expect(persistedBatch?.rows?.filter((row: { status: string }) => row.status === "COMPLETED")).toHaveLength(3);
+  });
+
   test("Idempotencia de Catalog ante pérdida del estado Bulk y rechazo de duplicados en segundo lote", async ({
     page,
   }) => {
+    test.setTimeout(60000);
     const uniqueSku = `CAT-IDEM-${Date.now().toString().slice(-4)}`;
     const csvContent = [
       "sku,nombre,descripcion,categoria,marca,tipo_producto,precio_regular,moneda,stock_inicial",
@@ -712,8 +773,25 @@ test.describe("P0 — Integración transversal completa de módulos con persiste
     const batchId = batchUrlMatch ? batchUrlMatch[1] : "";
     expect(batchId).toMatch(/^lote-imp-/);
 
-    // Esperar a que la simulación aplique Catálogo (y falle al persistir el avance de Bulk)
-    await page.waitForTimeout(1000);
+    // Esperar a la confirmación de Catalog e Inventory mientras Bulk sigue guardado en QUEUED.
+    await page.waitForFunction(({ batchId, sku }) => {
+      const read = (domain: string) => {
+        const raw = localStorage.getItem(`g6-productos-ofertas:mock:v1:${domain}`);
+        return raw ? JSON.parse(raw).data : null;
+      };
+      const catalog = read("catalog");
+      const inventory = read("inventory");
+      const bulk = read("bulk");
+      const catalogOperation = catalog?.bulkOperations?.find(([key]: [string]) => key === `${batchId}:1:CATALOGO`);
+      const inventoryOperation = inventory?.bulkOperations?.find(([key]: [string]) => key === `${batchId}:1:INVENTARIO`);
+      const stock = inventory?.stockItems?.filter((item: { sku: string }) => item.sku === sku)
+        .reduce((sum: number, item: { onHand: number }) => sum + item.onHand, 0);
+      return Boolean(
+        catalogOperation?.[1]?.sku === sku && catalog?.products?.some((product: { skuBase: string }) => product.skuBase === sku) &&
+        inventoryOperation && inventoryOperation[1]?.quantity === 25 && stock === 25 &&
+        bulk?.batches?.some(([id, batch]: [string, { status: string }]) => id === batchId && batch.status === "QUEUED"),
+      );
+    }, { batchId, sku: uniqueSku }, { timeout: 15000 });
 
     // Restaurar almacenamiento
     await page.evaluate(() => {
@@ -724,16 +802,32 @@ test.describe("P0 — Integración transversal completa de módulos con persiste
     // Recargar F5
     await page.reload();
 
-    // Reanudar lote para completar la conciliación si fuera necesario o esperar finalización
-    const resumeButton = page.getByRole("button", { name: "Reanudar lote", exact: true });
-    if (await resumeButton.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await resumeButton.click();
-      const confirmDialog = page.getByRole("dialog");
-      await expect(confirmDialog).toBeVisible({ timeout: 5000 });
-      await confirmDialog.getByRole("button", { name: "Confirmar reanudación", exact: true }).click();
-    }
+    // La hidratación de Bulk debe reanudar automáticamente el lote al recargar.
 
     await expect(page.locator("section").getByText("Completado", { exact: true }).first()).toBeVisible({ timeout: 15000 });
+    await page.waitForFunction((batchId) => {
+      const raw = localStorage.getItem("g6-productos-ofertas:mock:v1:bulk");
+      const data = raw ? JSON.parse(raw).data : null;
+      return data?.batches?.some(([id, batch]: [string, { status: string }]) => id === batchId && batch.status === "COMPLETED");
+    }, batchId, { timeout: 15000 });
+
+    const completedState = await page.evaluate(({ batchId, sku }) => {
+      const read = (domain: string) => {
+        const raw = localStorage.getItem(`g6-productos-ofertas:mock:v1:${domain}`);
+        return raw ? JSON.parse(raw).data : null;
+      };
+      const catalog = read("catalog");
+      const inventory = read("inventory");
+      const bulk = read("bulk");
+      return {
+        catalogOperations: catalog?.bulkOperations?.filter(([key]: [string]) => key === `${batchId}:1:CATALOGO`).length ?? 0,
+        products: catalog?.products?.filter((product: { skuBase: string }) => product.skuBase === sku).length ?? 0,
+        inventoryOperations: inventory?.bulkOperations?.filter(([key]: [string]) => key === `${batchId}:1:INVENTARIO`).length ?? 0,
+        stock: inventory?.stockItems?.filter((item: { sku: string }) => item.sku === sku).reduce((sum: number, item: { onHand: number }) => sum + item.onHand, 0) ?? 0,
+        batchStatus: bulk?.batches?.find(([id]: [string]) => id === batchId)?.[1]?.status,
+      };
+    }, { batchId, sku: uniqueSku });
+    expect(completedState).toEqual({ catalogOperations: 1, products: 1, inventoryOperations: 1, stock: 25, batchStatus: "COMPLETED" });
 
     // Confirmar en Catálogo: exactamente UN producto
     await page.goto("/productos");
@@ -772,6 +866,8 @@ test.describe("P0 — Integración transversal completa de módulos con persiste
     await expect(page).toHaveURL("/carga-masiva/revisar");
     await page.getByRole("button", { name: "Confirmar importación", exact: true }).first().click();
     await expect(page).toHaveURL(/\/carga-masiva\/importaciones\/lote-imp-/);
+    const duplicateBatchId = page.url().match(/\/carga-masiva\/importaciones\/(lote-imp-[^/]+)/)?.[1] ?? "";
+    expect(duplicateBatchId).toMatch(/^lote-imp-/);
 
     // Esperar finalización del segundo lote con observaciones
     await expect(page.getByText(/Completado con observaciones|Fallos registrados/).first()).toBeVisible({ timeout: 15000 });
@@ -785,5 +881,39 @@ test.describe("P0 — Integración transversal completa de módulos con persiste
     const stockRowAfter = page.getByRole("row").filter({ hasText: uniqueSku });
     await expect(stockRowAfter).toHaveCount(1);
     await expect(stockRowAfter).toContainText("25");
+
+    await page.reload();
+    await expect(page.getByRole("row").filter({ hasText: uniqueSku })).toHaveCount(1);
+    await expect(page.getByRole("row").filter({ hasText: uniqueSku })).toContainText("25");
+    await page.goto("/precios");
+    await page.getByRole("combobox", { name: "Producto o SKU" }).click();
+    await page.getByRole("option", { name: new RegExp(uniqueSku), exact: false }).click();
+    await page.getByRole("button", { name: "Consultar", exact: true }).click();
+    await expect(page.getByText("S/ 220.00").first()).toBeVisible();
+    const finalState = await page.evaluate(({ batchId, duplicateBatchId, sku }) => {
+      const read = (domain: string) => {
+        const raw = localStorage.getItem(`g6-productos-ofertas:mock:v1:${domain}`);
+        return raw ? JSON.parse(raw).data : null;
+      };
+      const catalog = read("catalog");
+      const inventory = read("inventory");
+      const bulk = read("bulk");
+      return {
+        catalogOperations: catalog?.bulkOperations?.filter(([key]: [string]) => key === `${batchId}:1:CATALOGO`).length ?? 0,
+        products: catalog?.products?.filter((product: { skuBase: string }) => product.skuBase === sku).length ?? 0,
+        inventoryOperations: inventory?.bulkOperations?.filter(([key]: [string]) => key === `${batchId}:1:INVENTARIO`).length ?? 0,
+        stock: inventory?.stockItems?.filter((item: { sku: string }) => item.sku === sku).reduce((sum: number, item: { onHand: number }) => sum + item.onHand, 0) ?? 0,
+        batchStatus: bulk?.batches?.find(([id]: [string]) => id === batchId)?.[1]?.status,
+        duplicateRows: bulk?.batches?.find(([id]: [string]) => id === duplicateBatchId)?.[1]?.rows?.map((row: { status: string; code: string | null }) => ({ status: row.status, code: row.code })),
+      };
+    }, { batchId, duplicateBatchId, sku: uniqueSku });
+    expect(finalState).toEqual({
+      catalogOperations: 1,
+      products: 1,
+      inventoryOperations: 1,
+      stock: 25,
+      batchStatus: "COMPLETED",
+      duplicateRows: [{ status: "FAILED", code: "SKU_DUPLICADO" }],
+    });
   });
 });

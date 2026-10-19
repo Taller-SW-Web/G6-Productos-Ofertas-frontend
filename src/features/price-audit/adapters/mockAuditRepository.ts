@@ -164,7 +164,7 @@ export function wrapPdfText(text: string, maxLen = 95): string[] {
 export function generateAuditPdf(items: AuditEntry[], filters: AuditFilters): Blob {
   const cappedItems = items.slice(0, 500);
   const ITEMS_PER_PAGE = 30;
-  const totalPages = Math.max(1, Math.ceil(cappedItems.length / ITEMS_PER_PAGE));
+  const MAX_LINES_PER_PAGE = 64;
 
   const filterDesc: string[] = [];
   if (filters.sku) filterDesc.push(`SKU: ${filters.sku}`);
@@ -174,40 +174,65 @@ export function generateAuditPdf(items: AuditEntry[], filters: AuditFilters): Bl
   if (filters.usuarioId && filters.usuarioId !== "demo-pricing") filterDesc.push(`Usuario: ${filters.usuarioId}`);
   if (filters.batchId) filterDesc.push(`Lote: ${filters.batchId}`);
 
-  const pagesLines: string[][] = [];
+  const firstPageHeader = [
+    "AUDITORIA DE PRECIOS",
+    `Generado: ${new Date().toISOString()}`,
+    `Total de registros: ${items.length}`,
+    ...(filterDesc.length > 0 ? [`Filtros: ${filterDesc.join(" | ")}`] : []),
+    "--------------------------------------------------------------------------------",
+  ];
+  const continuationHeader = (pageNumber: number, totalPages: number) => [
+    `AUDITORIA DE PRECIOS — Página ${pageNumber} de ${totalPages}`,
+    "--------------------------------------------------------------------------------",
+  ];
+  const pagesLines: string[][] = [firstPageHeader];
+  const pageSeatCounts = [0];
+  const headerFor = (pageIndex: number) => pageIndex === 0
+    ? firstPageHeader
+    : continuationHeader(pageIndex + 1, 1);
+  const newPage = () => {
+    const pageIndex = pagesLines.length;
+    pagesLines.push(headerFor(pageIndex));
+    pageSeatCounts.push(0);
+  };
 
-  for (let p = 0; p < totalPages; p++) {
-    const pageLines: string[] = [];
-    if (p === 0) {
-      pageLines.push("AUDITORIA DE PRECIOS");
-      pageLines.push(`Generado: ${new Date().toISOString()}`);
-      pageLines.push(`Total de registros: ${items.length}`);
-      if (filterDesc.length > 0) {
-        pageLines.push(`Filtros: ${filterDesc.join(" | ")}`);
+  if (cappedItems.length === 0) pagesLines[0]!.push("No se encontraron registros.");
+  for (const item of cappedItems) {
+    const seat = displayAuditId(item.id);
+    const user = item.actorId === "demo-pricing" ? "No informado" : (item.actorId ?? "Sin usuario");
+    const diff = item.before !== null && item.after !== null ? `${item.before} -> ${item.after}` : (item.after ?? "Retiro");
+    const reason = item.reason ? ` | Motivo: ${item.reason}` : "";
+    const seatLines = wrapPdfText(`Asiento: ${seat} | SKU: ${item.sku} | ${item.priceType} | ${diff} | ${item.at} | ${user}${reason}`, 95);
+    let offset = 0;
+    while (offset < seatLines.length) {
+      let pageIndex = pagesLines.length - 1;
+      let page = pagesLines[pageIndex]!;
+      if (pageSeatCounts[pageIndex]! >= ITEMS_PER_PAGE || page.length >= MAX_LINES_PER_PAGE) {
+        newPage();
+        pageIndex++;
+        page = pagesLines[pageIndex]!;
       }
-      pageLines.push("--------------------------------------------------------------------------------");
-    } else {
-      pageLines.push(`AUDITORIA DE PRECIOS — Página ${p + 1} de ${totalPages}`);
-      pageLines.push("--------------------------------------------------------------------------------");
+      const remainingLines = MAX_LINES_PER_PAGE - page.length;
+      const remainingSeatSlots = ITEMS_PER_PAGE - pageSeatCounts[pageIndex]!;
+      if (remainingLines === 0 || remainingSeatSlots === 0) {
+        newPage();
+        continue;
+      }
+      const count = Math.min(remainingLines, seatLines.length - offset);
+      if (offset === 0 && count < seatLines.length && pageSeatCounts[pageIndex]! > 0) {
+        newPage();
+        continue;
+      }
+      page.push(...seatLines.slice(offset, offset + count));
+      pageSeatCounts[pageIndex] = pageSeatCounts[pageIndex]! + 1;
+      offset += count;
+      if (offset < seatLines.length) newPage();
     }
+  }
 
-    const chunk = cappedItems.slice(p * ITEMS_PER_PAGE, (p + 1) * ITEMS_PER_PAGE);
-    if (chunk.length === 0 && p === 0) {
-      pageLines.push("No se encontraron registros.");
-    } else {
-      for (const item of chunk) {
-        const seat = displayAuditId(item.id);
-        const user = item.actorId === "demo-pricing" ? "No informado" : (item.actorId ?? "Sin usuario");
-        const diff = item.before !== null && item.after !== null ? `${item.before} -> ${item.after}` : (item.after ?? "Retiro");
-        const reason = item.reason ? ` | Motivo: ${item.reason}` : "";
-        const line = `Asiento: ${seat} | SKU: ${item.sku} | ${item.priceType} | ${diff} | ${item.at} | ${user}${reason}`;
-        const wrapped = wrapPdfText(line, 95);
-        for (const w of wrapped) {
-          pageLines.push(w);
-        }
-      }
-    }
-    pagesLines.push(pageLines);
+  const totalPages = pagesLines.length;
+  for (let pageIndex = 1; pageIndex < totalPages; pageIndex++) {
+    pagesLines[pageIndex]![0] = `AUDITORIA DE PRECIOS — Página ${pageIndex + 1} de ${totalPages}`;
   }
 
   const encoder = new TextEncoder();
@@ -294,6 +319,8 @@ export interface ParsedPdfResult {
   totalPages: number;
   objectCount: number;
   pageObjectsCount: number;
+  pageLineCounts: number[];
+  pageSeatCounts: number[];
   extractedTexts: string[];
   rawText: string;
 }
@@ -367,11 +394,15 @@ export function parsePdfStructure(bytes: Uint8Array): ParsedPdfResult {
 
   // 6. Decode streams and extract texts
   const extractedTexts: string[] = [];
+  const pageLineCounts: number[] = [];
+  const pageSeatCounts: number[] = [];
   const streamRegex = /<<\s*\/Length\s*(\d+)\s*>>\s*stream\r?\n([\s\S]*?)\r?\nendstream/g;
   let streamMatch: RegExpExecArray | null;
 
   while ((streamMatch = streamRegex.exec(text)) !== null) {
     const streamContent = streamMatch[2]!;
+    let lineCount = 0;
+    let seatCount = 0;
 
     const tjRegex = /\(([\s\S]*?)\)\s*Tj/g;
     let tjMatch: RegExpExecArray | null;
@@ -405,7 +436,11 @@ export function parsePdfStructure(bytes: Uint8Array): ParsedPdfResult {
         }
       }
       extractedTexts.push(decoded);
+      lineCount++;
+      if (decoded.startsWith("Asiento: ")) seatCount++;
     }
+    pageLineCounts.push(lineCount);
+    pageSeatCounts.push(seatCount);
   }
 
   return {
@@ -414,6 +449,8 @@ export function parsePdfStructure(bytes: Uint8Array): ParsedPdfResult {
     totalPages,
     objectCount: countObj,
     pageObjectsCount: kids.length,
+    pageLineCounts,
+    pageSeatCounts,
     extractedTexts,
     rawText: extractedTexts.join("\n"),
   };
