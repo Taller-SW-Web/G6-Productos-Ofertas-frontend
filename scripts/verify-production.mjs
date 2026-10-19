@@ -355,7 +355,11 @@ try {
     const detail = page.getByRole("dialog");
     await detail.getByText(/VER-01 producción simulada/).waitFor();
     assert.match(await detail.innerText(), /VER-01 producción simulada/);
-    assert.match(await detail.innerText(), /demo-pricing/);
+    const detailText = await detail.innerText();
+
+    assert.match(detailText, /aud-/);
+    assert.doesNotMatch(detailText, /demo-pricing/);
+    assert.match(detailText, /ZAP-TRL-EXP/);
     await page.getByRole("button", { name: "Volver al historial", exact: true }).click();
     await verifyCommercialCopy();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);

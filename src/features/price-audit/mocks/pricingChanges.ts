@@ -1,6 +1,6 @@
 import type { PriceTarget, PriceView } from "../../pricing/services/pricingRepository";
 import { decimalLess } from "../../pricing/services/pricingValidation";
-import type { AuditEntry } from "../services/auditRepository";
+import { AuditFailure, type AuditEntry } from "../services/auditRepository";
 import {
   isMockPersistenceAvailable,
   isRecord,
@@ -83,7 +83,7 @@ function isMockPricingAuditState(value: unknown): value is MockPricingAuditState
   );
 }
 
-function reconcilePendingFromPricing(
+export function reconcilePendingFromPricing(
   recordFn: (target: PriceTarget, before: PriceView, after: PriceView, reason: string) => void,
 ) {
   if (!isMockPersistenceAvailable()) return;
@@ -107,8 +107,13 @@ function reconcilePendingFromPricing(
     }
   }
   if (remaining.length !== pending.length) {
+    const backupPending = [...pending];
     pricingData.pendingAudit = remaining;
-    saveMockState("pricing", pricingData);
+    const ok = saveMockState("pricing", pricingData);
+    if (!ok) {
+      pricingData.pendingAudit = backupPending;
+      return;
+    }
     publishMockChange("pricing");
   }
 }
@@ -237,16 +242,34 @@ export function createMockPricingAudit(options: { persist?: boolean } = {}) {
     },
     saveJob: (job: StoredAuditJob) => {
       const idx = jobs.findIndex((j) => j.id === job.id);
+      const prev = idx !== -1 ? structuredClone(jobs[idx]) : undefined;
       if (idx !== -1) {
         jobs[idx] = structuredClone(job);
       } else {
         jobs.push(structuredClone(job));
       }
-      return persist();
+      const ok = persist();
+      if (!ok && persistEnabled) {
+        if (prev !== undefined) {
+          jobs[idx] = prev;
+        } else {
+          jobs.pop();
+        }
+        return false;
+      }
+      return ok;
     },
     nextJobId: (format: "CSV" | "PDF") => {
+      const prevSequence = jobSequence;
       jobSequence++;
-      persist();
+      const ok = persist();
+      if (!ok && persistEnabled) {
+        jobSequence = prevSequence;
+        throw new AuditFailure(
+          "unavailable",
+          "No se pudo generar el identificador de exportación por fallo de persistencia.",
+        );
+      }
       return `exp-014-${format.toLowerCase()}-${jobSequence}`;
     },
   };

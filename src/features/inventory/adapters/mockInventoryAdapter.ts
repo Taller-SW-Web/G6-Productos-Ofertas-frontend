@@ -39,6 +39,7 @@ interface MockInventoryState {
   alerts: InventoryAlert[];
   processedOperations: [string, TransferItem][];
   processedOperationKeys: [string, string][];
+  bulkOperations?: [string, { sku: string; quantity: number }][];
 }
 
 function isStockItemRecord(value: unknown): value is StockItem {
@@ -126,7 +127,18 @@ function isMockInventoryState(value: unknown): value is MockInventoryState {
         entry.length === 2 &&
         typeof entry[0] === "string" &&
         typeof entry[1] === "string",
-    )
+    ) &&
+    (value.bulkOperations === undefined ||
+      (Array.isArray(value.bulkOperations) &&
+        value.bulkOperations.every(
+          (entry) =>
+            Array.isArray(entry) &&
+            entry.length === 2 &&
+            typeof entry[0] === "string" &&
+            isRecord(entry[1]) &&
+            typeof entry[1].sku === "string" &&
+            typeof entry[1].quantity === "number",
+        )))
   );
 }
 
@@ -137,6 +149,7 @@ export class MockInventoryAdapter implements InventoryRepository {
   private alerts: InventoryAlert[] = JSON.parse(JSON.stringify(initialAlerts));
   private processedOperations = new Map<string, TransferItem>();
   private processedOperationKeys = new Map<string, string>();
+  private bulkOperations = new Map<string, { sku: string; quantity: number }>();
   private readonly persistEnabled: boolean;
 
   constructor(options: { persist?: boolean } = {}) {
@@ -169,6 +182,7 @@ export class MockInventoryAdapter implements InventoryRepository {
     // Idempotency records must survive a reload as maps, never as derived balances.
     this.processedOperations = new Map(stored.processedOperations);
     this.processedOperationKeys = new Map(stored.processedOperationKeys);
+    this.bulkOperations = new Map(stored.bulkOperations ?? []);
   }
 
   private persist(): boolean {
@@ -181,6 +195,7 @@ export class MockInventoryAdapter implements InventoryRepository {
         alerts: this.alerts,
         processedOperations: [...this.processedOperations.entries()],
         processedOperationKeys: [...this.processedOperationKeys.entries()],
+        bulkOperations: [...this.bulkOperations.entries()],
       } satisfies MockInventoryState);
     }
     publishMockChange("inventory");
@@ -250,16 +265,51 @@ export class MockInventoryAdapter implements InventoryRepository {
 
   applyBulkStock(
     items: Array<{
+      batchId?: string;
+      rowId?: string | number;
       sku: string;
       productName: string;
       categoryName?: string;
       brandName?: string;
       stock?: number;
     }>,
+    batchId?: string,
   ): void {
     for (const data of items) {
-      const existing = this.stockItems.find((s) => s.sku === data.sku);
+      const bId = data.batchId || batchId || "default-batch";
+      const rId = data.rowId !== undefined ? data.rowId : "0";
+      const operationKey = `${bId}:${rId}:INVENTARIO`;
+
+      // 1. Buscar la clave de operación.
+      const existingOp = this.bulkOperations.get(operationKey);
       const stockQty = data.stock ?? 0;
+
+      // 2. Si existe con el mismo SKU y cantidad, devolver el resultado anterior sin sumar stock.
+      if (existingOp) {
+        if (existingOp.sku === data.sku && existingOp.quantity === stockQty) {
+          continue;
+        }
+        // 3. Si existe con un SKU o cantidad diferente, rechazar la operación por conflicto.
+        throw new InventoryError(
+          "IDEMPOTENCY_CONFLICT",
+          `Conflicto de idempotencia en la operación ${operationKey}: la clave ya fue registrada con SKU "${existingOp.sku}" y cantidad ${existingOp.quantity}, pero se recibió SKU "${data.sku}" y cantidad ${stockQty}.`,
+        );
+      }
+
+      // 4. Si no existe, validar SKU y cantidad.
+      if (!data.sku || !data.sku.trim()) {
+        throw new InventoryError("VALIDACION", "El SKU es obligatorio para el registro de inventario.");
+      }
+      if (!Number.isFinite(stockQty) || stockQty < 0 || !Number.isInteger(stockQty)) {
+        throw new InventoryError("CANTIDAD_INVALIDA", "La cantidad de stock inicial debe ser un número entero no negativo.");
+      }
+
+      // 5. Conservar una copia de los valores que se modificarán.
+      const backupStockItems = JSON.parse(JSON.stringify(this.stockItems)) as StockItem[];
+      const backupBulkOps = new Map(this.bulkOperations);
+
+      // 6. Incrementar el stock.
+      const existing = this.stockItems.find((s) => s.sku === data.sku);
       if (existing) {
         existing.productName = data.productName || existing.productName;
         if (data.categoryName) existing.categoryName = data.categoryName;
@@ -288,8 +338,24 @@ export class MockInventoryAdapter implements InventoryRepository {
         };
         this.stockItems.push(created);
       }
+
+      // 7. Registrar la clave de operación.
+      this.bulkOperations.set(operationKey, { sku: data.sku, quantity: stockQty });
+
+      // 8. Guardar el estado completo de Inventory.
+      const ok = this.persist();
+
+      // 9. Si el almacenamiento falla, restaurar el stock y retirar la clave.
+      if (!ok && this.persistEnabled) {
+        this.stockItems = backupStockItems;
+        this.bulkOperations = backupBulkOps;
+        throw new InventoryError(
+          "OPERATIVO",
+          "No se pudo guardar el estado de inventario en el almacenamiento.",
+        );
+      }
+      // 10. Solo devolver éxito cuando el guardado esté confirmado.
     }
-    this.persist();
   }
 
   private recalculateStockStatus(item: StockItem): void {

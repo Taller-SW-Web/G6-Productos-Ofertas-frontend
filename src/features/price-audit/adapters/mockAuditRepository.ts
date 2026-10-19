@@ -63,11 +63,9 @@ function escapePdfText(text: string): string {
 }
 
 export function generateAuditPdf(items: AuditEntry[], filters: AuditFilters): Blob {
-  const lines: string[] = [
-    "AUDITORIA DE PRECIOS",
-    `Generado: ${new Date().toISOString()}`,
-    `Total de registros: ${items.length}`,
-  ];
+  const ITEMS_PER_PAGE = 30;
+  const totalPages = Math.max(1, Math.ceil(items.length / ITEMS_PER_PAGE));
+
   const filterDesc: string[] = [];
   if (filters.sku) filterDesc.push(`SKU: ${filters.sku}`);
   if (filters.desde) filterDesc.push(`Desde: ${filters.desde}`);
@@ -75,33 +73,37 @@ export function generateAuditPdf(items: AuditEntry[], filters: AuditFilters): Bl
   if (filters.canal) filterDesc.push(`Canal: ${filters.canal}`);
   if (filters.usuarioId && filters.usuarioId !== "demo-pricing") filterDesc.push(`Usuario: ${filters.usuarioId}`);
   if (filters.batchId) filterDesc.push(`Lote: ${filters.batchId}`);
-  if (filterDesc.length > 0) {
-    lines.push(`Filtros: ${filterDesc.join(" | ")}`);
-  }
-  lines.push("--------------------------------------------------------------------------------");
-  for (const item of items.slice(0, 50)) {
-    const seat = displayAuditId(item.id);
-    const user = item.actorId === "demo-pricing" ? "No informado" : (item.actorId ?? "Sin usuario");
-    const diff = item.before !== null && item.after !== null ? `${item.before} -> ${item.after}` : (item.after ?? "Retiro");
-    lines.push(`Asiento: ${seat} | SKU: ${item.sku} | ${item.priceType} | ${diff} | ${item.at} | ${user}`);
-  }
-  if (items.length > 50) {
-    lines.push(`... y ${items.length - 50} registros adicionales.`);
-  }
 
-  let streamContent = "BT\n/F1 9 Tf\n14 TL\n40 760 Td\n";
-  lines.forEach((line, i) => {
-    const escaped = escapePdfText(line);
-    if (i === 0) {
-      streamContent += `/F1 14 Tf (${escaped}) Tj\n/F1 9 Tf\nT*\n`;
+  const pagesLines: string[][] = [];
+
+  for (let p = 0; p < totalPages; p++) {
+    const pageLines: string[] = [];
+    if (p === 0) {
+      pageLines.push("AUDITORIA DE PRECIOS");
+      pageLines.push(`Generado: ${new Date().toISOString()}`);
+      pageLines.push(`Total de registros: ${items.length}`);
+      if (filterDesc.length > 0) {
+        pageLines.push(`Filtros: ${filterDesc.join(" | ")}`);
+      }
+      pageLines.push("--------------------------------------------------------------------------------");
     } else {
-      streamContent += `(${escaped}) Tj\nT*\n`;
+      pageLines.push(`AUDITORIA DE PRECIOS — Página ${p + 1} de ${totalPages}`);
+      pageLines.push("--------------------------------------------------------------------------------");
     }
-  });
-  streamContent += "ET\n";
 
-  const streamBytes = new TextEncoder().encode(streamContent);
-  const streamLength = streamBytes.length;
+    const chunk = items.slice(p * ITEMS_PER_PAGE, (p + 1) * ITEMS_PER_PAGE);
+    if (chunk.length === 0 && p === 0) {
+      pageLines.push("No se encontraron registros.");
+    } else {
+      for (const item of chunk) {
+        const seat = displayAuditId(item.id);
+        const user = item.actorId === "demo-pricing" ? "No informado" : (item.actorId ?? "Sin usuario");
+        const diff = item.before !== null && item.after !== null ? `${item.before} -> ${item.after}` : (item.after ?? "Retiro");
+        pageLines.push(`Asiento: ${seat} | SKU: ${item.sku} | ${item.priceType} | ${diff} | ${item.at} | ${user}`);
+      }
+    }
+    pagesLines.push(pageLines);
+  }
 
   let pdf = "%PDF-1.4\n";
   const offsets: number[] = [];
@@ -109,24 +111,52 @@ export function generateAuditPdf(items: AuditEntry[], filters: AuditFilters): Bl
   offsets.push(pdf.length);
   pdf += "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n";
 
-  offsets.push(pdf.length);
-  pdf += "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n";
+  const kids: string[] = [];
+  for (let p = 0; p < totalPages; p++) {
+    kids.push(`${4 + 2 * p} 0 R`);
+  }
 
   offsets.push(pdf.length);
-  pdf += "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n";
+  pdf += `2 0 obj\n<< /Type /Pages /Kids [${kids.join(" ")}] /Count ${totalPages} >>\nendobj\n`;
 
   offsets.push(pdf.length);
-  pdf += `4 0 obj\n<< /Length ${streamLength} >>\nstream\n${streamContent}endstream\nendobj\n`;
+  pdf += "3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n";
 
-  offsets.push(pdf.length);
-  pdf += "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n";
+  for (let p = 0; p < totalPages; p++) {
+    const pageObjId = 4 + 2 * p;
+    const contentObjId = 5 + 2 * p;
+    const lines = pagesLines[p] ?? [];
 
+    let streamContent = "BT\n/F1 9 Tf\n14 TL\n40 760 Td\n";
+    lines.forEach((line, i) => {
+      const escaped = escapePdfText(line);
+      if (p === 0 && i === 0) {
+        streamContent += `/F1 14 Tf (${escaped}) Tj\n/F1 9 Tf\nT*\n`;
+      } else if (p > 0 && i === 0) {
+        streamContent += `/F1 12 Tf (${escaped}) Tj\n/F1 9 Tf\nT*\n`;
+      } else {
+        streamContent += `(${escaped}) Tj\nT*\n`;
+      }
+    });
+    streamContent += "ET\n";
+
+    const streamBytes = new TextEncoder().encode(streamContent);
+    const streamLength = streamBytes.length;
+
+    offsets.push(pdf.length);
+    pdf += `${pageObjId} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${contentObjId} 0 R /Resources << /Font << /F1 3 0 R >> >> >>\nendobj\n`;
+
+    offsets.push(pdf.length);
+    pdf += `${contentObjId} 0 obj\n<< /Length ${streamLength} >>\nstream\n${streamContent}endstream\nendobj\n`;
+  }
+
+  const totalObjs = 4 + 2 * totalPages;
   const xrefOffset = pdf.length;
-  pdf += "xref\n0 6\n0000000000 65535 f \n";
+  pdf += `xref\n0 ${totalObjs}\n0000000000 65535 f \n`;
   for (const offset of offsets) {
     pdf += `${offset.toString().padStart(10, "0")} 00000 n \n`;
   }
-  pdf += `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  pdf += `trailer\n<< /Size ${totalObjs} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
 
   return new Blob([pdf], { type: "application/pdf" });
 }
@@ -201,13 +231,22 @@ export function createMockAuditRepository(
         fileAvailable: false,
         filters: structuredClone(input.filters),
       };
-      saveJob(job);
+      const ok = saveJob(job);
+      if (!ok) {
+        throw new AuditFailure(
+          "unavailable",
+          "No se pudo guardar la solicitud de exportación en el almacenamiento.",
+        );
+      }
       return structuredClone(job);
     },
     async getExport(id, signal) {
       signal.throwIfAborted();
       const job = getJob(id);
       if (!job) return null;
+      const prevStatus = job.status;
+      const prevCompletedAt = job.completedAt;
+      const prevFileAvailable = job.fileAvailable;
       let changed = false;
       if (job.status === "QUEUED") {
         job.status = "PROCESSING";
@@ -219,7 +258,16 @@ export function createMockAuditRepository(
         changed = true;
       }
       if (changed) {
-        saveJob(job);
+        const ok = saveJob(job);
+        if (!ok) {
+          job.status = prevStatus;
+          job.completedAt = prevCompletedAt;
+          job.fileAvailable = prevFileAvailable;
+          throw new AuditFailure(
+            "unavailable",
+            "No se pudo actualizar el estado de la exportación en el almacenamiento.",
+          );
+        }
       }
       return structuredClone(job);
     },

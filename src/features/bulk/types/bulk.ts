@@ -62,6 +62,11 @@ export interface BulkImportRow {
   steps: BulkDomainStep[];
   precio_regular?: number;
   stock_inicial?: number;
+  descripcion?: string;
+  categoria?: string;
+  marca?: string;
+  tipo_producto?: string;
+  moneda?: string;
 }
 
 export interface BulkImportBatch {

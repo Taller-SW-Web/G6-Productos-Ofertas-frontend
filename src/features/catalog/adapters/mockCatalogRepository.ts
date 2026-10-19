@@ -147,28 +147,143 @@ export class MockCatalogRepository implements CatalogRepository {
     this.changed(false);
   }
 
-  applyBulkProducts(
+  async applyBulkProducts(
     items: Array<{
       sku: string;
       name: string;
       description?: string;
       categoryName?: string;
+      categoryId?: string;
       brandName?: string;
+      brandId?: string;
+      typeName?: string;
+      typeId?: string;
       priceInitial?: number;
     }>,
-  ): void {
-    let hasChanges = false;
-    for (const item of items) {
-      const skuUpper = item.sku.trim().toUpperCase();
-      const existing = this.products.find(
-        (p) => p.skuBase.toUpperCase() === skuUpper,
-      );
-      if (existing) {
-        existing.name = item.name.trim() || existing.name;
-        if (item.description) existing.description = item.description.trim();
-        if (item.priceInitial !== undefined) existing.priceInitial = item.priceInitial;
-        hasChanges = true;
-      } else {
+  ): Promise<void> {
+    const norm = (s?: string) => s?.trim().toLowerCase() ?? "";
+
+    const [categories, brands, productTypes] = await Promise.all([
+      sharedMockTaxonomyRepository.getCategories(),
+      sharedMockTaxonomyRepository.getBrands(),
+      sharedMockTaxonomyRepository.getProductTypes(),
+    ]);
+
+    const prevProducts = JSON.parse(JSON.stringify(this.products)) as ProductDetailView[];
+    const prevVariants = JSON.parse(JSON.stringify(this.variants));
+
+    try {
+      let hasChanges = false;
+      for (const item of items) {
+        const skuUpper = item.sku.trim().toUpperCase();
+
+        // 1. Validar que el SKU no exista previamente en productos ni variantes
+        const existingInProducts = this.products.some(
+          (p) => p.skuBase.toUpperCase() === skuUpper,
+        );
+        const existingInVariants = this.variants.some(
+          (v) => v.sku.toUpperCase() === skuUpper,
+        );
+        if (existingInProducts || existingInVariants) {
+          throw new CatalogError(
+            "duplicate_sku",
+            `El SKU "${item.sku.trim()}" ya existe en el catálogo maestro.`,
+          );
+        }
+
+        // 2. Resolver categoría contra maestros de taxonomía
+        let resolvedCategoryId = item.categoryId;
+        let resolvedCategoryName = item.categoryName;
+        if (!resolvedCategoryId && item.categoryName) {
+          let matched = categories.filter(
+            (c) => norm(c.nombre) === norm(item.categoryName) && c.activo,
+          );
+          if (matched.length > 1) {
+            const officialOnly = matched.filter((c) => !c.id.startsWith("CAT-"));
+            if (officialOnly.length === 1) {
+              matched = officialOnly;
+            }
+          }
+          if (matched.length === 0) {
+            throw new CatalogError(
+              "validation",
+              `Categoría "${item.categoryName}" no encontrada o inactiva en la taxonomía.`,
+            );
+          }
+          if (matched.length > 1) {
+            throw new CatalogError(
+              "validation",
+              `Múltiples categorías coinciden con "${item.categoryName}".`,
+            );
+          }
+          const firstCat = matched[0];
+          if (!firstCat) {
+            throw new CatalogError("validation", `Categoría "${item.categoryName}" no encontrada.`);
+          }
+          resolvedCategoryId = firstCat.id;
+          resolvedCategoryName = firstCat.nombre;
+        } else if (!resolvedCategoryId) {
+          throw new CatalogError("validation", "La categoría es obligatoria para la importación.");
+        }
+
+        // 3. Resolver marca contra maestros de taxonomía
+        let resolvedBrandId = item.brandId;
+        let resolvedBrandName = item.brandName;
+        if (!resolvedBrandId && item.brandName) {
+          const matched = brands.filter(
+            (b) => norm(b.nombre) === norm(item.brandName) && b.activo,
+          );
+          if (matched.length === 0) {
+            throw new CatalogError(
+              "validation",
+              `Marca "${item.brandName}" no encontrada o inactiva en la taxonomía.`,
+            );
+          }
+          if (matched.length > 1) {
+            throw new CatalogError(
+              "validation",
+              `Múltiples marcas coinciden con "${item.brandName}".`,
+            );
+          }
+          const firstBrand = matched[0];
+          if (!firstBrand) {
+            throw new CatalogError("validation", `Marca "${item.brandName}" no encontrada.`);
+          }
+          resolvedBrandId = firstBrand.id;
+          resolvedBrandName = firstBrand.nombre;
+        } else if (!resolvedBrandId) {
+          throw new CatalogError("validation", "La marca es obligatoria para la importación.");
+        }
+
+        // 4. Resolver tipo de producto obligatorio contra maestros de taxonomía
+        let resolvedTypeId = item.typeId;
+        let resolvedTypeName = item.typeName;
+        if (!resolvedTypeId && item.typeName) {
+          const matched = productTypes.filter(
+            (pt) => norm(pt.nombre) === norm(item.typeName) && pt.activo,
+          );
+          if (matched.length === 0) {
+            throw new CatalogError(
+              "validation",
+              `Tipo de producto "${item.typeName}" no encontrado o inactivo en la taxonomía.`,
+            );
+          }
+          if (matched.length > 1) {
+            throw new CatalogError(
+              "validation",
+              `Múltiples tipos de producto coinciden con "${item.typeName}".`,
+            );
+          }
+          const firstType = matched[0];
+          if (!firstType) {
+            throw new CatalogError("validation", `Tipo de producto "${item.typeName}" no encontrado.`);
+          }
+          resolvedTypeId = firstType.id;
+          resolvedTypeName = firstType.nombre;
+        } else if (!resolvedTypeId) {
+          throw new CatalogError("validation", "El tipo de producto es obligatorio para la importación.");
+        }
+
         const newId = `PROD-${crypto.randomUUID()}`;
         const newProduct: ProductDetailView = {
           id: newId,
@@ -177,12 +292,12 @@ export class MockCatalogRepository implements CatalogRepository {
           description:
             item.description?.trim() || "Producto importado mediante carga masiva",
           hasVariants: false,
-          categoryId: "cat-calzado",
-          categoryName: item.categoryName || "Calzado",
-          typeId: "tipo-calzado",
-          typeName: "Calzado Deportivo",
-          brandId: "marca-nike",
-          brandName: item.brandName || "Nike",
+          categoryId: resolvedCategoryId,
+          categoryName: resolvedCategoryName || item.categoryName || "",
+          typeId: resolvedTypeId,
+          typeName: resolvedTypeName || item.typeName || "",
+          brandId: resolvedBrandId,
+          brandName: resolvedBrandName || item.brandName || "",
           status: "ACTIVO",
           preparationSummary: "COMPLETED",
           catalogVersion: 1,
@@ -203,9 +318,14 @@ export class MockCatalogRepository implements CatalogRepository {
         this.products.unshift(newProduct);
         hasChanges = true;
       }
-    }
-    if (hasChanges) {
-      this.changed();
+
+      if (hasChanges) {
+        this.changed();
+      }
+    } catch (error) {
+      this.products = prevProducts;
+      this.variants = prevVariants;
+      throw error;
     }
   }
 
@@ -585,7 +705,7 @@ export class MockCatalogRepository implements CatalogRepository {
           "Un producto activo requiere nombre y descripción completos.",
         );
       }
-      if (!current.hasVariants) {
+      if (!current.hasVariants && isPhysicalProfileComplete(current.physicalProfile)) {
         if (!isPhysicalProfileComplete(payload.perfilFisico)) {
           throw new CatalogError(
             "active_rejected",

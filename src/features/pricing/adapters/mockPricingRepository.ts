@@ -145,9 +145,14 @@ export function createMockPricingRepository(
       }
     }
     if (remaining.length !== pendingAudit.length) {
+      const backup = [...pendingAudit];
       pendingAudit.length = 0;
       pendingAudit.push(...remaining);
-      persist();
+      const ok = persist();
+      if (!ok) {
+        pendingAudit.length = 0;
+        pendingAudit.push(...backup);
+      }
     }
   };
   async function refreshTargets(signal?: AbortSignal) {
