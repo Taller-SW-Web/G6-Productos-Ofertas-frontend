@@ -100,7 +100,7 @@ test.describe("MK-001 — regresión de UI de Carga masiva", () => {
     await expect(page.getByRole("button", { name: "Continuar a revisión", exact: true })).toBeDisabled();
   });
 
-  test("H13: XLSX sin recuento verificado informa dependencia del proveedor", async ({ page }) => {
+  test("H13: XLSX se rechaza porque la importación no está disponible en este entorno", async ({ page }) => {
     const { getGenuineMinimalXlsxBuffer } = await import("./fixtures/genuineXlsxFixture");
     const buffer = getGenuineMinimalXlsxBuffer();
 
@@ -114,13 +114,9 @@ test.describe("MK-001 — regresión de UI de Carga masiva", () => {
     await expect(page).toHaveURL("/carga-masiva/revisar");
     await page.getByRole("button", { name: "Confirmar importación", exact: true }).first().click();
 
-    await expect(page).toHaveURL(/\/carga-masiva\/importaciones\/lote-/);
-    await expect(page.getByText("Verificación dependiente del proveedor", { exact: false })).toBeVisible();
-    await expect(page.getByText("Total de filas", { exact: true })).toBeVisible();
-    await expect(page.getByText("No determinado", { exact: true })).toBeVisible();
-    await expect(
-      page.getByRole("link", { name: "Nueva carga masiva", exact: true }).first(),
-    ).toBeVisible();
+    await expect(page).toHaveURL("/carga-masiva/revisar");
+    await expect(page.getByText("Importación no disponible", { exact: true })).toBeVisible();
+    await expect(page.getByText("La importación Excel no está disponible en este entorno.", { exact: true })).toBeVisible();
   });
 
   test("H11/H12: S03 presenta los estados en cola y en procesamiento", async ({ page }) => {
