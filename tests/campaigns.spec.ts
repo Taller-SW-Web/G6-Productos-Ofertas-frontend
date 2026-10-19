@@ -38,7 +38,7 @@ async function selectScope(page: Page) {
     .getByRole("button", { name: "Confirmar alcance", exact: true })
     .click();
 }
-test("MK-006 S01/S05: typed filters and detail retain list context", async ({
+test("@smoke MK-006 S01/S05: typed filters and detail retain list context", async ({
   page,
 }) => {
   await page.goto("/promociones?estado=active&modalidad=automatic&tamanio=1");

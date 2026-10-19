@@ -93,7 +93,7 @@ for (const module of taxonomySections) {
   });
 }
 
-test("MK-008: category creation and edit forms expose the expected fields", async ({
+test("@smoke MK-008: category creation and edit forms expose the expected fields", async ({
   page,
 }) => {
   await page.goto("/categorias/nueva");

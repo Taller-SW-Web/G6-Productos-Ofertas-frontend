@@ -6,7 +6,7 @@ async function expectNoHorizontalOverflow(page: import("@playwright/test").Page)
   ).toBe(true);
 }
 
-test("Bulk smoke: selección, revisión local, admisión y seguimiento", async ({ page }) => {
+test("@smoke Bulk: selección, revisión local, admisión y seguimiento", async ({ page }) => {
   await page.goto("/carga-masiva");
   await expectNoHorizontalOverflow(page);
   await page.locator('input[type="file"]').setInputFiles({

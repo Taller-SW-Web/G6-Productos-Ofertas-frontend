@@ -14,7 +14,7 @@ async function selectOption(
 }
 
 test.describe("MK-015: Control de stock, umbrales y traslados (Issue #17)", () => {
-  test("MK-015-S01: Muestra tabla de saldos autoritativos con cálculo y estado", async ({
+  test("@smoke MK-015-S01: Muestra tabla de saldos autoritativos con cálculo y estado", async ({
     page,
   }) => {
     await page.goto("/inventario");

@@ -57,7 +57,7 @@ async function receiveTransfer(page: Page, code: string, quantity: number) {
   ).toBeVisible();
 }
 
-test("R1: una marca creada se restaura tras recargar y guarda un sobre versionado", async ({
+test("@smoke R1: una marca creada se restaura tras recargar y guarda un sobre versionado", async ({
   page,
 }) => {
   await page.goto("/marcas/nueva");

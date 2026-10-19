@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 // MK-002 Combos — end-to-end coverage against the shared mock Catalog/Pricing
 // runtime. Every test starts from a fresh navigation, so the mock store resets.
 
-test("listado, navegación y detalle con disponibilidad informativa", async ({ page }) => {
+test("@smoke listado, navegación y detalle con disponibilidad informativa", async ({ page }) => {
   await page.goto("/combos");
   await expect(page.getByRole("heading", { name: "Gestión de combos" })).toBeVisible();
 

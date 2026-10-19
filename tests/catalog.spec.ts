@@ -10,7 +10,7 @@ async function noPageOverflow(page: Page) {
 }
 
 test.describe("MK-003 Gestión de productos (CRUD principal)", () => {
-  test("S01: listado, búsqueda, filtros combinados y conservación de contexto", async ({
+  test("@smoke S01: listado, búsqueda, filtros combinados y conservación de contexto", async ({
     page,
   }) => {
     await page.goto("/productos");
