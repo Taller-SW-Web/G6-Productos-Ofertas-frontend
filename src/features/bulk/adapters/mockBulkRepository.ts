@@ -19,6 +19,7 @@ import { BulkRepositoryError } from "../services/bulkErrors";
 import { canMockProvideImportReport } from "../services/reportAvailability";
 import { mockCatalogRepository } from "../../catalog/adapters/mockCatalogRepository";
 import { sharedMockInventoryAdapter } from "../../inventory/adapters/mockInventoryAdapter";
+import { createPricingRuntime } from "../../pricing/services/pricingService";
 import {
   clearMockState,
   isMockPersistenceAvailable,
@@ -185,17 +186,21 @@ async function applyBatchRowsToConsumerModules(batch: BulkImportBatch) {
     // 2. Aplicar Catalog
     if (!catalogDone) {
       try {
-        await mockCatalogRepository.applyBulkProducts([
-          {
-            sku: row.sku,
-            name: row.nombre,
-            description: row.descripcion,
-            categoryName: row.categoria,
-            brandName: row.marca,
-            typeName: row.tipo_producto,
-            priceInitial: row.precio_regular,
-          },
-        ]);
+        await mockCatalogRepository.applyBulkProducts(
+          [
+            {
+              rowId: row.row_id,
+              sku: row.sku,
+              name: row.nombre,
+              description: row.descripcion,
+              categoryName: row.categoria,
+              brandName: row.marca,
+              typeName: row.tipo_producto,
+              priceInitial: row.precio_regular,
+            },
+          ],
+          batch.batch_id,
+        );
         // 3. Confirmar que Catalog guardó correctamente.
         row.applied_domains.push("CATALOGO");
         const catalogStep = row.steps.find((s) => s.domain === "CATALOGO");
@@ -251,15 +256,74 @@ async function applyBatchRowsToConsumerModules(batch: BulkImportBatch) {
 
     // 4. Confirmar el precio regular a través de Pricing, utilizando la proyección desde Catalog; no crear un segundo precio independiente.
     if (!pricingDone) {
-      row.applied_domains.push("PRICING");
-      const pricingStep = row.steps.find((s) => s.domain === "PRICING");
-      if (pricingStep) {
-        pricingStep.status = "COMPLETED";
-        pricingStep.detail =
-          row.precio_regular !== undefined
-            ? `Precio regular S/ ${row.precio_regular.toFixed(2)} registrado`
-            : "Precio regular registrado";
-        pricingStep.code = null;
+      try {
+        const pricingRuntime = await createPricingRuntime("mock");
+        const targets = await pricingRuntime.service.listTargets(new AbortController().signal);
+        const normSku = row.sku.trim().toUpperCase();
+        const foundTarget = targets.find(
+          (t) =>
+            (t.kind === "product" && t.referenceSku?.trim().toUpperCase() === normSku) ||
+            (t.kind === "variant" && t.sku.trim().toUpperCase() === normSku),
+        );
+
+        if (!foundTarget) {
+          throw new Error(`Objetivo de precio no encontrado para el SKU ${row.sku}`);
+        }
+
+        const snapshot = await pricingRuntime.service.read(
+          { targetId: foundTarget.id, channel: "global" },
+          new AbortController().signal,
+        );
+
+        if (!snapshot || !snapshot.price) {
+          throw new Error(`Precio vigente no disponible para el SKU ${row.sku}`);
+        }
+
+        if (snapshot.price.currency !== "PEN") {
+          throw new Error(`Moneda inválida en Pricing: esperada PEN, encontrada ${snapshot.price.currency}`);
+        }
+
+        const currentRegularVal = Number(snapshot.price.regular);
+        const expectedRegularVal = Number(row.precio_regular);
+        if (
+          !Number.isFinite(currentRegularVal) ||
+          !Number.isFinite(expectedRegularVal) ||
+          Math.abs(currentRegularVal - expectedRegularVal) > 0.001
+        ) {
+          throw new Error(
+            `Discrepancia en precio regular: esperado ${expectedRegularVal}, registrado ${currentRegularVal}`,
+          );
+        }
+
+        row.applied_domains.push("PRICING");
+        const pricingStep = row.steps.find((s) => s.domain === "PRICING");
+        if (pricingStep) {
+          pricingStep.status = "COMPLETED";
+          pricingStep.detail =
+            row.precio_regular !== undefined
+              ? `Precio regular S/ ${expectedRegularVal.toFixed(2)} registrado`
+              : "Precio regular registrado";
+          pricingStep.code = null;
+        }
+      } catch (err) {
+        row.status = "FAILED";
+        row.failed_domain = "PRICING";
+        row.needs_reconciliation = true;
+        const msg = err instanceof Error ? err.message : "Error al confirmar precio en Pricing";
+        row.code = "ERROR_INTERNO";
+        row.detail = msg;
+        const pricingStep = row.steps.find((s) => s.domain === "PRICING");
+        if (pricingStep) {
+          pricingStep.status = "FAILED";
+          pricingStep.code = "ERROR_INTERNO";
+          pricingStep.detail = msg;
+        }
+        const invStep = row.steps.find((s) => s.domain === "INVENTARIO");
+        if (invStep) {
+          invStep.status = "PENDING";
+          invStep.detail = "No iniciado debido a fallo en Pricing";
+        }
+        continue;
       }
     }
 
@@ -499,6 +563,137 @@ function scheduleExportSimulation(exportId: string) {
   }, DEMO_CONFIG.COMPLETION_DELAY_MS);
   activeTimers.add(t2);
 }
+export interface CsvParsedRow {
+  rowNumber: number;
+  columns: string[];
+  hasUnclosedQuote?: boolean;
+  syntaxError?: string;
+}
+
+export function parseCsvRecords(text: string): CsvParsedRow[] {
+  const rows: CsvParsedRow[] = [];
+  let currentFields: string[] = [];
+  let currentField = "";
+  let state: "START_FIELD" | "UNQUOTED_FIELD" | "QUOTED_FIELD" | "AFTER_QUOTE" = "START_FIELD";
+  let rowNumber = 1;
+  let rowHasError: string | null = null;
+  let hasUnclosedQuote = false;
+
+  let i = 0;
+  const len = text.length;
+
+  const pushField = () => {
+    currentFields.push(currentField);
+    currentField = "";
+    state = "START_FIELD";
+  };
+
+  const pushRow = () => {
+    pushField();
+    rows.push({
+      rowNumber,
+      columns: currentFields,
+      hasUnclosedQuote,
+      syntaxError: rowHasError ?? undefined,
+    });
+    rowNumber++;
+    currentFields = [];
+    rowHasError = null;
+    hasUnclosedQuote = false;
+  };
+
+  while (i < len) {
+    const ch = text[i];
+
+    if (state === "START_FIELD") {
+      if (ch === '"') {
+        state = "QUOTED_FIELD";
+        i++;
+      } else if (ch === ",") {
+        currentFields.push("");
+        i++;
+      } else if (ch === "\r") {
+        if (i + 1 < len && text[i + 1] === "\n") {
+          i++;
+        }
+        if (currentFields.length > 0) {
+          pushRow();
+        }
+        i++;
+      } else if (ch === "\n") {
+        if (currentFields.length > 0) {
+          pushRow();
+        }
+        i++;
+      } else {
+        currentField += ch;
+        state = "UNQUOTED_FIELD";
+        i++;
+      }
+    } else if (state === "UNQUOTED_FIELD") {
+      if (ch === '"') {
+        rowHasError = "Comilla no permitida dentro de campo sin comillas";
+        currentField += ch;
+        i++;
+      } else if (ch === ",") {
+        pushField();
+        i++;
+      } else if (ch === "\r") {
+        if (i + 1 < len && text[i + 1] === "\n") {
+          i++;
+        }
+        pushRow();
+        i++;
+      } else if (ch === "\n") {
+        pushRow();
+        i++;
+      } else {
+        currentField += ch;
+        i++;
+      }
+    } else if (state === "QUOTED_FIELD") {
+      if (ch === '"') {
+        if (i + 1 < len && text[i + 1] === '"') {
+          currentField += '"';
+          i += 2;
+        } else {
+          state = "AFTER_QUOTE";
+          i++;
+        }
+      } else {
+        currentField += ch;
+        i++;
+      }
+    } else if (state === "AFTER_QUOTE") {
+      if (ch === ",") {
+        pushField();
+        i++;
+      } else if (ch === "\r") {
+        if (i + 1 < len && text[i + 1] === "\n") {
+          i++;
+        }
+        pushRow();
+        i++;
+      } else if (ch === "\n") {
+        pushRow();
+        i++;
+      } else {
+        rowHasError = "Caracteres no permitidos después de comilla de cierre";
+        currentField += ch;
+        i++;
+      }
+    }
+  }
+
+  if (state === "QUOTED_FIELD") {
+    hasUnclosedQuote = true;
+    pushRow();
+  } else if (currentFields.length > 0 || currentField.length > 0 || state === "AFTER_QUOTE") {
+    pushRow();
+  }
+
+  return rows;
+}
 
 export const mockBulkRepository: BulkRepository & {
   advanceMockImport?: (batchId: string) => Promise<BulkImportBatch | null>;
@@ -571,269 +766,263 @@ export const mockBulkRepository: BulkRepository & {
         "rejected",
       );
     }
-
-function parseCsvLine(line: string): { columns: string[]; hasUnclosedQuote: boolean } {
-  const columns: string[] = [];
-  let current = "";
-  let inQuotes = false;
-  let i = 0;
-
-  while (i < line.length) {
-    const char = line[i];
-    if (inQuotes) {
-      if (char === '"') {
-        if (i + 1 < line.length && line[i + 1] === '"') {
-          current += '"';
-          i += 2;
-        } else {
-          inQuotes = false;
-          i++;
-        }
-      } else {
-        current += char;
-        i++;
-      }
-    } else {
-      if (char === '"') {
-        inQuotes = true;
-        i++;
-      } else if (char === ',') {
-        columns.push(current);
-        current = "";
-        i++;
-      } else {
-        current += char;
-        i++;
-      }
-    }
-  }
-
-  if (inQuotes) {
-    return { columns: [], hasUnclosedQuote: true };
-  }
-  columns.push(current);
-  return { columns, hasUnclosedQuote: false };
-}
-
     const parsedRows: BulkImportRow[] = [];
     if (lowerName.endsWith(".csv")) {
       try {
         const text = await file.text();
-        const rawLines = text.split(/\r\n|\r|\n/);
-        while (rawLines.length > 0 && (rawLines[rawLines.length - 1]?.trim() ?? "") === "") {
-          rawLines.pop();
-        }
+        const records = parseCsvRecords(text);
 
-        const firstLine = rawLines[0];
-        if (firstLine) {
-          const headerParsed = parseCsvLine(firstLine);
-          if (!headerParsed.hasUnclosedQuote && headerParsed.columns.length > 1) {
-            const headerCols = headerParsed.columns.map((h) => h.trim().toLowerCase().replace(/^["']|["']$/g, ""));
-            const skuIdx = headerCols.findIndex((h) => h === "sku" || h === "codigo");
-            const nameIdx = headerCols.findIndex((h) => h === "nombre" || h === "name" || h === "producto");
-            const descIdx = headerCols.findIndex((h) => h === "descripcion" || h === "description");
-            const catIdx = headerCols.findIndex((h) => h === "categoria" || h === "category");
-            const brandIdx = headerCols.findIndex((h) => h === "marca" || h === "brand");
-            const typeIdx = headerCols.findIndex((h) => h === "tipo_producto" || h === "tipo" || h === "product_type");
-            const priceIdx = headerCols.findIndex((h) => h === "precio_regular" || h.includes("precio") || h === "price");
-            const currencyIdx = headerCols.findIndex((h) => h === "moneda" || h === "currency");
-            const stockIdx = headerCols.findIndex((h) => h === "stock_inicial" || h.includes("stock") || h === "cantidad" || h === "qty");
+        if (records.length > 0) {
+          const headerRow = records[0]!;
+          const MANDATORY_COLUMNS = [
+            "sku",
+            "nombre",
+            "descripcion",
+            "categoria",
+            "marca",
+            "tipo_producto",
+            "precio_regular",
+            "moneda",
+            "stock_inicial",
+          ] as const;
 
-            const seenSkusInFile = new Set<string>();
+          const headerCols = headerRow.columns.map((h) => h.trim().toLowerCase());
+          const missingHeaderCols = MANDATORY_COLUMNS.filter((col) => !headerCols.includes(col));
 
-            for (let i = 1; i < rawLines.length; i++) {
-              const rowLine = rawLines[i];
-              if (!rowLine || !rowLine.trim()) continue;
+          const skuIdx = headerCols.indexOf("sku");
+          const nameIdx = headerCols.indexOf("nombre");
+          const descIdx = headerCols.indexOf("descripcion");
+          const catIdx = headerCols.indexOf("categoria");
+          const brandIdx = headerCols.indexOf("marca");
+          const typeIdx = headerCols.indexOf("tipo_producto");
+          const priceIdx = headerCols.indexOf("precio_regular");
+          const currencyIdx = headerCols.indexOf("moneda");
+          const stockIdx = headerCols.indexOf("stock_inicial");
 
-              const parsed = parseCsvLine(rowLine);
-              const rowId = i;
+          const seenSkusInFile = new Set<string>();
 
-              // Rule: Unclosed quote invalidates the row
-              if (parsed.hasUnclosedQuote) {
-                parsedRows.push({
-                  row_id: rowId,
-                  sku: `ROW-${rowId}`,
-                  nombre: "Fila con comilla sin cerrar",
-                  status: "FAILED",
-                  applied_domains: [],
-                  failed_domain: "CATALOGO",
-                  needs_reconciliation: false,
-                  code: "VALIDACION",
-                  detail: "Fila inválida: comilla sin cerrar.",
-                  steps: [
-                    { domain: "CATALOGO", status: "FAILED", code: "VALIDACION", detail: "Comilla sin cerrar" },
-                    { domain: "PRICING", status: "PENDING", detail: "No iniciado por formato inválido" },
-                    { domain: "INVENTARIO", status: "PENDING", detail: "No iniciado por formato inválido" },
-                  ],
-                });
-                continue;
-              }
+          for (let i = 1; i < records.length; i++) {
+            const rowRecord = records[i]!;
+            const rowId = i;
 
-              // Rule: Each row must have same number of columns as header
-              if (parsed.columns.length !== headerCols.length) {
-                parsedRows.push({
-                  row_id: rowId,
-                  sku: `ROW-${rowId}`,
-                  nombre: "Fila con columnas inconsistentes",
-                  status: "FAILED",
-                  applied_domains: [],
-                  failed_domain: "CATALOGO",
-                  needs_reconciliation: false,
-                  code: "VALIDACION",
-                  detail: `Número de columnas (${parsed.columns.length}) no coincide con la cabecera (${headerCols.length}).`,
-                  steps: [
-                    { domain: "CATALOGO", status: "FAILED", code: "VALIDACION", detail: "Columnas inconsistentes" },
-                    { domain: "PRICING", status: "PENDING", detail: "No iniciado por formato inválido" },
-                    { domain: "INVENTARIO", status: "PENDING", detail: "No iniciado por formato inválido" },
-                  ],
-                });
-                continue;
-              }
+            if (headerRow.hasUnclosedQuote || headerRow.syntaxError) {
+              parsedRows.push({
+                row_id: rowId,
+                sku: `ROW-${rowId}`,
+                nombre: "Fila con cabecera inválida",
+                status: "FAILED",
+                applied_domains: [],
+                failed_domain: "CATALOGO",
+                needs_reconciliation: false,
+                code: "VALIDACION",
+                detail: headerRow.hasUnclosedQuote ? "Cabecera con comilla sin cerrar." : headerRow.syntaxError!,
+                steps: [
+                  { domain: "CATALOGO", status: "FAILED", code: "VALIDACION", detail: "Cabecera inválida" },
+                  { domain: "PRICING", status: "PENDING", detail: "No iniciado por formato inválido" },
+                  { domain: "INVENTARIO", status: "PENDING", detail: "No iniciado por formato inválido" },
+                ],
+              });
+              continue;
+            }
 
-              const cols = parsed.columns.map((c) => c.trim());
-              const sku = skuIdx !== -1 ? cols[skuIdx] : "";
-              const nombre = nameIdx !== -1 ? cols[nameIdx] : "";
-              const descripcion = descIdx !== -1 ? cols[descIdx] : undefined;
-              const categoria = catIdx !== -1 ? cols[catIdx] : undefined;
-              const marca = brandIdx !== -1 ? cols[brandIdx] : undefined;
-              const tipo_producto = typeIdx !== -1 ? cols[typeIdx] : undefined;
-              const priceRaw = priceIdx !== -1 ? cols[priceIdx] : "";
-              const currencyRaw = currencyIdx !== -1 && cols[currencyIdx] ? cols[currencyIdx].toUpperCase() : "PEN";
-              const stockRaw = stockIdx !== -1 ? cols[stockIdx] : "";
+            if (missingHeaderCols.length > 0) {
+              parsedRows.push({
+                row_id: rowId,
+                sku: `ROW-${rowId}`,
+                nombre: "Fila con plantilla incompleta",
+                status: "FAILED",
+                applied_domains: [],
+                failed_domain: "CATALOGO",
+                needs_reconciliation: false,
+                code: "DATOS_INCOMPLETOS",
+                detail: `Columnas obligatorias ausentes en la cabecera: ${missingHeaderCols.join(", ")}.`,
+                steps: [
+                  { domain: "CATALOGO", status: "FAILED", code: "DATOS_INCOMPLETOS", detail: `Faltan columnas: ${missingHeaderCols.join(", ")}` },
+                  { domain: "PRICING", status: "PENDING", detail: "No iniciado por plantilla incompleta" },
+                  { domain: "INVENTARIO", status: "PENDING", detail: "No iniciado por plantilla incompleta" },
+                ],
+              });
+              continue;
+            }
 
-              // Rule: SKU and nombre cannot be empty
-              if (!sku || !nombre) {
-                parsedRows.push({
-                  row_id: rowId,
-                  sku: sku || `ROW-${rowId}`,
-                  nombre: nombre || "Producto sin nombre",
-                  status: "FAILED",
-                  applied_domains: [],
-                  failed_domain: "CATALOGO",
-                  needs_reconciliation: false,
-                  code: "DATOS_INCOMPLETOS",
-                  detail: "SKU y nombre son obligatorios y no pueden estar vacíos.",
-                  steps: [
-                    { domain: "CATALOGO", status: "FAILED", code: "DATOS_INCOMPLETOS", detail: "SKU y nombre obligatorios" },
-                    { domain: "PRICING", status: "PENDING", detail: "No iniciado" },
-                    { domain: "INVENTARIO", status: "PENDING", detail: "No iniciado" },
-                  ],
-                });
-                continue;
-              }
+            if (rowRecord.hasUnclosedQuote || rowRecord.syntaxError) {
+              parsedRows.push({
+                row_id: rowId,
+                sku: `ROW-${rowId}`,
+                nombre: "Fila con formato CSV inválido",
+                status: "FAILED",
+                applied_domains: [],
+                failed_domain: "CATALOGO",
+                needs_reconciliation: false,
+                code: "VALIDACION",
+                detail: rowRecord.hasUnclosedQuote ? "Fila inválida: comilla sin cerrar." : rowRecord.syntaxError!,
+                steps: [
+                  { domain: "CATALOGO", status: "FAILED", code: "VALIDACION", detail: rowRecord.hasUnclosedQuote ? "Comilla sin cerrar" : "Error sintaxis CSV" },
+                  { domain: "PRICING", status: "PENDING", detail: "No iniciado por formato inválido" },
+                  { domain: "INVENTARIO", status: "PENDING", detail: "No iniciado por formato inválido" },
+                ],
+              });
+              continue;
+            }
 
-              // Rule: Duplicate SKUs within same file must be rejected
-              const skuUpper = sku.toUpperCase();
-              if (seenSkusInFile.has(skuUpper)) {
-                parsedRows.push({
-                  row_id: rowId,
-                  sku,
-                  nombre,
-                  status: "FAILED",
-                  applied_domains: [],
-                  failed_domain: "CATALOGO",
-                  needs_reconciliation: false,
-                  code: "SKU_DUPLICADO",
-                  detail: `SKU "${sku}" duplicado dentro del mismo archivo.`,
-                  steps: [
-                    { domain: "CATALOGO", status: "FAILED", code: "SKU_DUPLICADO", detail: "SKU duplicado en archivo" },
-                    { domain: "PRICING", status: "PENDING", detail: "No iniciado" },
-                    { domain: "INVENTARIO", status: "PENDING", detail: "No iniciado" },
-                  ],
-                });
-                continue;
-              }
-              seenSkusInFile.add(skuUpper);
+            if (rowRecord.columns.length !== headerCols.length) {
+              parsedRows.push({
+                row_id: rowId,
+                sku: `ROW-${rowId}`,
+                nombre: "Fila con columnas inconsistentes",
+                status: "FAILED",
+                applied_domains: [],
+                failed_domain: "CATALOGO",
+                needs_reconciliation: false,
+                code: "VALIDACION",
+                detail: `Número de columnas (${rowRecord.columns.length}) no coincide con la cabecera (${headerCols.length}).`,
+                steps: [
+                  { domain: "CATALOGO", status: "FAILED", code: "VALIDACION", detail: "Columnas inconsistentes" },
+                  { domain: "PRICING", status: "PENDING", detail: "No iniciado por formato inválido" },
+                  { domain: "INVENTARIO", status: "PENDING", detail: "No iniciado por formato inválido" },
+                ],
+              });
+              continue;
+            }
 
-              // Rule: Precio regular: decimal positivo finito
-              const priceNum = priceRaw ? Number(priceRaw) : NaN;
-              if (priceIdx !== -1 && (isNaN(priceNum) || !Number.isFinite(priceNum) || priceNum <= 0)) {
-                parsedRows.push({
-                  row_id: rowId,
-                  sku,
-                  nombre,
-                  status: "FAILED",
-                  applied_domains: [],
-                  failed_domain: "PRICING",
-                  needs_reconciliation: false,
-                  code: "PRECIO_INVALIDO",
-                  detail: `El precio regular debe ser un decimal positivo finito (recibido: "${priceRaw}").`,
-                  steps: [
-                    { domain: "CATALOGO", status: "PENDING", detail: "Pendiente" },
-                    { domain: "PRICING", status: "FAILED", code: "PRECIO_INVALIDO", detail: "Precio inválido" },
-                    { domain: "INVENTARIO", status: "PENDING", detail: "No iniciado" },
-                  ],
-                });
-                continue;
-              }
+            const cols = rowRecord.columns.map((c) => c.trim());
+            const sku = skuIdx !== -1 ? cols[skuIdx] : "";
+            const nombre = nameIdx !== -1 ? cols[nameIdx] : "";
+            const descripcion = descIdx !== -1 ? cols[descIdx] : undefined;
+            const categoria = catIdx !== -1 ? cols[catIdx] : undefined;
+            const marca = brandIdx !== -1 ? cols[brandIdx] : undefined;
+            const tipo_producto = typeIdx !== -1 ? cols[typeIdx] : undefined;
+            const priceRaw = priceIdx !== -1 ? cols[priceIdx] : "";
+            const currencyRaw = currencyIdx !== -1 && cols[currencyIdx] ? cols[currencyIdx].toUpperCase() : "";
+            const stockRaw = stockIdx !== -1 ? cols[stockIdx] : "";
 
-              // Rule: Moneda admitida para esta integración: PEN
-              if (currencyRaw !== "PEN") {
-                parsedRows.push({
-                  row_id: rowId,
-                  sku,
-                  nombre,
-                  status: "FAILED",
-                  applied_domains: [],
-                  failed_domain: "PRICING",
-                  needs_reconciliation: false,
-                  code: "PRECIO_INVALIDO",
-                  detail: `Moneda no admitida: "${currencyRaw}". Solo se admite PEN.`,
-                  steps: [
-                    { domain: "CATALOGO", status: "PENDING", detail: "Pendiente" },
-                    { domain: "PRICING", status: "FAILED", code: "PRECIO_INVALIDO", detail: "Moneda no admitida" },
-                    { domain: "INVENTARIO", status: "PENDING", detail: "No iniciado" },
-                  ],
-                });
-                continue;
-              }
+            if (!sku || !nombre) {
+              parsedRows.push({
+                row_id: rowId,
+                sku: sku || `ROW-${rowId}`,
+                nombre: nombre || "Producto sin nombre",
+                status: "FAILED",
+                applied_domains: [],
+                failed_domain: "CATALOGO",
+                needs_reconciliation: false,
+                code: "DATOS_INCOMPLETOS",
+                detail: "SKU y nombre son obligatorios y no pueden estar vacíos.",
+                steps: [
+                  { domain: "CATALOGO", status: "FAILED", code: "DATOS_INCOMPLETOS", detail: "SKU y nombre obligatorios" },
+                  { domain: "PRICING", status: "PENDING", detail: "No iniciado" },
+                  { domain: "INVENTARIO", status: "PENDING", detail: "No iniciado" },
+                ],
+              });
+              continue;
+            }
 
-              // Rule: Stock inicial: entero no negativo
-              const stockNum = stockRaw ? Number(stockRaw) : 0;
-              if (stockIdx !== -1 && (!stockRaw || !/^\d+$/.test(stockRaw) || !Number.isSafeInteger(stockNum) || stockNum < 0)) {
-                parsedRows.push({
-                  row_id: rowId,
-                  sku,
-                  nombre,
-                  status: "FAILED",
-                  applied_domains: [],
-                  failed_domain: "INVENTARIO",
-                  needs_reconciliation: false,
-                  code: "CANTIDAD_INVALIDA",
-                  detail: `El stock inicial debe ser un entero no negativo (recibido: "${stockRaw}").`,
-                  steps: [
-                    { domain: "CATALOGO", status: "PENDING", detail: "Pendiente" },
-                    { domain: "PRICING", status: "PENDING", detail: "Pendiente" },
-                    { domain: "INVENTARIO", status: "FAILED", code: "CANTIDAD_INVALIDA", detail: "Stock inválido" },
-                  ],
-                });
-                continue;
-              }
-
-              // Valid row
+            const skuUpper = sku.toUpperCase();
+            if (seenSkusInFile.has(skuUpper)) {
               parsedRows.push({
                 row_id: rowId,
                 sku,
                 nombre,
-                descripcion,
-                categoria,
-                marca,
-                tipo_producto,
-                moneda: currencyRaw,
-                precio_regular: !isNaN(priceNum) && priceNum > 0 ? priceNum : undefined,
-                stock_inicial: stockNum >= 0 ? stockNum : undefined,
-                status: "PENDING",
+                status: "FAILED",
                 applied_domains: [],
-                failed_domain: null,
+                failed_domain: "CATALOGO",
                 needs_reconciliation: false,
-                detail: "Pendiente de procesamiento",
+                code: "SKU_DUPLICADO",
+                detail: `SKU "${sku}" duplicado dentro del mismo archivo.`,
                 steps: [
-                  { domain: "CATALOGO", status: "PENDING", detail: "Pendiente" },
-                  { domain: "PRICING", status: "PENDING", detail: !isNaN(priceNum) && priceNum > 0 ? `Precio regular S/ ${priceNum.toFixed(2)} registrado` : "Sin precio inicial" },
-                  { domain: "INVENTARIO", status: "PENDING", detail: `SKU inicializado y stock ${stockNum} u. aplicado` },
+                  { domain: "CATALOGO", status: "FAILED", code: "SKU_DUPLICADO", detail: "SKU duplicado en archivo" },
+                  { domain: "PRICING", status: "PENDING", detail: "No iniciado" },
+                  { domain: "INVENTARIO", status: "PENDING", detail: "No iniciado" },
                 ],
               });
+              continue;
             }
+            seenSkusInFile.add(skuUpper);
+
+            const priceNum = priceRaw ? Number(priceRaw) : NaN;
+            if (!priceRaw || isNaN(priceNum) || !Number.isFinite(priceNum) || priceNum <= 0) {
+              parsedRows.push({
+                row_id: rowId,
+                sku,
+                nombre,
+                status: "FAILED",
+                applied_domains: [],
+                failed_domain: "PRICING",
+                needs_reconciliation: false,
+                code: "PRECIO_INVALIDO",
+                detail: `El precio regular es obligatorio y debe ser un decimal positivo finito (recibido: "${priceRaw}").`,
+                steps: [
+                  { domain: "CATALOGO", status: "PENDING", detail: "Pendiente" },
+                  { domain: "PRICING", status: "FAILED", code: "PRECIO_INVALIDO", detail: "Precio inválido o ausente" },
+                  { domain: "INVENTARIO", status: "PENDING", detail: "No iniciado" },
+                ],
+              });
+              continue;
+            }
+
+            if (!currencyRaw || currencyRaw !== "PEN") {
+              parsedRows.push({
+                row_id: rowId,
+                sku,
+                nombre,
+                status: "FAILED",
+                applied_domains: [],
+                failed_domain: "PRICING",
+                needs_reconciliation: false,
+                code: "PRECIO_INVALIDO",
+                detail: `Moneda no admitida o ausente: "${currencyRaw}". Solo se admite PEN.`,
+                steps: [
+                  { domain: "CATALOGO", status: "PENDING", detail: "Pendiente" },
+                  { domain: "PRICING", status: "FAILED", code: "PRECIO_INVALIDO", detail: "Moneda no admitida" },
+                  { domain: "INVENTARIO", status: "PENDING", detail: "No iniciado" },
+                ],
+              });
+              continue;
+            }
+
+            const stockNum = stockRaw ? Number(stockRaw) : NaN;
+            if (!stockRaw || !/^\d+$/.test(stockRaw) || !Number.isSafeInteger(stockNum) || stockNum < 0) {
+              parsedRows.push({
+                row_id: rowId,
+                sku,
+                nombre,
+                status: "FAILED",
+                applied_domains: [],
+                failed_domain: "INVENTARIO",
+                needs_reconciliation: false,
+                code: "CANTIDAD_INVALIDA",
+                detail: `El stock inicial es obligatorio y debe ser un entero no negativo (recibido: "${stockRaw}").`,
+                steps: [
+                  { domain: "CATALOGO", status: "PENDING", detail: "Pendiente" },
+                  { domain: "PRICING", status: "PENDING", detail: "Pendiente" },
+                  { domain: "INVENTARIO", status: "FAILED", code: "CANTIDAD_INVALIDA", detail: "Stock inválido o ausente" },
+                ],
+              });
+              continue;
+            }
+
+            // Valid row
+            parsedRows.push({
+              row_id: rowId,
+              sku,
+              nombre,
+              descripcion,
+              categoria,
+              marca,
+              tipo_producto,
+              moneda: currencyRaw,
+              precio_regular: priceNum,
+              stock_inicial: stockNum,
+              status: "PENDING",
+              applied_domains: [],
+              failed_domain: null,
+              needs_reconciliation: false,
+              detail: "Pendiente de procesamiento",
+              steps: [
+                { domain: "CATALOGO", status: "PENDING", detail: "Pendiente" },
+                { domain: "PRICING", status: "PENDING", detail: `Precio regular S/ ${priceNum.toFixed(2)} registrado` },
+                { domain: "INVENTARIO", status: "PENDING", detail: `SKU inicializado y stock ${stockNum} u. aplicado` },
+              ],
+            });
           }
         }
       } catch {

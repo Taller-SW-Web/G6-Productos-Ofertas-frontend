@@ -153,8 +153,16 @@ test.describe("P0 — Integración transversal completa de módulos con persiste
     await expect(page.getByText("Zapatilla Air Max Runner")).toBeVisible();
     await expect(page.getByText(bulkSku)).toBeVisible();
 
-    // 6. Verificar que el precio regular existe en Pricing
+    // 6. Verificar que el precio regular existe en Pricing después de importar y tras F5
     await page.goto("/precios");
+    await page.getByRole("combobox", { name: "Producto o SKU" }).click();
+    await page.getByRole("option", { name: new RegExp(bulkSku), exact: false }).click();
+    await page.getByRole("button", { name: "Consultar", exact: true }).click();
+    await expect(page.getByText(bulkSku).first()).toBeVisible();
+    await expect(page.getByText("S/ 320.00").first()).toBeVisible();
+
+    // Recargar F5 y comprobar que el precio persiste
+    await page.reload();
     await page.getByRole("combobox", { name: "Producto o SKU" }).click();
     await page.getByRole("option", { name: new RegExp(bulkSku), exact: false }).click();
     await page.getByRole("button", { name: "Consultar", exact: true }).click();
@@ -660,5 +668,122 @@ test.describe("P0 — Integración transversal completa de módulos con persiste
     await expect(downloadButton).toBeVisible({ timeout: 20000 });
     await expect(downloadButton).toBeEnabled();
     await expect(page.getByText("Archivo generado").first()).toBeVisible();
+  });
+
+  test("Idempotencia de Catalog ante pérdida del estado Bulk y rechazo de duplicados en segundo lote", async ({
+    page,
+  }) => {
+    const uniqueSku = `CAT-IDEM-${Date.now().toString().slice(-4)}`;
+    const csvContent = [
+      "sku,nombre,descripcion,categoria,marca,tipo_producto,precio_regular,moneda,stock_inicial",
+      `${uniqueSku},Producto Idem Catalog,Zapatilla deportiva prueba,Calzado,Nike,Zapatilla,220.00,PEN,25`,
+    ].join("\n");
+
+    await page.goto("/carga-masiva");
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "lote_catalog_idem.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from(csvContent),
+    });
+    await page.getByRole("button", { name: "Continuar a revisión", exact: true }).click();
+    await expect(page).toHaveURL("/carga-masiva/revisar");
+
+    // Interceptar Storage.prototype.setItem para permitir la creación del lote en Bulk
+    // pero fallar en las llamadas posteriores para simular pérdida/fallo del avance de Bulk
+    await page.evaluate(() => {
+      const originalSetItem = Storage.prototype.setItem;
+      (window as unknown as { __originalSetItem?: typeof originalSetItem }).__originalSetItem = originalSetItem;
+      let bulkSaves = 0;
+      Storage.prototype.setItem = function (key: string, value: string) {
+        if (key.includes("bulk")) {
+          bulkSaves++;
+          // La primera llamada guarda el lote creado en QUEUED; las siguientes simulan fallo al persistir avance
+          if (bulkSaves > 1) {
+            throw new DOMException("Fallo simulado al persistir avance de Bulk", "QuotaExceededError");
+          }
+        }
+        return originalSetItem.call(this, key, value);
+      };
+    });
+
+    await page.getByRole("button", { name: "Confirmar importación", exact: true }).first().click();
+    await expect(page).toHaveURL(/\/carga-masiva\/importaciones\/lote-imp-/);
+    const batchUrlMatch = page.url().match(/\/carga-masiva\/importaciones\/(lote-imp-[^/]+)/);
+    const batchId = batchUrlMatch ? batchUrlMatch[1] : "";
+    expect(batchId).toMatch(/^lote-imp-/);
+
+    // Esperar a que la simulación aplique Catálogo (y falle al persistir el avance de Bulk)
+    await page.waitForTimeout(1000);
+
+    // Restaurar almacenamiento
+    await page.evaluate(() => {
+      const original = (window as unknown as { __originalSetItem?: typeof Storage.prototype.setItem }).__originalSetItem;
+      if (original) Storage.prototype.setItem = original;
+    });
+
+    // Recargar F5
+    await page.reload();
+
+    // Reanudar lote para completar la conciliación si fuera necesario o esperar finalización
+    const resumeButton = page.getByRole("button", { name: "Reanudar lote", exact: true });
+    if (await resumeButton.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await resumeButton.click();
+      const confirmDialog = page.getByRole("dialog");
+      await expect(confirmDialog).toBeVisible({ timeout: 5000 });
+      await confirmDialog.getByRole("button", { name: "Confirmar reanudación", exact: true }).click();
+    }
+
+    await expect(page.locator("section").getByText("Completado", { exact: true }).first()).toBeVisible({ timeout: 15000 });
+
+    // Confirmar en Catálogo: exactamente UN producto
+    await page.goto("/productos");
+    const catalogCards = page.getByText(uniqueSku);
+    await expect(catalogCards).toHaveCount(1);
+
+    // Confirmar en Pricing: exactamente UN precio registrado
+    await page.goto("/precios");
+    await page.getByRole("combobox", { name: "Producto o SKU" }).click();
+    const pricingOption = page.getByRole("option", { name: new RegExp(uniqueSku), exact: false });
+    await expect(pricingOption).toHaveCount(1);
+    await pricingOption.click();
+    await page.getByRole("button", { name: "Consultar", exact: true }).click();
+    await expect(page.getByText(uniqueSku).first()).toBeVisible();
+    await expect(page.getByText("S/ 220.00").first()).toBeVisible();
+
+    // Confirmar en Inventario: exactamente UNA aplicación de stock (25 unidades)
+    await page.goto("/inventario");
+    const stockRow = page.getByRole("row").filter({ hasText: uniqueSku });
+    await expect(stockRow).toHaveCount(1);
+    await expect(stockRow).toContainText("25");
+
+    // Comprobar que un segundo lote con el mismo SKU es rechazado como duplicado
+    const secondCsvContent = [
+      "sku,nombre,descripcion,categoria,marca,tipo_producto,precio_regular,moneda,stock_inicial",
+      `${uniqueSku},Segundo Producto Mismo SKU,Otra descripción,Calzado,Nike,Zapatilla,220.00,PEN,10`,
+    ].join("\n");
+
+    await page.goto("/carga-masiva");
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "lote_segundo_duplicado.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from(secondCsvContent),
+    });
+    await page.getByRole("button", { name: "Continuar a revisión", exact: true }).click();
+    await expect(page).toHaveURL("/carga-masiva/revisar");
+    await page.getByRole("button", { name: "Confirmar importación", exact: true }).first().click();
+    await expect(page).toHaveURL(/\/carga-masiva\/importaciones\/lote-imp-/);
+
+    // Esperar finalización del segundo lote con observaciones
+    await expect(page.getByText(/Completado con observaciones|Fallos registrados/).first()).toBeVisible({ timeout: 15000 });
+    await page.getByRole("link", { name: "Ver resultado final" }).first().click();
+
+    // Confirmar que la fila fue rechazada
+    await expect(page.getByText("Rechazado").first()).toBeVisible();
+
+    // En Inventario el stock sigue siendo exactamente 25 unidades (no se sumaron las 10 del segundo lote)
+    await page.goto("/inventario");
+    const stockRowAfter = page.getByRole("row").filter({ hasText: uniqueSku });
+    await expect(stockRowAfter).toHaveCount(1);
+    await expect(stockRowAfter).toContainText("25");
   });
 });

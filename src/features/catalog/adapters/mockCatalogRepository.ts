@@ -36,9 +36,16 @@ import {
   subscribeExternalMockChanges,
 } from "../../shared/mockState";
 
+export interface CatalogBulkOperation {
+  sku: string;
+  productId: string;
+  priceInitial: number;
+}
+
 interface MockCatalogState {
   products: ProductDetailView[];
   variants: VariantDetailView[];
+  bulkOperations?: [string, CatalogBulkOperation][];
 }
 
 function isCatalogProduct(value: unknown): boolean {
@@ -79,13 +86,15 @@ function isMockCatalogState(value: unknown): value is MockCatalogState {
     Array.isArray(value.products) &&
     value.products.every(isCatalogProduct) &&
     Array.isArray(value.variants) &&
-    value.variants.every(isCatalogVariant)
+    value.variants.every(isCatalogVariant) &&
+    (value.bulkOperations === undefined || Array.isArray(value.bulkOperations))
   );
 }
 
 export class MockCatalogRepository implements CatalogRepository {
   private products: ProductDetailView[] = [];
   private variants: VariantDetailView[] = [];
+  private bulkOperations: Map<string, CatalogBulkOperation> = new Map();
   private listeners = new Set<() => void>();
   private revisionValue = 0;
   private readonly persistEnabled: boolean;
@@ -119,6 +128,7 @@ export class MockCatalogRepository implements CatalogRepository {
       if (stored) {
         this.products = stored.products;
         this.variants = stored.variants;
+        this.bulkOperations = new Map(stored.bulkOperations ?? []);
       } else {
         this.loadFixtures();
       }
@@ -129,12 +139,17 @@ export class MockCatalogRepository implements CatalogRepository {
   }
 
   private snapshot(): MockCatalogState {
-    return { products: this.products, variants: this.variants };
+    return {
+      products: this.products,
+      variants: this.variants,
+      bulkOperations: Array.from(this.bulkOperations.entries()),
+    };
   }
 
   private loadFixtures() {
     this.products = JSON.parse(JSON.stringify(initialProducts));
     this.variants = JSON.parse(JSON.stringify(initialVariants));
+    this.bulkOperations.clear();
   }
 
   private hydrateFromStorage() {
@@ -143,6 +158,7 @@ export class MockCatalogRepository implements CatalogRepository {
     if (!stored) return;
     this.products = stored.products;
     this.variants = stored.variants;
+    this.bulkOperations = new Map(stored.bulkOperations ?? []);
     // Notify consumers without re-persisting the value just read.
     this.changed(false);
   }
@@ -159,7 +175,9 @@ export class MockCatalogRepository implements CatalogRepository {
       typeName?: string;
       typeId?: string;
       priceInitial?: number;
+      rowId?: string | number;
     }>,
+    batchId?: string,
   ): Promise<void> {
     const norm = (s?: string) => s?.trim().toLowerCase() ?? "";
 
@@ -171,13 +189,39 @@ export class MockCatalogRepository implements CatalogRepository {
 
     const prevProducts = JSON.parse(JSON.stringify(this.products)) as ProductDetailView[];
     const prevVariants = JSON.parse(JSON.stringify(this.variants));
+    const prevBulkOps = new Map(this.bulkOperations);
 
     try {
       let hasChanges = false;
       for (const item of items) {
         const skuUpper = item.sku.trim().toUpperCase();
+        const expectedPrice = item.priceInitial !== undefined ? Number(item.priceInitial) : 0;
+        const rowIdStr = item.rowId !== undefined ? String(item.rowId) : undefined;
+        const operationKey = batchId && rowIdStr ? `${batchId}:${rowIdStr}:CATALOGO` : undefined;
 
-        // 1. Validar que el SKU no exista previamente en productos ni variantes
+        // 2. Buscar operationKey.
+        if (operationKey) {
+          const existingOp = this.bulkOperations.get(operationKey);
+          if (existingOp) {
+            // 3. Si existe y el SKU, precio y producto coinciden con la operación guardada, devolver éxito sin crear otro producto.
+            const productExists = this.products.some(
+              (p) => p.id === existingOp.productId && p.skuBase.toUpperCase() === existingOp.sku.toUpperCase(),
+            );
+            const pricesMatch = Math.abs(existingOp.priceInitial - expectedPrice) < 0.001;
+            const skusMatch = existingOp.sku.toUpperCase() === skuUpper;
+
+            if (productExists && pricesMatch && skusMatch) {
+              continue;
+            }
+            // 4. Si existe pero la intención difiere, lanzar conflicto.
+            throw new CatalogError(
+              "conflict",
+              `Conflicto de idempotencia en Catálogo para la operación ${operationKey}: los datos recibidos difieren del registro previo.`,
+            );
+          }
+        }
+
+        // 5. Si no existe, comprobar duplicación global de SKU.
         const existingInProducts = this.products.some(
           (p) => p.skuBase.toUpperCase() === skuUpper,
         );
@@ -315,6 +359,15 @@ export class MockCatalogRepository implements CatalogRepository {
             variantes: [],
           },
         };
+
+        if (operationKey) {
+          this.bulkOperations.set(operationKey, {
+            sku: skuUpper,
+            productId: newId,
+            priceInitial: expectedPrice,
+          });
+        }
+
         this.products.unshift(newProduct);
         hasChanges = true;
       }
@@ -325,6 +378,7 @@ export class MockCatalogRepository implements CatalogRepository {
     } catch (error) {
       this.products = prevProducts;
       this.variants = prevVariants;
+      this.bulkOperations = prevBulkOps;
       throw error;
     }
   }
