@@ -154,3 +154,7 @@ Despliegue nativo GitHub → Vercel: [configuración inicial, bootstrap, smoke y
 | Requisitos funcionales, UX/Design System, arquitectura y contratos | [Repositorio Docs](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs) — `requisitos/`, `ux/mockups/`, `arquitectura/` y `contratos/` |
 
 Docs es la fuente para SPEC, HU, flujos, decisiones UX y contratos ejecutables. Backend es un repositorio independiente responsable de sus servicios. Antes de integrar, verifica el contrato vigente del provider y los acuerdos aplicables; la documentación o un adapter local no prueban homologación, despliegue o autorización.
+
+## Integración G1 Marketplace H4
+
+Este repositorio implementa el frontend administrativo G6. El frontend comercial Marketplace pertenece a G1 y consume capacidades G6 mediante el BFF de G1 → API Gateway G6. No se implementa un segundo BFF Marketplace aquí. Para compatibilidad, consultar el [paquete normativo Docs H4](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/docs/g1-marketplace-homologacion-lote03/integraciones/ACUERDO_G1_G6_H4_2026-10-20.md) y la [guía operativa obligatoria Backend](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/castilla/integraciones/g1-marketplace/README.md). Los mocks/fixtures de G6 solo prueban el frontend administrativo; un fallo real de API no permite fallback silencioso a datos ficticios. La disponibilidad detallada interna no equivale a la proyección comercial de cuatro estados.
