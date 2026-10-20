@@ -343,13 +343,65 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
   });
 });
 
+describe("apiInventoryAdapter — dashboard KPIs (obtenerDashboardInventario)", () => {
+  const DASHBOARD_DTO = {
+    generatedAt: "2026-10-20T00:00:00.000Z",
+    totalSkus: 12,
+    totalOnHand: 150,
+    totalReserved: 20,
+    totalAvailable: 125,
+    skusDisponibles: 9,
+    skusStockBajo: 2,
+    skusAgotados: 1,
+    porUbicacion: [
+      {
+        location_id: "loc-1",
+        on_hand: 150,
+        reserved: 20,
+        available: 125,
+        skusDisponibles: 9,
+        skusStockBajo: 2,
+        skusAgotados: 1,
+      },
+    ],
+  };
+
+  it("mapea KPIs autoritativos de DashboardInventario e informa null en métricas no publicadas", async () => {
+    const { repository, calls } = setup(async () => jsonResponse(DASHBOARD_DTO));
+    await expect(
+      repository.getDashboardKpis({ locationId: "loc-1" }),
+    ).resolves.toEqual({
+      availableUnits: 125,
+      blockedUnits: null,
+      totalPhysicalUnits: 150,
+      totalVendibleSkus: null,
+      skusAvailable: 9,
+      skusLowStock: 2,
+      skusOutOfStock: 1,
+      reservedUnits: 20,
+      totalPendingTransfers: null,
+      transfersInTransit: null,
+      transfersPartiallyReceived: null,
+      transfersWithDiscrepancy: null,
+    });
+    expect(calls[0]?.path).toBe("/api/v1/inventario/dashboard?locationId=loc-1");
+  });
+
+  it("rechaza con CONTRATO_BLOQUEADO filtros de texto libre o estado no admitidos por obtenerDashboardInventario", async () => {
+    const { repository, request } = setup(async () => jsonResponse(DASHBOARD_DTO));
+    await expect(
+      rejection(repository.getDashboardKpis({ search: "SKU-A" })),
+    ).resolves.toMatchObject({ code: "CONTRATO_BLOQUEADO" });
+    expect(request).not.toHaveBeenCalled();
+  });
+});
+
 describe("apiInventoryAdapter — operaciones sin fuente contractual", () => {
   it("rechaza con CONTRATO_BLOQUEADO las lecturas cuyo modelo no cubre el contrato", async () => {
     const { repository, request } = setup(async () => jsonResponse({}));
     for (const promise of [
       repository.getStockItems(),
       repository.getStockDetail("SKU-A", "loc-1"),
-      repository.getDashboardKpis(),
       repository.getDashboardAlerts(),
       repository.getLocationDistribution(),
       repository.getCategories(),

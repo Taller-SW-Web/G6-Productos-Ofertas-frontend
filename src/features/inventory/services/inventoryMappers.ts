@@ -1,6 +1,7 @@
 import { InventoryError } from "./inventoryErrors";
 import type {
   DispositionType,
+  InventoryKpiSummary,
   ReceiveTransferPayload,
   StockStatus,
   ThresholdConfig,
@@ -196,6 +197,45 @@ export function toThresholdConfig(value: unknown): ThresholdConfig {
     skuOverrides[sku] = umbral;
   }
   return { globalThreshold, skuOverrides };
+}
+
+export function toDashboardKpiSummary(value: unknown): InventoryKpiSummary {
+  const dto = record(value);
+  dateTime(dto, "generatedAt");
+  nonNegativeInt(dto, "totalSkus", 0);
+  const totalOnHand = nonNegativeInt(dto, "totalOnHand", 0);
+  const totalReserved = nonNegativeInt(dto, "totalReserved", 0);
+  const totalAvailable = nonNegativeInt(dto, "totalAvailable", 0);
+  const skusDisponibles = nonNegativeInt(dto, "skusDisponibles", 0);
+  const skusStockBajo = nonNegativeInt(dto, "skusStockBajo", 0);
+  const skusAgotados = nonNegativeInt(dto, "skusAgotados", 0);
+  if (!Array.isArray(dto.porUbicacion)) return incompatible();
+  for (const rawLocation of dto.porUbicacion) {
+    const location = record(rawLocation);
+    nonEmptyString(location, "location_id");
+    nonNegativeInt(location, "on_hand", 0);
+    nonNegativeInt(location, "reserved", 0);
+    nonNegativeInt(location, "available", 0);
+    nonNegativeInt(location, "skusDisponibles", 0);
+    nonNegativeInt(location, "skusStockBajo", 0);
+    nonNegativeInt(location, "skusAgotados", 0);
+  }
+  // Los indicadores que `DashboardInventario` no publica se informan como `null`
+  // (ausencia de dato verificable, nunca como 0).
+  return {
+    availableUnits: totalAvailable,
+    blockedUnits: null,
+    totalPhysicalUnits: totalOnHand,
+    totalVendibleSkus: null,
+    skusAvailable: skusDisponibles,
+    skusLowStock: skusStockBajo,
+    skusOutOfStock: skusAgotados,
+    reservedUnits: totalReserved,
+    totalPendingTransfers: null,
+    transfersInTransit: null,
+    transfersPartiallyReceived: null,
+    transfersWithDiscrepancy: null,
+  };
 }
 
 export function toRecepcionTrasladoRequestDto(

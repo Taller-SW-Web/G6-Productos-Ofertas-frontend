@@ -10,8 +10,9 @@ extremo.
 ## Fuentes normativas
 
 - OpenAPI `0.6.0-rc.1`, operaciones de Inventario: `obtenerUmbralesInventario`,
-  `actualizarUmbralGlobal`, `establecerUmbralSku`, `listarTrasladosInventario`,
-  `obtenerTrasladoInventario`, `registrarRecepcionTrasladoInventario`.
+  `actualizarUmbralGlobal`, `establecerUmbralSku`, `obtenerDashboardInventario`,
+  `listarTrasladosInventario`, `obtenerTrasladoInventario`,
+  `registrarRecepcionTrasladoInventario`.
 - `catalogo-errores.md`: `TRASLADO_NO_ENCONTRADO`, `TRASLADO_NO_RECIBIBLE`,
   `IDEMPOTENCY_CONFLICT`, `CANTIDAD_RECIBIDA_EXCEDE_TRASLADO`,
   `DISPOSICION_RECEPCION_INVALIDA`, `TOKEN_INVALIDO`, `SCOPE_INSUFICIENTE`,
@@ -22,11 +23,11 @@ extremo.
 
 | Archivo | Cambio |
 |---|---|
-| `adapters/apiInventoryAdapter.ts` | Fábrica `createHttpInventoryRepository` con `InventoryHttpTransport` inyectable. Implementa umbrales y traslados (lectura y recepción), con bloqueo de doble envío, resultado incierto y traducción de `application/problem+json`. Las operaciones sin fuente contractual fallan con `CONTRATO_BLOQUEADO`. |
-| `services/inventoryMappers.ts` | Validadores/mappers del contrato: `toThresholdConfig`, `validateTrasladoDto`, `validateTrasladoListDto`, `validateRecepcionResponse`, `validateTransferPresentation`. Conserva `toTransferItem`, `toStockStatus` y `toRecepcionTrasladoRequestDto`. |
+| `adapters/apiInventoryAdapter.ts` | Fábrica `createHttpInventoryRepository` con `InventoryHttpTransport` inyectable. Implementa umbrales, KPIs autoritativos de dashboard (con `null` en métricas no publicadas) y traslados (lectura y recepción), con bloqueo de doble envío, resultado incierto y traducción de `application/problem+json`. Las operaciones sin fuente contractual fallan con `CONTRATO_BLOQUEADO`. |
+| `services/inventoryMappers.ts` | Validadores/mappers del contrato: `toThresholdConfig`, `toDashboardKpiSummary`, `validateTrasladoDto`, `validateTrasladoListDto`, `validateRecepcionResponse`, `validateTransferPresentation`. Conserva `toTransferItem`, `toStockStatus` y `toRecepcionTrasladoRequestDto`. |
 | `services/inventoryErrors.ts` | Códigos de protocolo/estado: `NO_AUTENTICADO`, `SIN_PERMISO`, `SERVICIO_NO_DISPONIBLE`, `RESULTADO_INCIERTO`, `RESPUESTA_INCOMPATIBLE`, `CONTRATO_BLOQUEADO`. |
 | `services/inventoryProvider.ts` | Punto de inyección `configureInventoryApi(factory)`. Sin factory, el modo API mantiene un fallo controlado bajo demanda; nunca cae al mock. |
-| `adapters/apiInventoryAdapter.spec.ts` | 17 pruebas unitarias del adaptador. |
+| `adapters/apiInventoryAdapter.spec.ts` | 19 pruebas unitarias del adaptador. |
 | `adapters/vitest.config.ts` | Configuración local del feature (no modifica los scripts compartidos). |
 | `INTEGRACION_HTTP.md` | Este documento. |
 
@@ -40,6 +41,7 @@ otros features.
 | `obtenerUmbralesInventario` | `GET /api/v1/inventario/umbrales` | `umbralGlobal → globalThreshold`; `overrides[] → skuOverrides` |
 | `actualizarUmbralGlobal` | `PUT /api/v1/inventario/umbrales/global` | body `{ umbral }`; respuesta `UmbralInventario` |
 | `establecerUmbralSku` | `PUT /api/v1/inventario/umbrales/skus/{sku}` | SKU codificado; body `{ umbral }` |
+| `obtenerDashboardInventario` | `GET /api/v1/inventario/dashboard?locationId&categoriaId&marcaId` | mapea los 6 KPIs autoritativos de `DashboardInventario` e informa `null` (ausencia de dato, nunca `0`) en las 6 métricas no publicadas; rechaza con `CONTRATO_BLOQUEADO` filtros de texto libre o estado |
 | `listarTrasladosInventario` | `GET /api/v1/inventario/traslados?estado&target_location_id&pagina&tamanio` | pagina con `tamanio=100` hasta cubrir `total` (sin truncar) |
 | `obtenerTrasladoInventario` | (mapeador `validateTrasladoDto` disponible) | — |
 | `registrarRecepcionTrasladoInventario` | `POST /api/v1/inventario/traslados/{trasladoId}/recepciones` | `Idempotency-Key = operation_id`; body `RecepcionTrasladoInventarioRequest` |
@@ -60,7 +62,6 @@ rellenan con valores simulados.
 | Método del puerto | Campo sin fuente contractual | Owner / condición |
 |---|---|---|
 | `getStockItems`, `getStockDetail` | `productName`, `categoryName`, `brandName`; `locationName`; `stockVersion`; `updatedAt` | Catálogo/Taxonomía (mapping producto→SKU) y una fuente de ubicaciones; `consultarDisponibilidad` no expone versión ni fecha |
-| `getDashboardKpis` | `blockedUnits`, `totalVendibleSkus`, cuatro KPIs de traslados | `obtenerDashboardInventario` no los publica |
 | `getDashboardAlerts` | modelo completo de alertas | No existe operación de alertas |
 | `getLocationDistribution` | `blockedTotal`, `locationName` | `porUbicacion` no los publica |
 | `getCategories`, `getBrands` | integración de filtros (paginación) | Catálogo; definición pendiente |
@@ -115,7 +116,7 @@ composition root (#45/#109) y no se modifica aquí.
 |---|---|
 | `npm run typecheck` | PASS |
 | `npm run lint` | PASS |
-| `npx vitest run --config src/features/inventory/adapters/vitest.config.ts` | **17/17 PASS** |
+| `npx vitest run --config src/features/inventory/adapters/vitest.config.ts` | **19/19 PASS** |
 | `npm test` | `test:unit:combos` 36 PASS; `test:unit:bulk` 24 PASS |
 | `npm run build` con `VITE_DATA_MODE=mock` | PASS |
 | `npm run build` con `VITE_DATA_MODE=api` | PASS |

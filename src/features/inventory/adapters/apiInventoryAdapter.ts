@@ -1,12 +1,15 @@
 import { InventoryError } from "../services/inventoryErrors";
 import type { InventoryRepository } from "../services/inventoryRepository";
 import type {
+  DashboardFiltersQuery,
+  InventoryKpiSummary,
   StockItem,
   ThresholdConfig,
   TransferFiltersQuery,
   TransferItem,
 } from "../services/inventoryTypes";
 import {
+  toDashboardKpiSummary,
   toRecepcionTrasladoRequestDto,
   toThresholdConfig,
   toTransferItem,
@@ -63,8 +66,8 @@ const BLOCKED_DETAILS = {
     "productName/categoryName/brandName (Catálogo/Taxonomía), locationName (sin endpoint) y stockVersion/updatedAt no los devuelve consultarDisponibilidad",
   getStockDetail:
     "mismos campos sin fuente que getStockItems (consultarDisponibilidad)",
-  getDashboardKpis:
-    "blockedUnits ausente, totalVendibleSkus ambiguo y los cuatro KPIs de traslados quedan fuera de obtenerDashboardInventario",
+  getDashboardKpisFilter:
+    "obtenerDashboardInventario no admite filtrar por texto libre ni por estado de stock",
   getDashboardAlerts:
     "no existe operación de alertas en el contrato de Inventario",
   getLocationDistribution:
@@ -369,10 +372,23 @@ export function createHttpInventoryRepository(
       );
     },
 
-    getDashboardKpis() {
-      return Promise.reject(
-        blocked("getDashboardKpis", BLOCKED_DETAILS.getDashboardKpis),
-      );
+    getDashboardKpis(
+      filters?: DashboardFiltersQuery,
+    ): Promise<InventoryKpiSummary> {
+      if (filters?.search?.trim() || filters?.status?.trim()) {
+        return Promise.reject(
+          blocked("getDashboardKpis", BLOCKED_DETAILS.getDashboardKpisFilter),
+        );
+      }
+      const params = new URLSearchParams();
+      if (filters?.locationId) params.set("locationId", filters.locationId);
+      if (filters?.category) params.set("categoriaId", filters.category);
+      if (filters?.brand) params.set("marcaId", filters.brand);
+      const query = params.toString();
+      const path = query
+        ? `/api/v1/inventario/dashboard?${query}`
+        : "/api/v1/inventario/dashboard";
+      return json(path, { method: "GET" }, false).then(toDashboardKpiSummary);
     },
 
     getDashboardAlerts() {
