@@ -147,6 +147,13 @@ export function createHttpInventoryRepository(
   //     servidor (incluyendo la recuperación idempotente del resultado durable).
   const transferWrites = new Map<string, TransferReceptionWriteRecord>();
 
+  // TAC-P0-05: DTO de confirmación persistido, indexado por `operationId`. Una
+  // vez que Inventory confirma la recepción (200 + DTO válido), la confirmación
+  // es autoritativa e independiente del enriquecimiento de presentación. Este
+  // cache evita repetir el POST si `present()` (resolvedor de Catálogo/ubicaciones)
+  // falla después de que la mutación ya fue persistida.
+  const confirmedReceptions = new Map<string, TrasladoInventarioDto>();
+
   async function send(
     path: string,
     request: InventoryHttpRequest,
@@ -406,12 +413,21 @@ export function createHttpInventoryRepository(
       const key = payload.transferId;
       const frozenPayload = freezeReceiveTransferPayload(payload);
       const currentRecord = transferWrites.get(key);
+      const wasUncertainRetry = currentRecord?.state === "UNCERTAIN";
 
       if (currentRecord?.state === "IN_FLIGHT") {
         throw new InventoryError(
           "RESULTADO_INCIERTO",
           "Hay una recepción pendiente de confirmación para este traslado.",
         );
+      }
+
+      // TAC-P0-05: la confirmación ya fue registrada para esta identidad. Un
+      // error de presentación previo no debe repetir el POST, sino recuperar el
+      // resultado durable ya persistido.
+      const confirmedDto = confirmedReceptions.get(frozenPayload.operationId);
+      if (confirmedDto) {
+        return present(confirmedDto);
       }
 
       if (currentRecord?.state === "UNCERTAIN") {
@@ -429,15 +445,21 @@ export function createHttpInventoryRepository(
         }
       }
 
+      const priorReconciliation =
+        currentRecord?.state === "UNCERTAIN" ? currentRecord.reconciliation : "NONE";
+
       transferWrites.set(key, {
         state: "IN_FLIGHT",
         payload: frozenPayload,
-        reconciliation: currentRecord?.reconciliation ?? "NONE",
+        reconciliation: priorReconciliation,
         updatedAt: frozenPayload.receivedAt,
       });
 
+      // Fase A — envío autoritativo. Un fallo aquí NO acredita si la mutación se
+      // aplicó o no; se transiciona según la matriz (TAC-P1-07).
+      let body: unknown;
       try {
-        const body = await json(
+        body = await json(
           `/api/v1/inventario/traslados/${encodeURIComponent(key)}/recepciones`,
           {
             method: "POST",
@@ -449,18 +471,20 @@ export function createHttpInventoryRepository(
           },
           true,
         );
-        const { traslado } = validateRecepcionResponse(body);
-        const item = await present(traslado);
-        clearUncertainTransferReception(key, frozenPayload.operationId);
-        transferWrites.set(key, {
-          state: "RECONCILED",
-          payload: frozenPayload,
-          reconciliation: "CONFIRMED_BY_IDEMPOTENT_RETRY",
-          updatedAt: traslado.updated_at,
-        });
-        return item;
       } catch (error) {
-        if (
+        // TAC-P1-07: estando en UNCERTAIN, ningún error (red, 5xx, 4xx incluido
+        // 409 IDEMPOTENCY_CONFLICT) libera el bloqueo; solo lo hace un 200 con
+        // DTO válido. En primer intento, un error incierto conserva UNCERTAIN y
+        // un 4xx definitivo limpia el registro.
+        if (wasUncertainRetry) {
+          setUncertainTransferReception(frozenPayload);
+          transferWrites.set(key, {
+            state: "UNCERTAIN",
+            payload: frozenPayload,
+            reconciliation: priorReconciliation,
+            updatedAt: frozenPayload.receivedAt,
+          });
+        } else if (
           error instanceof InventoryError &&
           error.code === "RESULTADO_INCIERTO"
         ) {
@@ -468,32 +492,47 @@ export function createHttpInventoryRepository(
           transferWrites.set(key, {
             state: "UNCERTAIN",
             payload: frozenPayload,
-            reconciliation:
-              currentRecord?.state === "UNCERTAIN"
-                ? currentRecord.reconciliation
-                : "NONE",
+            reconciliation: "NONE",
             updatedAt: frozenPayload.receivedAt,
           });
-        } else if (
-          currentRecord?.state === "UNCERTAIN" &&
-          error instanceof InventoryError &&
-          (error.code === "NO_AUTENTICADO" ||
-            error.code === "SIN_PERMISO" ||
-            error.code === "SERVICIO_NO_DISPONIBLE")
-        ) {
-          // Si ya existía una operación incierta y el reintento falló por un
-          // rechazo de protocolo antes de verificar la operación, se preserva
-          // el estado incierto original.
-          setUncertainTransferReception(currentRecord.payload);
-          transferWrites.set(key, currentRecord);
         } else {
-          // Rechazos definitivos (400/401/403/404/409/422 en primer intento)
-          // no dejan el traslado bloqueado en estado incierto.
           clearUncertainTransferReception(key, frozenPayload.operationId);
           transferWrites.delete(key);
         }
         throw error;
       }
+
+      // Fase B — validar el DTO de confirmación. Si es incompatible, el resultado
+      // no se puede determinar: la mutación pudo aplicarse, se preserva UNCERTAIN.
+      let traslado: TrasladoInventarioDto;
+      try {
+        traslado = validateRecepcionResponse(body).traslado;
+      } catch (error) {
+        setUncertainTransferReception(frozenPayload);
+        transferWrites.set(key, {
+          state: "UNCERTAIN",
+          payload: frozenPayload,
+          reconciliation: priorReconciliation,
+          updatedAt: frozenPayload.receivedAt,
+        });
+        throw error;
+      }
+
+      // Fase C — registrar la confirmación autoritativa ANTES del enriquecimiento
+      // de presentación (TAC-P0-05). No condicionar RECONCILED al éxito de present().
+      clearUncertainTransferReception(key, frozenPayload.operationId);
+      confirmedReceptions.set(frozenPayload.operationId, traslado);
+      transferWrites.set(key, {
+        state: "RECONCILED",
+        payload: frozenPayload,
+        reconciliation: "CONFIRMED_BY_IDEMPOTENT_RETRY",
+        updatedAt: traslado.updated_at,
+      });
+
+      // Fase D — enriquecimiento de presentación (no autoritativo). Si falla, la
+      // mutación YA está confirmada y el estado permanece RECONCILED; el POST no
+      // se repite (el reintento con la misma identidad devuelve el cache).
+      return present(traslado);
     },
 
     getStockItems(): Promise<StockItem[]> {

@@ -36,6 +36,19 @@ de traslados (`TAC-P0-01` y `TAC-P0-02`):
    `transferId` y bloquea la edición de campos hasta que el reintento idéntico
    confirme el resultado durable.
 
+Corte **Hito 4 (2026-10-21, iteración 3)**: se resolvieron los hallazgos de la
+segunda auditoría de Marco:
+
+3. **`TAC-P0-05` — Confirmación separada del enriquecimiento:** `receiveTransfer()`
+   registra `RECONCILED` y cachea el DTO confirmado **antes** de `present()`; un
+   fallo del resolvedor de presentación no reabre la operación ni repite el POST.
+4. **`TAC-P1-07` — Matriz de transición ante errores:** estando en `UNCERTAIN`,
+   ningún error (`400/401/403/404/409/422/5xx`, red o DTO inválido) libera el
+   bloqueo; solo lo hace un `200` con DTO válido.
+5. **`TAC-P0-06` — Pérdida en refresh:** documentado y caracterizado por prueba;
+   la solución definitiva queda `BLOQUEADO_ESPECÍFICO` con propuesta a Marco
+   (ver sección dedicada).
+
 ## Fuentes normativas
 
 - OpenAPI `0.6.0-rc.1` (`docs/contratos/http/openapi.yaml`), operaciones de
@@ -84,18 +97,82 @@ transporte compartido ni otros features.
 | `obtenerTrasladoInventario` | (mapeador `validateTrasladoDto` disponible) | — |
 | `registrarRecepcionTrasladoInventario` | `POST /api/v1/inventario/traslados/{trasladoId}/recepciones` | `Idempotency-Key = operation_id`; body `RecepcionTrasladoInventarioRequest` inmutable entre reintentos |
 
-## Ciclo de estados de recepción e idempotencia (`TAC-P0-01` y `TAC-P0-02`)
+## Ciclo de estados de recepción e idempotencia (`TAC-P0-01`, `TAC-P0-02`, `TAC-P0-05`, `TAC-P1-07`)
 
-| Estado en adaptador | Cuándo entra | Qué permite / qué bloquea | Cómo sale |
-|---|---|---|---|
-| `IN_FLIGHT` | Antes de enviar `POST /inventario/traslados/{id}/recepciones` | Bloquea cualquier segundo envío concurrente para el mismo `transferId` con `RESULTADO_INCIERTO` | Pasa a `RECONCILED` (200 OK), a `UNCERTAIN` (error de red / `>=500` / respuesta ilegible) o se limpia si fue primer intento con `4xx` definitivo |
-| `UNCERTAIN` | Error de red, timeout, HTTP `>=500` o cuerpo 200 ilegible en la escritura | Bloquea cualquier otro `operationId` y cualquier cambio de `quantityReceived`, `disposition`, `finalReceipt`, `receivedAt` o `note`. Al cerrar/reabrir el modal, la UI restaura el snapshot inmutable y deshabilita la edición. `GET /inventario/traslados` marca `reconciliation: "UNVERIFIABLE_BY_LIST_CONTRACT"` y **no** libera el bloqueo | Solo pasa a `RECONCILED` cuando el reintento idéntico (mismo `operationId` e idéntico payload JSON) recibe confirmación `200 OK` del servidor |
-| `RECONCILED` | Respuesta `200 OK` válida en primer intento o en reintento idempotente (`CONFIRMED_BY_IDEMPOTENT_RETRY`) | Limpia el bloqueo incierto y permite posteriores recepciones parciales con un nuevo `operationId` si el traslado continúa en `RECIBIDO_PARCIAL` | — |
+`receiveTransfer()` separa cuatro fases para no confundir la confirmación
+autoritativa de Inventory con el enriquecimiento de presentación (`TAC-P0-05`):
+
+1. **Fase A — envío autoritativo:** `POST .../recepciones`. Un fallo de red o
+   `5xx` no acredita si la mutación se aplicó.
+2. **Fase B — validar el DTO de confirmación:** `validateRecepcionResponse()`.
+   Si el `200` trae un DTO incompatible, el resultado no se puede determinar.
+3. **Fase C — registrar la confirmación:** se marca `RECONCILED` **antes** de
+   tocar el resolvedor de presentación y se cachea el DTO confirmado por
+   `operationId`. La confirmación no depende del enriquecimiento.
+4. **Fase D — enriquecimiento de presentación:** `present()` (resolvedor de
+   Catálogo/ubicaciones). Si falla, la mutación **ya está confirmada**; el
+   estado permanece `RECONCILED` y el reintento con la misma identidad devuelve
+   el cache **sin repetir el POST**.
+
+### Matriz de transición de estados (`TAC-P1-07`)
+
+| Estado previo | Desenlace del `POST` | Estado siguiente |
+|---|---|---|
+| `IN_FLIGHT` (primer intento) | `200` + DTO válido | `RECONCILED` (confirmación antes de presentación) |
+| `IN_FLIGHT` (primer intento) | red / `5xx` / `200` ilegible | `UNCERTAIN` |
+| `IN_FLIGHT` (primer intento) | `200` + DTO incompatible | `UNCERTAIN` |
+| `IN_FLIGHT` (primer intento) | `4xx` definitivo (`400/401/403/404/409/422`) | registro eliminado (el backend rechazó sin persistir) |
+| `UNCERTAIN` (reintento idéntico) | `200` + DTO válido | `RECONCILED` (`CONFIRMED_BY_IDEMPOTENT_RETRY`) |
+| `UNCERTAIN` (reintento idéntico) | **cualquier otro** (`400/401/403/404/409/422/5xx`, red, `200` ilegible o DTO incompatible) | **permanece `UNCERTAIN`** |
+
+Regla de seguridad: **estando en `UNCERTAIN`, la única salida es un `200` con
+DTO de confirmación válido.** En particular, un `409 IDEMPOTENCY_CONFLICT`
+durante la recuperación no libera el bloqueo ni habilita otra identidad, porque
+el resultado original sigue desconocido.
+
+### Estado `UNCERTAIN` — qué permite / qué bloquea
+
+- Bloquea cualquier otro `operationId` y cualquier cambio de `quantityReceived`,
+  `disposition`, `finalReceipt`, `receivedAt` o `note`.
+- Al cerrar/reabrir `ReceiveTransferModal`, la UI restaura el snapshot inmutable
+  y deshabilita la edición hasta que el reintento idéntico recupere el resultado.
+- `GET /inventario/traslados` marca `reconciliation: "UNVERIFIABLE_BY_LIST_CONTRACT"`
+  y **no** libera el bloqueo.
 
 Limitación contractual registrada (`TAC-P0-02`):
 - `GET /api/v1/inventario/traslados` y `GET /api/v1/inventario/traslados/{trasladoId}` devuelven `TrasladoInventario` (`quantity_shipped`, `quantity_received`, `missing_quantity`, `estado`), sin historial de recepciones ni `operation_id`.
 - `GET /api/v1/inventario/operaciones/{operationId}` (`consultarOperacionInventario`, OpenAPI L20309) es de uso exclusivo M2M para `modulo-ventas` con `serviceBearer` y scope `inventario:operaciones:leer`, no para el navegador.
 - En consecuencia, la única conciliación concluyente disponible dentro del contrato vigente para el navegador es el **reintento idempotente con la misma solicitud inmutable** (`Idempotency-Key` y body idénticos), ante el cual `traslados.service.ts` devuelve el `result_payload` persistido en `inventory_operations` sin duplicar el movimiento.
+
+## Recuperación tras refresh/crash (`TAC-P0-06` — BLOQUEADO_ESPECÍFICO)
+
+`uncertainReceptionsByTransferId` es un `Map` en memoria. Protege el intento al
+cerrar/reabrir el modal, pero **se pierde con un refresh completo del navegador
+o al reiniciar la aplicación**. Tras una recarga, el intento `UNCERTAIN` ya no
+se restaura y podría generarse un nuevo `operationId` para una recepción que
+quizá ya fue confirmada. Este escenario está documentado en el módulo
+(`transferReceptionAttempt.ts`) y caracterizado por una prueba de reinicio de
+sesión; **la solución definitiva está pendiente de acuerdo con Marco.**
+
+Propuesta de mecanismo (a elegir por Marco antes de implementar — no se aplica
+de forma unilateral):
+
+1. **Persistencia local del payload inmutable** (`localStorage`/`sessionStorage`)
+   del intento `UNCERTAIN` (solo `operationId`, `receivedAt`, `quantityReceived`,
+   `disposition`, `finalReceipt`, `note` y `transferId`). Al recargar, se hidrata
+   el modal bloqueado al reintento idéntico. *Modelo de seguridad:* no almacena
+   tokens, credenciales ni datos de negocio ajenos; la escritura real sigue
+   protegida por idempotencia del backend (`Idempotency-Key` + fingerprint).
+2. **Consulta de operación para el navegador** (`GET /inventario/operaciones/{operationId}`
+   ampliado a un consumidor con identidad de gestor), que devolvería el
+   `result_payload` persistido y permitiría reconciliar sin re-aplicar. Requiere
+   ampliación de contrato y scopes (no unilateral).
+3. **Aceptar la limitación** y exigir al usuario verificar el traslado en la
+   bandeja antes de una nueva recepción, con el riesgo documentado de doble
+   aplicación si se genera un nuevo `operationId` tras una recarga.
+
+No se agregan endpoints, persistencia en el navegador ni acceso a
+`inventory_operations` sin la decisión explícita de Marco.
 
 ## Operaciones bloqueadas por contrato (`TAC-P0-04`)
 
@@ -135,7 +212,7 @@ modo. Ese desbloqueo corresponde a la composición compartida de Castilla/Marco.
 |---|---|
 | `npm run typecheck` | PASS |
 | `npm run lint` | PASS |
-| `npx vitest run --config src/features/inventory/adapters/vitest.config.ts` | **28/28 PASS** |
+| `npx vitest run --config src/features/inventory/adapters/vitest.config.ts` | **33/33 PASS** (incluye regresiones `TAC-P0-05`, `TAC-P1-07` y caracterización `TAC-P0-06`) |
 | `npm test` | `test:unit:combos` 54 PASS; `test:unit:bulk` 51 PASS |
 | `npx playwright test tests/inventory.spec.ts tests/inventory-adapter.spec.ts tests/inventory-idempotency.spec.ts tests/inventory-dashboard.spec.ts` | PASS |
 | `npm run build` con `VITE_DATA_MODE=mock` | PASS |

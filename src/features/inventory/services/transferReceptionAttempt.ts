@@ -18,6 +18,17 @@ import type {
 //   3. Mientras una recepción esté en estado `UNCERTAIN` (respuesta perdida o
 //      fallo >=500), no se permite mutar el contenido ni sustituir `operationId`
 //      al cerrar/reabrir el modal o tras un `GET /inventario/traslados` genérico.
+//
+// LÍMITE CONOCIDO (TAC-P0-06 — BLOQUEADO_ESPECÍFICO):
+//   `uncertainReceptionsByTransferId` es un Map en memoria. Protege el intento
+//   al cerrar/reabrir el modal, pero se pierde con un refresh completo del
+//   navegador o al reiniciar la aplicación. Tras una recarga, el intento
+//   `UNCERTAIN` ya no se restaura y podría generarse un nuevo `operationId` para
+//   una recepción que quizá ya fue confirmada. La solución definitiva (persistir
+//   la operación inmutable y su modelo de seguridad, o exponer una consulta de
+//   operación para el navegador) requiere acuerdo previo con Marco; NO se
+//   implementa aquí ni se añaden endpoints, persistencia en el navegador o
+//   acceso a `inventory_operations` de forma unilateral.
 
 export type TransferReceptionWriteState =
   | "IN_FLIGHT"

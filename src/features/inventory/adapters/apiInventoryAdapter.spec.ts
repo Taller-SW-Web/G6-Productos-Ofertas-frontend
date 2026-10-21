@@ -14,6 +14,7 @@ import {
   type InventoryHttpRequest,
   type InventoryHttpTransport,
 } from "./apiInventoryAdapter";
+import type { TransferPresentationResolver } from "../services/inventoryMappers";
 
 beforeEach(() => {
   resetUncertainTransferReceptions();
@@ -80,6 +81,7 @@ const RECEPCION_PAYLOAD: ReceiveTransferPayload = {
 
 interface SetupOptions {
   withoutResolver?: boolean;
+  resolver?: TransferPresentationResolver;
 }
 
 function setup(
@@ -92,11 +94,12 @@ function setup(
     return respond(path, init);
   });
   const transport: InventoryHttpTransport = { request };
+  const resolver = options.withoutResolver
+    ? undefined
+    : (options.resolver ?? (async () => PRESENTATION));
   const repository = createHttpInventoryRepository({
     transport,
-    ...(options.withoutResolver
-      ? {}
-      : { resolveTransferPresentation: async () => PRESENTATION }),
+    ...(resolver ? { resolveTransferPresentation: resolver } : {}),
   });
   return { repository, request, calls };
 }
@@ -702,6 +705,132 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
     await expect(
       rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
     ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
+  });
+
+  it("TAC-P0-05: registra la confirmación antes del enriquecimiento; un resolvedor caído no reabre la operación ni repite el POST", async () => {
+    const { repository, calls } = setup(async () => jsonResponse(RECEPCION_OK), {
+      resolver: async () => {
+        throw new InventoryError("CONTRATO_BLOQUEADO", "resolvedor de presentación caído");
+      },
+    });
+    await expect(
+      rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+    ).resolves.toMatchObject({ code: "CONTRATO_BLOQUEADO" });
+
+    // La mutación ya está confirmada y reconciliada, pese al fallo del resolvedor.
+    expect(repository.getTransferWriteRecord("t-1")?.state).toBe("RECONCILED");
+    expect(getUncertainTransferReception("t-1")).toBeNull();
+
+    // El reintento con la misma identidad NO repite el POST (devuelve el cache).
+    await expect(
+      rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+    ).resolves.toMatchObject({ code: "CONTRATO_BLOQUEADO" });
+    expect(calls).toHaveLength(1);
+  });
+
+  it("TAC-P0-05: HTTP 200 con DTO de confirmación incompatible preserva UNCERTAIN (no libera la operación)", async () => {
+    // Falta `operation_id` y `traslado`: el DTO no permite determinar el resultado.
+    const { repository, calls } = setup(async () =>
+      jsonResponse({ receipt_id: "r-1", disposition: "REINGRESAR_DISPONIBLE", received_quantity: 4, completed_at: "2026-10-03T00:00:00.000Z" }),
+    );
+    await expect(
+      rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+    ).resolves.toMatchObject({ code: "RESPUESTA_INCOMPATIBLE" });
+    expect(repository.getTransferWriteRecord("t-1")?.state).toBe("UNCERTAIN");
+    expect(getUncertainTransferReception("t-1")).not.toBeNull();
+    expect(calls).toHaveLength(1);
+  });
+
+  it("TAC-P1-07: en UNCERTAIN, ningún error del reintento (400/401/403/404/409/422/5xx/red/DTO inválido) libera el bloqueo", async () => {
+    const retryOutcomes: (() => Promise<Response> | Response)[] = [
+      () => problemResponse(400, "VALIDACION"),
+      () => problemResponse(401, "TOKEN_INVALIDO"),
+      () => problemResponse(403, "SCOPE_INSUFICIENTE"),
+      () => problemResponse(404, "TRASLADO_NO_ENCONTRADO"),
+      () => problemResponse(409, "IDEMPOTENCY_CONFLICT"),
+      () => problemResponse(422, "CANTIDAD_RECIBIDA_EXCEDE_TRASLADO"),
+      () => problemResponse(503, "SERVICIO_NO_DISPONIBLE"),
+      () => {
+        throw new TypeError("network lost");
+      },
+      () =>
+        new Response("no-json", {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      () =>
+        jsonResponse({
+          receipt_id: "r-1",
+          disposition: "REINGRESAR_DISPONIBLE",
+          received_quantity: 4,
+          completed_at: "2026-10-03T00:00:00.000Z",
+        }),
+    ];
+
+    for (const outcome of retryOutcomes) {
+      let attempt = 0;
+      const { repository } = setup(async () => {
+        attempt += 1;
+        if (attempt === 1) return problemResponse(503, "SERVICIO_NO_DISPONIBLE");
+        return outcome();
+      });
+
+      // Primer intento queda UNCERTAIN.
+      await expect(
+        rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+      ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
+      expect(repository.getTransferWriteRecord("t-1")?.state).toBe("UNCERTAIN");
+
+      // Reintento con la MISMA solicitud inmutable: cualquier desenlace conserva UNCERTAIN.
+      const retryError = await rejection(
+        repository.receiveTransfer(RECEPCION_PAYLOAD),
+      );
+      expect(retryError).toBeInstanceOf(InventoryError);
+      expect(repository.getTransferWriteRecord("t-1")?.state).toBe("UNCERTAIN");
+      expect(getUncertainTransferReception("t-1")).not.toBeNull();
+    }
+  });
+
+  it("TAC-P1-07: estando en UNCERTAIN, solo un 200 con DTO válido transiciona a RECONCILED", async () => {
+    let attempt = 0;
+    const { repository, calls } = setup(async () => {
+      attempt += 1;
+      if (attempt === 1) return problemResponse(503, "SERVICIO_NO_DISPONIBLE");
+      return jsonResponse(RECEPCION_OK);
+    });
+    await expect(
+      rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+    ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
+    expect(repository.getTransferWriteRecord("t-1")?.state).toBe("UNCERTAIN");
+
+    await expect(
+      repository.receiveTransfer(RECEPCION_PAYLOAD),
+    ).resolves.toMatchObject({ id: "t-1", quantityReceived: 4 });
+    expect(repository.getTransferWriteRecord("t-1")).toMatchObject({
+      state: "RECONCILED",
+      reconciliation: "CONFIRMED_BY_IDEMPOTENT_RETRY",
+    });
+    expect(calls).toHaveLength(2);
+  });
+
+  it("TAC-P0-06: el registro incierto es solo en memoria y se pierde al reiniciar la sesión (limitación documentada, BLOQUEADO_ESPECÍFICO)", async () => {
+    const { repository } = setup(async () =>
+      problemResponse(503, "SERVICIO_NO_DISPONIBLE"),
+    );
+    await expect(
+      rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+    ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
+    expect(getUncertainTransferReception("t-1")).not.toBeNull();
+
+    // Simula una recarga completa del navegador: el Map en memoria se vacía.
+    resetUncertainTransferReceptions();
+    expect(getUncertainTransferReception("t-1")).toBeNull();
+
+    // Una nueva sesión del formulario ya no restaura la operación incierta.
+    // (Este es el hueco exacto que Marco marca como BLOQUEADO_ESPECÍFICO: la
+    // solución requiere acuerdo previo y no se implementa aquí.)
+    const newSession = createTransferReceptionFormSession("t-1");
+    expect(newSession.getUncertainPayload()).toBeNull();
   });
 });
 
