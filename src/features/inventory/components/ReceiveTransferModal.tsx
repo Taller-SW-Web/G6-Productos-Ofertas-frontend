@@ -18,6 +18,11 @@ import type {
   ReceiveTransferPayload,
   TransferItem,
 } from "../services/inventoryTypes";
+import {
+  createTransferReceptionFormSession,
+  getUncertainTransferReception,
+  type TransferReceptionFormSession,
+} from "../services/transferReceptionAttempt";
 
 interface ReceiveTransferModalProps {
   transfer: TransferItem | null;
@@ -26,17 +31,6 @@ interface ReceiveTransferModalProps {
   submitError?: string | null;
   onClose: () => void;
   onConfirm: (payload: ReceiveTransferPayload) => Promise<void>;
-}
-
-function createOperationId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === "x" ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
 }
 
 interface TransferFormInnerProps {
@@ -54,22 +48,31 @@ function TransferFormInner({
   onClose,
   onConfirm,
 }: TransferFormInnerProps) {
-  const operationIdRef = useRef<string>(createOperationId());
-  // Rastrea si ya se intentó una operación y cuál fue su intención. La intención
-  // replica exactamente la del contrato/repositorio (transferId, cantidad,
-  // disposición y cierre final); la nota NO forma parte de la intención.
-  const attemptedRef = useRef(false);
-  const lastIntentRef = useRef<string | null>(null);
-  const [quantity, setQuantity] = useState<number | string>(
-    transfer.quantityPending,
+  const sessionRef = useRef<TransferReceptionFormSession>(
+    createTransferReceptionFormSession(transfer.id),
   );
-  const [disposition, setDisposition] = useState<DispositionType>(
-    "REINGRESAR_DISPONIBLE",
+  const [uncertainAttempt, setUncertainAttempt] =
+    useState<Readonly<ReceiveTransferPayload> | null>(() =>
+      getUncertainTransferReception(transfer.id),
+    );
+  const [quantity, setQuantity] = useState<number | string>(() => {
+    const uncertain = getUncertainTransferReception(transfer.id);
+    return uncertain ? uncertain.quantityReceived : transfer.quantityPending;
+  });
+  const [disposition, setDisposition] = useState<DispositionType>(() => {
+    const uncertain = getUncertainTransferReception(transfer.id);
+    return uncertain ? uncertain.disposition : "REINGRESAR_DISPONIBLE";
+  });
+  const [finalReceipt, setFinalReceipt] = useState<boolean>(() => {
+    const uncertain = getUncertainTransferReception(transfer.id);
+    return uncertain ? uncertain.finalReceipt : true;
+  });
+  const [note, setNote] = useState<string>(
+    () => getUncertainTransferReception(transfer.id)?.note ?? "",
   );
-  const [finalReceipt, setFinalReceipt] = useState<boolean>(true);
-  const [note, setNote] = useState<string>("");
   const [errorValidation, setErrorValidation] = useState<string | null>(null);
 
+  const isUncertainLocked = uncertainAttempt !== null;
   const numQty = Number(quantity);
   const isMissing = finalReceipt && numQty < transfer.quantityPending;
   const missingCount = transfer.quantityPending - numQty;
@@ -97,30 +100,34 @@ function TransferFormInner({
 
     setErrorValidation(null);
 
-    // Conservar el operationId solo para reintentar EXACTAMENTE la misma
-    // operación. Si tras un intento cambia la intención (cantidad, disposición
-    // o cierre final), se genera una nueva identidad de idempotencia.
-    const intent = `${numQty}|${disposition}|${finalReceipt}`;
-    if (attemptedRef.current && intent !== lastIntentRef.current) {
-      operationIdRef.current = createOperationId();
-    }
-    lastIntentRef.current = intent;
-    attemptedRef.current = true;
-
+    let payload: Readonly<ReceiveTransferPayload>;
     try {
-      await onConfirm({
-        transferId: transfer.id,
+      payload = sessionRef.current.prepareSubmission({
         quantityReceived: numQty,
         disposition,
         finalReceipt,
-        operationId: operationIdRef.current,
-        receivedAt: new Date().toISOString(),
-        note: note.trim() || undefined,
+        note,
       });
+    } catch (err) {
+      setErrorValidation(
+        err instanceof Error
+          ? err.message
+          : "No se puede modificar una recepción con resultado incierto.",
+      );
+      return;
+    }
+
+    try {
+      await onConfirm(payload);
+      sessionRef.current.recordSuccess(payload);
+      setUncertainAttempt(null);
       onClose();
-    } catch {
-      // El error se maneja en el hook/parent; operationId se conserva para
-      // reintentar la MISMA operación.
+    } catch (err) {
+      // TAC-P0-01 / TAC-P0-02: si el intento quedó en RESULTADO_INCIERTO se
+      // conserva el snapshot inmutable completo (operationId, receivedAt, note,
+      // cantidad, disposición y recepción final) incluso si el modal se cierra.
+      const locked = sessionRef.current.recordFailure(payload, err);
+      setUncertainAttempt(locked);
     }
   };
 
@@ -174,6 +181,19 @@ function TransferFormInner({
           </Group>
         </div>
 
+        {isUncertainLocked && (
+          <Alert
+            icon={<IconAlertTriangle size={16} />}
+            title="Operación con resultado incierto pendiente de confirmación"
+            color="orange"
+          >
+            El envío anterior ({uncertainAttempt.operationId}) no recibió
+            confirmación definitiva. Los valores de la solicitud quedaron
+            bloqueados de forma inmutable para que el reintento consulte o
+            recupere exactamente la misma operación sin duplicar saldos.
+          </Alert>
+        )}
+
         <NumberInput
           label="Cantidad recibida físicamente"
           description={`Máximo pendiente: ${transfer.quantityPending} unidades.`}
@@ -184,7 +204,7 @@ function TransferFormInner({
           value={quantity}
           onChange={setQuantity}
           required
-          disabled={submitting}
+          disabled={submitting || isUncertainLocked}
           aria-label="Cantidad recibida físicamente"
         />
 
@@ -209,7 +229,7 @@ function TransferFormInner({
           onChange={(val) =>
             setDisposition((val as DispositionType) ?? "REINGRESAR_DISPONIBLE")
           }
-          disabled={submitting}
+          disabled={submitting || isUncertainLocked}
           required
           aria-label="Disposición de unidades recibidas"
         />
@@ -219,7 +239,7 @@ function TransferFormInner({
           description="Si quedan unidades sin recibir, el traslado se cerrará como completado con discrepancia."
           checked={finalReceipt}
           onChange={(e) => setFinalReceipt(e.currentTarget.checked)}
-          disabled={submitting}
+          disabled={submitting || isUncertainLocked}
         />
 
         {isMissing && (
@@ -257,7 +277,7 @@ function TransferFormInner({
           value={note}
           maxLength={500}
           onChange={(e) => setNote(e.currentTarget.value)}
-          disabled={submitting}
+          disabled={submitting || isUncertainLocked}
           rows={2}
         />
 

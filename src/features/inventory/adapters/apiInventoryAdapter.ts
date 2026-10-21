@@ -21,6 +21,13 @@ import {
   type TransferPresentationResolver,
   type TrasladoInventarioDto,
 } from "../services/inventoryMappers";
+import {
+  areSameReceiveTransferPayloads,
+  clearUncertainTransferReception,
+  freezeReceiveTransferPayload,
+  setUncertainTransferReception,
+  type TransferReceptionWriteRecord,
+} from "../services/transferReceptionAttempt";
 
 // Adaptador HTTP del feature de inventario (OpenAPI 0.6.0-rc.1, `api-productos`).
 //
@@ -60,6 +67,12 @@ export interface HttpInventoryRepositoryDependencies {
   // owner autoritativo (Catálogo/ubicaciones). Si falta, los métodos de
   // traslados fallan con CONTRATO_BLOQUEADO en lugar de simular datos.
   resolveTransferPresentation?: TransferPresentationResolver;
+}
+
+export interface HttpInventoryRepository extends InventoryRepository {
+  getTransferWriteRecord(
+    transferId: string,
+  ): TransferReceptionWriteRecord | null;
 }
 
 const PAGE_SIZE = 100;
@@ -124,13 +137,15 @@ async function problemCode(response: Response): Promise<string | undefined> {
 
 export function createHttpInventoryRepository(
   dependencies: HttpInventoryRepositoryDependencies,
-): InventoryRepository {
+): HttpInventoryRepository {
   const { transport, resolveTransferPresentation } = dependencies;
-  const pendingWrites = new Set<string>();
-  // transferId -> operationId de la recepción cuyo resultado quedó incierto.
-  // Conservar la identidad permite reintentar de forma idempotente; una
-  // identidad distinta exige reconciliar antes con una lectura autoritativa.
-  const uncertainWrites = new Map<string, string>();
+  // TAC-P0-02: separación explícita de tres estados de escritura por traslado:
+  //   - IN_FLIGHT: escritura en curso sin respuesta recibida aún.
+  //   - UNCERTAIN: respuesta perdida o fallo >=500; conserva el snapshot
+  //     inmutable completo (`operationId`, `receivedAt`, `note`, cantidades).
+  //   - RECONCILED: recepción confirmada con respuesta autoritativa del
+  //     servidor (incluyendo la recuperación idempotente del resultado durable).
+  const transferWrites = new Map<string, TransferReceptionWriteRecord>();
 
   async function send(
     path: string,
@@ -296,11 +311,22 @@ export function createHttpInventoryRepository(
         );
       pagina += 1;
     }
-    // Reconciliación de recepciones con resultado incierto: el listado es la
-    // lectura autoritativa del estado del traslado. Una vez consultado, se
-    // levanta el bloqueo para permitir un reintento idempotente (la UI conserva
-    // el mismo operationId) en lugar de dejar el traslado bloqueado de por vida.
-    for (const dto of collected) uncertainWrites.delete(dto.traslado_id);
+    // TAC-P0-02: `GET /api/v1/inventario/traslados` devuelve solo el estado
+    // agregado del traslado (`quantity_received`, `estado`) y NO identifica qué
+    // `operation_id` fue aplicado. Por tanto, la lectura general NO elimina el
+    // estado `UNCERTAIN` ni habilita una segunda recepción con otro
+    // `operationId`; deja constancia explícita de que la conciliación por
+    // listado no es concluyente.
+    for (const dto of collected) {
+      const current = transferWrites.get(dto.traslado_id);
+      if (current?.state === "UNCERTAIN") {
+        transferWrites.set(dto.traslado_id, {
+          ...current,
+          reconciliation: "UNVERIFIABLE_BY_LIST_CONTRACT",
+          updatedAt: dto.updated_at,
+        });
+      }
+    }
     return Promise.all(collected.map((dto) => present(dto)));
   }
 
@@ -366,24 +392,50 @@ export function createHttpInventoryRepository(
       ).then(toThresholdConfig);
     },
 
+    getTransferWriteRecord(
+      transferId: string,
+    ): TransferReceptionWriteRecord | null {
+      return transferWrites.get(transferId) ?? null;
+    },
+
     getTransfers(filters?: TransferFiltersQuery): Promise<TransferItem[]> {
       return readTransfers(filters);
     },
 
     async receiveTransfer(payload): Promise<TransferItem> {
       const key = payload.transferId;
-      if (pendingWrites.has(key))
+      const frozenPayload = freezeReceiveTransferPayload(payload);
+      const currentRecord = transferWrites.get(key);
+
+      if (currentRecord?.state === "IN_FLIGHT") {
         throw new InventoryError(
           "RESULTADO_INCIERTO",
           "Hay una recepción pendiente de confirmación para este traslado.",
         );
-      const uncertainOperation = uncertainWrites.get(key);
-      if (uncertainOperation && uncertainOperation !== payload.operationId)
-        throw new InventoryError(
-          "RESULTADO_INCIERTO",
-          "El resultado anterior sigue sin verificarse. Consulta el traslado antes de recibir otra vez.",
-        );
-      pendingWrites.add(key);
+      }
+
+      if (currentRecord?.state === "UNCERTAIN") {
+        if (currentRecord.payload.operationId !== frozenPayload.operationId) {
+          throw new InventoryError(
+            "RESULTADO_INCIERTO",
+            "El resultado de la recepción anterior sigue sin reconciliación concluyente (el listado general no informa operation_id). Reintenta exactamente la misma operación para recuperar su confirmación.",
+          );
+        }
+        if (!areSameReceiveTransferPayloads(currentRecord.payload, frozenPayload)) {
+          throw new InventoryError(
+            "RESULTADO_INCIERTO",
+            "No se puede alterar cantidad, disposición, cierre final, fecha ni nota mientras la recepción anterior tenga resultado incierto. Reintenta la solicitud inmutable original.",
+          );
+        }
+      }
+
+      transferWrites.set(key, {
+        state: "IN_FLIGHT",
+        payload: frozenPayload,
+        reconciliation: currentRecord?.reconciliation ?? "NONE",
+        updatedAt: frozenPayload.receivedAt,
+      });
+
       try {
         const body = await json(
           `/api/v1/inventario/traslados/${encodeURIComponent(key)}/recepciones`,
@@ -391,25 +443,56 @@ export function createHttpInventoryRepository(
             method: "POST",
             headers: {
               "content-type": "application/json",
-              "Idempotency-Key": payload.operationId,
+              "Idempotency-Key": frozenPayload.operationId,
             },
-            body: JSON.stringify(toRecepcionTrasladoRequestDto(payload)),
+            body: JSON.stringify(toRecepcionTrasladoRequestDto(frozenPayload)),
           },
           true,
         );
         const { traslado } = validateRecepcionResponse(body);
         const item = await present(traslado);
-        uncertainWrites.delete(key);
+        clearUncertainTransferReception(key, frozenPayload.operationId);
+        transferWrites.set(key, {
+          state: "RECONCILED",
+          payload: frozenPayload,
+          reconciliation: "CONFIRMED_BY_IDEMPOTENT_RETRY",
+          updatedAt: traslado.updated_at,
+        });
         return item;
       } catch (error) {
         if (
           error instanceof InventoryError &&
           error.code === "RESULTADO_INCIERTO"
-        )
-          uncertainWrites.set(key, payload.operationId);
+        ) {
+          setUncertainTransferReception(frozenPayload);
+          transferWrites.set(key, {
+            state: "UNCERTAIN",
+            payload: frozenPayload,
+            reconciliation:
+              currentRecord?.state === "UNCERTAIN"
+                ? currentRecord.reconciliation
+                : "NONE",
+            updatedAt: frozenPayload.receivedAt,
+          });
+        } else if (
+          currentRecord?.state === "UNCERTAIN" &&
+          error instanceof InventoryError &&
+          (error.code === "NO_AUTENTICADO" ||
+            error.code === "SIN_PERMISO" ||
+            error.code === "SERVICIO_NO_DISPONIBLE")
+        ) {
+          // Si ya existía una operación incierta y el reintento falló por un
+          // rechazo de protocolo antes de verificar la operación, se preserva
+          // el estado incierto original.
+          setUncertainTransferReception(currentRecord.payload);
+          transferWrites.set(key, currentRecord);
+        } else {
+          // Rechazos definitivos (400/401/403/404/409/422 en primer intento)
+          // no dejan el traslado bloqueado en estado incierto.
+          clearUncertainTransferReception(key, frozenPayload.operationId);
+          transferWrites.delete(key);
+        }
         throw error;
-      } finally {
-        pendingWrites.delete(key);
       }
     },
 

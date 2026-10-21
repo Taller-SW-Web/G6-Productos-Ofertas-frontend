@@ -1,5 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { InventoryError } from "../services/inventoryErrors";
+import {
+  createTransferReceptionFormSession,
+  getUncertainTransferReception,
+  resetUncertainTransferReceptions,
+} from "../services/transferReceptionAttempt";
 import type {
   ReceiveTransferPayload,
   TransferFiltersQuery,
@@ -9,6 +14,10 @@ import {
   type InventoryHttpRequest,
   type InventoryHttpTransport,
 } from "./apiInventoryAdapter";
+
+beforeEach(() => {
+  resetUncertainTransferReceptions();
+});
 
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
@@ -286,7 +295,7 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
     await expect(first).resolves.toMatchObject({ id: "t-1" });
   });
 
-  it("marca resultado incierto ante 5xx y permite reintentar con la misma identidad idempotente", async () => {
+  it("marca resultado incierto ante 5xx y permite reintentar con la misma solicitud inmutable", async () => {
     let attempt = 0;
     const { repository, request } = setup(async () => {
       attempt += 1;
@@ -298,14 +307,16 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
       rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
     ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
     expect(request).toHaveBeenCalledTimes(1);
-    // Misma Idempotency-Key: el reintento no puede duplicar la recepción.
+    expect(repository.getTransferWriteRecord("t-1")?.state).toBe("UNCERTAIN");
+    // Misma Idempotency-Key e idéntico payload: el reintento recupera la confirmación.
     await expect(
       repository.receiveTransfer(RECEPCION_PAYLOAD),
     ).resolves.toMatchObject({ id: "t-1", quantityReceived: 4 });
     expect(request).toHaveBeenCalledTimes(2);
+    expect(repository.getTransferWriteRecord("t-1")?.state).toBe("RECONCILED");
   });
 
-  it("exige reconciliar con una lectura antes de reintentar con otra identidad", async () => {
+  it("TAC-P0-02: GET /traslados no libera una operación incierta ni habilita otro operationId sin conciliación concluyente", async () => {
     let receiving = true;
     const { repository, request } = setup(async (path) => {
       if (path.includes("/recepciones")) {
@@ -323,6 +334,7 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
     await expect(
       rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
     ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
+    expect(repository.getTransferWriteRecord("t-1")?.state).toBe("UNCERTAIN");
 
     const otherIdentity: ReceiveTransferPayload = {
       ...RECEPCION_PAYLOAD,
@@ -333,13 +345,309 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
     ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
     expect(request).toHaveBeenCalledTimes(1);
 
-    // La lectura autoritativa del traslado reconcilia el resultado incierto.
+    // La lectura del listado general NO incluye operation_id: el estado sigue UNCERTAIN
+    // y se marca como UNVERIFIABLE_BY_LIST_CONTRACT.
     await expect(repository.getTransfers()).resolves.toHaveLength(1);
+    expect(repository.getTransferWriteRecord("t-1")).toMatchObject({
+      state: "UNCERTAIN",
+      reconciliation: "UNVERIFIABLE_BY_LIST_CONTRACT",
+    });
+
+    // Un intento con otro operationId sigue bloqueado tras el GET.
     receiving = false;
     await expect(
-      repository.receiveTransfer(otherIdentity),
-    ).resolves.toMatchObject({ id: "t-1" });
+      rejection(repository.receiveTransfer(otherIdentity)),
+    ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
+    expect(request).toHaveBeenCalledTimes(2);
+
+    // Solo el reintento idéntico con el mismo operationId y el mismo payload
+    // recupera el resultado durable del servidor y reconcilia el estado.
+    await expect(
+      repository.receiveTransfer(RECEPCION_PAYLOAD),
+    ).resolves.toMatchObject({ id: "t-1", quantityReceived: 4 });
     expect(request).toHaveBeenCalledTimes(3);
+    expect(repository.getTransferWriteRecord("t-1")).toMatchObject({
+      state: "RECONCILED",
+      reconciliation: "CONFIRMED_BY_IDEMPOTENT_RETRY",
+    });
+  });
+
+  it("TAC-P0-01 / TAC-P0-02: rechaza alterar timestamp, nota, cantidad, disposición o cierre final mientras la operación es incierta", async () => {
+    const { repository, request } = setup(async () =>
+      problemResponse(503, "SERVICIO_NO_DISPONIBLE"),
+    );
+    const initial: ReceiveTransferPayload = {
+      ...RECEPCION_PAYLOAD,
+      note: "Caja sellada",
+    };
+    await expect(
+      rejection(repository.receiveTransfer(initial)),
+    ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
+    expect(request).toHaveBeenCalledTimes(1);
+
+    for (const mutated of [
+      { ...initial, receivedAt: "2026-10-03T00:00:05.000Z" },
+      { ...initial, note: "Nota modificada" },
+      { ...initial, quantityReceived: 3 },
+      { ...initial, disposition: "CONFIRMAR_MERMA" as const },
+      { ...initial, finalReceipt: true },
+    ]) {
+      await expect(
+        rejection(repository.receiveTransfer(mutated)),
+      ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
+    }
+    // Ninguna mutación salió a la red.
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("TAC-P0-01 / TAC-P0-02 (flujo formulario + adaptador + fingerprint backend): commit exitoso con pérdida de respuesta, cierre/reapertura de modal y recuperación idempotente sin segunda recepción", async () => {
+    // Simula el cálculo real de fingerprint del backend (`traslados.service.ts`)
+    // sobre traslado_id, received_quantity, disposition, final_receipt,
+    // received_at, note e intention, más la tabla durable `inventory_operations`.
+    const durableOperations = new Map<
+      string,
+      { fingerprint: string; response: Record<string, unknown> }
+    >();
+    let persistedReceptionsCount = 0;
+    let loseHttpResponseOnce = true;
+
+    const { repository, calls } = setup(async (path, req) => {
+      if (path.endsWith("/inventario/traslados?pagina=1&tamanio=100")) {
+        return jsonResponse({
+          items: [
+            traslado({
+              quantity_received: persistedReceptionsCount > 0 ? 4 : 0,
+              estado:
+                persistedReceptionsCount > 0 ? "RECIBIDO_PARCIAL" : "EN_TRANSITO",
+            }),
+          ],
+          pagina: 1,
+          tamanio: 100,
+          total: 1,
+        });
+      }
+
+      const idempotencyKey = req.headers?.["Idempotency-Key"] ?? "";
+      const dto = JSON.parse(req.body ?? "{}") as {
+        operation_id: string;
+        received_quantity: number;
+        disposition: string;
+        final_receipt: boolean;
+        received_at: string;
+        note?: string;
+      };
+      const fingerprint = JSON.stringify({
+        traslado_id: "t-1",
+        received_quantity: dto.received_quantity,
+        disposition: dto.disposition,
+        final_receipt: dto.final_receipt,
+        received_at: dto.received_at,
+        note: dto.note ?? null,
+        intention: "recepcion_traslado",
+      });
+
+      const existing = durableOperations.get(idempotencyKey);
+      if (existing) {
+        if (existing.fingerprint !== fingerprint) {
+          return problemResponse(409, "IDEMPOTENCY_CONFLICT");
+        }
+        return jsonResponse(existing.response);
+      }
+
+      // 1.er envío: PostgreSQL confirma la operación y persiste el resultado,
+      // pero la respuesta HTTP se pierde antes de llegar al navegador.
+      persistedReceptionsCount += 1;
+      const storedResponse = {
+        ...RECEPCION_OK,
+        operation_id: dto.operation_id,
+        received_quantity: dto.received_quantity,
+      };
+      durableOperations.set(idempotencyKey, {
+        fingerprint,
+        response: storedResponse,
+      });
+
+      if (loseHttpResponseOnce) {
+        loseHttpResponseOnce = false;
+        throw new TypeError("network connection lost after commit");
+      }
+      return jsonResponse(storedResponse);
+    });
+
+    let clockTick = 0;
+    const timestamps = [
+      "2026-10-20T18:00:00.000Z",
+      "2026-10-20T18:01:00.000Z",
+      "2026-10-20T18:02:00.000Z",
+    ];
+    let idTick = 0;
+    const ids = [
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    ];
+
+    // Sesión 1 del modal (apertura inicial)
+    const modalSession1 = createTransferReceptionFormSession("t-1", {
+      createId: () => ids[idTick++]!,
+      now: () => timestamps[clockTick++]!,
+    });
+
+    const firstAttemptPayload = modalSession1.prepareSubmission({
+      quantityReceived: 4,
+      disposition: "REINGRESAR_DISPONIBLE",
+      finalReceipt: false,
+      note: "  Entrega parcial verificada  ",
+    });
+
+    const firstError = await rejection(
+      repository.receiveTransfer(firstAttemptPayload),
+    );
+    expect(firstError.code).toBe("RESULTADO_INCIERTO");
+    modalSession1.recordFailure(firstAttemptPayload, firstError);
+
+    // La recepción sí se persistió en el backend, pero el cliente quedó en UNCERTAIN.
+    expect(persistedReceptionsCount).toBe(1);
+    expect(getUncertainTransferReception("t-1")).toEqual(firstAttemptPayload);
+
+    // Caso 4: intento de cambiar cantidad o nota durante la operación incierta.
+    expect(() =>
+      modalSession1.prepareSubmission({
+        quantityReceived: 5,
+        disposition: "REINGRESAR_DISPONIBLE",
+        finalReceipt: false,
+        note: "Entrega parcial verificada",
+      }),
+    ).toThrowError(InventoryError);
+    expect(() =>
+      modalSession1.prepareSubmission({
+        quantityReceived: 4,
+        disposition: "REINGRESAR_DISPONIBLE",
+        finalReceipt: false,
+        note: "Otra nota distinta",
+      }),
+    ).toThrowError(InventoryError);
+
+    // Caso 6: el usuario cierra el modal y recarga la bandeja (`GET /traslados`);
+    // la lectura general NO libera la operación incierta.
+    await expect(repository.getTransfers()).resolves.toHaveLength(1);
+    expect(repository.getTransferWriteRecord("t-1")?.state).toBe("UNCERTAIN");
+
+    // Caso 5: el usuario vuelve a abrir el modal para `t-1` (nueva instancia de
+    // sesión con reloj en T2 y generador listo para otro UUID).
+    const modalSession2 = createTransferReceptionFormSession("t-1", {
+      createId: () => ids[idTick++]!,
+      now: () => timestamps[clockTick++]!,
+    });
+    expect(modalSession2.getUncertainPayload()).toEqual(firstAttemptPayload);
+
+    // Caso 3: reintento desde el modal reabierto. Reutiliza EXACTAMENTE el
+    // mismo operationId, receivedAt y note (idéntico JSON e Idempotency-Key).
+    const retryPayload = modalSession2.prepareSubmission({
+      quantityReceived: 4,
+      disposition: "REINGRESAR_DISPONIBLE",
+      finalReceipt: false,
+      note: "Entrega parcial verificada",
+    });
+    expect(retryPayload).toEqual(firstAttemptPayload);
+
+    const recovered = await repository.receiveTransfer(retryPayload);
+    modalSession2.recordSuccess(retryPayload);
+
+    expect(recovered).toMatchObject({
+      id: "t-1",
+      status: "RECIBIDO_PARCIAL",
+      quantityReceived: 4,
+    });
+    // No se registró una segunda recepción en el backend.
+    expect(persistedReceptionsCount).toBe(1);
+    expect(getUncertainTransferReception("t-1")).toBeNull();
+    expect(repository.getTransferWriteRecord("t-1")?.state).toBe("RECONCILED");
+
+    const postCalls = calls.filter((c) => c.request.method === "POST");
+    expect(postCalls).toHaveLength(2);
+    expect(postCalls[0]?.request.headers?.["Idempotency-Key"]).toBe(
+      postCalls[1]?.request.headers?.["Idempotency-Key"],
+    );
+    expect(postCalls[0]?.request.body).toBe(postCalls[1]?.request.body);
+  });
+
+  it("TAC-P0-01: tras un rechazo definitivo (4xx), cambiar cantidad, disposición, cierre final o nota genera una operación nueva con distinto operationId y timestamp", async () => {
+    const { repository } = setup(async () =>
+      problemResponse(422, "CANTIDAD_RECIBIDA_EXCEDE_TRASLADO"),
+    );
+
+    let idIndex = 0;
+    const ids = [
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222",
+      "33333333-3333-4333-8333-333333333333",
+    ];
+    let timeIndex = 0;
+    const times = [
+      "2026-10-20T19:00:00.000Z",
+      "2026-10-20T19:00:10.000Z",
+      "2026-10-20T19:00:20.000Z",
+    ];
+
+    const session = createTransferReceptionFormSession("t-1", {
+      createId: () => ids[idIndex++]!,
+      now: () => times[timeIndex++]!,
+    });
+
+    const first = session.prepareSubmission({
+      quantityReceived: 10,
+      disposition: "REINGRESAR_DISPONIBLE",
+      finalReceipt: true,
+      note: "Nota A",
+    });
+    const err = await rejection(repository.receiveTransfer(first));
+    expect(err.code).toBe("CANTIDAD_RECIBIDA_EXCEDE_TRASLADO");
+    session.recordFailure(first, err);
+
+    // Como fue 422 definitivo, el traslado NO quedó bloqueado en UNCERTAIN.
+    expect(repository.getTransferWriteRecord("t-1")).toBeNull();
+
+    // Si reintenta sin tocar ningún campo (misma nota, cantidad, etc.), conserva snapshot.
+    const sameRetry = session.prepareSubmission({
+      quantityReceived: 10,
+      disposition: "REINGRESAR_DISPONIBLE",
+      finalReceipt: true,
+      note: "Nota A",
+    });
+    expect(sameRetry.operationId).toBe(first.operationId);
+    expect(sameRetry.receivedAt).toBe(first.receivedAt);
+
+    // Si cambia SOLO la nota, NO se presenta como reintento de la misma operación.
+    const changedNote = session.prepareSubmission({
+      quantityReceived: 10,
+      disposition: "REINGRESAR_DISPONIBLE",
+      finalReceipt: true,
+      note: "Nota B corregida",
+    });
+    expect(changedNote.operationId).toBe(
+      "22222222-2222-4222-8222-222222222222",
+    );
+    expect(changedNote.receivedAt).toBe("2026-10-20T19:00:10.000Z");
+  });
+
+  it("Caso 8: rechazos 401, 403, 409 y 422 en receiveTransfer no dejan bloqueo incierto ni mutaciones adicionales", async () => {
+    for (const [status, code, expected] of [
+      [401, "TOKEN_INVALIDO", "NO_AUTENTICADO"],
+      [403, "SCOPE_INSUFICIENTE", "SIN_PERMISO"],
+      [409, "TRASLADO_NO_RECIBIBLE", "TRASLADO_NO_RECIBIBLE"],
+      [409, "IDEMPOTENCY_CONFLICT", "IDEMPOTENCY_CONFLICT"],
+      [422, "CANTIDAD_RECIBIDA_EXCEDE_TRASLADO", "CANTIDAD_RECIBIDA_EXCEDE_TRASLADO"],
+    ] as const) {
+      const { repository, calls } = setup(async () =>
+        problemResponse(status, code),
+      );
+      await expect(
+        rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+      ).resolves.toMatchObject({ code: expected });
+      expect(calls).toHaveLength(1);
+      expect(repository.getTransferWriteRecord("t-1")).toBeNull();
+      expect(getUncertainTransferReception("t-1")).toBeNull();
+    }
   });
 
   it("traduce 409 TRASLADO_NO_RECIBIBLE e IDEMPOTENCY_CONFLICT", async () => {
