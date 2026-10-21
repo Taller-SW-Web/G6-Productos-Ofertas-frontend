@@ -852,64 +852,121 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
     expect(next.operationId).not.toBe(payload.operationId);
   });
 
-  it("TAC-P0-09: el caché de confirmaciones exige identidad e intención idénticas", async () => {
-    const { repository, calls } = setup(async () => jsonResponse(RECEPCION_OK));
+  describe("TAC-P0-09: identidad del caché de confirmaciones", () => {
+    it("1/6: mismo operationId y payload idéntico devuelve la confirmación cacheada sin repetir el POST", async () => {
+      const { repository, calls } = setup(async () =>
+        jsonResponse(RECEPCION_OK),
+      );
 
-    // Caso 1: mismo operationId y payload idéntico -> resultado cacheado sin POST.
-    await expect(
-      repository.receiveTransfer(RECEPCION_PAYLOAD),
-    ).resolves.toMatchObject({ id: "t-1", quantityReceived: 4 });
-    await expect(
-      repository.receiveTransfer(RECEPCION_PAYLOAD),
-    ).resolves.toMatchObject({ id: "t-1", quantityReceived: 4 });
-    expect(calls).toHaveLength(1);
-
-    // Casos 2, 3 y 4: misma identidad con distinta intención -> rechazo.
-    const mutated: ReceiveTransferPayload[] = [
-      { ...RECEPCION_PAYLOAD, quantityReceived: 3 },
-      { ...RECEPCION_PAYLOAD, note: "Nota distinta" },
-      { ...RECEPCION_PAYLOAD, disposition: "CONFIRMAR_MERMA" },
-      { ...RECEPCION_PAYLOAD, finalReceipt: true },
-      { ...RECEPCION_PAYLOAD, receivedAt: "2026-10-03T00:00:05.000Z" },
-      { ...RECEPCION_PAYLOAD, transferId: "t-2" },
-    ];
-    for (const payload of mutated) {
       await expect(
-        rejection(repository.receiveTransfer(payload)),
-      ).resolves.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
-    }
-    // Ninguna intención distinta salió a la red.
-    expect(calls).toHaveLength(1);
-  });
+        repository.receiveTransfer(RECEPCION_PAYLOAD),
+      ).resolves.toMatchObject({ id: "t-1", quantityReceived: 4 });
+      await expect(
+        repository.receiveTransfer(RECEPCION_PAYLOAD),
+      ).resolves.toMatchObject({ id: "t-1", quantityReceived: 4 });
 
-  it("TAC-P0-09: un 200 con operation_id o traslado_id ajenos no declara la confirmación", async () => {
-    const cases = [
-      {
-        body: {
+      // El resultado viene del caché: una sola petición al contrato.
+      expect(calls).toHaveLength(1);
+    });
+
+    it("2/6: la misma identidad con distinta cantidad se rechaza como conflicto sin salir a la red", async () => {
+      const { repository, calls } = setup(async () =>
+        jsonResponse(RECEPCION_OK),
+      );
+      await expect(
+        repository.receiveTransfer(RECEPCION_PAYLOAD),
+      ).resolves.toMatchObject({ id: "t-1" });
+
+      await expect(
+        rejection(
+          repository.receiveTransfer({
+            ...RECEPCION_PAYLOAD,
+            quantityReceived: 3,
+          }),
+        ),
+      ).resolves.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
+
+      // No se devuelve el resultado anterior ni se emite un segundo POST.
+      expect(calls).toHaveLength(1);
+    });
+
+    it("3/6: la misma identidad con distinta nota se rechaza como conflicto sin salir a la red", async () => {
+      const { repository, calls } = setup(async () =>
+        jsonResponse(RECEPCION_OK),
+      );
+      await expect(
+        repository.receiveTransfer(RECEPCION_PAYLOAD),
+      ).resolves.toMatchObject({ id: "t-1" });
+
+      await expect(
+        rejection(
+          repository.receiveTransfer({
+            ...RECEPCION_PAYLOAD,
+            note: "Nota distinta",
+          }),
+        ),
+      ).resolves.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
+
+      expect(calls).toHaveLength(1);
+    });
+
+    it("4/6: la misma identidad con distinta disposición, cierre final, fecha o traslado se rechaza como conflicto", async () => {
+      const { repository, calls } = setup(async () =>
+        jsonResponse(RECEPCION_OK),
+      );
+      await expect(
+        repository.receiveTransfer(RECEPCION_PAYLOAD),
+      ).resolves.toMatchObject({ id: "t-1" });
+
+      const mutated: ReceiveTransferPayload[] = [
+        { ...RECEPCION_PAYLOAD, disposition: "CONFIRMAR_MERMA" },
+        { ...RECEPCION_PAYLOAD, finalReceipt: true },
+        { ...RECEPCION_PAYLOAD, receivedAt: "2026-10-03T00:00:05.000Z" },
+        { ...RECEPCION_PAYLOAD, transferId: "t-2" },
+      ];
+      for (const payload of mutated) {
+        await expect(
+          rejection(repository.receiveTransfer(payload)),
+        ).resolves.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
+      }
+
+      // Ninguna intención distinta salió a la red.
+      expect(calls).toHaveLength(1);
+    });
+
+    it("5/6: un 200 con operation_id ajeno no declara la confirmación y preserva UNCERTAIN", async () => {
+      const { repository, calls } = setup(async () =>
+        jsonResponse({
           ...RECEPCION_OK,
           operation_id: "99999999-9999-4999-8999-999999999999",
-        },
-      },
-      {
-        body: {
-          ...RECEPCION_OK,
-          traslado: traslado({ traslado_id: "t-9" }),
-        },
-      },
-    ];
-
-    for (const testCase of cases) {
-      const { repository, calls } = setup(async () =>
-        jsonResponse(testCase.body),
+        }),
       );
+
       await expect(
         rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
       ).resolves.toMatchObject({ code: "RESPUESTA_INCOMPATIBLE" });
-      // No se declara confirmación: la operación permanece incierta.
+
       expect(repository.getTransferWriteRecord("t-1")?.state).toBe("UNCERTAIN");
       expect(getUncertainTransferReception("t-1")).not.toBeNull();
       expect(calls).toHaveLength(1);
-    }
+    });
+
+    it("6/6: un 200 con traslado_id ajeno no declara la confirmación y preserva UNCERTAIN", async () => {
+      const { repository, calls } = setup(async () =>
+        jsonResponse({
+          ...RECEPCION_OK,
+          traslado: traslado({ traslado_id: "t-9" }),
+        }),
+      );
+
+      await expect(
+        rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+      ).resolves.toMatchObject({ code: "RESPUESTA_INCOMPATIBLE" });
+
+      expect(repository.getTransferWriteRecord("t-1")?.state).toBe("UNCERTAIN");
+      expect(getUncertainTransferReception("t-1")).not.toBeNull();
+      expect(calls).toHaveLength(1);
+    });
   });
 
   it("TAC-P1-07: en UNCERTAIN, ningún error del reintento (400/401/403/404/409/422/5xx/red/DTO inválido) libera el bloqueo", async () => {
