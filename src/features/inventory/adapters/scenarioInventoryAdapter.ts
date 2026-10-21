@@ -1,4 +1,5 @@
 import type { InventoryRepository } from "../services/inventoryRepository";
+import { MockInventoryAdapter } from "./mockInventoryAdapter";
 import type {
   DashboardFiltersQuery,
   InventoryAlert,
@@ -187,5 +188,11 @@ export class ScenarioInventoryAdapter implements InventoryRepository {
 
   async getLocations(): Promise<InventoryLocationOption[]> {
     return this.delegate.getLocations();
+  }
+
+  applyBulkStock(items: Parameters<MockInventoryAdapter["applyBulkStock"]>[0]): void {
+    if (this.delegate instanceof MockInventoryAdapter) {
+      this.delegate.applyBulkStock(items);
+    }
   }
 }

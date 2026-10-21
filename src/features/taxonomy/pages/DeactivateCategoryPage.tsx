@@ -119,7 +119,7 @@ function DeactivateCategoryContent({ detalle }: { detalle: CategoryDetail }) {
               Cancelar
             </Button>
             <Button
-              color="danger"
+              variant="outline"
               disabled={detalle.estado !== "Activo"}
               onClick={() => setConfirmar(true)}
             >

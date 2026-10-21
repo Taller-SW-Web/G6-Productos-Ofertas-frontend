@@ -1,13 +1,7 @@
-import { lazy, Suspense, useContext, type ReactNode } from "react";
+import { useContext, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { FeedbackAlert } from "../../components/shared";
 import { DataModeContext } from "./DataModeContext";
-
-const TaxonomyDataNotice = lazy(() =>
-  import("../../features/taxonomy/components/TaxonomyDataNotice").then(
-    (module) => ({ default: module.TaxonomyDataNotice }),
-  ),
-);
 
 const taxonomyPaths = [
   "/categorias",
@@ -33,18 +27,10 @@ export function TaxonomyModeGate({ children }: { children: ReactNode }) {
     return (
       <FeedbackAlert
         semantic="error"
-        title="Integración con API real no disponible"
+        title="Función no disponible"
       >
-        Integración con API real no disponible actualmente para el módulo de
-        Taxonomía.
+        Esta función no está disponible en el modo actual.
       </FeedbackAlert>
     );
-  return (
-    <>
-      <Suspense fallback={null}>
-        <TaxonomyDataNotice />
-      </Suspense>
-      {children}
-    </>
-  );
+  return children;
 }

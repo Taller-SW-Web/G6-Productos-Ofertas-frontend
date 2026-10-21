@@ -2,7 +2,8 @@ import { usePromotionServices } from "../hooks/usePromotionServices";
 import { PromotionDataNotice } from "../components/PromotionDataNotice";
 import { useCallback } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Button, Group, Select, Stack } from "@mantine/core";
+import { ActionIcon, Button, Group, Menu, Select, Stack } from "@mantine/core";
+import { IconDotsVertical, IconEdit, IconEye } from "@tabler/icons-react";
 import {
   EntityTable,
   FilterBar,
@@ -107,27 +108,37 @@ export function CampaignsPage() {
     {
       key: "actions",
       header: "Acciones",
-      width: 130,
+      width: 120,
+      align: "right",
       render: (row) => (
-        <Group gap="xs">
-          <Button
-            variant="subtle"
-            size="sm"
+        <Group gap="xs" justify="flex-end" wrap="nowrap">
+          <ActionIcon
             component={Link}
             to={`/promociones/${row.id}?${params}`}
             aria-label={`Ver detalle de ${row.name}`}
+            title="Ver detalle"
           >
-            Ver detalle
-          </Button>
-          <Button
-            variant="subtle"
-            size="sm"
-            component={Link}
-            to={`/promociones/${row.id}/editar?${params}`}
-            aria-label={`Editar ${row.name}`}
-          >
-            Editar
-          </Button>
+            <IconEye size={16} stroke={2} aria-hidden="true" />
+          </ActionIcon>
+          <Menu position="bottom-end" shadow="md">
+            <Menu.Target>
+              <ActionIcon
+                aria-label={`Más acciones de ${row.name}`}
+                title="Más acciones"
+              >
+                <IconDotsVertical size={16} />
+              </ActionIcon>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Item
+                component={Link}
+                to={`/promociones/${row.id}/editar?${params}`}
+                leftSection={<IconEdit size={16} stroke={2} aria-hidden="true" />}
+              >
+                Editar
+              </Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
         </Group>
       ),
     },

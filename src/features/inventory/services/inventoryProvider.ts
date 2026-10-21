@@ -89,7 +89,7 @@ export function getInventoryRepository(): InventoryRepository {
       // error controlado en modo API. Nunca se cae silenciosamente al mock.
       base = apiFactory ? apiFactory() : new ApiPendingRepository();
     } else {
-      base = new MockInventoryAdapter();
+      base = new MockInventoryAdapter({ persist: true });
     }
 
     // En desarrollo/pruebas se decora con ScenarioInventoryAdapter para

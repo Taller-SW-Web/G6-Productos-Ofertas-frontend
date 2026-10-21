@@ -6,7 +6,7 @@ async function expectNoHorizontalOverflow(page: import("@playwright/test").Page)
   ).toBe(true);
 }
 
-test("Bulk smoke: selección, revisión local, admisión y seguimiento", async ({ page }) => {
+test("@smoke Bulk: selección, revisión local, admisión y seguimiento", async ({ page }) => {
   await page.goto("/carga-masiva");
   await expectNoHorizontalOverflow(page);
   await page.locator('input[type="file"]').setInputFiles({
@@ -107,7 +107,7 @@ test("Bulk smoke: resultado parcial y acciones compatibles con el lote", async (
   await expect(page.getByText("80", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Reanudar operaciones pendientes" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Descargar reporte de errores" })).toHaveCount(0);
-  await expect(page.getByText("No hay un recurso de reporte descargable para este lote.")).toBeVisible();
+  await expect(page.getByText("No hay un reporte descargable para este lote.")).toBeVisible();
 
   await page.goto("/carga-masiva/importaciones/lote-inexistente");
   await expect(page.getByText("Lote no encontrado")).toBeVisible();
@@ -129,7 +129,7 @@ test("Bulk smoke: exportación completa CSV con estados asíncronos", async ({ p
 
   await page.goto("/carga-masiva/descargas?export_id=export-completed-xlsx");
   await expect(page.getByText("XLSX completado sin archivo descargable")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Descarga XLSX no disponible en demo" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Descargar archivo XLSX consolidado" })).toBeDisabled();
 
   await page.goto("/carga-masiva/descargas?export_id=export-inexistente");
   await expect(page.getByText("Exportación no encontrada")).toBeVisible();

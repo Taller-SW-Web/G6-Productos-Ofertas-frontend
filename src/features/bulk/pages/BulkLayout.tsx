@@ -11,8 +11,8 @@ export function BulkLayout() {
     <BulkUploadProvider>
       <Stack gap="lg">
         {mode === "api" && !providerConfigured && (
-          <FeedbackAlert semantic="warning" title="Provider API de Bulk no configurado">
-            Las operaciones de carga masiva no están conectadas a bulk-svc. No se utilizarán fixtures mock en este modo.
+          <FeedbackAlert semantic="warning" title="Función no disponible">
+            Las operaciones de carga masiva no están disponibles en el modo actual.
           </FeedbackAlert>
         )}
         <Outlet />

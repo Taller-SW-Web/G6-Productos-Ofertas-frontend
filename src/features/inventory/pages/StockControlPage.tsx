@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Button, Group, Stack, Text } from "@mantine/core";
+import { ActionIcon, Button, Group, Stack, Text } from "@mantine/core";
 import {
   IconAdjustments,
   IconChartBar,
@@ -9,7 +9,6 @@ import {
 } from "@tabler/icons-react";
 import {
   EntityTable,
-  FeedbackAlert,
   PageHeader,
   StatusBadge,
   type TableColumn,
@@ -173,17 +172,18 @@ export function StockControlPage() {
     {
       key: "actions",
       header: "Acción",
-      width: 120,
+      width: 80,
       align: "right",
       render: (row) => (
-        <Button
-          size="xs"
-          variant="light"
-          leftSection={<IconEye size={14} />}
+        <ActionIcon
+          variant="subtle"
+          size={32}
+          aria-label="Ver detalle"
+          title={`Ver detalle de ${row.sku} en ${row.locationName}`}
           onClick={() => setSelectedItem(row)}
         >
-          Ver detalle
-        </Button>
+          <IconEye size={16} />
+        </ActionIcon>
       ),
     },
   ];
@@ -242,13 +242,8 @@ export function StockControlPage() {
       />
 
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Disponibilidad autoritativa multicanal">
-          El saldo disponible se calcula a partir de las unidades físicas menos las reservadas y las
-          bloqueadas, sin valores negativos. Los canales de venta consultan este saldo sin modificar
-          físicamente el inventario.
-        </FeedbackAlert>
-
         {isRevisionMode && <DevScenarioSelector />}
+
 
         <StockFilters
           filters={filters}

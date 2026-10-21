@@ -2,6 +2,7 @@ export { PageHeader } from "./PageHeader";
 export { SectionCard } from "./SectionCard";
 export { StatusBadge } from "./StatusBadge";
 export { FeedbackAlert } from "./FeedbackAlert";
+export { ContextNote } from "./ContextNote";
 export { EmptyState } from "./EmptyState";
 export { SearchField } from "./SearchField";
 export { FilterBar } from "./FilterBar";

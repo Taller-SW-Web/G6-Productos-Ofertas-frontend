@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 // MK-002 Combos — end-to-end coverage against the shared mock Catalog/Pricing
 // runtime. Every test starts from a fresh navigation, so the mock store resets.
 
-test("listado, navegación y detalle con disponibilidad informativa", async ({ page }) => {
+test("@smoke listado, navegación y detalle con disponibilidad informativa", async ({ page }) => {
   await page.goto("/combos");
   await expect(page.getByRole("heading", { name: "Gestión de combos" })).toBeVisible();
 
@@ -14,14 +14,14 @@ test("listado, navegación y detalle con disponibilidad informativa", async ({ p
   const trailRow = page.getByRole("row").filter({ hasText: "Conjunto Trail Esencial" });
   await expect(trailRow).toBeVisible();
   await expect(trailRow).toContainText("4 combos estimados");
-  await expect(page.getByRole("row").filter({ hasText: "Dúo Oxford" })).toContainText("Agotado");
+  await expect(page.getByRole("row").filter({ hasText: "Dúo Running" })).toContainText("Agotado");
   await expect(page.getByRole("row").filter({ hasText: "Pack Urbano histórico" })).toContainText("INACTIVO");
 
   await trailRow.getByRole("link", { name: "Ver detalle" }).click();
   await expect(page).toHaveURL(/\/combos\/combo-001$/);
   await expect(page.getByRole("heading", { name: "Conjunto Trail Esencial" })).toBeVisible();
   await expect(page.getByText("CAS-COR-001")).toBeVisible();
-  await expect(page.getByText("CAM-OXF-BLA-M")).toBeVisible();
+  await expect(page.getByText("CAM-RUN-BLA-M")).toBeVisible();
   await expect(page.getByText("4 combos estimados")).toBeVisible();
   await expect(page.getByText("Suma regular vigente")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -38,7 +38,7 @@ test("creación de un combo directo y desactivación conservando el histórico",
   await page.getByRole("button", { name: "Agregar componente" }).click();
 
   await page.getByRole("combobox", { name: "Producto" }).click();
-  await page.getByRole("option", { name: "Camisa Oxford Manga Larga" }).click();
+  await page.getByRole("option", { name: "Camiseta Running Endurance" }).click();
   await page.getByRole("combobox", { name: "Variante / SKU" }).click();
   await page.getByRole("option", { name: /Blanco/ }).click();
   await page.getByRole("button", { name: "Agregar componente" }).click();
@@ -125,4 +125,34 @@ test("COM-05: conflicto de versión, diff, conservación del borrador y segundo 
   await page.getByRole("button", { name: "Guardar cambios" }).click();
   await expect(page.getByRole("heading", { name: "Propuesta local conservada" })).toBeVisible();
   await expect(page).toHaveURL(/\/combos\/combo-001$/);
+});
+
+test("COM-02: las referencias vigentes del detalle provienen de Pricing (override y herencia)", async ({ page }) => {
+  // Dúo Running: CAM-RUN-BLA-M (hereda base 139.90/129.90) + CAM-RUN-AZU-L (override 149.90/sin oferta).
+  // La suma pública vigente solo existe si Pricing resolvió ambas referencias; el histórico no la tenía.
+  await page.goto("/combos/combo-002");
+  await expect(page.getByRole("heading", { name: "Dúo Running" })).toBeVisible();
+  await expect(page.getByText("Referencias vigentes confirmadas")).toBeVisible();
+  await expect(page.getByText("2 / 2", { exact: true })).toBeVisible();
+  await expect(page.getByText(/289[.,]80/).first()).toBeVisible();
+  await expect(page.getByText(/279[.,]80/).first()).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("COM-03: la disponibilidad informativa no se presenta como verificación inventada", async ({ page }) => {
+  await page.goto("/combos/combo-001?scenario=detail-incomplete");
+  await expect(page.getByRole("heading", { name: "Conjunto Trail Esencial" })).toBeVisible();
+  await expect(page.getByText("Disponibilidad incompleta").first()).toBeVisible();
+
+  await page.goto("/combos/combo-001?scenario=detail-unverifiable");
+  await expect(page.getByText("Disponibilidad no verificable").first()).toBeVisible();
+
+  await page.goto("/combos/combo-001?scenario=detail-component-inactive");
+  await expect(page.getByText("Componente inactivo").first()).toBeVisible();
+
+  await page.goto("/combos/combo-001?scenario=detail-stale");
+  await expect(page.getByText("Desactualizada (4 combos estimados)").first()).toBeVisible();
+
+  await page.goto("/combos/combo-001?scenario=detail-active-zero");
+  await expect(page.getByText("Agotado (0 confirmado)").first()).toBeVisible();
 });

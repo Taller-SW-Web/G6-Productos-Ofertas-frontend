@@ -60,6 +60,13 @@ export interface BulkImportRow {
   code?: BulkErrorCode | null;
   detail?: string | null;
   steps: BulkDomainStep[];
+  precio_regular?: number;
+  stock_inicial?: number;
+  descripcion?: string;
+  categoria?: string;
+  marca?: string;
+  tipo_producto?: string;
+  moneda?: string;
 }
 
 export interface BulkImportBatch {

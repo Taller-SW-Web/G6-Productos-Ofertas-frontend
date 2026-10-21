@@ -75,7 +75,7 @@ export function CouponFormPage() {
 
 function CouponFormContent({ initial }: { initial: CouponView | null }) {
   const [params] = useSearchParams();
-  const { services, confirmedServices, prepareCreation, clearTransientParams } =
+  const { services, confirmedServices, prepareCreation, clearTransientParams, revision: queryRevision } =
     usePromotionServices();
   const navigate = useNavigate();
   const [revision, setRevision] = useState(0);
@@ -94,7 +94,7 @@ function CouponFormContent({ initial }: { initial: CouponView | null }) {
     },
     [services, prepareCreation],
   );
-  const choices = useAdministrationRead(`promotions:${revision}`, readChoices);
+  const choices = useAdministrationRead(`promotions:${revision + queryRevision}`, readChoices);
   const cancel = () =>
     navigate(initial ? `/cupones/${initial.id}${suffix}` : `/cupones${suffix}`);
   if (form.confirmed) {

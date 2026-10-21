@@ -1,5 +1,6 @@
 import type { InventoryRepository } from "../services/inventoryRepository";
 import { InventoryError } from "../services/inventoryErrors";
+import { readMockInventoryCatalog } from "../../catalog/adapters/mockCatalogConsumers";
 import {
   isTerminalTransferStatus,
   type DashboardFiltersQuery,
@@ -22,6 +23,124 @@ import {
   initialThresholds,
   initialTransfers,
 } from "../mocks/inventoryFixtures";
+import {
+  isMockPersistenceAvailable,
+  isRecord,
+  publishMockChange,
+  readMockState,
+  saveMockState,
+  subscribeExternalMockChanges,
+} from "../../shared/mockState";
+
+interface MockInventoryState {
+  stockItems: StockItem[];
+  thresholds: ThresholdConfig;
+  transfers: TransferItem[];
+  alerts: InventoryAlert[];
+  processedOperations: [string, TransferItem][];
+  processedOperationKeys: [string, string][];
+  bulkOperations?: [string, { sku: string; quantity: number }][];
+}
+
+function isStockItemRecord(value: unknown): value is StockItem {
+  return (
+    isRecord(value) &&
+    typeof value.sku === "string" &&
+    value.sku.trim().length > 0 &&
+    typeof value.locationId === "string" &&
+    value.locationId.trim().length > 0 &&
+    typeof value.onHand === "number" &&
+    Number.isFinite(value.onHand) &&
+    value.onHand >= 0 &&
+    typeof value.reserved === "number" &&
+    Number.isFinite(value.reserved) &&
+    value.reserved >= 0 &&
+    typeof value.blocked === "number" &&
+    Number.isFinite(value.blocked) &&
+    value.blocked >= 0 &&
+    typeof value.available === "number" &&
+    Number.isFinite(value.available) &&
+    value.available >= 0
+  );
+}
+
+function isTransferRecord(value: unknown): value is TransferItem {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    value.id.trim().length > 0 &&
+    typeof value.transferCode === "string" &&
+    value.transferCode.trim().length > 0 &&
+    typeof value.sku === "string" &&
+    value.sku.trim().length > 0 &&
+    typeof value.sourceLocationId === "string" &&
+    value.sourceLocationId.trim().length > 0 &&
+    typeof value.targetLocationId === "string" &&
+    value.targetLocationId.trim().length > 0 &&
+    typeof value.quantityShipped === "number" &&
+    Number.isFinite(value.quantityShipped) &&
+    value.quantityShipped >= 0 &&
+    typeof value.quantityReceived === "number" &&
+    Number.isFinite(value.quantityReceived) &&
+    value.quantityReceived >= 0 &&
+    typeof value.quantityPending === "number" &&
+    Number.isFinite(value.quantityPending) &&
+    value.quantityPending >= 0 &&
+    typeof value.status === "string"
+  );
+}
+
+function isThresholdConfig(value: unknown): value is ThresholdConfig {
+  return (
+    isRecord(value) &&
+    typeof value.globalThreshold === "number" &&
+    Number.isFinite(value.globalThreshold) &&
+    value.globalThreshold >= 0 &&
+    isRecord(value.skuOverrides) &&
+    Object.values(value.skuOverrides).every(
+      (v) => typeof v === "number" && Number.isFinite(v) && v >= 0,
+    )
+  );
+}
+
+function isMockInventoryState(value: unknown): value is MockInventoryState {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.stockItems) &&
+    value.stockItems.every(isStockItemRecord) &&
+    isThresholdConfig(value.thresholds) &&
+    Array.isArray(value.transfers) &&
+    value.transfers.every(isTransferRecord) &&
+    Array.isArray(value.alerts) &&
+    Array.isArray(value.processedOperations) &&
+    value.processedOperations.every(
+      (entry) =>
+        Array.isArray(entry) &&
+        entry.length === 2 &&
+        typeof entry[0] === "string" &&
+        isTransferRecord(entry[1]),
+    ) &&
+    Array.isArray(value.processedOperationKeys) &&
+    value.processedOperationKeys.every(
+      (entry) =>
+        Array.isArray(entry) &&
+        entry.length === 2 &&
+        typeof entry[0] === "string" &&
+        typeof entry[1] === "string",
+    ) &&
+    (value.bulkOperations === undefined ||
+      (Array.isArray(value.bulkOperations) &&
+        value.bulkOperations.every(
+          (entry) =>
+            Array.isArray(entry) &&
+            entry.length === 2 &&
+            typeof entry[0] === "string" &&
+            isRecord(entry[1]) &&
+            typeof entry[1].sku === "string" &&
+            typeof entry[1].quantity === "number",
+        )))
+  );
+}
 
 export class MockInventoryAdapter implements InventoryRepository {
   private stockItems: StockItem[] = JSON.parse(JSON.stringify(initialStockItems));
@@ -30,6 +149,214 @@ export class MockInventoryAdapter implements InventoryRepository {
   private alerts: InventoryAlert[] = JSON.parse(JSON.stringify(initialAlerts));
   private processedOperations = new Map<string, TransferItem>();
   private processedOperationKeys = new Map<string, string>();
+  private bulkOperations = new Map<string, { sku: string; quantity: number }>();
+  private readonly persistEnabled: boolean;
+
+  constructor(options: { persist?: boolean } = {}) {
+    // Directly constructed adapters (tests, injection) stay isolated; only the demo
+    // singleton opts into persistence explicitly.
+    this.persistEnabled = options.persist === true && isMockPersistenceAvailable();
+    if (this.persistEnabled) {
+      const stored = readMockState<MockInventoryState>("inventory", isMockInventoryState);
+      if (stored) {
+        this.hydrate(stored);
+      }
+      subscribeExternalMockChanges("inventory", () => {
+        const next = readMockState<MockInventoryState>("inventory", isMockInventoryState);
+        if (!next) return;
+        this.hydrate(next);
+        publishMockChange("inventory");
+      });
+      subscribeExternalMockChanges("catalog", async () => {
+        await this.refreshCatalogMetadata();
+        publishMockChange("inventory");
+      });
+    }
+  }
+
+  private hydrate(stored: MockInventoryState): void {
+    this.stockItems = stored.stockItems;
+    this.thresholds = stored.thresholds;
+    this.transfers = stored.transfers;
+    this.alerts = stored.alerts;
+    // Idempotency records must survive a reload as maps, never as derived balances.
+    this.processedOperations = new Map(stored.processedOperations);
+    this.processedOperationKeys = new Map(stored.processedOperationKeys);
+    this.bulkOperations = new Map(stored.bulkOperations ?? []);
+  }
+
+  private persist(): boolean {
+    let ok = true;
+    if (this.persistEnabled) {
+      ok = saveMockState("inventory", {
+        stockItems: this.stockItems,
+        thresholds: this.thresholds,
+        transfers: this.transfers,
+        alerts: this.alerts,
+        processedOperations: [...this.processedOperations.entries()],
+        processedOperationKeys: [...this.processedOperationKeys.entries()],
+        bulkOperations: [...this.bulkOperations.entries()],
+      } satisfies MockInventoryState);
+    }
+    publishMockChange("inventory");
+    return ok;
+  }
+
+  private async refreshCatalogMetadata() {
+    const metadata = await readMockInventoryCatalog();
+    for (const item of this.stockItems) {
+      const current = metadata.get(item.sku);
+      if (current) Object.assign(item, current);
+    }
+    for (const transfer of this.transfers) {
+      const current = metadata.get(transfer.sku);
+      if (current) transfer.productName = current.productName;
+    }
+    let hasNewItems = false;
+    for (const [sku, desc] of metadata) {
+      const exists = this.stockItems.some((s) => s.sku === sku);
+      if (!exists && desc.vendible) {
+        const newItem: StockItem = {
+          sku,
+          productName: desc.productName,
+          categoryName: desc.categoryName,
+          brandName: desc.brandName,
+          locationId: "ALM-CEN",
+          locationName: "Almacén Central Lima",
+          onHand: 0,
+          reserved: 0,
+          blocked: 0,
+          available: 0,
+          threshold:
+            this.thresholds.skuOverrides[sku] ?? this.thresholds.globalThreshold,
+          status: "AGOTADO",
+          stockVersion: 0,
+          updatedAt: new Date().toISOString(),
+        };
+        this.stockItems.push(newItem);
+        hasNewItems = true;
+
+        const existingTransfer = this.transfers.find((t) => t.sku === sku);
+        if (!existingTransfer) {
+          const newTransfer: TransferItem = {
+            id: `TRF-${sku.replace(/[^A-Za-z0-9]/g, "-")}`,
+            transferCode: `TRF-${sku}`,
+            sku,
+            productName: desc.productName,
+            sourceLocationId: "ALM-NOR",
+            sourceLocationName: "Almacén Regional Norte",
+            targetLocationId: "ALM-CEN",
+            targetLocationName: "Almacén Central Lima",
+            quantityShipped: 25,
+            quantityReceived: 0,
+            quantityPending: 25,
+            status: "EN_TRANSITO",
+            shippedAt: new Date().toISOString(),
+          };
+          this.transfers.unshift(newTransfer);
+        }
+      }
+    }
+    if (hasNewItems && this.persistEnabled) {
+      this.persist();
+    }
+    return metadata;
+  }
+
+  applyBulkStock(
+    items: Array<{
+      batchId?: string;
+      rowId?: string | number;
+      sku: string;
+      productName: string;
+      categoryName?: string;
+      brandName?: string;
+      stock?: number;
+    }>,
+    batchId?: string,
+  ): void {
+    for (const data of items) {
+      const bId = data.batchId || batchId || "default-batch";
+      const rId = data.rowId !== undefined ? data.rowId : "0";
+      const operationKey = `${bId}:${rId}:INVENTARIO`;
+
+      // 1. Buscar la clave de operación.
+      const existingOp = this.bulkOperations.get(operationKey);
+      const stockQty = data.stock ?? 0;
+
+      // 2. Si existe con el mismo SKU y cantidad, devolver el resultado anterior sin sumar stock.
+      if (existingOp) {
+        if (existingOp.sku === data.sku && existingOp.quantity === stockQty) {
+          continue;
+        }
+        // 3. Si existe con un SKU o cantidad diferente, rechazar la operación por conflicto.
+        throw new InventoryError(
+          "IDEMPOTENCY_CONFLICT",
+          `Conflicto de idempotencia en la operación ${operationKey}: la clave ya fue registrada con SKU "${existingOp.sku}" y cantidad ${existingOp.quantity}, pero se recibió SKU "${data.sku}" y cantidad ${stockQty}.`,
+        );
+      }
+
+      // 4. Si no existe, validar SKU y cantidad.
+      if (!data.sku || !data.sku.trim()) {
+        throw new InventoryError("VALIDACION", "El SKU es obligatorio para el registro de inventario.");
+      }
+      if (!Number.isFinite(stockQty) || stockQty < 0 || !Number.isInteger(stockQty)) {
+        throw new InventoryError("CANTIDAD_INVALIDA", "La cantidad de stock inicial debe ser un número entero no negativo.");
+      }
+
+      // 5. Conservar una copia de los valores que se modificarán.
+      const backupStockItems = JSON.parse(JSON.stringify(this.stockItems)) as StockItem[];
+      const backupBulkOps = new Map(this.bulkOperations);
+
+      // 6. Incrementar el stock.
+      const existing = this.stockItems.find((s) => s.sku === data.sku);
+      if (existing) {
+        existing.productName = data.productName || existing.productName;
+        if (data.categoryName) existing.categoryName = data.categoryName;
+        if (data.brandName) existing.brandName = data.brandName;
+        if (stockQty > 0) {
+          existing.onHand += stockQty;
+        }
+        this.recalculateStockStatus(existing);
+      } else {
+        const created: StockItem = {
+          sku: data.sku,
+          productName: data.productName,
+          categoryName: data.categoryName || "Calzado",
+          brandName: data.brandName || "Inka Athletic",
+          locationId: "ALM-CEN",
+          locationName: "Almacén Central Lima",
+          onHand: stockQty,
+          reserved: 0,
+          blocked: 0,
+          available: stockQty,
+          threshold:
+            this.thresholds.skuOverrides[data.sku] ?? this.thresholds.globalThreshold,
+          status: stockQty > 0 ? "DISPONIBLE" : "AGOTADO",
+          stockVersion: 1,
+          updatedAt: new Date().toISOString(),
+        };
+        this.stockItems.push(created);
+      }
+
+      // 7. Registrar la clave de operación.
+      this.bulkOperations.set(operationKey, { sku: data.sku, quantity: stockQty });
+
+      // 8. Guardar el estado completo de Inventory.
+      const ok = this.persist();
+
+      // 9. Si el almacenamiento falla, restaurar el stock y retirar la clave.
+      if (!ok && this.persistEnabled) {
+        this.stockItems = backupStockItems;
+        this.bulkOperations = backupBulkOps;
+        throw new InventoryError(
+          "OPERATIVO",
+          "No se pudo guardar el estado de inventario en el almacenamiento.",
+        );
+      }
+      // 10. Solo devolver éxito cuando el guardado esté confirmado.
+    }
+  }
 
   private recalculateStockStatus(item: StockItem): void {
     const effectiveThreshold =
@@ -64,15 +391,16 @@ export class MockInventoryAdapter implements InventoryRepository {
   // no traen esos atributos en el propio traslado.
   private buildSkuCatalog(): Map<
     string,
-    { categoryName: string; brandName: string }
+    { productName: string; categoryName: string; brandName: string }
   > {
     const catalog = new Map<
       string,
-      { categoryName: string; brandName: string }
+      { productName: string; categoryName: string; brandName: string }
     >();
     for (const item of this.stockItems) {
       if (!catalog.has(item.sku)) {
         catalog.set(item.sku, {
+          productName: item.productName,
           categoryName: item.categoryName,
           brandName: item.brandName,
         });
@@ -87,7 +415,7 @@ export class MockInventoryAdapter implements InventoryRepository {
   private matchesTransferFilters(
     transfer: TransferItem,
     filters: DashboardFiltersQuery | undefined,
-    catalog: Map<string, { categoryName: string; brandName: string }>,
+    catalog: Map<string, { productName: string; categoryName: string; brandName: string }>,
   ): boolean {
     if (
       filters?.locationId &&
@@ -101,7 +429,7 @@ export class MockInventoryAdapter implements InventoryRepository {
     if (
       search &&
       !transfer.sku.toLowerCase().includes(search) &&
-      !transfer.productName.toLowerCase().includes(search)
+      !(catalog.get(transfer.sku)?.productName ?? transfer.productName).toLowerCase().includes(search)
     ) {
       return false;
     }
@@ -205,13 +533,15 @@ export class MockInventoryAdapter implements InventoryRepository {
   }
 
   async getStockItems(filters?: StockFiltersQuery): Promise<StockItem[]> {
-    return this.queryStockItems(filters);
+    await this.refreshCatalogMetadata();
+    return this.queryStockItems(filters).map(item => ({ ...item }));
   }
 
   async getStockDetail(
     sku: string,
     locationId: string,
   ): Promise<StockItem | null> {
+    await this.refreshCatalogMetadata();
     const item = this.stockItems.find(
       (s) => s.sku === sku && s.locationId === locationId,
     );
@@ -233,6 +563,12 @@ export class MockInventoryAdapter implements InventoryRepository {
     }
     this.thresholds.globalThreshold = threshold;
     this.stockItems.forEach((item) => this.recalculateStockStatus(item));
+    if (!this.persist() && this.persistEnabled) {
+      throw new InventoryError(
+        "OPERATIVO",
+        "No se pudo guardar el cambio. Vuelve a intentarlo.",
+      );
+    }
     return JSON.parse(JSON.stringify(this.thresholds));
   }
 
@@ -248,11 +584,21 @@ export class MockInventoryAdapter implements InventoryRepository {
     }
     this.thresholds.skuOverrides[sku] = threshold;
     this.stockItems.forEach((item) => this.recalculateStockStatus(item));
+    if (!this.persist() && this.persistEnabled) {
+      throw new InventoryError(
+        "OPERATIVO",
+        "No se pudo guardar el cambio. Vuelve a intentarlo.",
+      );
+    }
     return JSON.parse(JSON.stringify(this.thresholds));
   }
 
   async getTransfers(filters?: TransferFiltersQuery): Promise<TransferItem[]> {
-    let result = [...this.transfers];
+    const metadata = await this.refreshCatalogMetadata();
+    let result = this.transfers.map(transfer => ({
+      ...transfer,
+      productName: metadata.get(transfer.sku)?.productName ?? transfer.productName,
+    }));
 
     if (filters?.targetLocationId && filters.targetLocationId !== "all") {
       result = result.filter(
@@ -392,12 +738,19 @@ export class MockInventoryAdapter implements InventoryRepository {
     const result: TransferItem = { ...transfer };
     this.processedOperations.set(payload.operationId, result);
     this.processedOperationKeys.set(payload.operationId, intent);
+    if (!this.persist() && this.persistEnabled) {
+      throw new InventoryError(
+        "OPERATIVO",
+        "No se pudo guardar el cambio. Vuelve a intentarlo.",
+      );
+    }
     return result;
   }
 
   async getDashboardKpis(
     filters?: DashboardFiltersQuery,
   ): Promise<InventoryKpiSummary> {
+    await this.refreshCatalogMetadata();
     const items = this.queryStockItems({
       search: filters?.search,
       category: filters?.category,
@@ -498,6 +851,7 @@ export class MockInventoryAdapter implements InventoryRepository {
   async getDashboardAlerts(
     filters?: DashboardFiltersQuery,
   ): Promise<InventoryAlert[]> {
+    await this.refreshCatalogMetadata();
     const items = this.queryStockItems({
       search: filters?.search,
       category: filters?.category,
@@ -583,6 +937,7 @@ export class MockInventoryAdapter implements InventoryRepository {
   async getLocationDistribution(
     filters?: DashboardFiltersQuery,
   ): Promise<LocationDistribution[]> {
+    await this.refreshCatalogMetadata();
     const map = new Map<string, LocationDistribution>();
 
     for (const item of this.queryStockItems({
@@ -620,6 +975,7 @@ return Array.from(map.values());
   }
 
   async getCategories(): Promise<InventoryCategoryOption[]> {
+    await this.refreshCatalogMetadata();
     const categories = new Map<string, InventoryCategoryOption>();
     for (const item of this.stockItems) {
       if (!categories.has(item.categoryName)) {
@@ -638,6 +994,7 @@ return Array.from(map.values());
   }
 
   async getBrands(): Promise<InventoryBrandOption[]> {
+    await this.refreshCatalogMetadata();
     const brands = new Map<string, InventoryBrandOption>();
     for (const item of this.stockItems) {
       if (!brands.has(item.brandName)) {
@@ -669,3 +1026,5 @@ return Array.from(map.values());
     return Array.from(locations.values());
   }
 }
+
+export const sharedMockInventoryAdapter = new MockInventoryAdapter({ persist: true });

@@ -1,29 +1,34 @@
 import { calculateInformativeAvailability } from "../services/availability";
 import type { Combo, ComboStatus, StockReading, SkuPrice } from "../types/combos";
+import { initialStockItems } from "../../inventory/mocks/inventoryFixtures";
 
 // Demonstration combos. Every SKU below exists in the shared Catalog used by
 // MK-003/MK-004 (see src/features/catalog/mocks/catalogFixtures.ts):
 //   CAS-COR-001      simple, ACTIVE product
-//   CAM-OXF-BLA-M    active variant of PROD-OXF-001
-//   CAM-OXF-AZU-L    active variant of PROD-OXF-001
+//   CAM-RUN-BLA-M    active variant of PROD-RUN-001
+//   CAM-RUN-AZU-L    active variant of PROD-RUN-001
 // Combos never insert fictitious products into the shared Catalog.
 
-export const stockFixtures: Readonly<Record<string, StockReading>> = {
-  "CAS-COR-001": { sku: "CAS-COR-001", stock: 4, stale: false, locationsCompatible: true },
-  "CAM-OXF-BLA-M": { sku: "CAM-OXF-BLA-M", stock: 8, stale: false, locationsCompatible: true },
-  "CAM-OXF-AZU-L": { sku: "CAM-OXF-AZU-L", stock: 0, stale: false, locationsCompatible: true },
-  "CAM-OXF-NEG-S": { sku: "CAM-OXF-NEG-S", stock: 0, stale: false, locationsCompatible: true },
-};
+export const stockFixtures: Readonly<Record<string, StockReading>> = Object.fromEntries(
+  Array.from(new Set(initialStockItems.map((item) => item.sku))).map((sku) => {
+    const stock = initialStockItems
+      .filter((item) => item.sku === sku)
+      .reduce((sum, item) => sum + item.available, 0);
+    return [sku, { sku, stock, stale: false, locationsCompatible: true }];
+  }),
+);
 
 export const priceFixtures: SkuPrice[] = [
   { sku: "CAS-COR-001", regularMinor: 17900, offerMinor: 15900, currency: "PEN", channelId: null, priceVersion: 1, validityId: "vigencia-cas-cor-001", validFrom: "2020-10-01T00:00:00Z", validUntil: null },
-  { sku: "CAM-OXF-BLA-M", regularMinor: 13990, offerMinor: 12990, currency: "PEN", channelId: null, priceVersion: 1, validityId: "vigencia-cam-oxf-bla-m", validFrom: "2020-10-01T00:00:00Z", validUntil: null },
-  { sku: "CAM-OXF-AZU-L", regularMinor: 14990, offerMinor: null, currency: "PEN", channelId: null, priceVersion: 1, validityId: "vigencia-cam-oxf-azu-l", validFrom: "2020-10-01T00:00:00Z", validUntil: null },
-  { sku: "CAM-OXF-NEG-S", regularMinor: 13990, offerMinor: null, currency: "PEN", channelId: null, priceVersion: 1, validityId: "vigencia-cam-oxf-neg-s", validFrom: "2020-10-01T00:00:00Z", validUntil: null },
+  { sku: "CAM-RUN-BLA-M", regularMinor: 13990, offerMinor: 12990, currency: "PEN", channelId: null, priceVersion: 1, validityId: "vigencia-cam-run-bla-m", validFrom: "2020-10-01T00:00:00Z", validUntil: null },
+  { sku: "CAM-RUN-AZU-L", regularMinor: 14990, offerMinor: null, currency: "PEN", channelId: null, priceVersion: 1, validityId: "vigencia-cam-run-azu-l", validFrom: "2020-10-01T00:00:00Z", validUntil: null },
+  { sku: "CAM-RUN-NEG-S", regularMinor: 13990, offerMinor: null, currency: "PEN", channelId: null, priceVersion: 1, validityId: "vigencia-cam-run-neg-s", validFrom: "2020-10-01T00:00:00Z", validUntil: null },
   { sku: "ZAP-RUN-41", regularMinor: 24900, offerMinor: null, currency: "PEN", channelId: null, priceVersion: 1, validityId: "vigencia-zap-run-41", validFrom: "2020-10-01T00:00:00Z", validUntil: null },
 ];
 
-const CALCULATED_AT = "2026-10-14T16:00:00-05:00";
+// Demo instant used to seed informative availability. It matches the shared
+// Pricing demo clock so a recomputed read is byte-identical to the seed.
+const CALCULATED_AT = "2026-10-17T12:00:00.000Z";
 
 function priceFor(sku: string): { regularUnitMinor: number | null; publicUnitMinor: number | null } {
   const price = priceFixtures.find((candidate) => candidate.sku === sku);
@@ -51,25 +56,25 @@ const seeds: ComboSeed[] = [
   {
     id: "combo-001",
     name: "Conjunto Trail Esencial",
-    description: "Casaca cortaviento y camisa Oxford para salidas de media montaña.",
+    description: "Casaca cortaviento y camiseta deportiva Running para salidas de media montaña.",
     status: "ACTIVO",
     priceMinor: 20990,
     version: 3,
     components: [
       { sku: "CAS-COR-001", productName: "Casaca Cortaviento Trail", quantity: 1 },
-      { sku: "CAM-OXF-BLA-M", productName: "Camisa Oxford Manga Larga", quantity: 1 },
+      { sku: "CAM-RUN-BLA-M", productName: "Camiseta Running Endurance", quantity: 1 },
     ],
   },
   {
     id: "combo-002",
-    name: "Dúo Oxford",
-    description: "Dos camisas Oxford para rotación diaria.",
+    name: "Dúo Running",
+    description: "Dos camisetas deportivas Running para rotación diaria.",
     status: "ACTIVO",
     priceMinor: 19990,
     version: 1,
     components: [
-      { sku: "CAM-OXF-BLA-M", productName: "Camisa Oxford Manga Larga", quantity: 1 },
-      { sku: "CAM-OXF-AZU-L", productName: "Camisa Oxford Manga Larga", quantity: 1 },
+      { sku: "CAM-RUN-BLA-M", productName: "Camiseta Running Endurance", quantity: 1 },
+      { sku: "CAM-RUN-AZU-L", productName: "Camiseta Running Endurance", quantity: 1 },
     ],
   },
   {
@@ -81,7 +86,7 @@ const seeds: ComboSeed[] = [
     version: 2,
     components: [
       { sku: "CAS-COR-001", productName: "Casaca Cortaviento Trail", quantity: 1 },
-      { sku: "CAM-OXF-AZU-L", productName: "Camisa Oxford Manga Larga", quantity: 1 },
+      { sku: "CAM-RUN-AZU-L", productName: "Camiseta Running Endurance", quantity: 1 },
     ],
   },
 ];

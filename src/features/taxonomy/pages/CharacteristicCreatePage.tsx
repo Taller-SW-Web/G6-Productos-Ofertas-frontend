@@ -102,7 +102,7 @@ export function CharacteristicCreatePage() {
               </Group>
             }
           >
-            {`Se creó «${creado.nombre}» de tipo ${etiquetaTipoCaracteristica[creado.tipo]}. La creación es simulada y no se guarda en un backend.`}
+            {`Se creó «${creado.nombre}» de tipo ${etiquetaTipoCaracteristica[creado.tipo]}.`}
           </FeedbackAlert>
         ) : (
           <>

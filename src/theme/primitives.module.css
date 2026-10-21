@@ -11,7 +11,9 @@
   transition:
     background 120ms ease-out,
     border-color 120ms ease-out;
-  &[data-size="sm"] {
+  /* xs is legacy; it maps visually to the normative compact sm size. */
+  &[data-size="sm"],
+  &[data-size="xs"] {
     min-height: 32px;
     padding: 4px 16px;
   }
@@ -19,6 +21,7 @@
     min-height: 48px;
     padding: 12px 24px;
   }
+  /* Primary: filled with ink text, never white on orange. */
   &[data-variant="filled"] {
     background: var(--po-primary);
     color: var(--po-ink);
@@ -28,31 +31,49 @@
     background: var(--po-primaryHover);
     color: var(--po-cloud);
   }
+  /* Secondary: white surface with primary-hover text/border, never filled. */
   &[data-variant="outline"] {
     background: var(--po-surface);
     color: var(--po-primaryHover);
   }
-  &[data-variant="subtle"] {
+  /* Tertiary: no visible background/border, primary-hover text. */
+  &[data-variant="subtle"],
+  &[data-variant="light"] {
     background: transparent;
     color: var(--po-primaryHover);
     border-color: transparent;
   }
-  &[data-variant="outline"]:not(:disabled):hover,
-  &[data-variant="subtle"]:not(:disabled):hover,
-  &[data-variant="outline"]:not(:disabled):active,
-  &[data-variant="subtle"]:not(:disabled):active {
+  &[data-variant="outline"]:not(:disabled):not([data-disabled]):hover,
+  &[data-variant="subtle"]:not(:disabled):not([data-disabled]):hover,
+  &[data-variant="light"]:not(:disabled):not([data-disabled]):hover,
+  &[data-variant="outline"]:not(:disabled):not([data-disabled]):active,
+  &[data-variant="subtle"]:not(:disabled):not([data-disabled]):active,
+  &[data-variant="light"]:not(:disabled):not([data-disabled]):active {
     background: var(--po-subtle);
   }
-  &.destructive {
+  /* Destructive is a distinct treatment only when it is the filled action. */
+  &.destructive[data-variant="filled"] {
     background: var(--po-errorText);
     color: var(--po-surface);
     border-color: var(--po-errorText);
   }
-  &.destructive:not(:disabled):hover,
-  &.destructive:not(:disabled):active {
+  &.destructive[data-variant="filled"]:not(:disabled):not([data-disabled]):hover,
+  &.destructive[data-variant="filled"]:not(:disabled):not([data-disabled]):active {
     background: var(--po-errorText);
     color: var(--po-surface);
     border-color: var(--po-ink);
+  }
+  /* Destructive outline stays secondary: neutral surface, red text/border. */
+  &.destructive[data-variant="outline"] {
+    color: var(--po-errorText);
+    border-color: var(--po-errorText);
+  }
+  /* Destructive subtle/light stays tertiary: no fill, red text. */
+  &.destructive[data-variant="subtle"],
+  &.destructive[data-variant="light"] {
+    background: transparent;
+    color: var(--po-errorText);
+    border-color: transparent;
   }
   &:disabled,
   &[data-disabled] {
@@ -181,6 +202,15 @@
   &:is(h4, h5, h6) {
     font-family: var(--mantine-font-family);
   }
+}
+/* Card heading: keeps the semantic heading level but renders Inter 20/28 700,
+   overriding the Oswald uppercase page-heading treatment. */
+.title.cardTitle {
+  font-family: var(--mantine-font-family);
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 700;
+  text-transform: none;
 }
 .badge {
   height: auto;

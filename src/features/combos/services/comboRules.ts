@@ -73,13 +73,14 @@ export function compareComboPrice(
   components: ComboComponent[],
   proposedPrice: string,
   prices: SkuPrice[],
+  now = Date.now(),
 ): ComparisonResult {
   if (components.length === 0) return { status: "unavailable", reason: "Agrega componentes para consultar sus precios." };
   let regularMinor = 0;
   let publicMinor = 0;
   let currency: string | null = null;
   for (const component of components) {
-    const matches = currentGlobalPricesForSku(component.sku, prices);
+    const matches = currentGlobalPricesForSku(component.sku, prices, now);
     if (matches.length !== 1) {
       return { status: "unavailable", reason: "No se pudo confirmar una referencia global vigente única para cada componente." };
     }
@@ -117,9 +118,9 @@ export function compareComboPrice(
   };
 }
 
-export function toComparisonComponents(draft: ComponentDraft[], prices: SkuPrice[]): ComboComponent[] {
+export function toComparisonComponents(draft: ComponentDraft[], prices: SkuPrice[], now = Date.now()): ComboComponent[] {
   return draft.map((item) => {
-    const matches = currentGlobalPricesForSku(item.sku, prices);
+    const matches = currentGlobalPricesForSku(item.sku, prices, now);
     const price = matches.length === 1 ? matches[0] : undefined;
     return {
       ...item,

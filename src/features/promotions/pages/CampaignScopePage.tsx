@@ -32,7 +32,7 @@ export function CampaignScopePage() {
         : current[type].filter((item) => item !== value),
     }));
   const filtered = products.filter((item) =>
-    `${item.name} ${item.skus.map((sku) => sku.sku).join(" ")}`
+    item.active && `${item.name} ${item.skus.map((sku) => sku.sku).join(" ")}`
       .toLocaleLowerCase("es")
       .includes(search.toLocaleLowerCase("es")),
   );

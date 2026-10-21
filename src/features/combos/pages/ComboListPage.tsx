@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Group, Pagination, Select, Skeleton, Table, Text } from "@mantine/core";
-import { IconPlus, IconRefresh } from "@tabler/icons-react";
+import { ActionIcon, Button, Group, Menu, Pagination, Select, Skeleton, Table, Text } from "@mantine/core";
+import { IconDotsVertical, IconEdit, IconEye, IconPlus, IconPower, IconRefresh } from "@tabler/icons-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { EmptyState, FeedbackAlert, PageHeader, ConfirmDialog } from "../../../components/shared";
 import { ComboAvailability } from "../components/ComboAvailability";
@@ -9,6 +9,7 @@ import { formatMoney } from "../services/comboRules";
 import { parseComboPage } from "../services/parseComboPage";
 import { RequestIdentity } from "../services/requestIdentity";
 import type { Combo, ComboPage, ComboStatus } from "../types/combos";
+import { useMockStateRevision } from "../../shared/useMockStateRevision";
 
 type ListState =
   | { key: string; status: "loading" }
@@ -20,6 +21,7 @@ export function ComboListPage() {
   const [params, setParams] = useSearchParams();
   const [state, setState] = useState<ListState>({ key: "", status: "loading" });
   const [refresh, setRefresh] = useState(0);
+  const revision = useMockStateRevision(["combos", "inventory", "catalog", "pricing"]);
   const [deactivationTarget, setDeactivationTarget] = useState<Combo | null>(null);
   const [deactivating, setDeactivating] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
@@ -29,7 +31,7 @@ export function ComboListPage() {
   const rawStatus = params.get("estado");
   const status: ComboStatus | "TODOS" = rawStatus === "ACTIVO" || rawStatus === "INACTIVO" ? rawStatus : "TODOS";
   const scenario = params.get("scenario") ?? undefined;
-  const queryKey = JSON.stringify([status, page, scenario, refresh]);
+  const queryKey = JSON.stringify([status, page, scenario, refresh, revision]);
 
   useEffect(() => {
     if (rawPage !== null && rawPage !== String(page)) {
@@ -102,11 +104,11 @@ export function ComboListPage() {
     </Group>
     {mutationError && <FeedbackAlert semantic="error" title="No se pudo desactivar el combo">{mutationError}</FeedbackAlert>}
     {currentState.status === "error" && <FeedbackAlert semantic="error" title="No se pudieron consultar los combos">{currentState.message}</FeedbackAlert>}
-    {currentState.status === "loading" ? <Table><Table.Tbody>{[0, 1, 2].map((row) => <Table.Tr key={row}><Table.Td><Skeleton height={18} /></Table.Td><Table.Td><Skeleton height={18} /></Table.Td><Table.Td><Skeleton height={18} /></Table.Td></Table.Tr>)}</Table.Tbody></Table> : currentState.status === "success" && rows.length === 0 ? <EmptyState title="No hay combos para mostrar" description="Crea un combo para definir una oferta comercial compuesta." action={<Button component={Link} to="/combos/nuevo">Crear combo</Button>} /> : currentState.status === "success" && <>
-      <Table.ScrollContainer minWidth={1000}><Table striped highlightOnHover><Table.Thead><Table.Tr><Table.Th>Combo</Table.Th><Table.Th>Precio</Table.Th><Table.Th>Componentes</Table.Th><Table.Th>Disponibilidad estimada</Table.Th><Table.Th>Estado</Table.Th><Table.Th>Acciones</Table.Th></Table.Tr></Table.Thead><Table.Tbody>{rows.map((combo) => <Table.Tr key={combo.id}>
+    {currentState.status === "loading" ? <Table><Table.Tbody>{[0, 1, 2].map((row) => <Table.Tr key={row}><Table.Td><Skeleton height={18} /></Table.Td><Table.Td><Skeleton height={18} /></Table.Td><Table.Td><Skeleton height={18} /></Table.Td><Table.Td><Skeleton height={18} /></Table.Td><Table.Td><Skeleton height={18} /></Table.Td><Table.Td><Skeleton height={18} /></Table.Td></Table.Tr>)}</Table.Tbody></Table> : currentState.status === "success" && rows.length === 0 ? <EmptyState title="No hay combos para mostrar" description="Crea un combo para definir una oferta comercial compuesta." action={<Button component={Link} to="/combos/nuevo">Crear combo</Button>} /> : currentState.status === "success" && <>
+      <Table.ScrollContainer minWidth={1000}><Table highlightOnHover><Table.Thead><Table.Tr><Table.Th>Combo</Table.Th><Table.Th>Precio</Table.Th><Table.Th>Componentes</Table.Th><Table.Th>Disponibilidad estimada</Table.Th><Table.Th>Estado</Table.Th><Table.Th style={{ width: 120, textAlign: "right" }}>Acciones</Table.Th></Table.Tr></Table.Thead><Table.Tbody>{rows.map((combo) => <Table.Tr key={combo.id}>
         <Table.Td><Text fw={600}>{combo.name}</Text><Text size="sm" c="dimmed" lineClamp={1}>{combo.description}</Text></Table.Td>
         <Table.Td>{formatMoney(combo.priceMinor)}</Table.Td><Table.Td>{combo.components.length} SKU</Table.Td><Table.Td><ComboAvailability combo={combo} /></Table.Td><Table.Td>{combo.status}</Table.Td>
-        <Table.Td><Group gap="xs" wrap="nowrap"><Button component={Link} to={`/combos/${combo.id}`} variant="subtle">Ver detalle</Button><Button component={Link} to={`/combos/${combo.id}/editar`} variant="subtle">Editar</Button>{combo.status === "ACTIVO" && <Button variant="subtle" color="danger" onClick={() => { setMutationError(null); setDeactivationTarget(combo); }}>Desactivar</Button>}</Group></Table.Td>
+        <Table.Td style={{ textAlign: "right" }}><Group gap="xs" justify="flex-end" wrap="nowrap"><ActionIcon component={Link} to={`/combos/${combo.id}`} aria-label={`Ver detalle de ${combo.name}`} title="Ver detalle"><IconEye size={16} /></ActionIcon><Menu position="bottom-end" shadow="md"><Menu.Target><ActionIcon aria-label={`Más acciones de ${combo.name}`} title="Más acciones"><IconDotsVertical size={16} /></ActionIcon></Menu.Target><Menu.Dropdown><Menu.Item component={Link} to={`/combos/${combo.id}/editar`} leftSection={<IconEdit size={16} />}>Editar</Menu.Item>{combo.status === "ACTIVO" && <Menu.Item color="danger" leftSection={<IconPower size={16} />} onClick={() => { setMutationError(null); setDeactivationTarget(combo); }}>Desactivar</Menu.Item>}</Menu.Dropdown></Menu></Group></Table.Td>
       </Table.Tr>)}</Table.Tbody></Table></Table.ScrollContainer>
       <Group justify="space-between" mt="md"><Text size="sm" c="dimmed">{result?.total ?? 0} combos</Text><Pagination value={page} total={pageCount} onChange={(value) => change("pagina", String(value))} /></Group>
     </>}

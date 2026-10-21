@@ -50,9 +50,9 @@ for (const publication of ["true", "false", "unknown"]) {
     await page.goto(`/tests/harness/catalog-adapter.html?product-edit=1&schema-empty=1&publication=${publication}&path=/productos/external-product/editar`);
     await expect(page.getByRole("combobox", { name: "Tipo de producto", exact: true })).toBeDisabled();
     if (publication === "false") {
-      await expect(page.getByText(/Precondiciones verificadas/)).toBeVisible();
+      await expect(page.getByText("El tipo de producto no se puede cambiar en este momento.")).toBeVisible();
     } else {
-      await expect(page.getByText(/No se cumplen o no se conocen las precondiciones/)).toBeVisible();
+      await expect(page.getByText("Completa los requisitos del producto antes de cambiar el tipo.")).toBeVisible();
     }
     await page.getByRole("button", { name: "Guardar cambios", exact: true }).click();
     await expect.poll(() => page.evaluate(() => window.productPayload)).toBeTruthy();

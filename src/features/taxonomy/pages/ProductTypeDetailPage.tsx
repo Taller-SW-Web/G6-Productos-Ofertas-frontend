@@ -459,7 +459,7 @@ function ProductTypeDetailContent({ id }: { id: string }) {
                 </Button>
                 {detalle.estado === "Activo" && (
                   <Button
-                    color="danger"
+                    variant="outline"
                     leftSection={<IconPower size={16} stroke={2} aria-hidden="true" />}
                     onClick={() => setConfirmDesactivar(true)}
                   >

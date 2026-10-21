@@ -33,18 +33,6 @@ export function ImportPricesPage() {
       requiresTarget={false}
     >
       <UnsavedPriceGuard blocker={blocker} busy={form.preview.busy} />
-      <FeedbackAlert
-        semantic="warning"
-        title="Contrato de importación pendiente"
-      >
-        Q-013-01: falta definir el contenido del archivo. Q-013-02: falta
-        precisar la admisión con errores parciales. La confirmación de
-        importación permanece bloqueada.
-      </FeedbackAlert>
-      <Text size="sm">
-        Alcance exclusivo de Pricing: no crea productos ni modifica inventario.
-        La carga no promete una transacción con otros dominios.
-      </Text>
       <Stepper active={form.step}>
         <Stepper.Step
           label="Archivo y validación"
@@ -57,7 +45,7 @@ export function ImportPricesPage() {
       </Stepper>
       <SectionCard
         title="Archivo de precios"
-        description="No se fijan formatos, cabeceras ni límites sin contrato publicado."
+        description="Selecciona el archivo y la política de importación."
       >
         <FileSelection
           label="Seleccionar archivo de precios"
@@ -133,8 +121,7 @@ export function ImportPricesPage() {
                 : "Errores por fila"
             }
           >
-            La prevalidación no autoriza admisión mientras Q-013-01/02 sigan
-            abiertos.
+            Revisa los resultados antes de continuar.
           </FeedbackAlert>
           <ImportRowsTable
             caption="Errores de prevalidación"
@@ -146,10 +133,6 @@ export function ImportPricesPage() {
             </Button>
             <Button disabled>Confirmar importación</Button>
           </Group>
-          <Text size="sm">
-            Confirmación deshabilitada por Q-013-01/02. No se ha creado ningún
-            lote.
-          </Text>
         </SectionCard>
       )}
       <SectionCard

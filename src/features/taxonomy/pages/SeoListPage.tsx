@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Box, Button, Stack, Text } from "@mantine/core";
-import { IconPlus } from "@tabler/icons-react";
+import { ActionIcon, Box, Button, Stack, Text } from "@mantine/core";
+import { IconPlus, IconSettings } from "@tabler/icons-react";
 import {
   EntityTable,
   FilterBar,
@@ -35,11 +35,16 @@ export function SeoListPage() {
     {
       key: "acciones",
       header: "Acciones",
-      width: 140,
+      width: 80,
+      align: "right",
       render: (i) => (
-        <Button variant="subtle" size="xs" onClick={() => navigate(`/seo/${i.id}`)}>
-          Configurar
-        </Button>
+        <ActionIcon
+          aria-label={`Configurar SEO de ${i.nombre}`}
+          title="Configurar SEO"
+          onClick={() => navigate(`/seo/${i.id}`)}
+        >
+          <IconSettings size={16} stroke={2} aria-hidden="true" />
+        </ActionIcon>
       ),
     },
   ];

@@ -7,6 +7,8 @@ export type InventoryErrorCode =
   | "CANTIDAD_RECIBIDA_EXCEDE_TRASLADO"
   | "DISPOSICION_RECEPCION_INVALIDA"
   | "IDEMPOTENCY_CONFLICT"
+  // Estado operativo local usado por el mock persistente (master).
+  | "OPERATIVO"
   // Protocolo HTTP del provider (OpenAPI: TOKEN_INVALIDO/SCOPE_INSUFICIENTE/
   // SERVICIO_NO_DISPONIBLE) y estado de una operación de escritura.
   | "NO_AUTENTICADO"

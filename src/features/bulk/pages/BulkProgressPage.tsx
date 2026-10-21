@@ -74,7 +74,7 @@ export function BulkProgressPage() {
             {error}
             {isStale && (
               <Text size="xs" mt="xs" c="dimmed">
-                Nota: Se muestra la última información confirmada del lote antes de producirse el error de conexión.
+                Se muestra la última información confirmada del lote.
               </Text>
             )}
           </FeedbackAlert>

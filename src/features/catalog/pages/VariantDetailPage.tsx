@@ -77,19 +77,12 @@ export function VariantDetailPage() {
     );
   }
 
-  const prepColor =
+  const prepSemantic =
     variant.inventoryStatus === "COMPLETED"
-      ? "green"
-      : variant.inventoryStatus === "REJECTED"
-        ? "red"
-        : "yellow";
-
-  const stateSemantic =
-    variant.status === "ACTIVA"
       ? "success"
-      : variant.status === "BORRADOR"
-        ? "info"
-        : "neutral";
+      : variant.inventoryStatus === "REJECTED"
+        ? "error"
+        : "warning";
 
   const volume =
     variant.physicalProfile?.largoCm &&
@@ -128,7 +121,7 @@ export function VariantDetailPage() {
             <Button
               component={Link}
               to={`/productos/${productId}/variantes/${variantId}/preparacion`}
-              variant="default"
+              variant="outline"
               size="sm"
               leftSection={<IconListCheck size={16} />}
             >
@@ -137,7 +130,7 @@ export function VariantDetailPage() {
             <Button
               component={Link}
               to={`/productos/${productId}/variantes/${variantId}/editar`}
-              variant="default"
+              variant="outline"
               size="sm"
               leftSection={<IconEdit size={16} />}
             >
@@ -145,7 +138,6 @@ export function VariantDetailPage() {
             </Button>
             {variant.status === "BORRADOR" && (
               <Button
-                color="teal"
                 size="sm"
                 leftSection={<IconCheck size={16} />}
                 onClick={() => setActivateOpened(true)}
@@ -155,7 +147,7 @@ export function VariantDetailPage() {
             )}
             {variant.status === "ACTIVA" && (
               <Button
-                color="red"
+                color="danger"
                 variant="outline"
                 size="sm"
                 leftSection={<IconPower size={16} />}
@@ -166,7 +158,6 @@ export function VariantDetailPage() {
             )}
             {variant.status === "INACTIVA" && (
               <Button
-                color="teal"
                 variant="outline"
                 size="sm"
                 leftSection={<IconRefresh size={16} />}
@@ -181,25 +172,25 @@ export function VariantDetailPage() {
 
       <Stack gap="lg" mt="md">
         {/* Context Header Card */}
-        <Paper p="md" withBorder>
+        <Paper p="lg" withBorder>
           <Group justify="space-between" align="center">
             <div>
               <Group gap="xs" align="center">
                 <Text size="lg" fw={700} ff="monospace">
                   {variant.sku}
                 </Text>
-                <StatusBadge semantic={stateSemantic}>
+                <StatusBadge>
                   {variant.status}
                 </StatusBadge>
-                <Badge size="sm" color={prepColor}>
+                <StatusBadge semantic={prepSemantic}>
                   Inventario: {variant.inventoryStatus}
-                </Badge>
+                </StatusBadge>
               </Group>
               <Text size="xs" c="dimmed" mt={4}>
                 ID Sistema: <code>{variant.variantId}</code> | Versión: {variant.catalogVersion ?? 1}
               </Text>
             </div>
-            <Paper p="xs" withBorder bg="var(--mantine-color-gray-0)">
+            <Paper p="xs" withBorder bg="var(--po-subtle)">
               <Text size="xs" c="dimmed">
                 Pertenece al producto padre:
               </Text>
@@ -334,7 +325,7 @@ export function VariantDetailPage() {
                     />
                   </Box>
                 ) : (
-                  <Group justify="center" p="xl" bg="var(--mantine-color-gray-1)">
+                  <Group justify="center" p="xl" bg="var(--po-subtle)">
                     <Stack align="center" gap="xs">
                       <IconPhotoOff size={32} color="gray" />
                       <Text size="xs" c="dimmed">
@@ -364,7 +355,7 @@ export function VariantDetailPage() {
                     <Text size="xs" c="dimmed">
                       Estado en Inventario:
                     </Text>
-                    <Badge color={prepColor}>{variant.inventoryStatus}</Badge>
+                    <StatusBadge semantic={prepSemantic}>{variant.inventoryStatus}</StatusBadge>
                   </Group>
                   <Text size="xs" c="dimmed">
                     {variant.inventoryStatus === "COMPLETED"

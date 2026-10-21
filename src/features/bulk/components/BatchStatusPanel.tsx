@@ -1,6 +1,5 @@
 import { Button, Group, SimpleGrid, Stack, Text } from "@mantine/core";
 import { IconRefresh, IconArrowRight, IconRotateClockwise } from "@tabler/icons-react";
-import { useContext } from "react";
 import { Link } from "react-router-dom";
 import {
   FeedbackAlert,
@@ -8,7 +7,6 @@ import {
   SectionCard,
   StatusBadge,
 } from "../../../components/shared";
-import { DataModeContext } from "../../../app/config/DataModeContext";
 import type { BulkImportBatch } from "../types/bulk";
 import {
   getQueuedBatchDescription,
@@ -21,6 +19,9 @@ export interface BatchStatusPanelProps {
   onResume?: () => void;
   refreshing?: boolean;
   resuming?: boolean;
+  // Explicit eligibility for the resume action. When omitted, callers that opt
+  // into resume keep the legacy terminal+reconciliation rule.
+  canResume?: boolean;
   showDetailsLink?: boolean;
 }
 
@@ -30,10 +31,9 @@ export function BatchStatusPanel({
   onResume,
   refreshing = false,
   resuming = false,
+  canResume,
   showDetailsLink = false,
 }: BatchStatusPanelProps) {
-  const dataMode = useContext(DataModeContext);
-  if (!dataMode) throw new Error("El estado de carga masiva requiere DataModeContext.");
   const isTerminal =
     batch.status === "COMPLETED" || batch.status === "FAILED_GENERAL";
   const isPartial =
@@ -46,15 +46,19 @@ export function BatchStatusPanel({
   const isFailedGeneral = batch.status === "FAILED_GENERAL";
   const isProcessing = batch.status === "PROCESSING";
   const isQueued = batch.status === "QUEUED";
+  const resumeEligible =
+    canResume ?? (isTerminal && batch.needs_reconciliation);
 
   // Semantic presentation for StatusBadge
   const statusSemantic = isSuccess
     ? "success"
-    : isPartial || isProcessing
-      ? "warning"
-      : isFailedGeneral
-        ? "error"
-        : "neutral";
+    : isProcessing
+      ? "info"
+      : isPartial
+        ? "warning"
+        : isFailedGeneral
+          ? "error"
+          : "neutral";
 
   const statusLabel = isSuccess
     ? "Completado"
@@ -96,12 +100,6 @@ export function BatchStatusPanel({
       }
     >
       <Stack gap="lg">
-        {dataMode === "mock" && (
-          <Text size="xs" c="dimmed">
-            Modo demostración · Datos simulados de importación masiva
-          </Text>
-        )}
-
         {/* KPI Metrics */}
         <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
           <MetricCard
@@ -160,7 +158,7 @@ export function BatchStatusPanel({
             semantic="error"
             title="Fallo general en la importación"
           >
-            No se pudo completar el procesamiento del lote. Los servicios de Catálogo, Precios o Inventario no admitieron la solicitud o el archivo presentó inconsistencias críticas.
+            No se pudo completar el procesamiento del lote. Revisa el archivo y vuelve a intentarlo.
           </FeedbackAlert>
         )}
 
@@ -169,19 +167,19 @@ export function BatchStatusPanel({
             semantic="warning"
             title="Lote en procesamiento — Verificación dependiente del proveedor"
           >
-            {getUnknownRowCountDescription(dataMode)}
+            {getUnknownRowCountDescription()}
           </FeedbackAlert>
         )}
 
         {isProcessing && typeof batch.total_rows === "number" && (
           <FeedbackAlert semantic="info" title="Lote en procesamiento asíncrono">
-            El servicio se encuentra procesando las filas en Catálogo, Precios e Inventario. Pulse &quot;Actualizar estado&quot; para comprobar el avance.
+            El lote sigue en proceso. Selecciona &quot;Actualizar estado&quot; para comprobar el avance.
           </FeedbackAlert>
         )}
 
         {isQueued && typeof batch.total_rows === "number" && (
           <FeedbackAlert semantic="info" title="Solicitud en cola">
-            {getQueuedBatchDescription(dataMode)}
+            {getQueuedBatchDescription()}
           </FeedbackAlert>
         )}
 
@@ -194,7 +192,7 @@ export function BatchStatusPanel({
               </Text>
               {typeof batch.total_rows === "number" && batch.rows.length < batch.total_rows && (
                 <Text size="xs" c="dimmed">
-                  Muestra preliminar: {batch.rows.length} de {batch.total_rows} filas totales
+                  Filas consultadas: {batch.rows.length} de {batch.total_rows}
                 </Text>
               )}
             </Group>
@@ -204,7 +202,7 @@ export function BatchStatusPanel({
                 value={`${batch.rows.filter((r) => r.applied_domains.includes("CATALOGO") || r.steps.some((s) => s.domain === "CATALOGO" && s.status === "COMPLETED")).length} / ${batch.rows.length}`}
                 description={
                   typeof batch.total_rows === "number" && batch.rows.length < batch.total_rows
-                    ? "Filas confirmadas en muestra"
+                    ? "Filas con resultado disponible"
                     : "Filas con borrador creado"
                 }
               />
@@ -213,7 +211,7 @@ export function BatchStatusPanel({
                 value={`${batch.rows.filter((r) => r.applied_domains.includes("PRICING") || r.steps.some((s) => s.domain === "PRICING" && s.status === "COMPLETED")).length} / ${batch.rows.length}`}
                 description={
                   typeof batch.total_rows === "number" && batch.rows.length < batch.total_rows
-                    ? "Filas confirmadas en muestra"
+                    ? "Filas con resultado disponible"
                     : "Filas con precio base registrado"
                 }
               />
@@ -222,7 +220,7 @@ export function BatchStatusPanel({
                 value={`${batch.rows.filter((r) => r.applied_domains.includes("INVENTARIO") || r.steps.some((s) => s.domain === "INVENTARIO" && s.status === "COMPLETED")).length} / ${batch.rows.length}`}
                 description={
                   typeof batch.total_rows === "number" && batch.rows.length < batch.total_rows
-                    ? "Filas confirmadas en muestra"
+                    ? "Filas con resultado disponible"
                     : "Filas con SKU inicializado"
                 }
               />
@@ -231,10 +229,10 @@ export function BatchStatusPanel({
         )}
 
         {/* Action buttons */}
-        {((onResume && isTerminal && batch.needs_reconciliation) ||
+        {((onResume && resumeEligible) ||
           (showDetailsLink && isTerminal)) && (
           <Group justify="flex-end" gap="sm">
-            {onResume && isTerminal && batch.needs_reconciliation && (
+            {onResume && resumeEligible && (
               <Button
                 variant="outline"
                 leftSection={<IconRotateClockwise size={18} stroke={2} aria-hidden="true" />}

@@ -6,6 +6,7 @@ import type {
 } from "../services/catalogRepository";
 import { CatalogError } from "../services/catalogRepository";
 import { useCatalogServices } from "./useCatalogServices";
+import { useMockStateRevision } from "../../shared/useMockStateRevision";
 
 export interface UseVariantListOptions {
   productId?: string;
@@ -31,6 +32,7 @@ export function useVariantList({
   const { catalog: catalogService } = useCatalogServices();
   const targetProductId = productId;
   const [revision, setRevision] = useState<number>(0);
+  const mockRevision = useMockStateRevision(["catalog", "inventory"]);
   const queryStatus = query?.status;
   const queryPage = query?.page;
   const queryPageSize = query?.pageSize;
@@ -41,7 +43,7 @@ export function useVariantList({
     queryPage,
     queryPageSize,
     scenario,
-    revision,
+    revision + mockRevision,
   ]);
 
   const [response, setResponse] = useState<{
