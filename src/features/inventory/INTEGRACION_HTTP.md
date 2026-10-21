@@ -270,3 +270,23 @@ modo. Ese desbloqueo corresponde a la composición compartida de Castilla/Marco.
 | `npm run build` con `VITE_DATA_MODE=api` | PASS |
 | `node scripts/verify-production.mjs mock` (1440 px) | **58 vistas PASS** |
 | `node scripts/verify-production.mjs api` (1440 px) | **53 vistas PASS** |
+
+## Evidencia de la iteración 4 (TAC-P0-08 / TAC-P0-09)
+
+- Rama: `taco`.
+- Commit de implementación y pruebas: `e315060` (padre `db7c2e6`).
+- Archivos: `apiInventoryAdapter.ts`, `apiInventoryAdapter.spec.ts`,
+  `ReceiveTransferModal.tsx`, `useTransfers.ts`, `TransfersPage.tsx`,
+  `inventoryErrors.ts`, `inventoryMappers.ts`,
+  `transferReceptionAttempt.ts` e `INTEGRACION_HTTP.md`.
+- Casos nuevos:
+  - `TAC-P0-08`: `POST 200` válido → confirmación → fallo de presentación →
+    cambio de cantidad/nota → intento de confirmar. Resultado: **PASS**; un solo
+    POST, operación `RECONCILED`, sin segunda recepción ni stock adicional.
+  - `TAC-P0-09`: mismo `operationId` con payload idéntico (cacheado, sin POST);
+    distinta cantidad, nota, disposición, cierre final, fecha o `transferId`
+    (rechazo `IDEMPOTENCY_CONFLICT`); `200` con `operation_id` o `traslado_id`
+    ajenos (no declara confirmación, preserva `UNCERTAIN`). Resultado: **PASS**.
+- Estado: **PARTIAL** (sin integración React→Gateway→PostgreSQL; ver `TAC-P0-03`
+  y dependencias #45/#109).
+
