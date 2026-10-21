@@ -71,10 +71,12 @@ export interface ReceiveTransferPayload {
 
 export interface LocationDistribution {
   locationId: string;
-  locationName: string;
+  // `null` cuando el contrato no publica el nombre de la ubicación.
+  locationName: string | null;
   onHandTotal: number;
   reservedTotal: number;
-  blockedTotal: number;
+  // `null` cuando el contrato no publica unidades bloqueadas por ubicación.
+  blockedTotal: number | null;
   availableTotal: number;
   skusAvailableCount: number;
   skusLowStockCount: number;

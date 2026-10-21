@@ -2,6 +2,7 @@ import { InventoryError } from "./inventoryErrors";
 import type {
   DispositionType,
   InventoryKpiSummary,
+  LocationDistribution,
   ReceiveTransferPayload,
   StockStatus,
   ThresholdConfig,
@@ -236,6 +237,28 @@ export function toDashboardKpiSummary(value: unknown): InventoryKpiSummary {
     transfersPartiallyReceived: null,
     transfersWithDiscrepancy: null,
   };
+}
+
+export function toLocationDistributionList(value: unknown): LocationDistribution[] {
+  const dto = record(value);
+  dateTime(dto, "generatedAt");
+  if (!Array.isArray(dto.porUbicacion)) return incompatible();
+  return dto.porUbicacion.map((rawLocation) => {
+    const location = record(rawLocation);
+    return {
+      locationId: nonEmptyString(location, "location_id"),
+      // El contrato no publica nombre de ubicación en `porUbicacion`.
+      locationName: null,
+      onHandTotal: nonNegativeInt(location, "on_hand", 0),
+      reservedTotal: nonNegativeInt(location, "reserved", 0),
+      // `porUbicacion` no publica unidades bloqueadas.
+      blockedTotal: null,
+      availableTotal: nonNegativeInt(location, "available", 0),
+      skusAvailableCount: nonNegativeInt(location, "skusDisponibles", 0),
+      skusLowStockCount: nonNegativeInt(location, "skusStockBajo", 0),
+      skusOutOfStockCount: nonNegativeInt(location, "skusAgotados", 0),
+    };
+  });
 }
 
 export function toRecepcionTrasladoRequestDto(

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { InventoryError } from "../services/inventoryErrors";
 import { getInventoryRepository } from "../services/inventoryProvider";
 import { useInventoryChangeSignal } from "./useInventoryChangeSignal";
 import type {
@@ -8,6 +9,56 @@ import type {
   LocationDistribution,
   StockItem,
 } from "../services/inventoryTypes";
+
+// Estado de una sección del dashboard. `blockedReason` distingue una limitación
+// del contrato (la operación no existe o no admite el filtro) de un fallo real
+// de transporte/servidor, para no presentar ambas situaciones igual.
+export interface DashboardSectionState {
+  error: string | null;
+  blockedReason: string | null;
+}
+
+export interface InventoryDashboardSections {
+  kpis: DashboardSectionState;
+  alerts: DashboardSectionState;
+  distribution: DashboardSectionState;
+  stockItems: DashboardSectionState;
+}
+
+const EMPTY_SECTION: DashboardSectionState = {
+  error: null,
+  blockedReason: null,
+};
+
+function describeSection(
+  reason: unknown,
+  fallback: string,
+): DashboardSectionState {
+  if (
+    reason instanceof InventoryError &&
+    reason.code === "CONTRATO_BLOQUEADO"
+  ) {
+    return { error: null, blockedReason: reason.message };
+  }
+  return {
+    error:
+      reason instanceof Error && reason.message ? reason.message : fallback,
+    blockedReason: null,
+  };
+}
+
+function sectionOf<T>(
+  result: PromiseSettledResult<T>,
+  fallback: string,
+): DashboardSectionState {
+  return result.status === "rejected"
+    ? describeSection(result.reason, fallback)
+    : EMPTY_SECTION;
+}
+
+function fulfilled<T>(result: PromiseSettledResult<T>, fallback: T): T {
+  return result.status === "fulfilled" ? result.value : fallback;
+}
 
 export function useInventoryDashboard(filters: DashboardFiltersQuery) {
   const revision = useInventoryChangeSignal();
@@ -30,14 +81,17 @@ export function useInventoryDashboard(filters: DashboardFiltersQuery) {
     alerts: InventoryAlert[];
     distribution: LocationDistribution[];
     stockItems: StockItem[];
-    error: string | null;
+    sections: InventoryDashboardSections;
   }>();
 
   useEffect(() => {
     let cancelled = false;
 
     const repository = getInventoryRepository();
-    Promise.all([
+    // Cada sección se resuelve por separado: una operación bloqueada por
+    // contrato (alertas, stock) o un fallo parcial no debe borrar los KPIs
+    // autoritativos que sí respondieron.
+    void Promise.allSettled([
       repository.getDashboardKpis({
         search,
         category,
@@ -66,33 +120,34 @@ export function useInventoryDashboard(filters: DashboardFiltersQuery) {
         locationId,
         status,
       }),
-    ])
-      .then(([kpiData, alertsData, distData, stockData]) => {
-        if (!cancelled) {
-          setResponse({
-            requestKey,
-            kpis: kpiData,
-            alerts: alertsData,
-            distribution: distData,
-            stockItems: stockData,
-            error: null,
-          });
-        }
-      })
-      .catch((err: Error) => {
-        if (!cancelled) {
-          setResponse({
-            requestKey,
-            kpis: null,
-            alerts: [],
-            distribution: [],
-            stockItems: [],
-            error:
-              err.message ||
-              "Error al cargar los datos analíticos del dashboard.",
-          });
-        }
+    ]).then(([kpiResult, alertsResult, distResult, stockResult]) => {
+      if (cancelled) return;
+      setResponse({
+        requestKey,
+        kpis: fulfilled(kpiResult, null),
+        alerts: fulfilled(alertsResult, []),
+        distribution: fulfilled(distResult, []),
+        stockItems: fulfilled(stockResult, []),
+        sections: {
+          kpis: sectionOf(
+            kpiResult,
+            "Error al cargar los indicadores del dashboard.",
+          ),
+          alerts: sectionOf(
+            alertsResult,
+            "Error al cargar las alertas del dashboard.",
+          ),
+          distribution: sectionOf(
+            distResult,
+            "Error al cargar la distribución por ubicación.",
+          ),
+          stockItems: sectionOf(
+            stockResult,
+            "Error al cargar las existencias por SKU.",
+          ),
+        },
       });
+    });
 
     return () => {
       cancelled = true;
@@ -101,19 +156,21 @@ export function useInventoryDashboard(filters: DashboardFiltersQuery) {
 
   const isCurrent = response?.requestKey === requestKey;
   const loading = !isCurrent;
-  const kpis = isCurrent ? response.kpis : null;
-  const alerts = isCurrent ? response.alerts : [];
-  const distribution = isCurrent ? response.distribution : [];
-  const stockItems = isCurrent ? response.stockItems : [];
-  const error = isCurrent ? response.error : null;
 
   return {
-    kpis,
-    alerts,
-    distribution,
-    stockItems,
+    kpis: isCurrent ? response.kpis : null,
+    alerts: isCurrent ? response.alerts : [],
+    distribution: isCurrent ? response.distribution : [],
+    stockItems: isCurrent ? response.stockItems : [],
+    sections: isCurrent
+      ? response.sections
+      : {
+          kpis: EMPTY_SECTION,
+          alerts: EMPTY_SECTION,
+          distribution: EMPTY_SECTION,
+          stockItems: EMPTY_SECTION,
+        },
     loading,
-    error,
     refetch: () => setReloadToken((token) => token + 1),
   };
 }

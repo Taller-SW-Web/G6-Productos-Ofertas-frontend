@@ -3,6 +3,7 @@ import type { InventoryRepository } from "../services/inventoryRepository";
 import type {
   DashboardFiltersQuery,
   InventoryKpiSummary,
+  LocationDistribution,
   StockItem,
   ThresholdConfig,
   TransferFiltersQuery,
@@ -10,6 +11,7 @@ import type {
 } from "../services/inventoryTypes";
 import {
   toDashboardKpiSummary,
+  toLocationDistributionList,
   toRecepcionTrasladoRequestDto,
   toThresholdConfig,
   toTransferItem,
@@ -25,13 +27,15 @@ import {
 // Implementa las operaciones cuyo modelo de presentación se puede completar
 // SOLO con el contrato más dependencias autoritativas inyectadas:
 //   - umbrales   (umbralGlobal/overrides -> ThresholdConfig) mapeo total.
+//   - dashboard  (obtenerDashboardInventario -> KPIs y distribución por
+//     ubicación). Los campos que el contrato no publica se exponen como `null`.
 //   - traslados  (listar/obtener/recepción) con un resolvedor de presentación
 //     inyectado para los campos que el contrato no transporta (código legible,
 //     nombre de producto y nombres de ubicación).
 //
 // Las operaciones cuyo modelo exige campos que NINGUNA operación de Inventario
 // devuelve (productName/categoryName/brandName, locationName, stockVersion,
-// updatedAt, blockedUnits, KPIs de traslados…) se rechazan con
+// updatedAt, blockedUnits, KPIs de traslados, alertas…) se rechazan con
 // `CONTRATO_BLOQUEADO`: no se completan con datos simulados.
 //
 // El transporte es un punto de inyección estrecho; lo aporta el cliente HTTP
@@ -67,11 +71,11 @@ const BLOCKED_DETAILS = {
   getStockDetail:
     "mismos campos sin fuente que getStockItems (consultarDisponibilidad)",
   getDashboardKpisFilter:
-    "obtenerDashboardInventario no admite filtrar por texto libre ni por estado de stock",
+    "obtenerDashboardInventario no admite filtrar por texto libre ni por estado de stock; quita ese filtro para consultar el agregado",
   getDashboardAlerts:
     "no existe operación de alertas en el contrato de Inventario",
   getLocationDistribution:
-    "blockedTotal y locationName no están en obtenerDashboardInventario.porUbicacion",
+    "obtenerDashboardInventario no admite filtrar por texto libre ni por estado de stock",
   getCategories:
     "operación de Catálogo (no de Inventario); destino de la integración de filtros pendiente de definición (paginación)",
   getBrands:
@@ -85,6 +89,17 @@ function blocked(operation: string, detail: string): InventoryError {
     "CONTRATO_BLOQUEADO",
     `Inventario no puede completar ${operation}: ${detail}.`,
   );
+}
+
+// La UI usa el literal "all" para representar "sin filtro". No es un valor del
+// contrato: enviarlo produciría 400 (estado/target_location_id) o seleccionaría
+// una categoría/marca/ubicación inexistente. Se normaliza a "ausente".
+export function contractFilterValue(
+  value: string | undefined,
+): string | undefined {
+  const normalized = value?.trim();
+  if (!normalized || normalized.toLowerCase() === "all") return undefined;
+  return normalized;
 }
 
 function isAbort(error: unknown): boolean {
@@ -112,7 +127,10 @@ export function createHttpInventoryRepository(
 ): InventoryRepository {
   const { transport, resolveTransferPresentation } = dependencies;
   const pendingWrites = new Set<string>();
-  const uncertainWrites = new Set<string>();
+  // transferId -> operationId de la recepción cuyo resultado quedó incierto.
+  // Conservar la identidad permite reintentar de forma idempotente; una
+  // identidad distinta exige reconciliar antes con una lectura autoritativa.
+  const uncertainWrites = new Map<string, string>();
 
   async function send(
     path: string,
@@ -243,9 +261,10 @@ export function createHttpInventoryRepository(
     pagina: number,
   ): string {
     const params = new URLSearchParams();
-    if (filters?.status) params.set("estado", filters.status);
-    if (filters?.targetLocationId)
-      params.set("target_location_id", filters.targetLocationId);
+    const status = contractFilterValue(filters?.status);
+    const targetLocationId = contractFilterValue(filters?.targetLocationId);
+    if (status) params.set("estado", status);
+    if (targetLocationId) params.set("target_location_id", targetLocationId);
     params.set("pagina", String(pagina));
     params.set("tamanio", String(PAGE_SIZE));
     return params.toString();
@@ -277,7 +296,40 @@ export function createHttpInventoryRepository(
         );
       pagina += 1;
     }
+    // Reconciliación de recepciones con resultado incierto: el listado es la
+    // lectura autoritativa del estado del traslado. Una vez consultado, se
+    // levanta el bloqueo para permitir un reintento idempotente (la UI conserva
+    // el mismo operationId) en lugar de dejar el traslado bloqueado de por vida.
+    for (const dto of collected) uncertainWrites.delete(dto.traslado_id);
     return Promise.all(collected.map((dto) => present(dto)));
+  }
+
+  function dashboardPath(filters: DashboardFiltersQuery | undefined): string {
+    const params = new URLSearchParams();
+    const locationId = contractFilterValue(filters?.locationId);
+    const categoriaId = contractFilterValue(filters?.category);
+    const marcaId = contractFilterValue(filters?.brand);
+    if (locationId) params.set("locationId", locationId);
+    if (categoriaId) params.set("categoriaId", categoriaId);
+    if (marcaId) params.set("marcaId", marcaId);
+    const query = params.toString();
+    return query
+      ? `/api/v1/inventario/dashboard?${query}`
+      : "/api/v1/inventario/dashboard";
+  }
+
+  function assertDashboardFiltersSupported(
+    operation: string,
+    filters: DashboardFiltersQuery | undefined,
+  ): void {
+    // `obtenerDashboardInventario` no publica filtro por texto libre ni por
+    // estado de stock. Enviar esos filtros devolvería un agregado distinto al
+    // solicitado, así que se rechaza en lugar de mostrar datos no verificables
+    // como si correspondieran a la selección.
+    const search = contractFilterValue(filters?.search);
+    const status = contractFilterValue(filters?.status);
+    if (search || status)
+      throw blocked(operation, BLOCKED_DETAILS.getDashboardKpisFilter);
   }
 
   return {
@@ -325,7 +377,8 @@ export function createHttpInventoryRepository(
           "RESULTADO_INCIERTO",
           "Hay una recepción pendiente de confirmación para este traslado.",
         );
-      if (uncertainWrites.has(key))
+      const uncertainOperation = uncertainWrites.get(key);
+      if (uncertainOperation && uncertainOperation !== payload.operationId)
         throw new InventoryError(
           "RESULTADO_INCIERTO",
           "El resultado anterior sigue sin verificarse. Consulta el traslado antes de recibir otra vez.",
@@ -353,7 +406,7 @@ export function createHttpInventoryRepository(
           error instanceof InventoryError &&
           error.code === "RESULTADO_INCIERTO"
         )
-          uncertainWrites.add(key);
+          uncertainWrites.set(key, payload.operationId);
         throw error;
       } finally {
         pendingWrites.delete(key);
@@ -372,23 +425,13 @@ export function createHttpInventoryRepository(
       );
     },
 
-    getDashboardKpis(
+    async getDashboardKpis(
       filters?: DashboardFiltersQuery,
     ): Promise<InventoryKpiSummary> {
-      if (filters?.search?.trim() || filters?.status?.trim()) {
-        return Promise.reject(
-          blocked("getDashboardKpis", BLOCKED_DETAILS.getDashboardKpisFilter),
-        );
-      }
-      const params = new URLSearchParams();
-      if (filters?.locationId) params.set("locationId", filters.locationId);
-      if (filters?.category) params.set("categoriaId", filters.category);
-      if (filters?.brand) params.set("marcaId", filters.brand);
-      const query = params.toString();
-      const path = query
-        ? `/api/v1/inventario/dashboard?${query}`
-        : "/api/v1/inventario/dashboard";
-      return json(path, { method: "GET" }, false).then(toDashboardKpiSummary);
+      assertDashboardFiltersSupported("getDashboardKpis", filters);
+      return json(dashboardPath(filters), { method: "GET" }, false).then(
+        toDashboardKpiSummary,
+      );
     },
 
     getDashboardAlerts() {
@@ -397,9 +440,15 @@ export function createHttpInventoryRepository(
       );
     },
 
-    getLocationDistribution() {
-      return Promise.reject(
-        blocked("getLocationDistribution", BLOCKED_DETAILS.getLocationDistribution),
+    async getLocationDistribution(
+      filters?: DashboardFiltersQuery,
+    ): Promise<LocationDistribution[]> {
+      assertDashboardFiltersSupported("getLocationDistribution", filters);
+      // `porUbicacion` de obtenerDashboardInventario es la fuente autoritativa
+      // de saldos por ubicación. No publica nombre de ubicación ni unidades
+      // bloqueadas: esos campos se exponen como `null`, nunca como cero.
+      return json(dashboardPath(filters), { method: "GET" }, false).then(
+        toLocationDistributionList,
       );
     },
 

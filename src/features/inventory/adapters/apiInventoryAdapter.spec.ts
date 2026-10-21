@@ -192,6 +192,18 @@ describe("apiInventoryAdapter — traslados (requiere resolvedor autoritativo)",
     expect(calls[0]?.path).toContain("target_location_id=loc-2");
   });
 
+  it('omite el literal "all" de la UI en lugar de enviarlo al contrato', async () => {
+    const { repository, calls } = setup(async () =>
+      jsonResponse({ items: [], pagina: 1, tamanio: 100, total: 0 }),
+    );
+    await expect(
+      repository.getTransfers({ status: "all", targetLocationId: "all" }),
+    ).resolves.toEqual([]);
+    expect(calls[0]?.path).toBe(
+      "/api/v1/inventario/traslados?pagina=1&tamanio=100",
+    );
+  });
+
   it("getTransfers falla con CONTRATO_BLOQUEADO si falta el resolvedor", async () => {
     const { repository } = setup(
       async () =>
@@ -274,18 +286,60 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
     await expect(first).resolves.toMatchObject({ id: "t-1" });
   });
 
-  it("marca resultado incierto ante 5xx y exige verificar antes de reintentar", async () => {
-    const { repository, request } = setup(async () =>
-      problemResponse(503, "SERVICIO_NO_DISPONIBLE"),
-    );
+  it("marca resultado incierto ante 5xx y permite reintentar con la misma identidad idempotente", async () => {
+    let attempt = 0;
+    const { repository, request } = setup(async () => {
+      attempt += 1;
+      return attempt === 1
+        ? problemResponse(503, "SERVICIO_NO_DISPONIBLE")
+        : jsonResponse(RECEPCION_OK);
+    });
     await expect(
       rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
     ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
     expect(request).toHaveBeenCalledTimes(1);
+    // Misma Idempotency-Key: el reintento no puede duplicar la recepción.
+    await expect(
+      repository.receiveTransfer(RECEPCION_PAYLOAD),
+    ).resolves.toMatchObject({ id: "t-1", quantityReceived: 4 });
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("exige reconciliar con una lectura antes de reintentar con otra identidad", async () => {
+    let receiving = true;
+    const { repository, request } = setup(async (path) => {
+      if (path.includes("/recepciones")) {
+        return receiving
+          ? problemResponse(503, "SERVICIO_NO_DISPONIBLE")
+          : jsonResponse(RECEPCION_OK);
+      }
+      return jsonResponse({
+        items: [traslado()],
+        pagina: 1,
+        tamanio: 100,
+        total: 1,
+      });
+    });
     await expect(
       rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
     ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
+
+    const otherIdentity: ReceiveTransferPayload = {
+      ...RECEPCION_PAYLOAD,
+      operationId: "22222222-2222-4222-8222-222222222222",
+    };
+    await expect(
+      rejection(repository.receiveTransfer(otherIdentity)),
+    ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
     expect(request).toHaveBeenCalledTimes(1);
+
+    // La lectura autoritativa del traslado reconcilia el resultado incierto.
+    await expect(repository.getTransfers()).resolves.toHaveLength(1);
+    receiving = false;
+    await expect(
+      repository.receiveTransfer(otherIdentity),
+    ).resolves.toMatchObject({ id: "t-1" });
+    expect(request).toHaveBeenCalledTimes(3);
   });
 
   it("traduce 409 TRASLADO_NO_RECIBIBLE e IDEMPOTENCY_CONFLICT", async () => {
@@ -392,6 +446,53 @@ describe("apiInventoryAdapter — dashboard KPIs (obtenerDashboardInventario)", 
     await expect(
       rejection(repository.getDashboardKpis({ search: "SKU-A" })),
     ).resolves.toMatchObject({ code: "CONTRATO_BLOQUEADO" });
+    await expect(
+      rejection(repository.getDashboardKpis({ status: "AGOTADO" })),
+    ).resolves.toMatchObject({ code: "CONTRATO_BLOQUEADO" });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('omite el literal "all" y consulta el agregado sin parámetros', async () => {
+    const { repository, calls } = setup(async () => jsonResponse(DASHBOARD_DTO));
+    await expect(
+      repository.getDashboardKpis({
+        search: "",
+        category: "all",
+        brand: "all",
+        locationId: "all",
+        status: "all",
+      }),
+    ).resolves.toMatchObject({ availableUnits: 125 });
+    expect(calls[0]?.path).toBe("/api/v1/inventario/dashboard");
+  });
+
+  it("mapea porUbicacion y expone null en nombre y bloqueo no publicados", async () => {
+    const { repository, calls } = setup(async () => jsonResponse(DASHBOARD_DTO));
+    await expect(
+      repository.getLocationDistribution({ locationId: "loc-1" }),
+    ).resolves.toEqual([
+      {
+        locationId: "loc-1",
+        locationName: null,
+        onHandTotal: 150,
+        reservedTotal: 20,
+        blockedTotal: null,
+        availableTotal: 125,
+        skusAvailableCount: 9,
+        skusLowStockCount: 2,
+        skusOutOfStockCount: 1,
+      },
+    ]);
+    expect(calls[0]?.path).toBe(
+      "/api/v1/inventario/dashboard?locationId=loc-1",
+    );
+  });
+
+  it("rechaza la distribución si el filtro no es verificable por contrato", async () => {
+    const { repository, request } = setup(async () => jsonResponse(DASHBOARD_DTO));
+    await expect(
+      rejection(repository.getLocationDistribution({ search: "SKU-A" })),
+    ).resolves.toMatchObject({ code: "CONTRATO_BLOQUEADO" });
     expect(request).not.toHaveBeenCalled();
   });
 });
@@ -403,7 +504,6 @@ describe("apiInventoryAdapter — operaciones sin fuente contractual", () => {
       repository.getStockItems(),
       repository.getStockDetail("SKU-A", "loc-1"),
       repository.getDashboardAlerts(),
-      repository.getLocationDistribution(),
       repository.getCategories(),
       repository.getBrands(),
       repository.getLocations(),

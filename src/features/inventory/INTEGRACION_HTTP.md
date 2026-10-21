@@ -7,6 +7,11 @@ cliente todavía no existen, y `CommercialModeGate` mantiene `/inventario`
 bloqueado en modo API. Ninguna operación se declara integrada de extremo a
 extremo.
 
+Corte **Hito 4 (2026-10-20)**: se sincronizó `taco` con `master` (sin descartar
+los cambios integrados del PR #44 ni la persistencia mock transversal), se
+corrigieron los filtros `"all"`, la carga parcial del dashboard, la distribución
+por ubicación y la reconciliación de recepciones con resultado incierto.
+
 ## Fuentes normativas
 
 - OpenAPI `0.6.0-rc.1`, operaciones de Inventario: `obtenerUmbralesInventario`,
@@ -23,16 +28,20 @@ extremo.
 
 | Archivo | Cambio |
 |---|---|
-| `adapters/apiInventoryAdapter.ts` | Fábrica `createHttpInventoryRepository` con `InventoryHttpTransport` inyectable. Implementa umbrales, KPIs autoritativos de dashboard (con `null` en métricas no publicadas) y traslados (lectura y recepción), con bloqueo de doble envío, resultado incierto y traducción de `application/problem+json`. Las operaciones sin fuente contractual fallan con `CONTRATO_BLOQUEADO`. |
-| `services/inventoryMappers.ts` | Validadores/mappers del contrato: `toThresholdConfig`, `toDashboardKpiSummary`, `validateTrasladoDto`, `validateTrasladoListDto`, `validateRecepcionResponse`, `validateTransferPresentation`. Conserva `toTransferItem`, `toStockStatus` y `toRecepcionTrasladoRequestDto`. |
-| `services/inventoryErrors.ts` | Códigos de protocolo/estado: `NO_AUTENTICADO`, `SIN_PERMISO`, `SERVICIO_NO_DISPONIBLE`, `RESULTADO_INCIERTO`, `RESPUESTA_INCOMPATIBLE`, `CONTRATO_BLOQUEADO`. |
-| `services/inventoryProvider.ts` | Punto de inyección `configureInventoryApi(factory)`. Sin factory, el modo API mantiene un fallo controlado bajo demanda; nunca cae al mock. |
-| `adapters/apiInventoryAdapter.spec.ts` | 19 pruebas unitarias del adaptador. |
+| `adapters/apiInventoryAdapter.ts` | Fábrica `createHttpInventoryRepository` con `InventoryHttpTransport` inyectable. Implementa umbrales, KPIs y distribución autoritativos de dashboard (con `null` en datos no publicados) y traslados (lectura y recepción), con bloqueo de doble envío, reconciliación de resultado incierto y traducción de `application/problem+json`. Las operaciones sin fuente contractual fallan con `CONTRATO_BLOQUEADO`. Normaliza el literal de UI `"all"` a "sin filtro". |
+| `services/inventoryMappers.ts` | Validadores/mappers del contrato: `toThresholdConfig`, `toDashboardKpiSummary`, `toLocationDistributionList`, `validateTrasladoDto`, `validateTrasladoListDto`, `validateRecepcionResponse`, `validateTransferPresentation`. Conserva `toTransferItem`, `toStockStatus` y `toRecepcionTrasladoRequestDto`. |
+| `services/inventoryErrors.ts` | Códigos de protocolo/estado: `OPERATIVO` (mock de master), `NO_AUTENTICADO`, `SIN_PERMISO`, `SERVICIO_NO_DISPONIBLE`, `RESULTADO_INCIERTO`, `RESPUESTA_INCOMPATIBLE`, `CONTRATO_BLOQUEADO`. |
+| `services/inventoryTypes.ts` | `LocationDistribution.locationName` y `blockedTotal` admiten `null` cuando el contrato no publica el dato. |
+| `services/inventoryProvider.ts` | Punto de inyección `configureInventoryApi(factory)`. Sin factory, el modo API mantiene un fallo controlado bajo demanda; nunca cae al mock. Conserva la persistencia mock de `master`. |
+| `hooks/useInventoryDashboard.ts` | Resuelve cada sección con `Promise.allSettled`: un bloqueo de contrato o fallo parcial no borra los KPIs que sí respondieron. Distingue `error` de `blockedReason`. |
+| `components/DashboardKpiGrid.tsx`, `DashboardAlerts.tsx`, `LocationDistributionTable.tsx` | Estados "no verificable" (warning) separados del error de transporte; `null` se muestra como "Sin datos", nunca como `0`. |
+| `adapters/apiInventoryAdapter.spec.ts` | 24 pruebas unitarias del adaptador. |
 | `adapters/vitest.config.ts` | Configuración local del feature (no modifica los scripts compartidos). |
 | `INTEGRACION_HTTP.md` | Este documento. |
 
-No se editaron `src/main.tsx`, `src/app/config/**`, el transporte compartido ni
-otros features.
+No se editaron `src/main.tsx` salvo lo integrado por `master`, el transporte
+compartido ni otros features. `src/app/config/**` conserva el bloqueo de
+`CommercialModeGate` de `master`.
 
 ## Operaciones implementadas
 
@@ -41,14 +50,39 @@ otros features.
 | `obtenerUmbralesInventario` | `GET /api/v1/inventario/umbrales` | `umbralGlobal → globalThreshold`; `overrides[] → skuOverrides` |
 | `actualizarUmbralGlobal` | `PUT /api/v1/inventario/umbrales/global` | body `{ umbral }`; respuesta `UmbralInventario` |
 | `establecerUmbralSku` | `PUT /api/v1/inventario/umbrales/skus/{sku}` | SKU codificado; body `{ umbral }` |
-| `obtenerDashboardInventario` | `GET /api/v1/inventario/dashboard?locationId&categoriaId&marcaId` | mapea los 6 KPIs autoritativos de `DashboardInventario` e informa `null` (ausencia de dato, nunca `0`) en las 6 métricas no publicadas; rechaza con `CONTRATO_BLOQUEADO` filtros de texto libre o estado |
+| `obtenerDashboardInventario` (KPIs) | `GET /api/v1/inventario/dashboard?locationId&categoriaId&marcaId` | mapea los KPIs autoritativos de `DashboardInventario` e informa `null` (ausencia de dato, nunca `0`) en los no publicados |
+| `obtenerDashboardInventario` (distribución) | `GET /api/v1/inventario/dashboard?locationId&categoriaId&marcaId` | mapea `porUbicacion[]`; `locationName` y `blockedTotal` quedan en `null` porque el contrato no los publica |
 | `listarTrasladosInventario` | `GET /api/v1/inventario/traslados?estado&target_location_id&pagina&tamanio` | pagina con `tamanio=100` hasta cubrir `total` (sin truncar) |
 | `obtenerTrasladoInventario` | (mapeador `validateTrasladoDto` disponible) | — |
 | `registrarRecepcionTrasladoInventario` | `POST /api/v1/inventario/traslados/{trasladoId}/recepciones` | `Idempotency-Key = operation_id`; body `RecepcionTrasladoInventarioRequest` |
 
-La recepción bloquea un segundo envío concurrente del mismo traslado y, ante
-error de red o `5xx`, marca el resultado como incierto y exige consultar el
-traslado antes de reintentar. Los `4xx` definitivos liberan el bloqueo.
+### Filtros de la UI
+
+La UI representa "sin filtro" con el literal `"all"`. Ese literal **no** es un
+valor del contrato:
+
+- `"all"`, cadena vacía y espacios se normalizan a "ausente" antes de construir
+  la query (`contractFilterValue`).
+- `obtenerDashboardInventario` no publica filtro por texto libre ni por estado
+  de stock. Con `search` o `status` activos, KPIs y distribución responden
+  `CONTRATO_BLOQUEADO` en lugar de devolver un agregado que no corresponde a la
+  selección; la UI lo presenta como "no verificable", sin inventar cifras.
+- `listarTrasladosInventario` acepta `estado` y `target_location_id`; con
+  `"all"` no se envían.
+
+### Reconciliación de recepciones con resultado incierto
+
+Ante error de red o `5xx` en la recepción:
+
+1. La operación queda marcada como incierta y se conserva su `operationId`.
+2. Un reintento con la **misma** identidad está permitido: el backend aplica
+   idempotencia y no duplica la recepción.
+3. Un reintento con una identidad **distinta** se rechaza con
+   `RESULTADO_INCIERTO` hasta reconciliar.
+4. Una lectura autoritativa de traslados (`GET /inventario/traslados`) sobre el
+   traslado afectado levanta el bloqueo; desde ese momento el usuario decide con
+   el estado real del servidor.
+5. Los `4xx` definitivos no dejan el traslado bloqueado.
 
 ### Campos que el contrato no transporta
 
@@ -61,11 +95,13 @@ rellenan con valores simulados.
 
 | Método del puerto | Campo sin fuente contractual | Owner / condición |
 |---|---|---|
-| `getStockItems`, `getStockDetail` | `productName`, `categoryName`, `brandName`; `locationName`; `stockVersion`; `updatedAt` | Catálogo/Taxonomía (mapping producto→SKU) y una fuente de ubicaciones; `consultarDisponibilidad` no expone versión ni fecha |
-| `getDashboardAlerts` | modelo completo de alertas | No existe operación de alertas |
-| `getLocationDistribution` | `blockedTotal`, `locationName` | `porUbicacion` no los publica |
-| `getCategories`, `getBrands` | integración de filtros (paginación) | Catálogo; definición pendiente |
+| `getStockItems`, `getStockDetail` | `productName`, `categoryName`, `brandName`; `locationName`; `stockVersion`; `updatedAt` | Catálogo/Taxonomía (mapping producto→SKU) y una fuente de ubicaciones. `consultarDisponibilidad` exige `skus` y no expone versión/fecha: no permite listar existencias |
+| `getDashboardAlerts` | modelo completo de alertas | No existe operación de alertas en Inventario |
+| `getCategories`, `getBrands` | integración de filtros (paginación) | Catálogo; definición pendiente del composition root |
 | `getLocations` | modelo completo de ubicaciones | Sin endpoint HTTP (`inventory.locations`) |
+
+`getLocationDistribution` ya **no** está bloqueada de forma global: se resuelve
+con `porUbicacion` y expone `null` en los dos campos ausentes.
 
 ## Punto exacto de integración (#45/#109)
 
@@ -116,7 +152,7 @@ composition root (#45/#109) y no se modifica aquí.
 |---|---|
 | `npm run typecheck` | PASS |
 | `npm run lint` | PASS |
-| `npx vitest run --config src/features/inventory/adapters/vitest.config.ts` | **19/19 PASS** |
+| `npx vitest run --config src/features/inventory/adapters/vitest.config.ts` | **24/24 PASS** |
 | `npm test` | `test:unit:combos` 36 PASS; `test:unit:bulk` 24 PASS |
 | `npm run build` con `VITE_DATA_MODE=mock` | PASS |
 | `npm run build` con `VITE_DATA_MODE=api` | PASS |
@@ -129,4 +165,6 @@ composition root (#45/#109) y no se modifica aquí.
   → PostgreSQL/RabbitMQ: depende de #109, #106/#107 y del entorno real.
 - Las pruebas del adaptador usan respuestas HTTP explícitas; no acreditan un
   endpoint desplegado.
+- La tabla "Inventario analítico por SKU" sigue bloqueada en modo API porque el
+  contrato no ofrece un listado de existencias con sus campos de presentación.
 - No se modificaron contratos, Gateway, Backend ni datos.

@@ -964,7 +964,7 @@ export class MockInventoryAdapter implements InventoryRepository {
       }
       dist.onHandTotal += item.onHand;
       dist.reservedTotal += item.reserved;
-      dist.blockedTotal += item.blocked;
+      dist.blockedTotal = (dist.blockedTotal ?? 0) + item.blocked;
       dist.availableTotal += item.available;
       if (item.status === "DISPONIBLE") dist.skusAvailableCount++;
       else if (item.status === "STOCK_BAJO") dist.skusLowStockCount++;
