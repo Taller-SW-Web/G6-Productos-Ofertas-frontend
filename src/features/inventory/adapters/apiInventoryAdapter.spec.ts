@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { InventoryError } from "../services/inventoryErrors";
+import {
+  InventoryError,
+  isInventoryPresentationFailure,
+} from "../services/inventoryErrors";
 import {
   createTransferReceptionFormSession,
   getUncertainTransferReception,
+  resetConfirmedTransferReceptionsAwaitingRefresh,
   resetUncertainTransferReceptions,
 } from "../services/transferReceptionAttempt";
 import type {
@@ -18,6 +22,7 @@ import type { TransferPresentationResolver } from "../services/inventoryMappers"
 
 beforeEach(() => {
   resetUncertainTransferReceptions();
+  resetConfirmedTransferReceptionsAwaitingRefresh();
 });
 
 function jsonResponse(value: unknown, status = 200): Response {
@@ -739,6 +744,172 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
     expect(repository.getTransferWriteRecord("t-1")?.state).toBe("UNCERTAIN");
     expect(getUncertainTransferReception("t-1")).not.toBeNull();
     expect(calls).toHaveLength(1);
+  });
+
+  it("TAC-P0-08: POST 200 confirmado + fallo de presentación no permite una segunda recepción ni repite el POST", async () => {
+    let postCount = 0;
+    let resolverDown = true;
+    const { repository, calls } = setup(
+      async (path, req) => {
+        if (path.includes("/recepciones")) {
+          postCount += 1;
+          const body = JSON.parse(req.body ?? "{}") as {
+            operation_id: string;
+          };
+          return jsonResponse({
+            ...RECEPCION_OK,
+            operation_id: body.operation_id,
+          });
+        }
+        return jsonResponse({
+          items: [
+            traslado({ quantity_received: 4, estado: "RECIBIDO_PARCIAL" }),
+          ],
+          pagina: 1,
+          tamanio: 100,
+          total: 1,
+        });
+      },
+      {
+        resolver: async () => {
+          if (resolverDown) {
+            throw new InventoryError(
+              "CONTRATO_BLOQUEADO",
+              "Catálogo/ubicaciones no disponible",
+            );
+          }
+          return PRESENTATION;
+        },
+      },
+    );
+
+    let idTick = 0;
+    const ids = [
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    ];
+    const session = createTransferReceptionFormSession("t-1", {
+      createId: () => ids[idTick++]!,
+      now: () => "2026-10-20T18:00:00.000Z",
+    });
+    const payload = session.prepareSubmission({
+      quantityReceived: 4,
+      disposition: "REINGRESAR_DISPONIBLE",
+      finalReceipt: false,
+      note: "Entrega parcial verificada",
+    });
+
+    // POST 200 válido -> operación confirmada -> resolveTransferPresentation falla.
+    const error = await rejection(repository.receiveTransfer(payload));
+    expect(isInventoryPresentationFailure(error)).toBe(true);
+    expect(error.code).toBe("CONTRATO_BLOQUEADO");
+    expect(error.message).toContain("fue registrada");
+
+    // La mutación quedó confirmada pese al fallo de presentación.
+    expect(postCount).toBe(1);
+    expect(repository.getTransferWriteRecord("t-1")?.state).toBe("RECONCILED");
+    expect(getUncertainTransferReception("t-1")).toBeNull();
+
+    // El formulario conoce la confirmación y no puede generar otra intención
+    // desde el estado desactualizado.
+    session.recordConfirmed(payload);
+    expect(() =>
+      session.prepareSubmission({
+        quantityReceived: 5,
+        disposition: "REINGRESAR_DISPONIBLE",
+        finalReceipt: false,
+        note: "Entrega parcial verificada",
+      }),
+    ).toThrowError(InventoryError);
+    expect(() =>
+      session.prepareSubmission({
+        quantityReceived: 4,
+        disposition: "REINGRESAR_DISPONIBLE",
+        finalReceipt: false,
+        note: "Otra nota distinta",
+      }),
+    ).toThrowError(InventoryError);
+
+    // Un reintento idéntico devuelve el cache: no hay una segunda recepción ni
+    // stock acreditado de nuevo.
+    await expect(
+      rejection(repository.receiveTransfer(payload)),
+    ).resolves.toMatchObject({ code: "CONTRATO_BLOQUEADO" });
+    expect(postCount).toBe(1);
+    expect(calls.filter((c) => c.request.method === "POST")).toHaveLength(1);
+
+    // Tras un listado exitoso (vista actualizada), se habilita una nueva
+    // intención legítima con otro operationId.
+    resolverDown = false;
+    await expect(repository.getTransfers()).resolves.toHaveLength(1);
+    const next = session.prepareSubmission({
+      quantityReceived: 3,
+      disposition: "REINGRESAR_DISPONIBLE",
+      finalReceipt: true,
+      note: "",
+    });
+    expect(next.operationId).toBe(ids[1]);
+    expect(next.operationId).not.toBe(payload.operationId);
+  });
+
+  it("TAC-P0-09: el caché de confirmaciones exige identidad e intención idénticas", async () => {
+    const { repository, calls } = setup(async () => jsonResponse(RECEPCION_OK));
+
+    // Caso 1: mismo operationId y payload idéntico -> resultado cacheado sin POST.
+    await expect(
+      repository.receiveTransfer(RECEPCION_PAYLOAD),
+    ).resolves.toMatchObject({ id: "t-1", quantityReceived: 4 });
+    await expect(
+      repository.receiveTransfer(RECEPCION_PAYLOAD),
+    ).resolves.toMatchObject({ id: "t-1", quantityReceived: 4 });
+    expect(calls).toHaveLength(1);
+
+    // Casos 2, 3 y 4: misma identidad con distinta intención -> rechazo.
+    const mutated: ReceiveTransferPayload[] = [
+      { ...RECEPCION_PAYLOAD, quantityReceived: 3 },
+      { ...RECEPCION_PAYLOAD, note: "Nota distinta" },
+      { ...RECEPCION_PAYLOAD, disposition: "CONFIRMAR_MERMA" },
+      { ...RECEPCION_PAYLOAD, finalReceipt: true },
+      { ...RECEPCION_PAYLOAD, receivedAt: "2026-10-03T00:00:05.000Z" },
+      { ...RECEPCION_PAYLOAD, transferId: "t-2" },
+    ];
+    for (const payload of mutated) {
+      await expect(
+        rejection(repository.receiveTransfer(payload)),
+      ).resolves.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
+    }
+    // Ninguna intención distinta salió a la red.
+    expect(calls).toHaveLength(1);
+  });
+
+  it("TAC-P0-09: un 200 con operation_id o traslado_id ajenos no declara la confirmación", async () => {
+    const cases = [
+      {
+        body: {
+          ...RECEPCION_OK,
+          operation_id: "99999999-9999-4999-8999-999999999999",
+        },
+      },
+      {
+        body: {
+          ...RECEPCION_OK,
+          traslado: traslado({ traslado_id: "t-9" }),
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const { repository, calls } = setup(async () =>
+        jsonResponse(testCase.body),
+      );
+      await expect(
+        rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+      ).resolves.toMatchObject({ code: "RESPUESTA_INCOMPATIBLE" });
+      // No se declara confirmación: la operación permanece incierta.
+      expect(repository.getTransferWriteRecord("t-1")?.state).toBe("UNCERTAIN");
+      expect(getUncertainTransferReception("t-1")).not.toBeNull();
+      expect(calls).toHaveLength(1);
+    }
   });
 
   it("TAC-P1-07: en UNCERTAIN, ningún error del reintento (400/401/403/404/409/422/5xx/red/DTO inválido) libera el bloqueo", async () => {

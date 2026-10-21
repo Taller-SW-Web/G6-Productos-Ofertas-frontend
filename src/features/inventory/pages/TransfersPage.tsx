@@ -46,10 +46,12 @@ export function TransfersPage() {
     submitting,
     error,
     submitError,
+    presentationError,
     successMessage,
     receive,
     refetch,
     clearSubmitError,
+    clearPresentationError,
     clearFeedback,
   } = useTransfers(filters);
 
@@ -76,6 +78,7 @@ export function TransfersPage() {
   // previa para no mostrar el fallo de un traslado distinto.
   const handleOpenReceptionModal = (row: TransferItem) => {
     clearSubmitError();
+    clearPresentationError();
     setActiveTransfer(row);
   };
 
@@ -276,6 +279,24 @@ export function TransfersPage() {
           </FeedbackAlert>
         )}
 
+
+        {presentationError && (
+          <FeedbackAlert
+            semantic="warning"
+            title="Recepción registrada — vista pendiente de actualizar"
+            actions={
+              <Button
+                size="xs"
+                variant="subtle"
+                onClick={clearPresentationError}
+              >
+                Cerrar
+              </Button>
+            }
+          >
+            {presentationError}
+          </FeedbackAlert>
+        )}
 
         {isRevisionMode && <DevScenarioSelector />}
 

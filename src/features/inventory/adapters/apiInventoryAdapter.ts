@@ -1,9 +1,13 @@
-import { InventoryError } from "../services/inventoryErrors";
+import {
+  InventoryError,
+  InventoryPresentationFailedError,
+} from "../services/inventoryErrors";
 import type { InventoryRepository } from "../services/inventoryRepository";
 import type {
   DashboardFiltersQuery,
   InventoryKpiSummary,
   LocationDistribution,
+  ReceiveTransferPayload,
   StockItem,
   ThresholdConfig,
   TransferFiltersQuery,
@@ -23,6 +27,7 @@ import {
 } from "../services/inventoryMappers";
 import {
   areSameReceiveTransferPayloads,
+  clearConfirmedTransferReceptionAwaitingRefresh,
   clearUncertainTransferReception,
   freezeReceiveTransferPayload,
   setUncertainTransferReception,
@@ -135,6 +140,14 @@ async function problemCode(response: Response): Promise<string | undefined> {
   return undefined;
 }
 
+// Cada confirmación se guarda con el snapshot inmutable que la originó
+// (TAC-P0-09). La identidad sola (`operationId`) NO es suficiente para
+// reutilizarla: primero se compara el fingerprint completo.
+interface ConfirmedReceptionRecord {
+  readonly payload: Readonly<ReceiveTransferPayload>;
+  readonly dto: TrasladoInventarioDto;
+}
+
 export function createHttpInventoryRepository(
   dependencies: HttpInventoryRepositoryDependencies,
 ): HttpInventoryRepository {
@@ -147,12 +160,14 @@ export function createHttpInventoryRepository(
   //     servidor (incluyendo la recuperación idempotente del resultado durable).
   const transferWrites = new Map<string, TransferReceptionWriteRecord>();
 
-  // TAC-P0-05: DTO de confirmación persistido, indexado por `operationId`. Una
-  // vez que Inventory confirma la recepción (200 + DTO válido), la confirmación
-  // es autoritativa e independiente del enriquecimiento de presentación. Este
-  // cache evita repetir el POST si `present()` (resolvedor de Catálogo/ubicaciones)
-  // falla después de que la mutación ya fue persistida.
-  const confirmedReceptions = new Map<string, TrasladoInventarioDto>();
+  // TAC-P0-05 / TAC-P0-09: DTO de confirmación persistido, indexado por
+  // `operationId` y acompañado del snapshot inmutable original. Una vez que
+  // Inventory confirma la recepción (200 + DTO válido), la confirmación es
+  // autoritativa e independiente del enriquecimiento de presentación. Este
+  // cache evita repetir el POST si `present()` (resolvedor de Catálogo/
+  // ubicaciones) falla después de que la mutación ya fue persistida, pero SOLO
+  // para la misma intención exacta.
+  const confirmedReceptions = new Map<string, ConfirmedReceptionRecord>();
 
   async function send(
     path: string,
@@ -278,6 +293,25 @@ export function createHttpInventoryRepository(
     return toTransferItem(dto, presentation);
   }
 
+  // TAC-P0-08: la presentación corre DESPUÉS de la confirmación autoritativa.
+  // Un fallo de enriquecimiento NO es un fallo de la mutación: se propaga un
+  // error tipado (`InventoryPresentationFailedError`) para que hook y formulario
+  // bloqueen nuevas intenciones y refresquen la vista sin repetir el POST.
+  async function presentConfirmed(
+    payload: Readonly<ReceiveTransferPayload>,
+    dto: TrasladoInventarioDto,
+  ): Promise<TransferItem> {
+    try {
+      return await present(dto);
+    } catch (error) {
+      throw new InventoryPresentationFailedError(
+        payload.transferId,
+        payload.operationId,
+        error,
+      );
+    }
+  }
+
   function transferQuery(
     filters: TransferFiltersQuery | undefined,
     pagina: number,
@@ -334,7 +368,14 @@ export function createHttpInventoryRepository(
         });
       }
     }
-    return Promise.all(collected.map((dto) => present(dto)));
+    const items = await Promise.all(collected.map((dto) => present(dto)));
+    // TAC-P0-08: solo un listado COMPLETO y presentable refresca la vista. Hasta
+    // aquí se mantiene bloqueada cualquier nueva intención para un traslado cuya
+    // recepción ya fue confirmada pero cuya vista seguía desactualizada.
+    for (const dto of collected) {
+      clearConfirmedTransferReceptionAwaitingRefresh(dto.traslado_id);
+    }
+    return items;
   }
 
   function dashboardPath(filters: DashboardFiltersQuery | undefined): string {
@@ -422,12 +463,23 @@ export function createHttpInventoryRepository(
         );
       }
 
-      // TAC-P0-05: la confirmación ya fue registrada para esta identidad. Un
-      // error de presentación previo no debe repetir el POST, sino recuperar el
-      // resultado durable ya persistido.
-      const confirmedDto = confirmedReceptions.get(frozenPayload.operationId);
-      if (confirmedDto) {
-        return present(confirmedDto);
+      // TAC-P0-05 / TAC-P0-09: la identidad ya fue confirmada. Antes de
+      // devolver el resultado durable se compara el snapshot COMPLETO
+      // (transferId, cantidad, disposición, cierre final, fecha y nota). Una
+      // identidad reutilizada con otra intención nunca devuelve la confirmación
+      // anterior: se rechaza como conflicto de idempotencia.
+      const confirmed = confirmedReceptions.get(frozenPayload.operationId);
+      if (confirmed) {
+        if (
+          confirmed.dto.traslado_id !== frozenPayload.transferId ||
+          !areSameReceiveTransferPayloads(confirmed.payload, frozenPayload)
+        ) {
+          throw new InventoryError(
+            "IDEMPOTENCY_CONFLICT",
+            "La identidad de esta recepción ya fue confirmada con otra intención (traslado, cantidad, disposición, cierre final, fecha o nota). No se devuelve un resultado ajeno a la solicitud.",
+          );
+        }
+        return presentConfirmed(frozenPayload, confirmed.dto);
       }
 
       if (currentRecord?.state === "UNCERTAIN") {
@@ -506,7 +558,20 @@ export function createHttpInventoryRepository(
       // no se puede determinar: la mutación pudo aplicarse, se preserva UNCERTAIN.
       let traslado: TrasladoInventarioDto;
       try {
-        traslado = validateRecepcionResponse(body).traslado;
+        const confirmation = validateRecepcionResponse(body);
+        // TAC-P0-09: el DTO de confirmación debe corresponder a ESTA solicitud.
+        // Si el `operation_id` o el `traslado_id` devueltos no coinciden, la
+        // mutación no se puede declarar confirmada y se preserva UNCERTAIN.
+        if (
+          confirmation.operationId !== frozenPayload.operationId ||
+          confirmation.traslado.traslado_id !== frozenPayload.transferId
+        ) {
+          throw new InventoryError(
+            "RESPUESTA_INCOMPATIBLE",
+            "Inventario devolvió una confirmación que no corresponde a la solicitud original. No se declara la operación como confirmada.",
+          );
+        }
+        traslado = confirmation.traslado;
       } catch (error) {
         setUncertainTransferReception(frozenPayload);
         transferWrites.set(key, {
@@ -519,9 +584,13 @@ export function createHttpInventoryRepository(
       }
 
       // Fase C — registrar la confirmación autoritativa ANTES del enriquecimiento
-      // de presentación (TAC-P0-05). No condicionar RECONCILED al éxito de present().
+      // de presentación (TAC-P0-05 / TAC-P0-09). Se guarda el snapshot inmutable
+      // original junto al DTO para poder verificar la identidad en un reintento.
       clearUncertainTransferReception(key, frozenPayload.operationId);
-      confirmedReceptions.set(frozenPayload.operationId, traslado);
+      confirmedReceptions.set(frozenPayload.operationId, {
+        payload: frozenPayload,
+        dto: traslado,
+      });
       transferWrites.set(key, {
         state: "RECONCILED",
         payload: frozenPayload,
@@ -532,7 +601,7 @@ export function createHttpInventoryRepository(
       // Fase D — enriquecimiento de presentación (no autoritativo). Si falla, la
       // mutación YA está confirmada y el estado permanece RECONCILED; el POST no
       // se repite (el reintento con la misma identidad devuelve el cache).
-      return present(traslado);
+      return presentConfirmed(frozenPayload, traslado);
     },
 
     getStockItems(): Promise<StockItem[]> {

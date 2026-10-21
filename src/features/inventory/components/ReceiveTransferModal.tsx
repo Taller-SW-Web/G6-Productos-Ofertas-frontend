@@ -20,9 +20,11 @@ import type {
 } from "../services/inventoryTypes";
 import {
   createTransferReceptionFormSession,
+  getConfirmedTransferReceptionAwaitingRefresh,
   getUncertainTransferReception,
   type TransferReceptionFormSession,
 } from "../services/transferReceptionAttempt";
+import { isInventoryPresentationFailure } from "../services/inventoryErrors";
 
 interface ReceiveTransferModalProps {
   transfer: TransferItem | null;
@@ -55,26 +57,40 @@ function TransferFormInner({
     useState<Readonly<ReceiveTransferPayload> | null>(() =>
       getUncertainTransferReception(transfer.id),
     );
-  const [quantity, setQuantity] = useState<number | string>(() => {
-    const uncertain = getUncertainTransferReception(transfer.id);
-    return uncertain ? uncertain.quantityReceived : transfer.quantityPending;
-  });
-  const [disposition, setDisposition] = useState<DispositionType>(() => {
-    const uncertain = getUncertainTransferReception(transfer.id);
-    return uncertain ? uncertain.disposition : "REINGRESAR_DISPONIBLE";
-  });
-  const [finalReceipt, setFinalReceipt] = useState<boolean>(() => {
-    const uncertain = getUncertainTransferReception(transfer.id);
-    return uncertain ? uncertain.finalReceipt : true;
-  });
-  const [note, setNote] = useState<string>(
-    () => getUncertainTransferReception(transfer.id)?.note ?? "",
+  // TAC-P0-08: si una recepción anterior ya fue confirmada pero la vista no pudo
+  // refrescarse, el formulario se hidrata con ese snapshot y queda bloqueado
+  // hasta que un listado exitoso actualice el traslado. Nunca genera otra
+  // intención (nuevo `operationId`) desde un estado desactualizado.
+  const [confirmedAttempt, setConfirmedAttempt] =
+    useState<Readonly<ReceiveTransferPayload> | null>(() =>
+      getConfirmedTransferReceptionAwaitingRefresh(transfer.id),
+    );
+  const [presentationFailure, setPresentationFailure] = useState<string | null>(
+    null,
   );
+  const initialAttempt =
+    getUncertainTransferReception(transfer.id) ??
+    getConfirmedTransferReceptionAwaitingRefresh(transfer.id);
+  const [quantity, setQuantity] = useState<number | string>(() =>
+    initialAttempt
+      ? initialAttempt.quantityReceived
+      : transfer.quantityPending,
+  );
+  const [disposition, setDisposition] = useState<DispositionType>(
+    () => initialAttempt?.disposition ?? "REINGRESAR_DISPONIBLE",
+  );
+  const [finalReceipt, setFinalReceipt] = useState<boolean>(
+    () => initialAttempt?.finalReceipt ?? true,
+  );
+  const [note, setNote] = useState<string>(() => initialAttempt?.note ?? "");
   const [errorValidation, setErrorValidation] = useState<string | null>(null);
 
   const isUncertainLocked = uncertainAttempt !== null;
+  const isConfirmedLocked = confirmedAttempt !== null;
+  const isLocked = isUncertainLocked || isConfirmedLocked;
   const numQty = Number(quantity);
-  const isMissing = finalReceipt && numQty < transfer.quantityPending;
+  const isMissing =
+    !isLocked && finalReceipt && numQty < transfer.quantityPending;
   const missingCount = transfer.quantityPending - numQty;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -121,8 +137,21 @@ function TransferFormInner({
       await onConfirm(payload);
       sessionRef.current.recordSuccess(payload);
       setUncertainAttempt(null);
+      setConfirmedAttempt(null);
+      setPresentationFailure(null);
       onClose();
     } catch (err) {
+      // TAC-P0-08: la recepción YA fue confirmada por Inventory y solo falló el
+      // enriquecimiento de presentación. No es un fallo transaccional: se
+      // bloquea el formulario con el snapshot confirmado, se informa el fallo
+      // de vista y NO se permite generar otra intención ni repetir el POST.
+      if (isInventoryPresentationFailure(err)) {
+        sessionRef.current.recordConfirmed(payload);
+        setUncertainAttempt(null);
+        setConfirmedAttempt(payload);
+        setPresentationFailure(err.message);
+        return;
+      }
       // TAC-P0-01 / TAC-P0-02: si el intento quedó en RESULTADO_INCIERTO se
       // conserva el snapshot inmutable completo (operationId, receivedAt, note,
       // cantidad, disposición y recepción final) incluso si el modal se cierra.
@@ -194,6 +223,20 @@ function TransferFormInner({
           </Alert>
         )}
 
+        {isConfirmedLocked && (
+          <Alert
+            icon={<IconCheck size={16} />}
+            title="Recepción registrada — vista pendiente de actualizar"
+            color="orange"
+          >
+            {presentationFailure ??
+              "La recepción anterior ya fue confirmada por Inventory, pero la vista del traslado aún no refleja el saldo real."}{" "}
+            No repitas la recepción: la operación quedó persistida. Cierra esta
+            ventana y espera a que la bandeja se actualice antes de registrar
+            otra recepción parcial.
+          </Alert>
+        )}
+
         <NumberInput
           label="Cantidad recibida físicamente"
           description={`Máximo pendiente: ${transfer.quantityPending} unidades.`}
@@ -204,7 +247,7 @@ function TransferFormInner({
           value={quantity}
           onChange={setQuantity}
           required
-          disabled={submitting || isUncertainLocked}
+          disabled={submitting || isLocked}
           aria-label="Cantidad recibida físicamente"
         />
 
@@ -229,7 +272,7 @@ function TransferFormInner({
           onChange={(val) =>
             setDisposition((val as DispositionType) ?? "REINGRESAR_DISPONIBLE")
           }
-          disabled={submitting || isUncertainLocked}
+          disabled={submitting || isLocked}
           required
           aria-label="Disposición de unidades recibidas"
         />
@@ -239,7 +282,7 @@ function TransferFormInner({
           description="Si quedan unidades sin recibir, el traslado se cerrará como completado con discrepancia."
           checked={finalReceipt}
           onChange={(e) => setFinalReceipt(e.currentTarget.checked)}
-          disabled={submitting || isUncertainLocked}
+          disabled={submitting || isLocked}
         />
 
         {isMissing && (
@@ -277,7 +320,7 @@ function TransferFormInner({
           value={note}
           maxLength={500}
           onChange={(e) => setNote(e.currentTarget.value)}
-          disabled={submitting || isUncertainLocked}
+          disabled={submitting || isLocked}
           rows={2}
         />
 
@@ -295,6 +338,7 @@ function TransferFormInner({
             loading={submitting}
             leftSection={<IconCheck size={16} />}
             color={isMissing ? "orange" : "primary"}
+            disabled={isConfirmedLocked}
           >
             {isMissing
               ? "Confirmar recepción con discrepancia"

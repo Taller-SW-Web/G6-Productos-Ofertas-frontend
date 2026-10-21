@@ -154,6 +154,42 @@ export function resetUncertainTransferReceptions(): void {
   uncertainReceptionsByTransferId.clear();
 }
 
+// TAC-P0-08: recepciones confirmadas por Inventory cuyo reflejo en la vista aún
+// no pudo actualizarse (fallo del enriquecimiento de presentación). La escritura
+// es autoritativa; este registro impide generar una NUEVA intención (nuevo
+// `operationId`) sobre una vista desactualizada. Se libera solo cuando un
+// listado exitoso confirma el `quantity_received`/`estado` reales del traslado.
+const confirmedReceptionsAwaitingRefreshByTransferId = new Map<
+  string,
+  Readonly<ReceiveTransferPayload>
+>();
+
+export function getConfirmedTransferReceptionAwaitingRefresh(
+  transferId: string,
+): Readonly<ReceiveTransferPayload> | null {
+  return confirmedReceptionsAwaitingRefreshByTransferId.get(transferId) ?? null;
+}
+
+export function markTransferReceptionConfirmedAwaitingRefresh(
+  payload: ReceiveTransferPayload,
+): Readonly<ReceiveTransferPayload> {
+  const frozen = freezeReceiveTransferPayload(payload);
+  confirmedReceptionsAwaitingRefreshByTransferId.set(frozen.transferId, frozen);
+  // Una operación confirmada deja de ser incierta para esa identidad.
+  uncertainReceptionsByTransferId.delete(frozen.transferId);
+  return frozen;
+}
+
+export function clearConfirmedTransferReceptionAwaitingRefresh(
+  transferId: string,
+): void {
+  confirmedReceptionsAwaitingRefreshByTransferId.delete(transferId);
+}
+
+export function resetConfirmedTransferReceptionsAwaitingRefresh(): void {
+  confirmedReceptionsAwaitingRefreshByTransferId.clear();
+}
+
 export interface TransferReceptionFormSessionOptions {
   readonly createId?: () => string;
   readonly now?: () => string;
@@ -167,6 +203,9 @@ export interface TransferReceptionFormSession {
     draft: TransferReceptionDraftInput,
   ): Readonly<ReceiveTransferPayload>;
   recordSuccess(payload: Readonly<ReceiveTransferPayload>): void;
+  // TAC-P0-08: la escritura fue confirmada, pero la vista no pudo actualizarse.
+  // Bloquea nuevas intenciones hasta que se refresque la consulta del traslado.
+  recordConfirmed(payload: Readonly<ReceiveTransferPayload>): void;
   recordFailure(
     payload: Readonly<ReceiveTransferPayload>,
     error: unknown,
@@ -197,11 +236,29 @@ export function createTransferReceptionFormSession(
     prepareSubmission(
       draft: TransferReceptionDraftInput,
     ): Readonly<ReceiveTransferPayload> {
-      const uncertain = getUncertainTransferReception(transferId);
       const draftSignature = computeReceiveTransferContentSignature(
         transferId,
         draft,
       );
+
+      const confirmed =
+        getConfirmedTransferReceptionAwaitingRefresh(transferId);
+      if (confirmed) {
+        const confirmedSignature = computeReceiveTransferContentSignature(
+          transferId,
+          confirmed,
+        );
+        if (confirmedSignature !== draftSignature) {
+          throw new InventoryError(
+            "PRESENTACION_FALLIDA",
+            "La recepción anterior ya fue confirmada por Inventory. Actualiza la bandeja para reflejar el saldo real del traslado antes de registrar otra recepción parcial.",
+          );
+        }
+        lastAttempt = confirmed;
+        return confirmed;
+      }
+
+      const uncertain = getUncertainTransferReception(transferId);
 
       if (uncertain) {
         const uncertainSignature = computeReceiveTransferContentSignature(
@@ -244,7 +301,12 @@ export function createTransferReceptionFormSession(
 
     recordSuccess(payload: Readonly<ReceiveTransferPayload>): void {
       clearUncertainTransferReception(transferId, payload.operationId);
+      clearConfirmedTransferReceptionAwaitingRefresh(transferId);
       lastAttempt = payload;
+    },
+
+    recordConfirmed(payload: Readonly<ReceiveTransferPayload>): void {
+      lastAttempt = markTransferReceptionConfirmedAwaitingRefresh(payload);
     },
 
     recordFailure(

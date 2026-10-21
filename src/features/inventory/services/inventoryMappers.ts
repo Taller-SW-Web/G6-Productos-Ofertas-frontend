@@ -157,11 +157,12 @@ export function validateTrasladoListDto(value: unknown): TrasladoListDto {
 }
 
 export function validateRecepcionResponse(value: unknown): {
+  operationId: string;
   traslado: TrasladoInventarioDto;
 } {
   const dto = record(value);
   nonEmptyString(dto, "receipt_id");
-  nonEmptyString(dto, "operation_id");
+  const operationId = nonEmptyString(dto, "operation_id");
   const disposition = dto.disposition;
   if (
     typeof disposition !== "string" ||
@@ -170,7 +171,7 @@ export function validateRecepcionResponse(value: unknown): {
     incompatible();
   nonNegativeInt(dto, "received_quantity", 1);
   dateTime(dto, "completed_at");
-  return { traslado: validateTrasladoDto(dto.traslado) };
+  return { operationId, traslado: validateTrasladoDto(dto.traslado) };
 }
 
 export function validateTransferPresentation(

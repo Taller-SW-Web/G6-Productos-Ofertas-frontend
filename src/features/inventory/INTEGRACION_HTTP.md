@@ -49,6 +49,21 @@ segunda auditoría de Marco:
    la solución definitiva queda `BLOQUEADO_ESPECÍFICO` con propuesta a Marco
    (ver sección dedicada).
 
+Corte **Hito 4 (2026-10-21, iteración 4)**: se resolvieron los dos P0 de la
+tercera auditoría de Marco:
+
+6. **`TAC-P0-08` — `WRITE_CONFIRMED` vs `PRESENTATION_FAILED`:** un fallo del
+   resolvedor de presentación después de un `200` válido se propaga como
+   `InventoryPresentationFailedError`, no como fallo transaccional. El
+   formulario queda bloqueado con el snapshot confirmado, el hook refresca la
+   bandeja y **no se genera una segunda intención** hasta que un listado
+   exitoso actualice el traslado.
+7. **`TAC-P0-09` — Caché con identidad e intención:** el caché de confirmaciones
+   guarda el snapshot inmutable junto al DTO. Un `operationId` reutilizado con
+   otro `transferId`, cantidad, disposición, cierre final, fecha o nota se
+   rechaza con `IDEMPOTENCY_CONFLICT`; un `200` con `operation_id` o
+   `traslado_id` ajenos **no** declara la confirmación y preserva `UNCERTAIN`.
+
 ## Fuentes normativas
 
 - OpenAPI `0.6.0-rc.1` (`docs/contratos/http/openapi.yaml`), operaciones de
@@ -69,16 +84,18 @@ segunda auditoría de Marco:
 
 | Archivo | Cambio |
 |---|---|
-| `services/transferReceptionAttempt.ts` | Coordinador inmutable de intentos de recepción (`createTransferReceptionFormSession`, `freezeReceiveTransferPayload`, `areSameReceiveTransferPayloads`, `TransferReceptionWriteRecord`). Preserva `operationId`, `receivedAt` y `note` entre reintentos y a través de cierres/reaperturas del modal cuando el intento queda en `UNCERTAIN`. |
-| `components/ReceiveTransferModal.tsx` | Usa `createTransferReceptionFormSession(transfer.id)`. Reutiliza la solicitud inmutable en reintentos idénticos, genera nueva identidad si cambia cantidad/disposición/cierre/nota tras un `4xx`, y bloquea la edición mostrando aviso explícito cuando existe una operación `UNCERTAIN`. |
-| `adapters/apiInventoryAdapter.ts` | Separa los estados `IN_FLIGHT`, `UNCERTAIN` y `RECONCILED` (`getTransferWriteRecord`). Elimina la limpieza prematura en `readTransfers()` y registra `UNVERIFIABLE_BY_LIST_CONTRACT`. Rechaza cualquier cambio de `operationId` o contenido mientras el traslado esté en `UNCERTAIN`. |
-| `services/inventoryMappers.ts` | Validadores/mappers del contrato: `toThresholdConfig`, `toDashboardKpiSummary`, `toLocationDistributionList`, `validateTrasladoDto`, `validateTrasladoListDto`, `validateRecepcionResponse`, `validateTransferPresentation`. |
-| `services/inventoryErrors.ts` | Códigos de protocolo/estado: `OPERATIVO` (mock de master), `NO_AUTENTICADO`, `SIN_PERMISO`, `SERVICIO_NO_DISPONIBLE`, `RESULTADO_INCIERTO`, `RESPUESTA_INCOMPATIBLE`, `CONTRATO_BLOQUEADO`. |
+| `services/transferReceptionAttempt.ts` | Coordinador inmutable de intentos de recepción (`createTransferReceptionFormSession`, `freezeReceiveTransferPayload`, `areSameReceiveTransferPayloads`, `TransferReceptionWriteRecord`). Preserva `operationId`, `receivedAt` y `note` entre reintentos y a través de cierres/reaperturas del modal cuando el intento queda en `UNCERTAIN`. Añade el registro `confirmedAwaitingRefresh` (`TAC-P0-08`): una recepción confirmada cuya vista no pudo actualizarse bloquea nuevas intenciones hasta un listado exitoso. |
+| `components/ReceiveTransferModal.tsx` | Usa `createTransferReceptionFormSession(transfer.id)`. Reutiliza la solicitud inmutable en reintentos idénticos, genera nueva identidad si cambia cantidad/disposición/cierre/nota tras un `4xx`, y bloquea la edición mostrando aviso explícito cuando existe una operación `UNCERTAIN`. Tras `TAC-P0-08`, un fallo de presentación se muestra como "Recepción registrada — vista pendiente de actualizar" y bloquea el formulario sin repetir el POST. |
+| `adapters/apiInventoryAdapter.ts` | Separa los estados `IN_FLIGHT`, `UNCERTAIN` y `RECONCILED` (`getTransferWriteRecord`). Elimina la limpieza prematura en `readTransfers()` y registra `UNVERIFIABLE_BY_LIST_CONTRACT`. Rechaza cualquier cambio de `operationId` o contenido mientras el traslado esté en `UNCERTAIN`. El caché de confirmaciones (`TAC-P0-09`) almacena `{ payload, dto }` y compara el fingerprint completo antes de devolverlo; el `200` debe traer el `operation_id` y `traslado_id` solicitados. |
+| `hooks/useTransfers.ts` | Distingue el fallo de presentación del fallo transaccional: expone `presentationError`, dispara `notifyInventoryChanged()` para refrescar la vista y nunca marca la recepción como fallida. |
+| `pages/TransfersPage.tsx` | Muestra el aviso de presentación (`FeedbackAlert` warning) y limpia el feedback al abrir el modal de otro traslado. |
+| `services/inventoryMappers.ts` | Validadores/mappers del contrato: `toThresholdConfig`, `toDashboardKpiSummary`, `toLocationDistributionList`, `validateTrasladoDto`, `validateTrasladoListDto`, `validateRecepcionResponse` (devuelve `operationId` para verificar identidad), `validateTransferPresentation`. |
+| `services/inventoryErrors.ts` | Códigos de protocolo/estado y `InventoryPresentationFailedError` (`TAC-P0-08`): separa `WRITE_CONFIRMED` de `PRESENTATION_FAILED` sin inventar códigos HTTP del provider. |
 | `services/inventoryTypes.ts` | `LocationDistribution.locationName` y `blockedTotal` admiten `null` cuando el contrato no publica el dato. |
 | `services/inventoryProvider.ts` | Punto de inyección `configureInventoryApi(factory)`. Sin factory, el modo API mantiene un fallo controlado bajo demanda; nunca cae al mock. |
 | `hooks/useInventoryDashboard.ts` | Resuelve cada sección con `Promise.allSettled`: un bloqueo de contrato o fallo parcial no borra los KPIs que sí respondieron. Distingue `error` de `blockedReason`. |
 | `components/DashboardKpiGrid.tsx`, `DashboardAlerts.tsx`, `LocationDistributionTable.tsx` | Estados "no verificable" (warning) separados del error de transporte; `null` se muestra como "Sin datos", nunca como `0`. |
-| `adapters/apiInventoryAdapter.spec.ts` | **28 pruebas unitarias y de flujo formulario+adaptador** (incluye los 8 casos obligatorios de `TAC-P0-01`/`TAC-P0-02`). |
+| `adapters/apiInventoryAdapter.spec.ts` | **36 pruebas unitarias y de flujo formulario+adaptador** (incluye los casos obligatorios de `TAC-P0-01`/`TAC-P0-02`, `TAC-P0-05`, `TAC-P1-07`, `TAC-P0-08` y los 6 casos de `TAC-P0-09`). |
 | `INTEGRACION_HTTP.md` | Este documento. |
 
 No se editaron `src/main.tsx`, `src/app/config/CommercialModeGate.tsx`, el
@@ -113,6 +130,40 @@ autoritativa de Inventory con el enriquecimiento de presentación (`TAC-P0-05`):
    Catálogo/ubicaciones). Si falla, la mutación **ya está confirmada**; el
    estado permanece `RECONCILED` y el reintento con la misma identidad devuelve
    el cache **sin repetir el POST**.
+
+### `WRITE_CONFIRMED` vs `PRESENTATION_FAILED` (`TAC-P0-08`)
+
+Un fallo de `present()` **no** es un fallo de la mutación. El adaptador lo
+envuelve en `InventoryPresentationFailedError`, que conserva el motivo real
+(`CONTRATO_BLOQUEADO`/`RESPUESTA_INCOMPATIBLE`/`PRESENTACION_FALLIDA`) e
+identifica `transferId` y `operationId`. Consecuencias verificadas:
+
+- `useTransfers` expone `presentationError` (no `submitError`), dispara
+  `notifyInventoryChanged()` y propaga el error.
+- `ReceiveTransferModal` llama a `session.recordConfirmed(payload)`, hidrata el
+  formulario con el snapshot confirmado, deshabilita todos los campos y el botón
+  de envío, y muestra "Recepción registrada — vista pendiente de actualizar".
+- `transferReceptionAttempt.ts` mantiene `confirmedAwaitingRefresh` por
+  `transferId`. `prepareSubmission()` rechaza cualquier contenido distinto al
+  confirmado hasta que `readTransfers()` complete un listado exitoso.
+- El reintento exacto devuelve el DTO cacheado y **no** emite un segundo POST.
+
+### Identidad del caché de confirmaciones (`TAC-P0-09`)
+
+`confirmedReceptions` almacena `{ payload, dto }` por `operationId`. Antes de
+devolver un resultado cacheado:
+
+1. Se compara el fingerprint completo con `areSameReceiveTransferPayloads()`
+   (`transferId`, `quantityReceived`, `disposition`, `finalReceipt`,
+   `receivedAt` y `note` normalizada).
+2. Se exige `dto.traslado_id === payload.transferId`.
+3. Cualquier diferencia lanza `IDEMPOTENCY_CONFLICT` sin devolver el resultado
+   anterior y sin emitir petición.
+
+Además, tras un `200`, `validateRecepcionResponse()` exige que
+`operation_id === payload.operationId` y `traslado.traslado_id ===
+payload.transferId`. Si no coinciden, **no se declara confirmación**: se lanza
+`RESPUESTA_INCOMPATIBLE` y la operación permanece `UNCERTAIN`.
 
 ### Matriz de transición de estados (`TAC-P1-07`)
 
@@ -212,9 +263,9 @@ modo. Ese desbloqueo corresponde a la composición compartida de Castilla/Marco.
 |---|---|
 | `npm run typecheck` | PASS |
 | `npm run lint` | PASS |
-| `npx vitest run --config src/features/inventory/adapters/vitest.config.ts` | **33/33 PASS** (incluye regresiones `TAC-P0-05`, `TAC-P1-07` y caracterización `TAC-P0-06`) |
+| `npx vitest run --config src/features/inventory/adapters/vitest.config.ts` | **36/36 PASS** (incluye regresiones `TAC-P0-05`, `TAC-P1-07`, `TAC-P0-08` y los 6 casos `TAC-P0-09`; caracterización `TAC-P0-06`) |
 | `npm test` | `test:unit:combos` 54 PASS; `test:unit:bulk` 51 PASS |
-| `npx playwright test tests/inventory.spec.ts tests/inventory-adapter.spec.ts tests/inventory-idempotency.spec.ts tests/inventory-dashboard.spec.ts` | PASS |
+| `npx playwright test tests/inventory.spec.ts tests/inventory-dashboard.spec.ts tests/inventory-adapter.spec.ts --reporter=line` | **46/46 PASS** |
 | `npm run build` con `VITE_DATA_MODE=mock` | PASS |
 | `npm run build` con `VITE_DATA_MODE=api` | PASS |
 | `node scripts/verify-production.mjs mock` (1440 px) | **58 vistas PASS** |
