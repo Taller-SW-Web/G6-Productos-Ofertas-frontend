@@ -95,7 +95,9 @@ tercera auditoría de Marco:
 | `services/inventoryProvider.ts` | Punto de inyección `configureInventoryApi(factory)`. Sin factory, el modo API mantiene un fallo controlado bajo demanda; nunca cae al mock. |
 | `hooks/useInventoryDashboard.ts` | Resuelve cada sección con `Promise.allSettled`: un bloqueo de contrato o fallo parcial no borra los KPIs que sí respondieron. Distingue `error` de `blockedReason`. |
 | `components/DashboardKpiGrid.tsx`, `DashboardAlerts.tsx`, `LocationDistributionTable.tsx` | Estados "no verificable" (warning) separados del error de transporte; `null` se muestra como "Sin datos", nunca como `0`. |
-| `adapters/apiInventoryAdapter.spec.ts` | **36 pruebas unitarias y de flujo formulario+adaptador** (incluye los casos obligatorios de `TAC-P0-01`/`TAC-P0-02`, `TAC-P0-05`, `TAC-P1-07`, `TAC-P0-08` y los 6 casos de `TAC-P0-09`). |
+| `adapters/apiInventoryAdapter.spec.ts` | **40 pruebas unitarias y de flujo formulario+adaptador** (incluye los casos obligatorios de `TAC-P0-01`/`TAC-P0-02`, `TAC-P0-05`, `TAC-P1-07`, `TAC-P0-08` y los **6 casos explícitos** de `TAC-P0-09`). |
+| `tests/inventory-presentation.spec.ts` | Prueba Playwright del escenario obligatorio `TAC-P0-08`: `POST 200` confirmado → fallo de presentación → formulario bloqueado → intento de reenvío sin segundo POST → refresco exitoso → nueva intención legítima con otro `operationId`. |
+| `tests/harness/inventory-http.html` / `tests/harness/inventory-http.tsx` | Harness de navegador que compone el **adaptador HTTP real** con un transporte de prueba y un resolvedor de presentación controlable; no inventa endpoints ni DTO (usa la forma del contrato ya validada). |
 | `INTEGRACION_HTTP.md` | Este documento. |
 
 No se editaron `src/main.tsx`, `src/app/config/CommercialModeGate.tsx`, el
@@ -263,9 +265,9 @@ modo. Ese desbloqueo corresponde a la composición compartida de Castilla/Marco.
 |---|---|
 | `npm run typecheck` | PASS |
 | `npm run lint` | PASS |
-| `npx vitest run --config src/features/inventory/adapters/vitest.config.ts` | **36/36 PASS** (incluye regresiones `TAC-P0-05`, `TAC-P1-07`, `TAC-P0-08` y los 6 casos `TAC-P0-09`; caracterización `TAC-P0-06`) |
+| `npx vitest run --config src/features/inventory/adapters/vitest.config.ts` | **40/40 PASS** (incluye regresiones `TAC-P0-05`, `TAC-P1-07`, `TAC-P0-08` y los 6 casos explícitos `TAC-P0-09`; caracterización `TAC-P0-06`) |
 | `npm test` | `test:unit:combos` 54 PASS; `test:unit:bulk` 51 PASS |
-| `npx playwright test tests/inventory.spec.ts tests/inventory-dashboard.spec.ts tests/inventory-adapter.spec.ts --reporter=line` | **46/46 PASS** |
+| `npx playwright test tests/inventory.spec.ts tests/inventory-dashboard.spec.ts tests/inventory-adapter.spec.ts tests/inventory-presentation.spec.ts --reporter=line` | **47/47 PASS** |
 | `npm run build` con `VITE_DATA_MODE=mock` | PASS |
 | `npm run build` con `VITE_DATA_MODE=api` | PASS |
 | `node scripts/verify-production.mjs mock` (1440 px) | **58 vistas PASS** |
@@ -289,4 +291,29 @@ modo. Ese desbloqueo corresponde a la composición compartida de Castilla/Marco.
     ajenos (no declara confirmación, preserva `UNCERTAIN`). Resultado: **PASS**.
 - Estado: **PARTIAL** (sin integración React→Gateway→PostgreSQL; ver `TAC-P0-03`
   y dependencias #45/#109).
+
+## Evidencia de la iteración 5 (prueba de navegador TAC-P0-08 y casos explícitos TAC-P0-09)
+
+- Rama: `taco`.
+- Commit de pruebas: `91db964`.
+- Archivos: `tests/inventory-presentation.spec.ts`,
+  `tests/harness/inventory-http.html`, `tests/harness/inventory-http.tsx` y
+  `src/features/inventory/adapters/apiInventoryAdapter.spec.ts`.
+- `TAC-P0-08` en navegador (Playwright, adaptador HTTP real):
+  - `POST 200` válido → confirmación → el resolvedor de presentación falla.
+  - La UI muestra "Recepción registrada — vista pendiente de actualizar" y no
+    "No se pudo registrar la recepción".
+  - Cantidad, nota y botón de confirmación quedan bloqueados con el snapshot
+    confirmado; un reenvío del formulario no emite un segundo `POST`.
+  - La bandeja conserva la vista desactualizada hasta que un listado completo y
+    presentable la refresca; solo entonces se habilita una nueva intención, con
+    un `operationId` distinto.
+- `TAC-P0-09` separado en 6 pruebas explícitas: (1) payload idéntico cacheado;
+  (2) distinta cantidad; (3) distinta nota; (4) distinta disposición, cierre
+  final, fecha o traslado; (5) `operation_id` ajeno; (6) `traslado_id` ajeno.
+- Resultado local: **40/40** pruebas del adaptador y **47/47** pruebas
+  Playwright de inventario. `typecheck`, `lint`, `npm test` (54 + 51), builds
+  `mock`/`api` y `verify-production` (58/53 vistas) **PASS**.
+- Estado: **PARTIAL** (sin integración React→Gateway→PostgreSQL; ver `TAC-P0-03`
+  y dependencias #45/#109). El PR y su CI quedan para la revisión del owner.
 
