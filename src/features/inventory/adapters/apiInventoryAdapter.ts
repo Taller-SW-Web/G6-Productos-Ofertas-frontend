@@ -30,7 +30,9 @@ import {
   clearConfirmedTransferReceptionAwaitingRefresh,
   clearUncertainTransferReception,
   freezeReceiveTransferPayload,
+  getConfirmedTransferReceptionAwaitingRefresh,
   setUncertainTransferReception,
+  type TransferReceptionPresentationRefresh,
   type TransferReceptionWriteRecord,
 } from "../services/transferReceptionAttempt";
 
@@ -109,6 +111,28 @@ function blocked(operation: string, detail: string): InventoryError {
   );
 }
 
+// TAC-P1-10: evidencia de frescura disponible en el contrato actual. Se compara
+// el agregado autoritativo devuelto por el POST de confirmación con el DTO del
+// listado. No se usan `updated_at` ni `stockVersion`: el contrato no publica una
+// versión de stock en `TrasladoInventario` y un timestamp no demuestra que la
+// recepción esté incluida. Un agregado distinto (incluido uno mayor por una
+// recepción externa) no se considera prueba suficiente.
+function sameTransferAggregate(
+  confirmed: TrasladoInventarioDto,
+  candidate: TrasladoInventarioDto,
+): boolean {
+  return (
+    confirmed.traslado_id === candidate.traslado_id &&
+    confirmed.sku === candidate.sku &&
+    confirmed.quantity_shipped === candidate.quantity_shipped &&
+    confirmed.quantity_received === candidate.quantity_received &&
+    confirmed.missing_quantity === candidate.missing_quantity &&
+    confirmed.source_location_id === candidate.source_location_id &&
+    confirmed.target_location_id === candidate.target_location_id &&
+    confirmed.estado === candidate.estado
+  );
+}
+
 // La UI usa el literal "all" para representar "sin filtro". No es un valor del
 // contrato: enviarlo produciría 400 (estado/target_location_id) o seleccionaría
 // una categoría/marca/ubicación inexistente. Se normaliza a "ausente".
@@ -168,6 +192,15 @@ export function createHttpInventoryRepository(
   // ubicaciones) falla después de que la mutación ya fue persistida, pero SOLO
   // para la misma intención exacta.
   const confirmedReceptions = new Map<string, ConfirmedReceptionRecord>();
+
+  function setPresentationRefresh(
+    transferId: string,
+    status: TransferReceptionPresentationRefresh,
+  ): void {
+    const record = transferWrites.get(transferId);
+    if (!record || record.presentationRefresh === status) return;
+    transferWrites.set(transferId, { ...record, presentationRefresh: status });
+  }
 
   async function send(
     path: string,
@@ -304,6 +337,9 @@ export function createHttpInventoryRepository(
     try {
       return await present(dto);
     } catch (error) {
+      // TAC-P1-10: deja constancia de que la confirmación existe pero la vista
+      // todavía no tiene evidencia de frescura. No libera el bloqueo.
+      setPresentationRefresh(payload.transferId, "AWAITING");
       throw new InventoryPresentationFailedError(
         payload.transferId,
         payload.operationId,
@@ -369,11 +405,27 @@ export function createHttpInventoryRepository(
       }
     }
     const items = await Promise.all(collected.map((dto) => present(dto)));
-    // TAC-P0-08: solo un listado COMPLETO y presentable refresca la vista. Hasta
-    // aquí se mantiene bloqueada cualquier nueva intención para un traslado cuya
-    // recepción ya fue confirmada pero cuya vista seguía desactualizada.
+    // TAC-P1-10: solo un listado COMPLETO, presentable y con el agregado
+    // coherente con la confirmación libera el bloqueo. Un HTTP 200 con saldo
+    // anterior no demuestra que la recepción esté reflejada; en ese caso el
+    // bloqueo permanece y se registra `UNVERIFIABLE_BY_AGGREGATE`
+    // (BLOQUEADO_ESPECÍFICO). Esto no aplica a `UNCERTAIN`, que sigue sin
+    // liberarse por listado (ver bloque anterior).
     for (const dto of collected) {
-      clearConfirmedTransferReceptionAwaitingRefresh(dto.traslado_id);
+      const awaiting = getConfirmedTransferReceptionAwaitingRefresh(
+        dto.traslado_id,
+      );
+      if (!awaiting) continue;
+      const confirmed = confirmedReceptions.get(awaiting.operationId);
+      if (confirmed && sameTransferAggregate(confirmed.dto, dto)) {
+        clearConfirmedTransferReceptionAwaitingRefresh(dto.traslado_id);
+        setPresentationRefresh(dto.traslado_id, "REFRESHED");
+      } else {
+        setPresentationRefresh(
+          dto.traslado_id,
+          "UNVERIFIABLE_BY_AGGREGATE",
+        );
+      }
     }
     return items;
   }

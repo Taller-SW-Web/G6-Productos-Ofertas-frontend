@@ -95,6 +95,11 @@ function TransferFormInner({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // TAC-P1-10: el botón ya está deshabilitado, pero un `requestSubmit`
+    // programático no debe poder reenviar mientras la vista siga bloqueada.
+    // No se aplica a `UNCERTAIN`: ese caso sí permite reintentar la misma
+    // intención con el snapshot inmutable.
+    if (isConfirmedLocked) return;
     if (isNaN(numQty) || !Number.isInteger(numQty) || numQty <= 0) {
       setErrorValidation(
         "La cantidad recibida debe ser un número entero mayor que cero.",

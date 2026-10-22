@@ -40,11 +40,24 @@ export type TransferReceptionReconciliationStatus =
   | "UNVERIFIABLE_BY_LIST_CONTRACT"
   | "CONFIRMED_BY_IDEMPOTENT_RETRY";
 
+// TAC-P1-10: estado local del refresco de presentación. Un listado HTTP 200 y
+// presentable NO basta para liberar el bloqueo de una recepción confirmada:
+// solo lo hace cuando el agregado del traslado coincide con el DTO confirmado.
+//   - AWAITING: todavía no hay un listado presentable que permita comparar.
+//   - REFRESHED: el listado coincide con la confirmación y se liberó el bloqueo.
+//   - UNVERIFIABLE_BY_AGGREGATE: el listado no demuestra el movimiento; el
+//     bloqueo permanece (BLOQUEADO_ESPECÍFICO, requiere conciliación).
+export type TransferReceptionPresentationRefresh =
+  | "AWAITING"
+  | "REFRESHED"
+  | "UNVERIFIABLE_BY_AGGREGATE";
+
 export interface TransferReceptionWriteRecord {
   readonly state: TransferReceptionWriteState;
   readonly payload: Readonly<ReceiveTransferPayload>;
   readonly reconciliation: TransferReceptionReconciliationStatus;
   readonly updatedAt: string;
+  readonly presentationRefresh?: TransferReceptionPresentationRefresh;
 }
 
 export interface TransferReceptionDraftInput {
@@ -301,7 +314,10 @@ export function createTransferReceptionFormSession(
 
     recordSuccess(payload: Readonly<ReceiveTransferPayload>): void {
       clearUncertainTransferReception(transferId, payload.operationId);
-      clearConfirmedTransferReceptionAwaitingRefresh(transferId);
+      // TAC-P1-10: un reintento cacheado que vuelve a presentar el DTO
+      // confirmado NO es un listado coherente. El bloqueo de presentación solo
+      // se libera en `readTransfers()` cuando el agregado del listado coincide
+      // con la confirmación; por eso aquí no se limpia.
       lastAttempt = payload;
     },
 

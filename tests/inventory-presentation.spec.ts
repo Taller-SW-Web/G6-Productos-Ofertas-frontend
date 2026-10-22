@@ -1,13 +1,14 @@
 import { test, expect } from "@playwright/test";
 
-// TAC-P0-08 — escenario obligatorio de la auditoría de Marco.
+// TAC-P0-08 / TAC-P1-10 — escenarios obligatorios de la auditoría de Marco.
 //
 // Se ejecuta con el adaptador HTTP REAL (`createHttpInventoryRepository`)
 // montado sobre un transporte de prueba que responde el contrato OpenAPI ya
 // validado por las pruebas unitarias. El fallo de presentación ocurre DESPUÉS
 // del 200 de confirmación, que es exactamente el caso que el auditor exige
-// verificar en el flujo del modal.
-test.describe("TAC-P0-08: escritura confirmada y fallo de presentación", () => {
+// verificar en el flujo del modal. TAC-P1-10 añade la lectura obsoleta: un GET
+// válido con el saldo anterior no debe liberar el bloqueo.
+test.describe("TAC-P0-08 / TAC-P1-10: escritura confirmada y presentación", () => {
   test("POST 200 confirmado + fallo de presentación no permite una segunda intención", async ({
     page,
   }) => {
@@ -84,13 +85,52 @@ test.describe("TAC-P0-08: escritura confirmada y fallo de presentación", () => 
     ).toBeVisible();
     await expect(page.getByRole("button", { name: "Reintentar" })).toBeVisible();
 
-    // Solo un listado COMPLETO y presentable actualiza el traslado y habilita
-    // una nueva intención legítima.
-    await page.evaluate(() =>
-      window.inventoryHttpScenario.setPresentationDown(false),
-    );
+    // TAC-P1-10: un GET válido y presentable que todavía devuelve el saldo
+    // anterior (0/10) NO libera el bloqueo. La bandeja deja de estar en error,
+    // así que el refresco siguiente se dispara con la señal interna real.
+    await page.evaluate(() => {
+      window.inventoryHttpScenario.setPresentationDown(false);
+      window.inventoryHttpScenario.setStaleRead(true);
+    });
     await page.getByRole("button", { name: "Reintentar" }).click();
     await expect(page.getByText("TR-HTTP-001")).toBeVisible();
+
+    await page
+      .getByRole("button", { name: "Recepcionar traslado TR-HTTP-001" })
+      .click();
+    const staleDialog = page.getByRole("dialog", { name: /Registrar recep/i });
+    await expect(staleDialog).toBeVisible();
+
+    const staleQty = staleDialog.getByRole("textbox", {
+      name: /Cantidad recibida/i,
+    });
+    const staleConfirm = staleDialog.getByRole("button", {
+      name: /Confirmar recep/i,
+    });
+    await expect(staleQty).toBeDisabled();
+    await expect(staleQty).toHaveValue("4");
+    await expect(staleConfirm).toBeDisabled();
+
+    // El guard de TAC-P1-10 impide incluso un submit programático.
+    await staleDialog
+      .locator("form")
+      .evaluate((form) => (form as HTMLFormElement).requestSubmit());
+    await page.waitForTimeout(150);
+    expect(
+      await page.evaluate(() => window.inventoryHttpScenario.postCount()),
+    ).toBe(1);
+
+    await page.keyboard.press("Escape");
+    await expect(staleDialog).toBeHidden();
+
+    // Un GET coherente con la confirmación (4/6/RECIBIDO_PARCIAL) sí libera el
+    // bloqueo y actualiza la bandeja antes de abrir el modal.
+    await page.evaluate(() => {
+      window.inventoryHttpScenario.setStaleRead(false);
+      window.inventoryHttpScenario.refresh();
+    });
+    const transferRow = page.getByRole("row", { name: /TR-HTTP-001/ });
+    await expect(transferRow).toContainText("6");
 
     await page
       .getByRole("button", { name: "Recepcionar traslado TR-HTTP-001" })

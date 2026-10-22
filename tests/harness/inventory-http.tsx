@@ -15,6 +15,7 @@ import {
   type InventoryHttpRequest,
 } from "../../src/features/inventory/adapters/apiInventoryAdapter";
 import { InventoryError } from "../../src/features/inventory/services/inventoryErrors";
+import { notifyInventoryChanged } from "../../src/features/inventory/services/inventoryEvents";
 
 // Harness de navegador para el adaptador HTTP REAL de inventario.
 //
@@ -26,15 +27,25 @@ import { InventoryError } from "../../src/features/inventory/services/inventoryE
 // exactamente la forma del contrato OpenAPI 0.6.0-rc.1 ya validada por las
 // pruebas unitarias.
 //
-// El escenario reproduce TAC-P0-08:
+// El escenario reproduce TAC-P0-08 y TAC-P1-10:
 //   1. `GET /traslados` presenta el traslado (resolvedor disponible).
 //   2. `POST /recepciones` responde 200 con un DTO válido -> confirmación.
 //   3. El resolvedor de presentación falla DESPUÉS de la confirmación.
 //   4. El formulario debe bloquearse y no emitir un segundo POST.
+//   5. Un GET válido pero todavía desactualizado (TAC-P1-10) tampoco libera el
+//      bloqueo; solo lo hace un GET cuyo agregado coincide con la confirmación.
 
 interface InventoryHttpScenario {
   /** Hace fallar el enriquecimiento de presentación (no la mutación). */
   setPresentationDown(value: boolean): void;
+  /**
+   * TAC-P1-10: el GET responde el agregado previo (0/10/EN_TRANSITO) aunque el
+   * POST ya haya confirmado la recepción. Sirve para probar que un HTTP 200
+   * presentable no libera el bloqueo.
+   */
+  setStaleRead(value: boolean): void;
+  /** Dispara la misma señal interna que usa la bandeja para refrescar. */
+  refresh(): void;
   /** Cantidad de POST /recepciones efectivamente emitidos. */
   postCount(): number;
   /** Cantidad acumulada de unidades confirmadas por el servidor de prueba. */
@@ -55,6 +66,7 @@ const TRANSFER_ID = "http-tr-1";
 const SHIPPED_QUANTITY = 10;
 
 let presentationDown = false;
+let staleRead = false;
 let receivedQuantity = 0;
 let postCount = 0;
 let lastOperationId: string | null = null;
@@ -74,11 +86,11 @@ function problemResponse(status: number, code: string): Response {
   });
 }
 
-function trasladoDto() {
+function trasladoDto(quantityReceived = receivedQuantity) {
   const estado =
-    receivedQuantity === 0
+    quantityReceived === 0
       ? "EN_TRANSITO"
-      : receivedQuantity >= SHIPPED_QUANTITY
+      : quantityReceived >= SHIPPED_QUANTITY
         ? "COMPLETADO"
         : "RECIBIDO_PARCIAL";
 
@@ -87,8 +99,8 @@ function trasladoDto() {
     source_incident_id: null,
     sku: "HTTP-RUN-41-BLU",
     quantity_shipped: SHIPPED_QUANTITY,
-    quantity_received: receivedQuantity,
-    missing_quantity: SHIPPED_QUANTITY - receivedQuantity,
+    quantity_received: quantityReceived,
+    missing_quantity: SHIPPED_QUANTITY - quantityReceived,
     source_location_id: "http-loc-1",
     target_location_id: "http-loc-2",
     estado,
@@ -135,7 +147,9 @@ const transport = {
 
     if (path.startsWith("/api/v1/inventario/traslados")) {
       return jsonResponse({
-        items: [trasladoDto()],
+        // TAC-P1-10: simula una lectura que todavía no refleja el POST. El DTO
+        // sigue siendo válido y presentable; solo es el saldo anterior.
+        items: [trasladoDto(staleRead ? 0 : receivedQuantity)],
         pagina: 1,
         tamanio: 100,
         total: 1,
@@ -169,6 +183,12 @@ resetInventoryRepository(repository);
 window.inventoryHttpScenario = {
   setPresentationDown(value: boolean): void {
     presentationDown = value;
+  },
+  setStaleRead(value: boolean): void {
+    staleRead = value;
+  },
+  refresh(): void {
+    notifyInventoryChanged();
   },
   postCount(): number {
     return postCount;

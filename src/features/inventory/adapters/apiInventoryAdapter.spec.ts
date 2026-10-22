@@ -5,6 +5,7 @@ import {
 } from "../services/inventoryErrors";
 import {
   createTransferReceptionFormSession,
+  getConfirmedTransferReceptionAwaitingRefresh,
   getUncertainTransferReception,
   resetConfirmedTransferReceptionsAwaitingRefresh,
   resetUncertainTransferReceptions,
@@ -65,10 +66,24 @@ const PRESENTATION = {
   targetLocationName: "Tienda Norte",
 };
 
+// TAC-P1-10: estado previo y estado confirmado deben ser distinguibles. Si
+// ambos usaran 4/6, un GET desactualizado sería indistinguible de uno fresco.
+const TRASLADO_PREVIO = traslado({
+  quantity_received: 0,
+  missing_quantity: 10,
+  estado: "EN_TRANSITO",
+});
+
+const TRASLADO_CONFIRMADO = traslado({
+  quantity_received: 4,
+  missing_quantity: 6,
+  estado: "RECIBIDO_PARCIAL",
+});
+
 const RECEPCION_OK = {
   receipt_id: "r-1",
   operation_id: "11111111-1111-4111-8111-111111111111",
-  traslado: traslado({ estado: "RECIBIDO_PARCIAL" }),
+  traslado: TRASLADO_CONFIRMADO,
   disposition: "REINGRESAR_DISPONIBLE",
   received_quantity: 4,
   destination_balance: null,
@@ -762,9 +777,7 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
           });
         }
         return jsonResponse({
-          items: [
-            traslado({ quantity_received: 4, estado: "RECIBIDO_PARCIAL" }),
-          ],
+          items: [TRASLADO_CONFIRMADO],
           pagina: 1,
           tamanio: 100,
           total: 1,
@@ -808,6 +821,9 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
     // La mutación quedó confirmada pese al fallo de presentación.
     expect(postCount).toBe(1);
     expect(repository.getTransferWriteRecord("t-1")?.state).toBe("RECONCILED");
+    expect(repository.getTransferWriteRecord("t-1")?.presentationRefresh).toBe(
+      "AWAITING",
+    );
     expect(getUncertainTransferReception("t-1")).toBeNull();
 
     // El formulario conoce la confirmación y no puede generar otra intención
@@ -838,10 +854,14 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
     expect(postCount).toBe(1);
     expect(calls.filter((c) => c.request.method === "POST")).toHaveLength(1);
 
-    // Tras un listado exitoso (vista actualizada), se habilita una nueva
+    // Tras un listado coherente (vista actualizada), se habilita una nueva
     // intención legítima con otro operationId.
     resolverDown = false;
     await expect(repository.getTransfers()).resolves.toHaveLength(1);
+    expect(getConfirmedTransferReceptionAwaitingRefresh("t-1")).toBeNull();
+    expect(repository.getTransferWriteRecord("t-1")?.presentationRefresh).toBe(
+      "REFRESHED",
+    );
     const next = session.prepareSubmission({
       quantityReceived: 3,
       disposition: "REINGRESAR_DISPONIBLE",
@@ -850,6 +870,281 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
     });
     expect(next.operationId).toBe(ids[1]);
     expect(next.operationId).not.toBe(payload.operationId);
+  });
+
+  it("TAC-P1-10: un GET presentable con el saldo anterior no libera el bloqueo", async () => {
+    let postCount = 0;
+    let resolverDown = true;
+    const { repository, calls } = setup(
+      async (path, req) => {
+        if (path.includes("/recepciones")) {
+          postCount += 1;
+          const body = JSON.parse(req.body ?? "{}") as {
+            operation_id: string;
+          };
+          return jsonResponse({
+            ...RECEPCION_OK,
+            operation_id: body.operation_id,
+          });
+        }
+        return jsonResponse({
+          items: [TRASLADO_PREVIO],
+          pagina: 1,
+          tamanio: 100,
+          total: 1,
+        });
+      },
+      {
+        resolver: async () => {
+          if (resolverDown) {
+            throw new InventoryError(
+              "CONTRATO_BLOQUEADO",
+              "Catálogo/ubicaciones no disponible",
+            );
+          }
+          return PRESENTATION;
+        },
+      },
+    );
+
+    const session = createTransferReceptionFormSession("t-1", {
+      createId: () => "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      now: () => "2026-10-20T18:00:00.000Z",
+    });
+
+    await expect(
+      rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+    ).resolves.toMatchObject({ code: "CONTRATO_BLOQUEADO" });
+    session.recordConfirmed(RECEPCION_PAYLOAD);
+
+    // El GET es válido y presentable, pero devuelve el saldo previo (0/10).
+    resolverDown = false;
+    await expect(repository.getTransfers()).resolves.toHaveLength(1);
+
+    expect(getConfirmedTransferReceptionAwaitingRefresh("t-1")).not.toBeNull();
+    expect(repository.getTransferWriteRecord("t-1")?.presentationRefresh).toBe(
+      "UNVERIFIABLE_BY_AGGREGATE",
+    );
+    expect(() =>
+      session.prepareSubmission({
+        quantityReceived: 3,
+        disposition: "REINGRESAR_DISPONIBLE",
+        finalReceipt: true,
+        note: "",
+      }),
+    ).toThrowError(InventoryError);
+
+    // Un reintento idéntico devuelve el caché; no hay segundo POST.
+    await expect(
+      repository.receiveTransfer(RECEPCION_PAYLOAD),
+    ).resolves.toMatchObject({ id: "t-1", quantityReceived: 4 });
+    expect(postCount).toBe(1);
+    expect(calls.filter((c) => c.request.method === "POST")).toHaveLength(1);
+  });
+
+  it("TAC-P1-10: un GET con el agregado confirmado libera el bloqueo y permite una nueva intención", async () => {
+    let postCount = 0;
+    let resolverDown = true;
+    const { repository, calls } = setup(
+      async (path, req) => {
+        if (path.includes("/recepciones")) {
+          postCount += 1;
+          const body = JSON.parse(req.body ?? "{}") as {
+            operation_id: string;
+          };
+          return jsonResponse({
+            ...RECEPCION_OK,
+            operation_id: body.operation_id,
+          });
+        }
+        return jsonResponse({
+          items: [TRASLADO_CONFIRMADO],
+          pagina: 1,
+          tamanio: 100,
+          total: 1,
+        });
+      },
+      {
+        resolver: async () => {
+          if (resolverDown) {
+            throw new InventoryError(
+              "CONTRATO_BLOQUEADO",
+              "Catálogo/ubicaciones no disponible",
+            );
+          }
+          return PRESENTATION;
+        },
+      },
+    );
+
+    const session = createTransferReceptionFormSession("t-1", {
+      createId: () => "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      now: () => "2026-10-20T18:00:00.000Z",
+    });
+
+    await expect(
+      rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+    ).resolves.toMatchObject({ code: "CONTRATO_BLOQUEADO" });
+    session.recordConfirmed(RECEPCION_PAYLOAD);
+
+    resolverDown = false;
+    await expect(repository.getTransfers()).resolves.toHaveLength(1);
+
+    expect(getConfirmedTransferReceptionAwaitingRefresh("t-1")).toBeNull();
+    expect(repository.getTransferWriteRecord("t-1")?.presentationRefresh).toBe(
+      "REFRESHED",
+    );
+    const next = session.prepareSubmission({
+      quantityReceived: 3,
+      disposition: "REINGRESAR_DISPONIBLE",
+      finalReceipt: true,
+      note: "",
+    });
+    expect(next.operationId).not.toBe(RECEPCION_PAYLOAD.operationId);
+    expect(postCount).toBe(1);
+    expect(calls.filter((c) => c.request.method === "POST")).toHaveLength(1);
+  });
+
+  it("TAC-P1-10: si el GET falla, el bloqueo permanece aunque el resolvedor esté disponible", async () => {
+    let postCount = 0;
+    let resolverDown = true;
+    const { repository } = setup(
+      async (path, req) => {
+        if (path.includes("/recepciones")) {
+          postCount += 1;
+          const body = JSON.parse(req.body ?? "{}") as {
+            operation_id: string;
+          };
+          return jsonResponse({
+            ...RECEPCION_OK,
+            operation_id: body.operation_id,
+          });
+        }
+        return problemResponse(503, "SERVICIO_NO_DISPONIBLE");
+      },
+      {
+        resolver: async () => {
+          if (resolverDown) {
+            throw new InventoryError(
+              "CONTRATO_BLOQUEADO",
+              "Catálogo/ubicaciones no disponible",
+            );
+          }
+          return PRESENTATION;
+        },
+      },
+    );
+
+    const session = createTransferReceptionFormSession("t-1", {
+      createId: () => "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      now: () => "2026-10-20T18:00:00.000Z",
+    });
+
+    await expect(
+      rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+    ).resolves.toMatchObject({ code: "CONTRATO_BLOQUEADO" });
+    session.recordConfirmed(RECEPCION_PAYLOAD);
+
+    resolverDown = false;
+    await expect(rejection(repository.getTransfers())).resolves.toMatchObject({
+      code: "SERVICIO_NO_DISPONIBLE",
+    });
+
+    expect(getConfirmedTransferReceptionAwaitingRefresh("t-1")).not.toBeNull();
+    expect(repository.getTransferWriteRecord("t-1")?.presentationRefresh).toBe(
+      "AWAITING",
+    );
+    expect(() =>
+      session.prepareSubmission({
+        quantityReceived: 3,
+        disposition: "REINGRESAR_DISPONIBLE",
+        finalReceipt: true,
+        note: "",
+      }),
+    ).toThrowError(InventoryError);
+    expect(postCount).toBe(1);
+  });
+
+  it("TAC-P1-10: si el resolvedor falla, el bloqueo permanece aunque el GET sea válido", async () => {
+    let postCount = 0;
+    const { repository } = setup(
+      async (path, req) => {
+        if (path.includes("/recepciones")) {
+          postCount += 1;
+          const body = JSON.parse(req.body ?? "{}") as {
+            operation_id: string;
+          };
+          return jsonResponse({
+            ...RECEPCION_OK,
+            operation_id: body.operation_id,
+          });
+        }
+        return jsonResponse({
+          items: [TRASLADO_CONFIRMADO],
+          pagina: 1,
+          tamanio: 100,
+          total: 1,
+        });
+      },
+      {
+        resolver: async () => {
+          throw new InventoryError(
+            "CONTRATO_BLOQUEADO",
+            "Catálogo/ubicaciones no disponible",
+          );
+        },
+      },
+    );
+
+    const session = createTransferReceptionFormSession("t-1", {
+      createId: () => "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      now: () => "2026-10-20T18:00:00.000Z",
+    });
+
+    await expect(
+      rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+    ).resolves.toMatchObject({ code: "CONTRATO_BLOQUEADO" });
+    session.recordConfirmed(RECEPCION_PAYLOAD);
+
+    await expect(rejection(repository.getTransfers())).resolves.toMatchObject({
+      code: "CONTRATO_BLOQUEADO",
+    });
+
+    expect(getConfirmedTransferReceptionAwaitingRefresh("t-1")).not.toBeNull();
+    expect(repository.getTransferWriteRecord("t-1")?.presentationRefresh).toBe(
+      "AWAITING",
+    );
+    expect(() =>
+      session.prepareSubmission({
+        quantityReceived: 3,
+        disposition: "REINGRESAR_DISPONIBLE",
+        finalReceipt: true,
+        note: "",
+      }),
+    ).toThrowError(InventoryError);
+    expect(postCount).toBe(1);
+  });
+
+  it("TAC-P1-10: recordSuccess no libera el bloqueo; solo un listado coherente lo hace", () => {
+    const session = createTransferReceptionFormSession("t-1", {
+      createId: () => "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      now: () => "2026-10-20T18:00:00.000Z",
+    });
+
+    session.recordConfirmed(RECEPCION_PAYLOAD);
+    expect(getConfirmedTransferReceptionAwaitingRefresh("t-1")).not.toBeNull();
+
+    // Simula el éxito de un reintento cacheado: no es un listado.
+    session.recordSuccess(RECEPCION_PAYLOAD);
+    expect(getConfirmedTransferReceptionAwaitingRefresh("t-1")).not.toBeNull();
+    expect(() =>
+      session.prepareSubmission({
+        quantityReceived: 3,
+        disposition: "REINGRESAR_DISPONIBLE",
+        finalReceipt: true,
+        note: "",
+      }),
+    ).toThrowError(InventoryError);
   });
 
   describe("TAC-P0-09: identidad del caché de confirmaciones", () => {
