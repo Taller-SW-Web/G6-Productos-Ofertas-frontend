@@ -97,7 +97,8 @@ tercera auditoría de Marco:
 | `components/DashboardKpiGrid.tsx`, `DashboardAlerts.tsx`, `LocationDistributionTable.tsx` | Estados "no verificable" (warning) separados del error de transporte; `null` se muestra como "Sin datos", nunca como `0`. |
 | `adapters/apiInventoryAdapter.spec.ts` | **40 pruebas unitarias y de flujo formulario+adaptador** (incluye los casos obligatorios de `TAC-P0-01`/`TAC-P0-02`, `TAC-P0-05`, `TAC-P1-07`, `TAC-P0-08` y los **6 casos explícitos** de `TAC-P0-09`). |
 | `tests/inventory-presentation.spec.ts` | Prueba Playwright del escenario obligatorio `TAC-P0-08`: `POST 200` confirmado → fallo de presentación → formulario bloqueado → intento de reenvío sin segundo POST → refresco exitoso → nueva intención legítima con otro `operationId`. |
-| `tests/harness/inventory-http.html` / `tests/harness/inventory-http.tsx` | Harness de navegador que compone el **adaptador HTTP real** con un transporte de prueba y un resolvedor de presentación controlable; no inventa endpoints ni DTO (usa la forma del contrato ya validada). |
+| `tests/harness/inventory-http.html` / `tests/harness/inventory-http.tsx` | Harness de navegador que compone el **adaptador HTTP real** con un transporte de prueba y un resolutor de presentación controlable; no inventa endpoints ni DTO (usa la forma del contrato ya validada). |
+| `package.json` / `adapters/vitest.config.ts` | `npm test` incorpora `test:unit:inventory`, de modo que el CI del PR ejecuta las regresiones del adaptador de inventario junto con Combos y Bulk. |
 | `INTEGRACION_HTTP.md` | Este documento. |
 
 No se editaron `src/main.tsx`, `src/app/config/CommercialModeGate.tsx`, el
@@ -266,7 +267,7 @@ modo. Ese desbloqueo corresponde a la composición compartida de Castilla/Marco.
 | `npm run typecheck` | PASS |
 | `npm run lint` | PASS |
 | `npx vitest run --config src/features/inventory/adapters/vitest.config.ts` | **40/40 PASS** (incluye regresiones `TAC-P0-05`, `TAC-P1-07`, `TAC-P0-08` y los 6 casos explícitos `TAC-P0-09`; caracterización `TAC-P0-06`) |
-| `npm test` | `test:unit:combos` 54 PASS; `test:unit:bulk` 51 PASS |
+| `npm test` | `test:unit:combos` 54 PASS; `test:unit:bulk` 51 PASS; `test:unit:inventory` 40 PASS |
 | `npx playwright test tests/inventory.spec.ts tests/inventory-dashboard.spec.ts tests/inventory-adapter.spec.ts tests/inventory-presentation.spec.ts --reporter=line` | **47/47 PASS** |
 | `npm run build` con `VITE_DATA_MODE=mock` | PASS |
 | `npm run build` con `VITE_DATA_MODE=api` | PASS |
@@ -312,8 +313,10 @@ modo. Ese desbloqueo corresponde a la composición compartida de Castilla/Marco.
   (2) distinta cantidad; (3) distinta nota; (4) distinta disposición, cierre
   final, fecha o traslado; (5) `operation_id` ajeno; (6) `traslado_id` ajeno.
 - Resultado local: **40/40** pruebas del adaptador y **47/47** pruebas
-  Playwright de inventario. `typecheck`, `lint`, `npm test` (54 + 51), builds
-  `mock`/`api` y `verify-production` (58/53 vistas) **PASS**.
+  Playwright de inventario. `typecheck`, `lint`, `npm test` (54 + 51 + 40),
+  builds `mock`/`api` y `verify-production` (58/53 vistas) **PASS**.
+- `npm test` ejecuta `test:unit:inventory`, por lo que el job `quick` del CI
+  también corre las 40 pruebas del adaptador (no solo las de Playwright).
 - Estado: **PARTIAL** (sin integración React→Gateway→PostgreSQL; ver `TAC-P0-03`
   y dependencias #45/#109). El PR y su CI quedan para la revisión del owner.
 
