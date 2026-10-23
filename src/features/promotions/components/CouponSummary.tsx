@@ -9,6 +9,8 @@ import {
   couponDateLabel,
   couponLimitLabel,
   couponPolicyLabel,
+  couponPromotionValidity,
+  couponPromotionValidityLabel,
   couponRemainingLabel,
   couponStatusLabel,
   couponUsageLabel,
@@ -42,6 +44,20 @@ export function CouponSummary({
                 coupon.promotion?.validFrom && coupon.promotion.validUntil
                   ? `${couponDateLabel(coupon.promotion.validFrom)} al ${couponDateLabel(coupon.promotion.validUntil)} (hora de Lima)`
                   : "No disponible"
+              }
+            />
+            <Value
+              label="Estado de vigencia"
+              value={couponPromotionValidityLabel(couponPromotionValidity(coupon))}
+            />
+            <Value
+              label="Elegibilidad informada"
+              value={
+                coupon.customerLimit === undefined
+                  ? "No disponible"
+                  : coupon.customerLimit === null
+                    ? "Sin límite por cliente"
+                    : `${coupon.customerLimit} uso${coupon.customerLimit === 1 ? "" : "s"} por cliente`
               }
             />
             <Value
