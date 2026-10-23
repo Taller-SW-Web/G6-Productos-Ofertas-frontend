@@ -100,7 +100,7 @@ test.describe("MK-001 — regresión de UI de Carga masiva", () => {
     await expect(page.getByRole("button", { name: "Continuar a revisión", exact: true })).toBeDisabled();
   });
 
-  test("H13: XLSX sin recuento verificado informa dependencia del proveedor", async ({ page }) => {
+  test("H13: XLSX se rechaza porque la importación no está disponible en este entorno", async ({ page }) => {
     const { getGenuineMinimalXlsxBuffer } = await import("./fixtures/genuineXlsxFixture");
     const buffer = getGenuineMinimalXlsxBuffer();
 
@@ -114,13 +114,9 @@ test.describe("MK-001 — regresión de UI de Carga masiva", () => {
     await expect(page).toHaveURL("/carga-masiva/revisar");
     await page.getByRole("button", { name: "Confirmar importación", exact: true }).first().click();
 
-    await expect(page).toHaveURL(/\/carga-masiva\/importaciones\/lote-/);
-    await expect(page.getByText("Verificación dependiente del proveedor", { exact: false })).toBeVisible();
-    await expect(page.getByText("Total de filas", { exact: true })).toBeVisible();
-    await expect(page.getByText("No determinado", { exact: true })).toBeVisible();
-    await expect(
-      page.getByRole("link", { name: "Nueva carga masiva", exact: true }).first(),
-    ).toBeVisible();
+    await expect(page).toHaveURL("/carga-masiva/revisar");
+    await expect(page.getByText("Importación no disponible", { exact: true })).toBeVisible();
+    await expect(page.getByText("La importación Excel no está disponible en este entorno.", { exact: true })).toBeVisible();
   });
 
   test("H11/H12: S03 presenta los estados en cola y en procesamiento", async ({ page }) => {
@@ -130,7 +126,7 @@ test.describe("MK-001 — regresión de UI de Carga masiva", () => {
 
     await page.goto("/carga-masiva/importaciones/batch-processing");
     await expect(page.getByText("Desglose por dominio", { exact: true })).toBeVisible();
-    await expect(page.getByText(/Muestra preliminar/)).toBeVisible();
+    await expect(page.getByText(/Filas consultadas/)).toBeVisible();
     const section = page.locator("section");
     await expect(section.getByText("Catálogo", { exact: true })).toBeVisible();
     await expect(section.getByText("Precios (Pricing)", { exact: true })).toBeVisible();
@@ -182,5 +178,60 @@ test.describe("MK-001 — regresión de UI de Carga masiva", () => {
     await page.goto("/carga-masiva/descargas");
     await expect(downloadsLink).toHaveAttribute("aria-current", "page");
     await expectNoHorizontalOverflow(page);
+  });
+
+  test("C25: un lote parcial habilita la reanudación y confirma la reconciliación", async ({ page }) => {
+    await page.goto("/carga-masiva/importaciones/batch-partial/resultado");
+    await expect(page.getByText("Completado con observaciones", { exact: true })).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+
+    const resume = page.getByRole("button", { name: "Reanudar operaciones pendientes", exact: true });
+    await expect(resume).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Reanudar lote", exact: true })).toBeVisible();
+
+    await resume.click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText("Identificador del lote");
+    await dialog.getByRole("button", { name: "Confirmar reanudación", exact: true }).click();
+    await expect(page).toHaveURL("/carga-masiva/importaciones/batch-partial");
+    await expect(page.getByText("En cola de procesamiento", { exact: true })).toBeVisible();
+  });
+
+  test("C26: un lote terminal sin reconciliación no ofrece reanudación", async ({ page }) => {
+    await page.goto("/carga-masiva/importaciones/batch-catalog-failed/resultado");
+    await expect(page.getByText("Completado con observaciones", { exact: true })).toBeVisible();
+    await expect(page.getByText("Fallos registrados; no hay reconciliación pendiente", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Reanudar operaciones pendientes", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Reanudar lote", exact: true })).toHaveCount(0);
+    await expectNoHorizontalOverflow(page);
+  });
+
+  test("C27: la exportación CSV completada permite descargar y el XLSX no", async ({ page }) => {
+    await page.goto("/carga-masiva/descargas?export_id=export-completed");
+    await expect(page.getByText("Exportación terminada", { exact: true }).first()).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Descargar archivo CSV consolidado", exact: true }),
+    ).toBeEnabled();
+
+    await page.goto("/carga-masiva/descargas?export_id=export-completed-xlsx");
+    await expect(page.getByText("XLSX completado sin archivo descargable", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Descargar archivo XLSX consolidado", exact: true }),
+    ).toBeDisabled();
+  });
+
+  test("C28: las exportaciones no terminales mantienen la descarga deshabilitada", async ({ page }) => {
+    await page.goto("/carga-masiva/descargas?export_id=export-queued");
+    await expect(page.getByText("En cola", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Actualizar estado", exact: true })).toBeEnabled();
+    await expect(
+      page.getByRole("button", { name: "Descargar archivo CSV consolidado", exact: true }),
+    ).toBeDisabled();
+
+    await page.goto("/carga-masiva/descargas?export_id=export-processing");
+    await expect(page.getByText("Generando archivo…", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Descargar archivo XLSX consolidado", exact: true }),
+    ).toBeDisabled();
   });
 });

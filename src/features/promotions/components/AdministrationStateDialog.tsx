@@ -26,7 +26,16 @@ export function AdministrationStateDialog<T extends AdministrationRecord>({
   const command = usePromotionCommand<T>();
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string>();
-  const target = record.status === "active" ? "inactive" : "active";
+  const [target, setTarget] = useState<"active" | "inactive">(
+    record.status === "active" ? "inactive" : "active",
+  );
+  const [prevOpened, setPrevOpened] = useState(false);
+  if (opened && !prevOpened) {
+    setPrevOpened(true);
+    setTarget(record.status === "active" ? "inactive" : "active");
+  } else if (!opened && prevOpened) {
+    setPrevOpened(false);
+  }
   const action = `${target === "active" ? "Activar" : "Desactivar"} ${entityLabel}`;
   const unknown =
     command.error instanceof AdministrationError &&

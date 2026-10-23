@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import {
   Alert,
-  Badge,
   Button,
   Card,
   Group,
@@ -27,6 +26,7 @@ import {
   FeedbackAlert,
   PageHeader,
   SectionCard,
+  StatusBadge,
 } from "../../../components/shared";
 import { useProductDetail } from "../hooks/useProductDetail";
 import { useProductPreparation } from "../hooks/useProductPreparation";
@@ -126,7 +126,6 @@ export function ProductPreparationPage() {
 
             {p.status === "BORRADOR" && (
               <Button
-                color="orange"
                 onClick={() => setActivateOpened(true)}
                 leftSection={<IconCheck size={16} />}
               >
@@ -139,12 +138,12 @@ export function ProductPreparationPage() {
 
       {justCreated && (
         <Alert icon={<IconCheck size={16} />} color="green" variant="light">
-          <strong>Borrador guardado exitosamente.</strong> La preparación técnica se coordina asíncronamente. El producto permanecerá en BORRADOR hasta que cumplas los requisitos y confirmes su activación.
+          <strong>Borrador guardado.</strong> El producto permanecerá en BORRADOR hasta que completes los requisitos y confirmes su activación.
         </Alert>
       )}
 
       {prepState.retrySuccess && (
-        <FeedbackAlert semantic="info" title="Reintento admitido (HTTP 202)">
+        <FeedbackAlert semantic="info" title="Reintento solicitado">
           {prepState.retrySuccess}
         </FeedbackAlert>
       )}
@@ -164,23 +163,22 @@ export function ProductPreparationPage() {
                   Preparación en Pricing
                 </Text>
               </Group>
-              <Badge
-                size="md"
-                color={
+              <StatusBadge
+                semantic={
                   prep.pricing.status === "COMPLETED"
-                    ? "green"
+                    ? "success"
                     : prep.pricing.status === "REJECTED"
-                      ? "red"
-                      : "yellow"
+                      ? "error"
+                      : "warning"
                 }
               >
                 {preparationStatusLabel(prep.pricing.status)}
-              </Badge>
+              </StatusBadge>
             </Group>
 
             <Stack gap="sm">
               <Text size="xs" c="dimmed">
-                Owner del precio: <code>pricing-svc</code>. Coordina la inicialización del precio base regular.
+                Inicialización del precio base regular.
               </Text>
 
               {prep.pricing.status === "COMPLETED" && (
@@ -211,8 +209,7 @@ export function ProductPreparationPage() {
                   {prep.pricing.manualRetryAllowed && (
                     <Button
                       size="xs"
-                      color="orange"
-                      variant="light"
+                      variant="outline"
                       loading={prepState.retrying}
                       onClick={() => prepState.retry("PRICING")}
                       leftSection={<IconRefresh size={14} />}
@@ -234,29 +231,26 @@ export function ProductPreparationPage() {
                 </Text>
               </Group>
               {!p.hasVariants && prep.inventario && (
-                <Badge
-                  size="md"
-                  color={
+                <StatusBadge
+                  semantic={
                     prep.inventario.status === "COMPLETED"
-                      ? "green"
+                      ? "success"
                       : prep.inventario.status === "REJECTED"
-                        ? "red"
-                        : "yellow"
+                        ? "error"
+                        : "warning"
                   }
                 >
                   {preparationStatusLabel(prep.inventario.status)}
-                </Badge>
+                </StatusBadge>
               )}
               {p.hasVariants && (
-                <Badge size="md" color="blue">
-                  Por variante
-                </Badge>
+                <StatusBadge>Por variante</StatusBadge>
               )}
             </Group>
 
             <Stack gap="sm">
               <Text size="xs" c="dimmed">
-                Owner de stock: <code>inventory-svc</code>. Coordina los saldos físicos vendibles.
+                Inicialización del stock disponible.
               </Text>
 
               {!p.hasVariants && prep.inventario ? (
@@ -264,7 +258,7 @@ export function ProductPreparationPage() {
                   {prep.inventario.status === "COMPLETED" && (
                     <Alert icon={<IconCheck size={16} />} color="green" variant="light" p="xs">
                       <Text size="xs">
-                        SKU simple inicializado correctamente en el servicio de Inventario.
+                        SKU simple inicializado correctamente.
                       </Text>
                     </Alert>
                   )}
@@ -289,8 +283,7 @@ export function ProductPreparationPage() {
                       {prep.inventario.manualRetryAllowed && (
                         <Button
                           size="xs"
-                          color="orange"
-                          variant="light"
+                          variant="outline"
                           loading={prepState.retrying}
                           onClick={() => prepState.retry("INVENTARIO")}
                           leftSection={<IconRefresh size={14} />}
@@ -316,7 +309,7 @@ export function ProductPreparationPage() {
                     variant="outline"
                     rightSection={<IconExternalLink size={14} />}
                   >
-                    Gestionar inventario de variantes (MK-004)
+                    Gestionar inventario de variantes
                   </Button>
                 </Stack>
               )}

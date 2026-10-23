@@ -6,6 +6,12 @@ import type {
   BrandListItem,
   BrandUpdateInput,
 } from "../types";
+import {
+  isMockPersistenceAvailable,
+  loadMockArray,
+  persistMockArray,
+  syncMockArrayOnExternalChange,
+} from "../../shared/mockState";
 
 interface RegistroMarca {
   marcaId: string;
@@ -23,7 +29,16 @@ interface OperacionBaja {
   estado: "verificando" | "completada" | "no-concluyente";
 }
 
-const store: RegistroMarca[] = [
+const storeFixtures: RegistroMarca[] = [
+  {
+    marcaId: "BRD-INKA",
+    nombre: "Inka Athletic",
+    estado: "Activo",
+    logoUrl: null,
+    paisOrigenIso: "PE",
+    descripcion: "Marca deportiva nacional",
+    version: 1,
+  },
   {
     marcaId: "nike",
     nombre: "Nike",
@@ -80,17 +95,49 @@ const store: RegistroMarca[] = [
   },
 ];
 
-const operacionesBaja: OperacionBaja[] = [
+const isBrand = (value: unknown): value is RegistroMarca => {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.marcaId === "string" &&
+    typeof row.nombre === "string" &&
+    (row.estado === "Activo" || row.estado === "Inactivo") &&
+    typeof row.version === "number"
+  );
+};
+
+// Demo state restored from the current-browser session when available; otherwise a
+// fresh clone of the fixtures. Cross-tab writes rehydrate this same array in place.
+const store: RegistroMarca[] = loadMockArray("taxonomy-brands", storeFixtures, isBrand);
+syncMockArrayOnExternalChange("taxonomy-brands", store, isBrand);
+
+const persist = () => persistMockArray("taxonomy-brands", store);
+
+const operacionesBajaFixtures: OperacionBaja[] = [
   { operacionId: "op-marca-adidas", marcaId: "adidas", estado: "verificando" },
 ];
 
-// H-06: test isolation — snapshot/restore baseline store.
-const estadoInicialMarcas = store.map((item) => ({ ...item }));
-
-export const __resetBrandStore = (): void => {
-  store.length = 0;
-  store.push(...estadoInicialMarcas.map((item) => ({ ...item })));
+// Las operaciones de baja pendientes se persisten con su identificador y estado;
+// al recargar el usuario puede consultar o finalizar la misma operación sin que se
+// genere un identificador nuevo.
+const isOperacionBaja = (value: unknown): boolean => {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.operacionId === "string" &&
+    typeof row.marcaId === "string" &&
+    (row.estado === "verificando" || row.estado === "completada" || row.estado === "no-concluyente")
+  );
 };
+
+const operacionesBaja: OperacionBaja[] = loadMockArray(
+  "taxonomy-brand-baja",
+  operacionesBajaFixtures,
+  isOperacionBaja,
+);
+syncMockArrayOnExternalChange("taxonomy-brand-baja", operacionesBaja, isOperacionBaja);
+
+const persistBaja = () => persistMockArray("taxonomy-brand-baja", operacionesBaja);
 
 const esperar = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -174,6 +221,11 @@ export const mockBrandAdapter: BrandRepository = {
       version: 1,
     };
     store.push(r);
+    const ok = persist();
+    if (!ok && isMockPersistenceAvailable()) {
+      store.pop();
+      throw new Error("No se pudo guardar la marca. Vuelve a intentarlo.");
+    }
     return aDetalle(r);
   },
 
@@ -183,10 +235,16 @@ export const mockBrandAdapter: BrandRepository = {
     signal?.throwIfAborted();
     const r = store.find((item) => item.marcaId === input.marcaId);
     if (!r) return null;
+    const prev = { ...r };
     r.nombre = input.nombre.trim();
     r.descripcion = input.descripcion ?? null;
     r.paisOrigenIso = input.paisOrigenIso ?? null;
     r.version += 1;
+    const ok = persist();
+    if (!ok && isMockPersistenceAvailable()) {
+      Object.assign(r, prev);
+      throw new Error("No se pudo guardar la marca. Vuelve a intentarlo.");
+    }
     return aDetalle(r);
   },
 
@@ -216,14 +274,19 @@ export const mockBrandAdapter: BrandRepository = {
       return result;
     }
     const op = operacionesBaja.find((o) => o.marcaId === id);
-    const operacionId =
-      op?.operacionId ?? `op-marca-${id}-${Date.now().toString(36)}`;
+    // Deterministic id: re-requesting a baja never creates a duplicate operation.
+    const operacionId = op?.operacionId ?? `op-marca-${id}`;
     if (!op) {
       operacionesBaja.push({
         operacionId,
         marcaId: id,
         estado: "verificando",
       });
+      const okBaja = persistBaja();
+      if (!okBaja && isMockPersistenceAvailable()) {
+        operacionesBaja.pop();
+        throw new Error("No se pudo registrar la operación de baja en el almacenamiento local.");
+      }
     }
     return {
       resultado: "pendiente",
@@ -243,9 +306,23 @@ export const mockBrandAdapter: BrandRepository = {
     if (op.marcaId === "adidas" && op.estado === "verificando") {
       op.estado = "completada";
       const r = store.find((item) => item.marcaId === op.marcaId);
+      const prevEstado = r?.estado;
+      const prevVersion = r?.version;
       if (r) {
         r.estado = "Inactivo";
         r.version += 1;
+      }
+      const ok1 = persistBaja();
+      const ok2 = r ? persist() : true;
+      if ((!ok1 || !ok2) && isMockPersistenceAvailable()) {
+        op.estado = "verificando";
+        if (r && prevEstado !== undefined && prevVersion !== undefined) {
+          r.estado = prevEstado;
+          r.version = prevVersion;
+        }
+        persistBaja();
+        persist();
+        throw new Error("No se pudo completar la baja de la marca en el almacenamiento local.");
       }
       return {
         resultado: "exito",
@@ -261,6 +338,11 @@ export const mockBrandAdapter: BrandRepository = {
       };
     }
     op.estado = "no-concluyente";
+    const okNoConc = persistBaja();
+    if (!okNoConc && isMockPersistenceAvailable()) {
+      op.estado = "verificando";
+      throw new Error("No se pudo actualizar el estado de la operación de baja.");
+    }
     return {
       resultado: "no-concluyente",
       mensaje: "La verificación no fue concluyente. La marca conserva su estado actual.",

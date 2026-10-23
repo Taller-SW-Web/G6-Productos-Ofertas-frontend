@@ -63,9 +63,8 @@ export function DashboardAlerts({
             <Button
               component={Link}
               to={alt.targetRoute}
-              size="xs"
+              size="sm"
               variant="subtle"
-              color={alt.severity === "error" ? "red" : alt.severity === "warning" ? "orange" : "blue"}
               rightSection={<IconArrowRight size={14} />}
             >
               {alt.actionLabel}

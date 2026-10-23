@@ -1,4 +1,5 @@
 import { priceRecords, priceTargets, targetNames } from "../mocks/prices";
+import { readMockPricingTargets } from "../../catalog/adapters/mockCatalogConsumers";
 import {
   mockReports,
   partialBatch,
@@ -9,6 +10,7 @@ import type {
   PricingRepository,
   PriceView,
   PriceChannel,
+  PriceTarget,
 } from "../services/pricingRepository";
 import type { Clock } from "../services/pricingRuntime";
 import {
@@ -16,17 +18,247 @@ import {
   validatePrice,
   validateSchedule,
 } from "../services/pricingValidation";
+import {
+  isMockPersistenceAvailable,
+  isRecord,
+  publishMockChange,
+  readMockState,
+  saveMockState,
+  subscribeExternalMockChanges,
+} from "../../shared/mockState";
 
-export function createMockPricingRepository(clock: Clock): PricingRepository {
-  const records = structuredClone(priceRecords);
-  const schedules = structuredClone(scheduleFixtures);
-  let sequence = schedules.length;
+interface PendingAuditRecord {
+  id: string;
+  target: PriceTarget;
+  before: PriceView;
+  after: PriceView;
+  reason: string;
+}
+
+interface MockPricingState {
+  records: PriceView[];
+  schedules: ScheduleView[];
+  sequence: number;
+  pendingAudit?: PendingAuditRecord[];
+}
+
+function isPriceRecord(value: unknown): value is PriceView {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    value.id.trim().length > 0 &&
+    typeof value.regular === "string" &&
+    /^\d+(\.\d+)?$/.test(value.regular) &&
+    Number(value.regular) >= 0 &&
+    (value.offer === null ||
+      value.offer === undefined ||
+      (typeof value.offer === "string" &&
+        /^\d+(\.\d+)?$/.test(value.offer) &&
+        Number(value.offer) >= 0)) &&
+    typeof value.currency === "string" &&
+    value.currency.trim().length > 0 &&
+    typeof value.version === "number" &&
+    Number.isFinite(value.version) &&
+    value.version >= 0 &&
+    typeof value.validFrom === "string"
+  );
+}
+
+function isScheduleRecord(value: unknown): value is ScheduleView {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    value.id.trim().length > 0 &&
+    typeof value.targetId === "string" &&
+    value.targetId.trim().length > 0 &&
+    typeof value.start === "string" &&
+    typeof value.amount === "string" &&
+    /^\d+(\.\d+)?$/.test(value.amount) &&
+    Number(value.amount) >= 0
+  );
+}
+
+function isPendingAuditRecord(value: unknown): value is PendingAuditRecord {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    value.id.trim().length > 0 &&
+    isRecord(value.target) &&
+    typeof value.target.id === "string" &&
+    isPriceRecord(value.before) &&
+    isPriceRecord(value.after) &&
+    typeof value.reason === "string"
+  );
+}
+
+function isMockPricingState(value: unknown): value is MockPricingState {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.records) &&
+    value.records.every(isPriceRecord) &&
+    Array.isArray(value.schedules) &&
+    value.schedules.every(isScheduleRecord) &&
+    typeof value.sequence === "number" &&
+    Number.isFinite(value.sequence) &&
+    value.sequence >= 0 &&
+    (value.pendingAudit === undefined ||
+      (Array.isArray(value.pendingAudit) &&
+        value.pendingAudit.every(isPendingAuditRecord)))
+  );
+}
+
+export function createMockPricingRepository(
+  clock: Clock,
+  onUpdated?: (target: PriceTarget, before: PriceView, after: PriceView, reason: string) => void,
+  options: { persist?: boolean } = {},
+): PricingRepository {
+  const persistEnabled = options.persist === true && isMockPersistenceAvailable();
+  const restored = persistEnabled
+    ? readMockState<MockPricingState>("pricing", isMockPricingState)
+    : null;
+  const records = restored ? restored.records : structuredClone(priceRecords);
+  const targets = structuredClone(priceTargets);
+  const names = { ...targetNames };
+  const pendingAudit: PendingAuditRecord[] = restored?.pendingAudit
+    ? structuredClone(restored.pendingAudit)
+    : [];
+  // A non-persistent instance (persist: false) must never touch `localStorage`;
+  // it still notifies in-session listeners so local tests keep working.
+  const persist = (): boolean => {
+    let ok = true;
+    if (persistEnabled) {
+      ok = saveMockState("pricing", { records, schedules, sequence, pendingAudit } satisfies MockPricingState);
+    }
+    if (ok) {
+      publishMockChange("pricing");
+    }
+    return ok;
+  };
+  const flushPendingAudit = () => {
+    if (!onUpdated || pendingAudit.length === 0) return;
+    const remaining: PendingAuditRecord[] = [];
+    for (const item of pendingAudit) {
+      try {
+        onUpdated(item.target, item.before, item.after, item.reason);
+      } catch {
+        remaining.push(item);
+      }
+    }
+    if (remaining.length !== pendingAudit.length) {
+      const backup = [...pendingAudit];
+      pendingAudit.length = 0;
+      pendingAudit.push(...remaining);
+      const ok = persist();
+      if (!ok) {
+        pendingAudit.length = 0;
+        pendingAudit.push(...backup);
+      }
+    }
+  };
+  async function refreshTargets(signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    flushPendingAudit();
+    const current = await readMockPricingTargets(signal ?? new AbortController().signal);
+    let targetsUpdated = false;
+    const addedTargets: PriceTarget[] = [];
+    const addedRecords: PriceView[] = [];
+    for (const catalogTarget of current) {
+      const existing = targets.find((t) =>
+        t.kind === catalogTarget.kind &&
+        (catalogTarget.kind === "product"
+          ? t.productId === catalogTarget.productId
+          : t.kind === "variant" && t.sku === catalogTarget.sku),
+      );
+
+      if (existing) {
+        if (catalogTarget.kind === "product" && existing.kind === "product") {
+          const catalogName = catalogTarget.label.slice(0, catalogTarget.label.lastIndexOf(" · "));
+          if (catalogName && catalogName !== targetNames[existing.id]) {
+            existing.label = `${catalogName} · ${existing.referenceSku}`;
+            names[existing.id] = catalogName;
+          }
+        }
+      } else if (persistEnabled) {
+        const newTarget: PriceTarget = structuredClone(catalogTarget);
+        if (newTarget.kind === "variant") {
+          const parent = targets.find(t => t.kind === "product" && t.productId === newTarget.productId);
+          if (parent) {
+            newTarget.productTargetId = parent.id;
+          }
+        }
+        targets.push(newTarget);
+        addedTargets.push(newTarget);
+        if (newTarget.kind === "product") {
+          const catalogName = newTarget.label.slice(0, newTarget.label.lastIndexOf(" · "));
+          names[newTarget.id] = catalogName || newTarget.label;
+          if (newTarget.initialRegular) {
+            const hasExisting = records.some((r) => r.id === newTarget.id);
+            if (!hasExisting) {
+              const newRec: PriceView = {
+                id: newTarget.id,
+                name: catalogName || newTarget.label,
+                regular: newTarget.initialRegular,
+                offer: null,
+                currency: "PEN",
+                version: 1,
+                origin: "product",
+                channel: "global",
+                validFrom: clock.now(),
+                validUntil: null,
+                inherited: false,
+              };
+              records.push(newRec);
+              addedRecords.push(newRec);
+              targetsUpdated = true;
+            }
+          }
+        } else {
+          names[newTarget.id] = newTarget.label.split(" — ")[0] || newTarget.label;
+        }
+      }
+    }
+    if (targetsUpdated) {
+      const ok = persist();
+      if (!ok && persistEnabled) {
+        for (const t of addedTargets) {
+          const idx = targets.indexOf(t);
+          if (idx !== -1) targets.splice(idx, 1);
+        }
+        for (const r of addedRecords) {
+          const idx = records.indexOf(r);
+          if (idx !== -1) records.splice(idx, 1);
+        }
+      }
+    }
+  }
+  const schedules = restored ? restored.schedules : structuredClone(scheduleFixtures);
+  let sequence = restored ? restored.sequence : schedules.length;
+  if (persistEnabled) {
+    subscribeExternalMockChanges("pricing", () => {
+      const next = readMockState<MockPricingState>("pricing", isMockPricingState);
+      if (!next) return;
+      records.length = 0;
+      records.push(...next.records);
+      schedules.length = 0;
+      schedules.push(...next.schedules);
+      sequence = next.sequence;
+      pendingAudit.length = 0;
+      if (next.pendingAudit) {
+        pendingAudit.push(...next.pendingAudit);
+      }
+      publishMockChange("pricing");
+    });
+    subscribeExternalMockChanges("catalog", async () => {
+      await refreshTargets();
+      publishMockChange("pricing");
+    });
+  }
   function effective(
     id: string,
     channel: PriceChannel,
     at: string,
   ): PriceView | null {
-    const target = priceTargets.find((row) => row.id === id);
+    const target = targets.find((row) => row.id === id);
     if (!target) return null;
     const applicable = (targetId: string, selected: PriceChannel) =>
       records
@@ -52,7 +284,7 @@ export function createMockPricingRepository(clock: Clock): PricingRepository {
     const result = {
       ...base,
       id,
-      name: targetNames[id] ?? target.label,
+      name: names[id] ?? target.label,
       sku: target.kind === "variant" ? target.sku : undefined,
       inherited,
     };
@@ -99,16 +331,16 @@ export function createMockPricingRepository(clock: Clock): PricingRepository {
   }
   return {
     async listTargets(signal) {
-      signal.throwIfAborted();
-      return structuredClone(priceTargets);
+      await refreshTargets(signal);
+      return structuredClone(targets);
     },
     async read(query, signal) {
-      signal.throwIfAborted();
-      const selected = priceTargets.find((row) => row.id === query.targetId);
+      await refreshTargets(signal);
+      const selected = targets.find((row) => row.id === query.targetId);
       const channel = selected?.kind === "product" ? "global" : query.channel;
       const price = effective(query.targetId, channel, clock.now());
       if (!price) return null;
-      const breakdown = priceTargets
+      const breakdown = targets
         .filter((row) => row.productId === selected?.productId)
         .flatMap((row) => {
           const resolved = effective(
@@ -121,19 +353,19 @@ export function createMockPricingRepository(clock: Clock): PricingRepository {
       return structuredClone({ price, breakdown });
     },
     async readEditable(target, signal) {
-      signal.throwIfAborted();
+      await refreshTargets(signal);
       return structuredClone(
         effective(target.targetId, target.channel, clock.now()),
       );
     },
     async update(change, signal) {
-      signal.throwIfAborted();
+      await refreshTargets(signal);
       const current = effective(
         change.target.targetId,
         change.target.channel,
         clock.now(),
       );
-      const target = priceTargets.find(
+      const target = targets.find(
         (row) => row.id === change.target.targetId,
       );
       if (!current || !target)
@@ -165,6 +397,7 @@ export function createMockPricingRepository(clock: Clock): PricingRepository {
         version: current.version + 1,
         validFrom: clock.now(),
       };
+      const previousValidUntils = new Map<PriceView, string | null>();
       for (const row of records)
         if (
           row.id === target.id &&
@@ -172,9 +405,47 @@ export function createMockPricingRepository(clock: Clock): PricingRepository {
           Date.parse(row.validFrom) <= Date.parse(clock.now()) &&
           (!row.validUntil ||
             Date.parse(row.validUntil) > Date.parse(clock.now()))
-        )
+        ) {
+          previousValidUntils.set(row, row.validUntil);
           row.validUntil = clock.now();
+        }
       records.push(saved);
+      const operationId = `op-audit-${target.id}-${change.target.channel}-v${saved.version}`;
+      const pendingRecord: PendingAuditRecord = {
+        id: operationId,
+        target,
+        before: current,
+        after: saved,
+        reason: change.draft.reason,
+      };
+      pendingAudit.push(pendingRecord);
+
+      const persisted = persist();
+      if (!persisted && persistEnabled) {
+        records.pop();
+        pendingAudit.pop();
+        for (const [row, originalValidUntil] of previousValidUntils) {
+          row.validUntil = originalValidUntil;
+        }
+        throw new PricingFailure(
+          "error",
+          "No se pudo guardar el cambio. Vuelve a intentarlo.",
+        );
+      }
+
+      try {
+        onUpdated?.(target, current, saved, change.draft.reason);
+        const idx = pendingAudit.findIndex((p) => p.id === operationId);
+        if (idx !== -1) {
+          pendingAudit.splice(idx, 1);
+          persist();
+        }
+      } catch (error) {
+        console.warn(
+          "Fallo en la notificación onUpdated tras guardar el precio:",
+          error,
+        );
+      }
       return structuredClone(saved);
     },
     async listSchedules(targetId, page, signal) {
@@ -188,7 +459,7 @@ export function createMockPricingRepository(clock: Clock): PricingRepository {
       };
     },
     async schedule(targetId, draft, signal) {
-      signal.throwIfAborted();
+      await refreshTargets(signal);
       const start = localInstant(draft.start);
       const end = draft.end ? localInstant(draft.end) : null;
       const reference = start
@@ -228,10 +499,19 @@ export function createMockPricingRepository(clock: Clock): PricingRepository {
         status: "SCHEDULED",
       };
       schedules.unshift(created);
+      const schedulePersisted = persist();
+      if (!schedulePersisted && persistEnabled) {
+        schedules.shift();
+        sequence--;
+        throw new PricingFailure(
+          "error",
+          "No se pudo guardar la programación. Vuelve a intentarlo.",
+        );
+      }
       return structuredClone(created);
     },
     async readHistorical(query, at, signal) {
-      signal.throwIfAborted();
+      signal?.throwIfAborted();
       const price = effective(query.targetId, query.channel, at);
       return price
         ? {
@@ -246,7 +526,7 @@ export function createMockPricingRepository(clock: Clock): PricingRepository {
         throw new PricingFailure("error", "Selecciona archivo y política.");
       throw new PricingFailure(
         "blocked_contract",
-        "Q-013-01/02: contenido de archivo y admisión parcial pendientes. No se analiza ni admite el archivo.",
+        "No se pudo validar el archivo. La importación no fue iniciada.",
       );
     },
     async readBatch(id, signal) {
@@ -264,8 +544,11 @@ export function createMockPricingRepository(clock: Clock): PricingRepository {
         data: new Blob([mockReports.partial], {
           type: "text/csv;charset=utf-8",
         }),
-        filename: `reporte-ficticio-${id}.csv`,
+        filename: `reporte_precios_${id}.csv`,
       };
+    },
+    reconcileAudit() {
+      flushPendingAudit();
     },
   };
 }

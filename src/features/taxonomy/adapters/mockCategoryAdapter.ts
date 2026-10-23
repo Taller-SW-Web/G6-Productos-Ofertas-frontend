@@ -8,6 +8,12 @@ import type {
   CategoryDetail,
   CategoryNode,
 } from "../types";
+import {
+  isMockPersistenceAvailable,
+  loadMockArray,
+  persistMockArray,
+  syncMockArrayOnExternalChange,
+} from "../../shared/mockState";
 
 // In-memory flat store for MK-008. No HTTP contract exists yet; writes are simulated
 // and lost on reload. Keeping it flat makes parent/child relationships explicit.
@@ -25,36 +31,23 @@ interface RegistroCategoria {
   productosActivos?: number;
 }
 
-type EscenarioDetalle = "default" | "no-encontrado" | "error";
-type EscenarioSlug =
-  | "default"
-  | "slug-sin-colision"
-  | "slug-con-colision"
-  | "slug-carrera-409";
-type EscenarioBaja =
-  | "default"
-  | "rechazada-subcategorias"
-  | "rechazada-productos"
-  | "rechazada-asincrona"
-  | "pendiente-prolongado"
-  | "error-consulta"
-  | "error";
-type EscenarioReactivacion = "default" | "bloqueada" | "error";
-type CategoryMockScenarios = {
-  detalle: EscenarioDetalle;
-  slug: EscenarioSlug;
-  baja: EscenarioBaja;
-  reactivacion: EscenarioReactivacion;
-  arbol: "default" | "empty" | "error";
-};
-
-const store: RegistroCategoria[] = [
+const storeFixtures: RegistroCategoria[] = [
+  {
+    id: "CAT-ROPA",
+    nombre: "Ropa",
+    slug: "cat-ropa",
+    padreId: null,
+    orden: 1,
+    estado: "Activo",
+    descripcion: "Prendas de vestir.",
+    productosActivos: 0,
+  },
   {
     id: "calzado",
     nombre: "Calzado",
     slug: "calzado",
     padreId: null,
-    orden: 1,
+    orden: 2,
     estado: "Activo",
     descripcion: "Calzado para dama y caballero.",
     productosActivos: 0,
@@ -64,7 +57,7 @@ const store: RegistroCategoria[] = [
     nombre: "Ropa",
     slug: "ropa",
     padreId: null,
-    orden: 2,
+    orden: 3,
     estado: "Activo",
     descripcion: "Prendas de vestir.",
     productosActivos: 0,
@@ -134,6 +127,26 @@ const store: RegistroCategoria[] = [
     productosActivos: 0,
   },
 ];
+
+const isCategory = (value: unknown): value is RegistroCategoria => {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.id === "string" &&
+    typeof row.nombre === "string" &&
+    typeof row.slug === "string" &&
+    (row.padreId === null || typeof row.padreId === "string") &&
+    typeof row.orden === "number" &&
+    (row.estado === "Activo" || row.estado === "Inactivo" || row.estado === "Verificando baja")
+  );
+};
+
+// Demo state restored from the current-browser session when available; otherwise a
+// fresh clone of the fixtures. Cross-tab writes rehydrate this same array in place.
+const store: RegistroCategoria[] = loadMockArray("taxonomy-categories", storeFixtures, isCategory);
+syncMockArrayOnExternalChange("taxonomy-categories", store, isCategory);
+
+const persist = () => persistMockArray("taxonomy-categories", store);
 
 const esperar = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -237,15 +250,33 @@ const aDetalle = (registro: RegistroCategoria): CategoryDetail => {
   };
 };
 
-// BLOCKED_CONTRACT: no hay contrato OpenAPI confirmado para el sondeo del resultado
-// de una baja asíncrona (202). Este registro mantiene las operaciones pendientes en
-// memoria para que la UI pueda consultar su estado sin inventar un endpoint HTTP.
+// Las operaciones de baja pendientes se persisten con su identificador y estado;
+// al recargar el usuario puede consultar o finalizar la misma operación sin que se
+// genere un identificador nuevo.
 interface OperacionBajaCategoria {
+  operacionId: string;
   categoriaId: string;
   estado: "pendiente" | "confirmada" | "rechazada";
 }
 
-const operacionesBaja = new Map<string, OperacionBajaCategoria>();
+const isOperacionBajaCategoria = (value: unknown): value is OperacionBajaCategoria => {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.operacionId === "string" &&
+    typeof row.categoriaId === "string" &&
+    (row.estado === "pendiente" || row.estado === "confirmada")
+  );
+};
+
+const operacionesBaja: OperacionBajaCategoria[] = loadMockArray(
+  "taxonomy-category-baja",
+  [],
+  isOperacionBajaCategoria,
+);
+syncMockArrayOnExternalChange("taxonomy-category-baja", operacionesBaja, isOperacionBajaCategoria);
+
+const persistCategoriaBaja = () => persistMockArray("taxonomy-category-baja", operacionesBaja);
 
 // Deterministic local states used only for review. The repository contract does not
 // accept scenarios; reviewers change these values to reproduce error or edge cases
@@ -396,7 +427,13 @@ export const mockCategoryAdapter: CategoryRepository = {
       descripcion: input.descripcion,
       imagen,
       productosActivos: 0,
-    });
+    };
+    store.push(creado);
+    const ok = persist();
+    if (!ok && isMockPersistenceAvailable()) {
+      store.pop();
+      throw new Error("No se pudo guardar la categoría. Vuelve a intentarlo.");
+    }
     return { id, nombre: input.nombre, slug: input.slug };
   },
 
@@ -450,6 +487,7 @@ export const mockCategoryAdapter: CategoryRepository = {
       }
     }
 
+    const prev = { ...registro };
     registro.nombre = input.nombre;
     registro.slug = input.slug;
     registro.padreId = padreId;
@@ -458,6 +496,11 @@ export const mockCategoryAdapter: CategoryRepository = {
     registro.imagen =
       input.imagen?.trim() || input.imagenUrl?.trim() || undefined;
 
+    const ok = persist();
+    if (!ok && isMockPersistenceAvailable()) {
+      Object.assign(registro, prev);
+      throw new Error("No se pudo guardar la categoría. Vuelve a intentarlo.");
+    }
     return aDetalle(registro);
   },
 
@@ -543,6 +586,7 @@ export const mockCategoryAdapter: CategoryRepository = {
       }
     }
 
+    const prevEstado = registro.estado;
     registro.estado = "Verificando baja";
     const operacionId = `op-baja-categoria-${id}`;
     operacionesBaja.set(operacionId, {
@@ -564,7 +608,7 @@ export const mockCategoryAdapter: CategoryRepository = {
     await esperar(400);
     signal?.throwIfAborted();
 
-    const operacion = operacionesBaja.get(operacionId);
+    const operacion = operacionesBaja.find((item) => item.operacionId === operacionId);
     if (!operacion) {
       throw new Error("No se encontró la operación de baja solicitada.");
     }
@@ -598,7 +642,15 @@ export const mockCategoryAdapter: CategoryRepository = {
 
     if (operacion.estado === "pendiente") {
       operacion.estado = "confirmada";
+      const prevEstado = registro.estado;
       registro.estado = "Inactivo";
+      const ok1 = persist();
+      const ok2 = persistCategoriaBaja();
+      if ((!ok1 || !ok2) && isMockPersistenceAvailable()) {
+        registro.estado = prevEstado;
+        operacion.estado = "pendiente";
+        throw new Error("No se pudo confirmar la baja de la categoría. Vuelve a intentarlo.");
+      }
       return {
         operacionId,
         estado: "confirmada",
@@ -669,7 +721,13 @@ export const mockCategoryAdapter: CategoryRepository = {
       };
     }
 
+    const prev = registro.estado;
     registro.estado = "Activo";
+    const ok = persist();
+    if (!ok && isMockPersistenceAvailable()) {
+      registro.estado = prev;
+      throw new Error("No se pudo reactivar la categoría. Vuelve a intentarlo.");
+    }
     return {
       resultado: "reactivada",
       categoria: aDetalle(registro),

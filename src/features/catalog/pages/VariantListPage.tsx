@@ -164,7 +164,7 @@ export function VariantListPage() {
         actions={
           <Group gap="xs">
             <Button
-              variant="default"
+              variant="outline"
               size="sm"
               leftSection={<IconRefresh size={16} />}
               onClick={() => reload()}
@@ -184,7 +184,7 @@ export function VariantListPage() {
       />
 
       {/* Context banner */}
-      <Paper p="sm" withBorder mb="md" bg="var(--mantine-color-gray-0)">
+      <Paper p="sm" withBorder mb="md" bg="var(--po-subtle)">
         <Group justify="space-between" align="center">
           <div>
             <Text size="xs" c="dimmed">
@@ -201,18 +201,9 @@ export function VariantListPage() {
             <Text size="xs" c="dimmed">
               Precio inicial de Catálogo: <strong>{product?.priceInitial === undefined ? "No disponible" : `S/. ${product.priceInitial.toFixed(2)}`}</strong>. Precio vigente: consultar Pricing.
             </Text>
-            <Badge
-              size="sm"
-              color={
-                product?.status === "ACTIVO"
-                  ? "green"
-                  : product?.status === "BORRADOR"
-                    ? "blue"
-                    : "gray"
-              }
-            >
+            <StatusBadge semantic="neutral">
               Padre: {product?.status}
-            </Badge>
+            </StatusBadge>
           </Group>
         </Group>
       </Paper>
@@ -288,7 +279,7 @@ export function VariantListPage() {
         )
       ) : (
         <Paper withBorder>
-          <Table striped highlightOnHover verticalSpacing="sm">
+          <Table highlightOnHover verticalSpacing="sm">
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>SKU Comercial</Table.Th>
@@ -296,24 +287,17 @@ export function VariantListPage() {
                 <Table.Th>Perfil Físico</Table.Th>
                 <Table.Th>Preparación Inventario</Table.Th>
                 <Table.Th>Estado</Table.Th>
-                <Table.Th style={{ textAlign: "right" }}>Acciones</Table.Th>
+                <Table.Th style={{ textAlign: "right", width: 120 }}>Acciones</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
               {variants.map((v) => {
-                const prepColor =
+                const prepSemantic =
                   v.inventoryStatus === "COMPLETED"
-                    ? "green"
-                    : v.inventoryStatus === "REJECTED"
-                      ? "red"
-                      : "yellow";
-
-                const stateSemantic =
-                  v.status === "ACTIVA"
                     ? "success"
-                    : v.status === "BORRADOR"
-                      ? "info"
-                      : "neutral";
+                    : v.inventoryStatus === "REJECTED"
+                      ? "error"
+                      : "warning";
 
                 return (
                   <Table.Tr key={v.variantId}>
@@ -348,55 +332,52 @@ export function VariantListPage() {
                       )}
                     </Table.Td>
                     <Table.Td>
-                      <Badge size="xs" color={prepColor}>
+                      <StatusBadge semantic={prepSemantic}>
                         {v.inventoryStatus}
-                      </Badge>
+                      </StatusBadge>
                     </Table.Td>
                     <Table.Td>
-                      <StatusBadge semantic={stateSemantic}>
+                      <StatusBadge>
                         {v.status}
                       </StatusBadge>
                     </Table.Td>
                     <Table.Td style={{ textAlign: "right" }}>
-                      <Group gap="xs" justify="flex-end">
+                      <Group gap="xs" justify="flex-end" wrap="nowrap">
                         <ActionIcon
                           component={Link}
                           to={`/productos/${productId}/variantes/${v.variantId}`}
-                          variant="subtle"
-                          color="gray"
-                          size="sm"
+                          aria-label={`Ver detalle de ${v.sku}`}
                           title="Ver detalle"
                         >
                           <IconEye size={16} />
                         </ActionIcon>
-                        <ActionIcon
-                          component={Link}
-                          to={`/productos/${productId}/variantes/${v.variantId}/editar`}
-                          variant="subtle"
-                          color="blue"
-                          size="sm"
-                          title="Editar variante"
-                        >
-                          <IconEdit size={16} />
-                        </ActionIcon>
                         <Menu position="bottom-end" shadow="md">
                           <Menu.Target>
-                            <ActionIcon variant="subtle" color="gray" size="sm">
+                            <ActionIcon
+                              aria-label={`Más acciones de ${v.sku}`}
+                              title="Más acciones"
+                            >
                               <IconDotsVertical size={16} />
                             </ActionIcon>
                           </Menu.Target>
                           <Menu.Dropdown>
                             <Menu.Item
                               component={Link}
+                              to={`/productos/${productId}/variantes/${v.variantId}/editar`}
+                              leftSection={<IconEdit size={16} />}
+                            >
+                              Editar
+                            </Menu.Item>
+                            <Menu.Item
+                              component={Link}
                               to={`/productos/${productId}/variantes/${v.variantId}/preparacion`}
-                              leftSection={<IconListCheck size={14} />}
+                              leftSection={<IconListCheck size={16} />}
                             >
                               Consultar Preparación
                             </Menu.Item>
                             {v.status === "BORRADOR" && (
                               <Menu.Item
-                                color="teal"
-                                leftSection={<IconCheck size={14} />}
+                                leftSection={<IconCheck size={16} />}
                                 onClick={() => handleActivateClick(v)}
                               >
                                 Activar Variante
@@ -404,8 +385,8 @@ export function VariantListPage() {
                             )}
                             {v.status === "ACTIVA" && (
                               <Menu.Item
-                                color="red"
-                                leftSection={<IconPower size={14} />}
+                                color="danger"
+                                leftSection={<IconPower size={16} />}
                                 onClick={() => handleDeactivateClick(v)}
                               >
                                 Desactivar Variante
@@ -413,8 +394,7 @@ export function VariantListPage() {
                             )}
                             {v.status === "INACTIVA" && (
                               <Menu.Item
-                                color="teal"
-                                leftSection={<IconRefresh size={14} />}
+                                leftSection={<IconRefresh size={16} />}
                                 onClick={() => handleReactivateClick(v)}
                               >
                                 Reactivar Variante

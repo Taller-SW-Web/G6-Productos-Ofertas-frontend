@@ -17,6 +17,7 @@ import {
 import { CouponSummary } from "../components/CouponSummary";
 import { CouponStateDialog } from "../components/CouponStateDialog";
 import { useCoupon } from "../hooks/useCoupons";
+import type { CouponView } from "../services/couponRepository";
 
 export function CouponDetailPage({
   limitsOnly = false,
@@ -40,7 +41,13 @@ export function CouponDetailPage({
   const navigate = useNavigate();
   const location = useLocation();
   const state = useCoupon(couponId, services.coupons, revision + queryRevision);
-  const coupon = state.status === "success" ? state.result : null;
+  const [cachedCoupon, setCachedCoupon] = useState<CouponView | null>(null);
+  const [prevResult, setPrevResult] = useState<CouponView | null>(null);
+  if (state.status === "success" && state.result !== prevResult) {
+    setPrevResult(state.result);
+    setCachedCoupon(state.result);
+  }
+  const coupon = state.status === "success" ? state.result : cachedCoupon;
   const suffix = params.size ? `?${params.toString()}` : "";
   useEffect(() => {
     if (coupon && (location.state?.focusState || stateUpdated))
@@ -96,7 +103,7 @@ export function CouponDetailPage({
             El nuevo estado fue confirmado. Los usos registrados se conservan.
           </FeedbackAlert>
         )}
-        {state.status === "loading" && (
+        {state.status === "loading" && !coupon && (
           <Stack role="status" aria-label="Cargando cupón">
             <Text size="sm">Cargando cupón…</Text>
             <Skeleton height={180} />

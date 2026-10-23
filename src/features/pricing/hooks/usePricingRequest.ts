@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { PricingFailure } from "../services/pricingModels";
 
+const readCache = new Map<string, unknown>();
+
 export type RequestState<T> =
   | { status: "loading" }
   | { status: "success"; result: T }
@@ -14,12 +16,18 @@ export function usePricingRead<T>(
     key: string;
     state: RequestState<T>;
   }>();
-  const [previous, setPrevious] = useState<{ key: string; result: T }>();
+  const [previous, setPrevious] = useState<{ key: string; result: T } | undefined>(
+    () => {
+      const cached = readCache.get(identity) as T | undefined;
+      return cached !== undefined ? { key: identity, result: cached } : undefined;
+    },
+  );
   useEffect(() => {
     const controller = new AbortController();
     void read(controller.signal).then(
       (result) => {
         if (controller.signal.aborted) return;
+        readCache.set(identity, result);
         setPrevious({ key: identity, result });
         setResponse({ key: requestKey, state: { status: "success", result } });
       },

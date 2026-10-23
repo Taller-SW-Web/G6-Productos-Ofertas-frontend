@@ -136,7 +136,7 @@ function CharacteristicEditForm({ detalle }: { detalle: CharacteristicDetail }) 
           </Group>
         }
       >
-        {`Se actualizó «${resultado.nombre}». La actualización es simulada y no se guarda en un backend.`}
+        {`Se actualizó «${resultado.nombre}».`}
       </FeedbackAlert>
     );
   }

@@ -170,7 +170,7 @@ function SeoConfigContent({ detalle }: { detalle: SeoCategory }) {
           />
           <Group gap="sm">
             <Button
-              variant="light"
+              variant="outline"
               leftSection={<IconWand size={16} stroke={2} aria-hidden="true" />}
               onClick={proponer}
               loading={proponiendo}
@@ -250,7 +250,7 @@ function SeoConfigContent({ detalle }: { detalle: SeoCategory }) {
                 disabled={guardando}
               />
               {warnTitulo && (
-                <Text size="xs" c="orange">
+                <Text size="sm" c="var(--po-warningText)">
                   {`Advertencia: supera 70 caracteres (${metaTitulo.length})`}
                 </Text>
               )}
@@ -263,7 +263,7 @@ function SeoConfigContent({ detalle }: { detalle: SeoCategory }) {
                 disabled={guardando}
               />
               {warnDesc && (
-                <Text size="xs" c="orange">
+                <Text size="sm" c="var(--po-warningText)">
                   {`Advertencia: supera 160 caracteres (${metaDescripcion.length})`}
                 </Text>
               )}

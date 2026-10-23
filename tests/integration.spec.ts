@@ -55,7 +55,7 @@ test("N03: API mode blocks mock-only modules and never loads their adapters", as
       "/tests/harness/pricing-adapter.html?" + new URLSearchParams({ path }),
     );
     await expect(page.getByRole("alert")).toContainText(
-      "Integración API no disponible",
+      "Función no disponible",
     );
     await expect(page.getByRole("textbox")).toHaveCount(0);
   }
@@ -191,10 +191,10 @@ test("N03: Catálogo y Taxonomía en modo API operan fail-closed y nunca recurre
 
   const apiServices = getCatalogServices("api");
   await expect(apiServices.catalog.list({ page: 1, pageSize: 10 })).rejects.toThrow(
-    /adapter API de Catálogo no está configurado/,
+    /La consulta del catálogo no está disponible/,
   );
   await expect(apiServices.taxonomy.getCategories()).rejects.toThrow(
-    /adapter API de Taxonomía no está configurado/,
+    /La consulta de categorías, marcas y tipos de producto no está disponible/,
   );
 
   // In mock mode, shared services load successfully

@@ -99,20 +99,11 @@ export function BulkDownloadsPage() {
           description="Estructura de referencia para preparar archivos de importación masiva"
         >
           <Stack gap="md">
-            <FeedbackAlert semantic="info" title="Disponibilidad de plantillas">
-              {dataMode === "mock"
-                ? "La demostración ofrece una muestra CSV y no incluye una plantilla XLSX descargable."
-                : "La disponibilidad de cada plantilla depende de la respuesta del provider API configurado."}
-            </FeedbackAlert>
 
             <Group justify="space-between" align="flex-end" wrap="wrap" gap="md">
               <Radio.Group
                 label="Formato de plantilla"
-                description={
-                  dataMode === "mock"
-                    ? "La muestra CSV es ficticia; el modo mock no incluye una plantilla XLSX."
-                    : "La solicitud se envía al provider API configurado para el formato seleccionado."
-                }
+                description="Selecciona el formato del archivo."
                 value={templateFormat}
                 onChange={(value) => setTemplateFormat(value as BulkExportFormat)}
               >
@@ -144,6 +135,7 @@ export function BulkDownloadsPage() {
           submitting={submittingExport}
           refreshing={refreshingJob}
           downloading={downloadingExport}
+          stale={isStale}
           dataMode={dataMode}
         />
       </Stack>

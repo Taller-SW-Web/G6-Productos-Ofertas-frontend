@@ -50,6 +50,7 @@ export function useCreateCategory() {
   };
 
   const confirmar = (input: CategoryCreateInput) => {
+    if (phase !== "confirmando" || !slugCheck) return;
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;

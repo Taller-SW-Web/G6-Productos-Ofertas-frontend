@@ -7,7 +7,7 @@ import {
 } from "../types/combos";
 import type { CombosRuntime } from "../services/combosService";
 
-const unavailable = () => new ComboError("unavailable", "El provider API de Combos, Catálogo, Pricing o Inventario no está configurado.");
+const unavailable = () => new ComboError("unavailable", "La información de combos no está disponible.");
 const combos: CombosRepository = {
   async list() { throw unavailable(); },
   async getById() { throw unavailable(); },
@@ -27,5 +27,5 @@ const availability: CombosAvailabilityPort = {
   async readStocks() { throw unavailable(); },
 };
 export function createUnavailableCombosAdapters(): CombosRuntime {
-  return { combos, catalog, pricing, availability };
+  return { combos, catalog, pricing, availability, now: () => Date.now() };
 }

@@ -9,13 +9,9 @@ export function getUnavailableDownloadMessage(
   kind: BulkDownloadKind,
   format: BulkExportFormat,
 ): string {
-  if (mode === "mock" && format === "XLSX") {
-    return `El modo mock no incluye un archivo XLSX descargable para esta ${kind}.`;
-  }
-  if (mode === "api") {
-    return `El provider API configurado no entregó el recurso de ${kind} solicitado (${format}).`;
-  }
-  return `El recurso de ${kind} solicitado (${format}) no está disponible en este escenario de demostración.`;
+  void mode;
+  void format;
+  return `El archivo solicitado para ${kind} no está disponible.`;
 }
 
 export function getDownloadFailureMessage(

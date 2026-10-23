@@ -12,7 +12,7 @@ export interface BulkRepositoryDependencies {
 function createUnavailableRepository(): BulkRepository {
   const unavailable = async (): Promise<never> => {
     throw new BulkRepositoryError(
-      "El provider HTTP de Carga masiva no está configurado. No se utilizaron datos simulados.",
+      "Esta función no está disponible en el modo actual.",
       "configuration",
     );
   };

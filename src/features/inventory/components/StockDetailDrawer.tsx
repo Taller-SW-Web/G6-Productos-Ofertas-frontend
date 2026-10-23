@@ -82,7 +82,7 @@ export function StockDetailDrawer({
             Detalle de magnitudes
           </Text>
           <SimpleGrid cols={2} spacing="sm">
-            <Paper p="md" withBorder radius="sm">
+            <Paper p="lg" withBorder radius="md">
               <Group justify="space-between">
                 <div>
                   <Text size="xs" c="dimmed">
@@ -101,7 +101,7 @@ export function StockDetailDrawer({
               </Text>
             </Paper>
 
-            <Paper p="md" withBorder radius="sm">
+            <Paper p="lg" withBorder radius="md">
               <Group justify="space-between">
                 <div>
                   <Text size="xs" c="dimmed">
@@ -120,7 +120,7 @@ export function StockDetailDrawer({
               </Text>
             </Paper>
 
-            <Paper p="md" withBorder radius="sm">
+            <Paper p="lg" withBorder radius="md">
               <Group justify="space-between">
                 <div>
                   <Text size="xs" c="dimmed">
@@ -139,7 +139,7 @@ export function StockDetailDrawer({
               </Text>
             </Paper>
 
-            <Paper p="md" withBorder radius="sm">
+            <Paper p="lg" withBorder radius="md">
               <Group justify="space-between">
                 <div>
                   <Text size="xs" c="dimmed">
@@ -160,7 +160,7 @@ export function StockDetailDrawer({
           </SimpleGrid>
         </div>
 
-        <Paper p="md" withBorder radius="sm">
+        <Paper p="lg" withBorder radius="md">
           <Text size="sm" fw={600} mb="xs">
             Umbral y trazabilidad
           </Text>
@@ -189,7 +189,7 @@ export function StockDetailDrawer({
         </FeedbackAlert>
 
         <Group justify="space-between" mt="md">
-          <Button variant="outline" color="gray" onClick={onClose}>
+          <Button variant="outline" onClick={onClose}>
             Cerrar detalle
           </Button>
           <Button

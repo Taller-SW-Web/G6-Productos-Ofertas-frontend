@@ -509,8 +509,8 @@ test("MK-014 S01–S05: 1440px screenshots, keyboard modal and prepared CSV/PDF 
     const downloading = page.waitForEvent("download");
     await page.getByRole("button", { name: `Descargar ${format}` }).click();
     const file = await downloading;
-    expect(file.suggestedFilename()).toBe(
-      `muestra-auditoria.${format!.toLowerCase()}`,
+    expect(file.suggestedFilename()).toMatch(
+      new RegExp(`^reporte_auditoria_.*\\.${format!.toLowerCase()}$`),
     );
     const stream = (await file.createReadStream())!;
     const chunks: Buffer[] = [];
@@ -530,7 +530,7 @@ test("MK-014: missing API and failed factories never fall back; ports and consum
   page.on("request", (request) => loaded.push(request.url()));
   await mount(page, "/precios/auditoria", 1, true);
   await expect(page.getByRole("alert")).toContainText(
-    "adapter API de auditoría de precios no está configurado",
+    "La consulta del historial de precios no está disponible",
   );
   await expect(page.getByRole("table")).toHaveCount(0);
   expect(

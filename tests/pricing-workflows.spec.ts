@@ -1,3 +1,4 @@
+import { gotoPricingReview } from "./support/pricingReview";
 import { test, expect, type Page } from "@playwright/test";
 import { evidencePath } from "./support/evidence";
 import {
@@ -60,7 +61,7 @@ async function capture(page: Page, path: string) {
 test("MK-013-S01: fresh readings enable contextual actions; stale/empty readings do not", async ({
   page,
 }) => {
-  await page.goto("/precios?target=variant40&channel=retail&modoRevision=1");
+  await gotoPricingReview(page, "/precios?target=variant40&channel=retail&modoRevision=1");
   await expect(
     page.getByRole("link", { name: "Editar precio", exact: true }),
   ).toHaveAttribute("href", /target=variant40&channel=retail/);
@@ -83,7 +84,7 @@ test("MK-013-S01: fresh readings enable contextual actions; stale/empty readings
 test("MK-013-S02: validation, focus, dialog cancellation, offer removal and inherited update", async ({
   page,
 }) => {
-  await page.goto("/precios/editar?target=base");
+  await gotoPricingReview(page, "/precios/editar?target=base");
   await page
     .getByRole("button", { name: "Guardar cambios", exact: true })
     .click();
@@ -175,7 +176,7 @@ test("MK-013-S02: validation, focus, dialog cancellation, offer removal and inhe
 test("MK-013-S02: version conflict preserves draft and requires reread and explicit review", async ({
   page,
 }) => {
-  await page.goto("/precios/editar?target=base&modoRevision=1");
+  await gotoPricingReview(page, "/precios/editar?target=base&modoRevision=1");
   await editDraft(page);
   await select(page, "Escenario de guardado", "Conflicto de versión");
   await confirmEdit(page);
@@ -217,7 +218,7 @@ for (const scenario of [
   test(`MK-013-S02: ${scenario} preserves proposal and prevents false success`, async ({
     page,
   }) => {
-    await page.goto("/precios/editar?target=override42&modoRevision=1");
+    await gotoPricingReview(page, "/precios/editar?target=override42&modoRevision=1");
     await editDraft(page);
     await select(page, "Escenario de guardado", scenario);
     await confirmEdit(page);
@@ -247,7 +248,7 @@ for (const scenario of [
 test("MK-013-S02: scope, sidebar and browser Back protect unsaved proposal", async ({
   page,
 }) => {
-  await page.goto("/precios?target=variant40&channel=retail");
+  await gotoPricingReview(page, "/precios?target=variant40&channel=retail");
   await page.getByRole("link", { name: "Editar precio", exact: true }).click();
   await editDraft(page);
   await select(page, "Alcance del precio", "Precio base del producto");
@@ -278,7 +279,7 @@ test("MK-013-S02: scope, sidebar and browser Back protect unsaved proposal", asy
 test("MK-013-S03: date validation, pagination and future creation preserve current price", async ({
   page,
 }) => {
-  await page.goto("/precios/programaciones?target=base");
+  await gotoPricingReview(page, "/precios/programaciones?target=base");
   await expect(
     page.getByText("Mostrando 1 a 2 de 3", { exact: true }),
   ).toBeVisible();
@@ -350,7 +351,7 @@ for (const scenario of [
   test(`MK-013-S03: ${scenario} keeps date fields and does not create a vigency`, async ({
     page,
   }) => {
-    await page.goto("/precios/programaciones?target=base&modoRevision=1");
+    await gotoPricingReview(page, "/precios/programaciones?target=base&modoRevision=1");
     await scheduleDraft(page);
     await select(page, "Escenario de programación", scenario);
     await page
@@ -384,7 +385,7 @@ for (const scenario of [
 test("MK-013-S04: changing file or policy invalidates simulated preview; import remains blocked", async ({
   page,
 }) => {
-  await page.goto("/precios/importar?modoRevision=1");
+  await gotoPricingReview(page, "/precios/importar?modoRevision=1");
   const file = page.locator('input[type="file"]');
   await file.setInputFiles({
     name: "archivo-sin-contrato.dat",
@@ -448,7 +449,7 @@ test("MK-013-S04: changing file or policy invalidates simulated preview; import 
       exact: true,
     })
     .click();
-  await expect(page.getByRole("alert")).toContainText("Archivo no analizable");
+  await expect(page.getByRole("alert")).toContainText("No se pudo analizar el archivo");
   await page
     .getByRole("link", { name: "Consultar lote de ejemplo", exact: true })
     .click();
@@ -461,7 +462,7 @@ test("MK-013-S04: changing file or policy invalidates simulated preview; import 
 test("MK-013-S05: queued, processing, partial, missing rows, failed refresh and report", async ({
   page,
 }) => {
-  await page.goto("/precios/importaciones/batch-013-01?modoRevision=1");
+  await gotoPricingReview(page, "/precios/importaciones/batch-013-01?modoRevision=1");
   await select(page, "Escenario del lote", "En cola");
   await expect(
     page.getByText("Solicitud recibida — en cola", { exact: true }),
@@ -490,7 +491,7 @@ test("MK-013-S05: queued, processing, partial, missing rows, failed refresh and 
     .getByRole("button", { name: "Descargar reporte", exact: true })
     .click();
   expect((await downloadPromise).suggestedFilename()).toBe(
-    "reporte-ficticio-batch-013-01.csv",
+    "reporte_precios_batch-013-01.csv",
   );
   await select(page, "Escenario del lote", "Error de refresco");
   await expect(
@@ -524,7 +525,7 @@ test("MK-013-S05: queued, processing, partial, missing rows, failed refresh and 
 test("MK-013-S06: as-of, fallback, error, absence and applied history retain context", async ({
   page,
 }) => {
-  await page.goto("/precios?target=variant40&channel=retail");
+  await gotoPricingReview(page, "/precios?target=variant40&channel=retail");
   await page
     .getByRole("link", { name: "Consultar histórico", exact: true })
     .click();
@@ -571,7 +572,7 @@ test("MK-013-S06: as-of, fallback, error, absence and applied history retain con
       exact: true,
     }),
   ).toHaveValue("2026-09-10T07:00");
-  await page.goto(
+  await gotoPricingReview(page,
     "/precios/historico?target=base&channel=retail&at=2026-09-10T07:00&modoRevision=1",
   );
   await expect(
@@ -601,7 +602,7 @@ test("MK-013: six direct views, desktop geometry, screenshots and no runtime err
     ],
   ];
   for (const [screen, url, title] of cases) {
-    await page.goto(url!);
+    await gotoPricingReview(page, url!);
     await expect(
       page.getByRole("heading", { name: title!, exact: true }),
     ).toBeVisible();
@@ -634,14 +635,14 @@ test("MK-013: six direct views, desktop geometry, screenshots and no runtime err
 test("MK-013: invalid objective and unknown batch never create defaults for mutation", async ({
   page,
 }) => {
-  await page.goto("/precios/editar?target=desconocido");
+  await gotoPricingReview(page, "/precios/editar?target=desconocido");
   await expect(
     page.getByText("Selecciona un objetivo válido", { exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Guardar cambios", exact: true }),
   ).toHaveCount(0);
-  await page.goto("/precios/importaciones/desconocido");
+  await gotoPricingReview(page, "/precios/importaciones/desconocido");
   await expect(
     page.getByText("Lote no encontrado", { exact: true }),
   ).toBeVisible();
@@ -712,7 +713,7 @@ test("MK-013: decimal precision, temporal boundaries and stale writes are checke
 test("MK-013-S02: browser Back from confirmation shows one dialog and retains proposal", async ({
   page,
 }) => {
-  await page.goto("/precios?target=base");
+  await gotoPricingReview(page, "/precios?target=base");
   await page.getByRole("link", { name: "Editar precio", exact: true }).click();
   await editDraft(page);
   await page
@@ -736,7 +737,7 @@ test("MK-013-S02: browser Back from confirmation shows one dialog and retains pr
 test("MK-013-S03/S06: loading, absence and errors are distinct and cancel stale reads", async ({
   page,
 }) => {
-  await page.goto("/precios/programaciones?target=base&modoRevision=1");
+  await gotoPricingReview(page, "/precios/programaciones?target=base&modoRevision=1");
   await select(page, "Escenario del listado", "Cargando");
   await expect(
     page.getByRole("status", {
@@ -754,7 +755,7 @@ test("MK-013-S03/S06: loading, absence and errors are distinct and cancel stale 
   await expect(page.getByRole("alert")).toContainText(
     "No se pudo cargar el listado",
   );
-  await page.goto(
+  await gotoPricingReview(page,
     "/precios/historico?target=variant40&at=2026-09-10T07:00&modoRevision=1",
   );
   await select(page, "Escenario histórico", "Cargando");

@@ -104,7 +104,7 @@ function RecommendationEditorProvider({
   kind: RecommendationKind;
 }) {
   const [params] = useSearchParams();
-  const { services, confirmedServices, clearTransientParams } =
+  const { services, confirmedServices, clearTransientParams, revision } =
     usePromotionServices();
   const suffix = params.size ? `?${params}` : "";
   const root = initial
@@ -126,12 +126,18 @@ function RecommendationEditorProvider({
   );
   const readCatalog = useCallback(
     async (signal: AbortSignal) => ({
-      products: await services.catalog.products(signal),
+      products: await services.catalog.products(signal, initial ? {
+        productIds: [
+          ...(initial.configuration.originType === "product" ? [initial.configuration.originId] : []),
+          ...initial.configuration.candidates.map((candidate) => candidate.productId),
+        ],
+        skus: [],
+      } : undefined),
       categories: await services.catalog.categories(signal),
     }),
-    [services],
+    [services, initial],
   );
-  const catalog = useAdministrationRead("catalog", readCatalog);
+  const catalog = useAdministrationRead(`catalog:${revision}:${initial?.id ?? "new"}`, readCatalog);
   if (form.confirmed) {
     const next = clearTransientParams(params);
     return (

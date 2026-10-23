@@ -13,7 +13,8 @@ import type { StockFiltersQuery } from "../services/inventoryTypes";
 
 export function ThresholdsPage() {
   const [params] = useSearchParams();
-
+  const isRevisionMode =
+    import.meta.env.DEV && params.get("modoRevision") === "1";
   const {
     thresholds,
     loading,
@@ -25,9 +26,6 @@ export function ThresholdsPage() {
   } = useThresholds();
 
   const { items: stockItems } = useInventoryStock({} as StockFiltersQuery);
-
-  const isRevisionMode =
-    import.meta.env.DEV && params.get("modoRevision") === "1";
 
   return (
     <>
@@ -52,12 +50,6 @@ export function ThresholdsPage() {
       />
 
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Precedencia de reglas de umbral">
-          El umbral resuelto usa primero la excepción por SKU y, si no existe, el umbral global.
-          Cuando el saldo disponible es menor o igual a este valor, el estado comercial pasa a{" "}
-          <strong>stock bajo</strong>.
-        </FeedbackAlert>
-
         {isRevisionMode && <DevScenarioSelector />}
 
         {loading && !thresholds && (

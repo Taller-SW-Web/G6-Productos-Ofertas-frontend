@@ -524,10 +524,10 @@ export const mockExports: Record<string, BulkExportJob> = {
 };
 
 // Sample demonstration CSV (not claimed as normative official template)
-export const MOCK_CSV_SAMPLE_DATA = `sku,nombre,descripcion,categoria,marca,precio_regular,moneda,stock_inicial
-NK-RN-001-42,Zapatilla Running Air Sprint - Talla 42,Zapatilla deportiva para running,Calzado,Nike,299.00,PEN,50
-AD-TR-002-M,Camiseta Entrenamiento DryFit - Talla M,Camiseta transpirable,Ropa,Adidas,89.00,PEN,30
-PUM-FT-004-L,Short Futbol Pro - Talla L,Short de competición,Ropa,Puma,79.00,PEN,20
+export const MOCK_CSV_SAMPLE_DATA = `sku,nombre,descripcion,categoria,marca,tipo_producto,precio_regular,moneda,stock_inicial
+NK-RN-001-42,Zapatilla Running Air Sprint - Talla 42,Zapatilla deportiva para running,Calzado,Nike,Zapatilla,299.00,PEN,50
+AD-TR-002-M,Camiseta Entrenamiento DryFit - Talla M,Camiseta transpirable,Ropa,Adidas,Camiseta deportiva,89.00,PEN,30
+INK-FT-004-L,Short Futbol Pro - Talla L,Short de entrenamiento,Ropa,Inka Athletic,Ropa de entrenamiento,79.00,PEN,20
 `;
 
 export const MOCK_EXPORT_CSV_DATA = `sku,nombre,categoria,marca,precio_regular,precio_oferta,moneda,stock_disponible,estado

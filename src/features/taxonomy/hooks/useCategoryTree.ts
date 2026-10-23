@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { categoryService } from "../services/categoryService";
 import type { CategoryNode } from "../types";
+import { useMockStateRevision } from "../../shared/useMockStateRevision";
 
 export type CategoryTreeState =
   | { status: "loading" }

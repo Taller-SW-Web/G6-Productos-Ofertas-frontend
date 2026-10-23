@@ -125,8 +125,7 @@ function AuditExportFlow({
             <AuditScope filters={filters} total={total} />
             <Text size="sm">
               {format} admite hasta {limit.toLocaleString("es-PE")} registros,
-              inclusive. El servicio vuelve a comprobar el resultado al
-              solicitar.
+              inclusive.
             </Text>
             {inputError && (
               <FeedbackAlert semantic="error" title="Revisa las fechas">

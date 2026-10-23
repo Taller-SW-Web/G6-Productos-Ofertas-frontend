@@ -1,5 +1,13 @@
 import { SeoConflictError, type SeoRepository } from "../services/seoRepository";
 import type { SlugPropuesta } from "../types";
+import {
+  isMockPersistenceAvailable,
+  isRecord,
+  publishMockChange,
+  readMockState,
+  saveMockState,
+  subscribeExternalMockChanges,
+} from "../../shared/mockState";
 
 interface RegistroSeo {
   id: string;
@@ -11,17 +19,66 @@ interface RegistroSeo {
   colisionResuelta?: boolean;
 }
 
-const store: RegistroSeo[] = [
+interface HistorialSlug {
+  slugAnterior: string;
+  slugActual: string;
+  fecha: string;
+}
+
+interface MockSeoState {
+  records: RegistroSeo[];
+  history: Record<string, HistorialSlug[]>;
+}
+
+function isMockSeoState(value: unknown): value is MockSeoState {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.records) &&
+    isRecord(value.history)
+  );
+}
+
+const storeFixtures: RegistroSeo[] = [
   { id: "cat-ropa", nombre: "Ropa", slug: "ropa", metaTitulo: "Ropa | Tienda", metaDescripcion: "Catálogo de ropa" },
   { id: "cat-zapatillas", nombre: "Zapatillas", slug: "zapatillas", metaTitulo: "Zapatillas deportivas", metaDescripcion: "Catálogo de zapatillas deportivas" },
   { id: "cat-tecnologia", nombre: "Tecnología", slug: "tecnologia", metaTitulo: "", metaDescripcion: "" },
 ];
 
-const historial: Record<string, Array<{ slugAnterior: string; slugActual: string; fecha: string }>> = {
+const historialFixtures: Record<string, HistorialSlug[]> = {
   "cat-zapatillas": [
     { slugAnterior: "zapatillas", slugActual: "zapatillas-deportivas", fecha: "2026-09-28T10:00:00Z" },
   ],
 };
+
+// Demo state restored from the current-browser session when available; otherwise a
+// fresh clone of the fixtures. Cross-tab writes rehydrate both stores in place.
+const persisted = readMockState<MockSeoState>("taxonomy-seo", isMockSeoState);
+const store: RegistroSeo[] = persisted
+  ? persisted.records
+  : (structuredClone(storeFixtures) as RegistroSeo[]);
+const historial: Record<string, HistorialSlug[]> = persisted
+  ? persisted.history
+  : (structuredClone(historialFixtures) as Record<string, HistorialSlug[]>);
+
+function persist(): boolean {
+  const ok = saveMockState("taxonomy-seo", { records: store, history: historial } satisfies MockSeoState);
+  publishMockChange("taxonomy-seo");
+  publishMockChange("taxonomy");
+  return ok;
+}
+
+if (isMockPersistenceAvailable()) {
+  subscribeExternalMockChanges("taxonomy-seo", () => {
+    const next = readMockState<MockSeoState>("taxonomy-seo", isMockSeoState);
+    if (!next) return;
+    store.length = 0;
+    store.push(...next.records);
+    for (const key of Object.keys(historial)) delete historial[key];
+    Object.assign(historial, next.history);
+    publishMockChange("taxonomy-seo");
+    publishMockChange("taxonomy");
+  });
+}
 
 const esperar = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -93,7 +150,9 @@ export const mockSeoAdapter: SeoRepository = {
     if (duplicado) {
       throw new SeoConflictError(slugNormalizado);
     }
-    if (slugNormalizado !== r.slug) {
+    const prev = { ...r };
+    const slugCambiado = slugNormalizado !== r.slug;
+    if (slugCambiado) {
       const historialDe = historial[id] ?? [];
       historialDe.push({
         slugAnterior: r.slug,
@@ -107,6 +166,14 @@ export const mockSeoAdapter: SeoRepository = {
     }
     r.metaTitulo = metaTitulo;
     r.metaDescripcion = metaDescripcion;
+    const ok = persist();
+    if (!ok && isMockPersistenceAvailable()) {
+      Object.assign(r, prev);
+      if (slugCambiado) {
+        historial[id]?.pop();
+      }
+      throw new Error("No se pudo guardar la configuración SEO. Vuelve a intentarlo.");
+    }
     return aRegistro(r);
   },
 

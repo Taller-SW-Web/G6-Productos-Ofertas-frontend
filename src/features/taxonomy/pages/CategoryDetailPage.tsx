@@ -1,6 +1,6 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Anchor, Button, Group, Loader, Stack, Text } from "@mantine/core";
-import { IconPencil, IconPower, IconRefresh } from "@tabler/icons-react";
+import { ActionIcon, Anchor, Button, Group, Loader, Stack, Text } from "@mantine/core";
+import { IconEye, IconPencil, IconPower, IconRefresh } from "@tabler/icons-react";
 import {
   EntityTable,
   FeedbackAlert,
@@ -21,9 +21,9 @@ const columnasHijas: TableColumn<CategoryNode>[] = [
     key: "nombre",
     header: "Nombre",
     render: (nodo) => (
-      <Anchor component={Link} to={`/categorias/${nodo.id}`} size="sm">
+      <Text size="sm" fw={nodo.nivel === 0 ? 600 : 400}>
         {nodo.nombre}
-      </Anchor>
+      </Text>
     ),
   },
   {
@@ -41,6 +41,22 @@ const columnasHijas: TableColumn<CategoryNode>[] = [
       <StatusBadge semantic={estadoSemantic[nodo.estado]}>
         {nodo.estado}
       </StatusBadge>
+    ),
+  },
+  {
+    key: "acciones",
+    header: "Acciones",
+    width: 80,
+    align: "right",
+    render: (nodo) => (
+      <ActionIcon
+        component={Link}
+        to={`/categorias/${nodo.id}`}
+        aria-label={`Ver detalle de ${nodo.nombre}`}
+        title="Ver detalle"
+      >
+        <IconEye size={16} stroke={2} aria-hidden="true" />
+      </ActionIcon>
     ),
   },
 ];
@@ -214,7 +230,6 @@ function CategoryDetailContent({
             {esActivo ? (
               <Button
                 variant="outline"
-                color="danger"
                 leftSection={<IconPower size={16} stroke={2} aria-hidden="true" />}
                 onClick={() => navigate(`/categorias/${detalle.id}/desactivar`)}
               >

@@ -14,7 +14,7 @@ async function selectOption(
 }
 
 test.describe("MK-015: Control de stock, umbrales y traslados (Issue #17)", () => {
-  test("MK-015-S01: Muestra tabla de saldos autoritativos con cálculo y estado", async ({
+  test("@smoke MK-015-S01: Muestra tabla de saldos autoritativos con cálculo y estado", async ({
     page,
   }) => {
     await page.goto("/inventario");
@@ -34,10 +34,11 @@ test.describe("MK-015: Control de stock, umbrales y traslados (Issue #17)", () =
     await expect(page.getByText("ZAP-TRL-40-BLK")).toBeVisible();
     await expect(page.getByText("ZAP-TRL-42-BLK")).toBeVisible();
     await expect(page.getByText("MED-CP-U-BLK")).toBeVisible();
+    await expect(page.getByText("CAM-RUN-BLA-M")).toBeVisible();
 
     await expect(page.getByRole("cell", { name: "DISPONIBLE" }).first()).toBeVisible();
     await expect(page.getByRole("cell", { name: "STOCK_BAJO" }).first()).toBeVisible();
-    await expect(page.getByRole("cell", { name: "AGOTADO" })).toBeVisible();
+    await expect(page.getByRole("cell", { name: "AGOTADO" }).first()).toBeVisible();
 
     const searchInput = page.getByRole("textbox", {
       name: "Buscar SKU o producto",
