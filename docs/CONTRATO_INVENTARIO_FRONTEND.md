@@ -115,3 +115,9 @@ La conformidad de este contrato se valida mediante los siguientes comandos. Los 
 | `node scripts/verify-production.mjs <mock\|api>` | Verificación en preview de producción (`1440 × 900`) para ambos modos sin errores ni carga de mocks en modo `api`. |
 
 > **Regla de evidencia:** no declarar `PASS` sin haber ejecutado el comando correspondiente y obtenido salida libre de errores. Si no se ejecutó, registrar `NO EJECUTADO`.
+
+## Compatibilidad Marketplace H4
+
+El frontend de Inventory en este repositorio es una herramienta administrativa G6, no el frontend comercial G1. Marketplace consulta el Gateway G6 desde su BFF servidor. Para operación vigente leer el [paquete H4 Backend](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/castilla/integraciones/g1-marketplace/README.md) y el [acuerdo Docs](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/docs/g1-marketplace-homologacion-lote03/integraciones/ACUERDO_G1_G6_H4_2026-10-20.md).
+
+La disponibilidad de gestión interna puede exponer saldos y ubicación a roles administrativos autorizados; la proyección comercial de G1 solo expone `DISPONIBLE`, `STOCK_BAJO`, `AGOTADO` o `INDETERMINADO`, sin saldo ni ubicación. `INDETERMINADO` es resultado comercial HTTP 200 y no significa agotado. La verificación N es lectura no vinculante (`binding=false`), no reserva. No convertir error/timeout de API en mock silencioso. Los mocks de este frontend no prueban G1, grant G7 ni runtime externo.
