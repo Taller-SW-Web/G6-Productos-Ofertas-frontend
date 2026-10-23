@@ -12,10 +12,12 @@ import {
   TextInput,
 } from "@mantine/core";
 import {
+  ConfirmDialog,
   FeedbackAlert,
   PageHeader,
   SectionCard,
 } from "../../../components/shared";
+import { SufijoResaltado } from "../components/SufijoResaltado";
 import { useCategoryDetail } from "../hooks/useCategoryDetail";
 import { useCategoryTree } from "../hooks/useCategoryTree";
 import { useUpdateCategory } from "../hooks/useUpdateCategory";
@@ -87,6 +89,11 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
     phase,
     error,
     resultado,
+    slugCheck,
+    slug,
+    setSlug,
+    comprobar,
+    cerrar,
     actualizar,
   } = useUpdateCategory();
 
@@ -98,6 +105,8 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
   const [nombreError, setNombreError] = useState<string | null>(null);
 
   const tieneSubcategorias = detalle.hijas.length > 0;
+  const modalAbierto =
+    phase === "comprobando" || phase === "confirmando" || phase === "guardando";
 
   // SPEC-008 / MK-008: máximo dos niveles. Solo las categorías raíz pueden ser
   // padre. Si la categoría que se edita ya tiene subcategorías, no puede moverse
@@ -131,11 +140,29 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
       return;
     }
     setNombreError(null);
+    if (limpio !== detalle.nombre) {
+      comprobar(limpio);
+      return;
+    }
     actualizar({
       id: detalle.id,
       nombre: limpio,
       // Category administration does not edit SEO slugs; MK-012 owns that task.
       slug: detalle.slug,
+      padreId: padreId ?? undefined,
+      descripcion: descripcion.trim() || undefined,
+      orden,
+      imagen: imagenUrl.trim() || undefined,
+    });
+  };
+
+  const handleConfirmar = () => {
+    if (!slugCheck || phase !== "confirmando" || slug.trim() !== slugCheck.slug)
+      return;
+    actualizar({
+      id: detalle.id,
+      nombre: nombre.trim(),
+      slug: slug.trim(),
       padreId: padreId ?? undefined,
       descripcion: descripcion.trim() || undefined,
       orden,
@@ -241,9 +268,6 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
           </SectionCard>
         </>
       )}
-<<<<<<< HEAD
-=======
-
       <ConfirmDialog
         opened={modalAbierto}
         title="Confirmar slug SEO"
@@ -311,7 +335,6 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
           )}
         </Stack>
       </ConfirmDialog>
->>>>>>> origin/master
     </>
   );
 }

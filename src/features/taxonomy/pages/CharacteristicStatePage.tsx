@@ -182,14 +182,9 @@ function CharacteristicStateContent({
               </FeedbackAlert>
               <Text size="sm" c="dimmed">
                 El identificador de la característica se conserva. La
-<<<<<<< HEAD
                 desactivación no elimina sus valores ni altera asociaciones
                 históricas; en la demostración deja de estar disponible para
                 nuevas asociaciones y capturas de valores.
-=======
-                desactivación no elimina sus valores, solo impide su uso en
-                nuevos esquemas.
->>>>>>> origin/master
               </Text>
               <Group gap="sm">
                 <Button onClick={handleCambiarEstado} loading={procesando}>

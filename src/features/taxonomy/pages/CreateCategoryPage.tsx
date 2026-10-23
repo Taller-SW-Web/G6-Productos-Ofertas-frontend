@@ -73,14 +73,9 @@ export function CreateCategoryPage() {
 
   const handleConfirmar = () => {
     if (
-<<<<<<< HEAD
       !slugCheck ||
-      (!slugCheck.disponible && slug !== slugCheck.alternativo) ||
-      phase === "comprobando" ||
-      phase === "guardando"
-=======
-      !slugCheck || phase !== "confirmando"
->>>>>>> origin/master
+      phase !== "confirmando" ||
+      slug.trim() !== slugCheck.slug
     ) {
       return;
     }

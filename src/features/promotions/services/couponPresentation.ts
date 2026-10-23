@@ -33,9 +33,15 @@ export function couponPromotionValidity(
   const until = coupon.promotion?.validUntil
     ? new Date(coupon.promotion.validUntil).getTime()
     : Number.NaN;
-  if (!Number.isFinite(from) || !Number.isFinite(until)) return "unknown";
-  if (now.getTime() < from) return "not-started";
-  if (now.getTime() >= until) return "expired";
+  if (
+    !Number.isFinite(from) ||
+    !Number.isFinite(until) ||
+    until <= from
+  )
+    return "unknown";
+  const timestamp = now.getTime();
+  if (timestamp < from) return "not-started";
+  if (timestamp >= until) return "expired";
   return "available";
 }
 
@@ -57,6 +63,7 @@ export const couponPolicyLabel = (coupon: CouponView) =>
 export function couponDateLabel(value: string) {
   return new Intl.DateTimeFormat("es-PE", {
     dateStyle: "medium",
+    timeStyle: "short",
     timeZone: "America/Lima",
   }).format(new Date(value));
 }

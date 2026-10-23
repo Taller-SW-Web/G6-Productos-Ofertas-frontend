@@ -90,7 +90,7 @@ const isCharacteristic = (value: unknown): value is RegistroCaracteristica => {
   return (
     typeof row.id === "string" &&
     typeof row.nombre === "string" &&
-    (row.tipo === "TEXTO" || row.tipo === "NUMERICO" || row.tipo === "LISTA") &&
+    (row.tipo === "TEXTO" || row.tipo === "NUMERO" || row.tipo === "LISTA") &&
     (row.estado === "Activo" || row.estado === "Inactivo")
   );
 };
@@ -280,6 +280,12 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
         "No se pudo crear la característica. Inténtalo de nuevo.",
       );
     }
+    if (!input.nombre.trim())
+      throw new Error("Ingresa el nombre de la característica.");
+    if (input.tipo !== "TEXTO" && input.tipo !== "NUMERO" && input.tipo !== "LISTA")
+      throw new Error("Selecciona un tipo de característica válido.");
+    if (input.tipo === "NUMERO" && !input.unidad?.trim())
+      throw new Error("Ingresa la unidad para una característica NUMERO.");
     const unidad = input.tipo === "NUMERO" ? input.unidad : undefined;
     const registro: RegistroCaracteristica = {
       id: generarId(input.nombre),
@@ -365,8 +371,16 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
     if (MOCK.formulario === "error") {
       throw new Error("No se pudo renombrar el valor. Inténtalo de nuevo.");
     }
+    const prevNombre = v.nombre;
+    const prevVersion = v.version;
     v.nombre = nombreLimpio;
     v.version += 1;
+    const ok = persist();
+    if (!ok && isMockPersistenceAvailable()) {
+      v.nombre = prevNombre;
+      v.version = prevVersion;
+      throw new Error("No se pudo renombrar el valor. Vuelve a intentarlo.");
+    }
     return { ...v };
   },
 
@@ -379,6 +393,7 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
     if (r.estado !== "Activo") {
       throw new Error("La característica está inactiva y no admite nuevos valores.");
     }
+    if (!nombre.trim()) throw new Error("Ingresa el nombre del valor.");
     // SPEC-009: el límite de valores permitidos se aplica también aquí y no solo como
     // restricción visual del formulario (maxValoresLista sobre valores activos).
     const existentes = r.valores ?? [];
@@ -492,7 +507,7 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
         operacionId,
         estado: "rechazada",
         mensaje:
-          "No se puede dar de baja: el valor está referenciado por un esquema activo o en productos activos.",
+          "No se puede dar de baja: el valor está referenciado por el esquema activo o por productos activos.",
         valor: { ...v },
       };
     }

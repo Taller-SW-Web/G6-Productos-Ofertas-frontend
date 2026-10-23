@@ -15,9 +15,10 @@ export function createReviewServiceResolver(base: PromotionServiceContext) {
     return next;
   };
   return (params: URLSearchParams): PromotionServiceContext => {
+    const couponScenario = readCouponScenario(params);
     const scenario =
-      readCouponScenario(params) === "usage-unavailable"
-        ? "usage-unavailable"
+      couponScenario === "usage-unavailable" || couponScenario === "expired"
+        ? couponScenario
         : administrationScenario(params);
     let context = contexts.get(scenario);
     if (!context) {

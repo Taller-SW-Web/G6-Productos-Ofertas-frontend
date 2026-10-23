@@ -51,7 +51,7 @@ export function CouponSummary({
               value={couponPromotionValidityLabel(couponPromotionValidity(coupon))}
             />
             <Value
-              label="Elegibilidad informada"
+              label="Usos permitidos por cliente"
               value={
                 coupon.customerLimit === undefined
                   ? "No disponible"

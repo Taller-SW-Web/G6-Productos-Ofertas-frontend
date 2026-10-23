@@ -1,5 +1,8 @@
 import { evidencePath } from "./support/evidence";
 import { expect, test, type Page } from "@playwright/test";
+
+const recommendationMockNotice =
+  "Entorno de prueba: la información presentada es de referencia y no confirma una aplicación comercial.";
 async function choose(page: Page, label: string, option: string) {
   await page.getByRole("combobox", { name: label, exact: true }).click();
   await page.getByRole("option", { name: option, exact: true }).click();
@@ -37,6 +40,9 @@ test("MK-007 S01/S06: filters, origins, pagination and read-only enrichments ret
   page,
 }) => {
   await page.goto("/recomendaciones?estado=inactive&tipo=upsell&tamanio=1");
+  await expect(
+    page.getByText(recommendationMockNotice, { exact: true }),
+  ).toBeVisible();
   await page
     .getByRole("link", {
       name: "Ver detalle de Mejora tu rendimiento",
@@ -66,6 +72,25 @@ test("MK-007 S01/S06: filters, origins, pagination and read-only enrichments ret
   await expect(
     page.getByRole("region", { name: "Configuración de la regla" }),
   ).toContainText("Origen por categoría: Running");
+});
+
+test("MK-007: mock notice is visible in every recommendation view", async ({
+  page,
+}) => {
+  for (const route of [
+    "/recomendaciones",
+    "/recomendaciones/nueva/venta-cruzada",
+    "/recomendaciones/completa-carrera/editar",
+    "/recomendaciones/nueva/upselling",
+    "/recomendaciones/nueva/venta-cruzada/productos",
+    "/recomendaciones/completa-carrera",
+    "/recomendaciones/completa-carrera/estado",
+  ]) {
+    await page.goto(route);
+    await expect(
+      page.getByText(recommendationMockNotice, { exact: true }),
+    ).toBeVisible();
+  }
 });
 test("MK-007 S02/S05: selector excludes origin/duplicates, cancellation preserves draft, order persists", async ({
   page,

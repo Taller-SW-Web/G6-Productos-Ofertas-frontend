@@ -303,6 +303,21 @@ export const __resetCategoryMockScenarios = (): void => {
 };
 
 // Mock adapter: returns deterministic fixtures, never a real backend response.
+type CategoryMockScenarios = {
+  detalle: "default" | "error" | "no-encontrado";
+  slug: "default" | "slug-sin-colision" | "slug-con-colision" | "slug-carrera-409";
+  baja:
+    | "default"
+    | "error"
+    | "rechazada-subcategorias"
+    | "rechazada-productos"
+    | "rechazada-asincrona"
+    | "error-consulta"
+    | "pendiente-prolongado";
+  reactivacion: "default" | "error" | "bloqueada";
+  arbol: "default" | "error" | "empty";
+};
+
 export const mockCategoryAdapter: CategoryRepository = {
   async list(signal) {
     signal?.throwIfAborted();
@@ -417,7 +432,7 @@ export const mockCategoryAdapter: CategoryRepository = {
     const imagen =
       input.imagen?.trim() || input.imagenUrl?.trim() || undefined;
 
-    store.push({
+    const creado: RegistroCategoria = {
       id,
       nombre: input.nombre,
       slug: input.slug,
@@ -586,10 +601,10 @@ export const mockCategoryAdapter: CategoryRepository = {
       }
     }
 
-    const prevEstado = registro.estado;
     registro.estado = "Verificando baja";
     const operacionId = `op-baja-categoria-${id}`;
-    operacionesBaja.set(operacionId, {
+    operacionesBaja.push({
+      operacionId,
       categoriaId: id,
       estado: MOCK.baja === "rechazada-asincrona" ? "rechazada" : "pendiente",
     });

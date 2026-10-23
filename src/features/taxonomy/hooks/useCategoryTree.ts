@@ -13,6 +13,7 @@ export function useCategoryTree(): {
   reload: () => void;
 } {
   const [state, setState] = useState<CategoryTreeState>({ status: "loading" });
+  const revision = useMockStateRevision(["taxonomy", "taxonomy-categories"]);
   const [requestVersion, setRequestVersion] = useState(0);
 
   const reload = useCallback(() => {
@@ -39,7 +40,7 @@ export function useCategoryTree(): {
       },
     );
     return () => controller.abort();
-  }, [requestVersion]);
+  }, [revision, requestVersion]);
 
   return { state, reload };
 }
