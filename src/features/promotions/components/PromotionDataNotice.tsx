@@ -13,7 +13,12 @@ export function PromotionDataNotice({ kind }: { kind: string }) {
         un cupón no aplica descuentos ni registra consumo o restitución de usos.
       </Text>
     );
-  if (kind === "campaigns" || kind === "campaign-form" || kind === "campaign-detail")
+  if (
+    kind === "campaigns" ||
+    kind === "campaign-form" ||
+    kind === "campaign-detail" ||
+    kind === "campaign-scope"
+  )
     return (
       <Text size="sm" c="dimmed">
         Entorno de prueba: la información presentada es de referencia y no
