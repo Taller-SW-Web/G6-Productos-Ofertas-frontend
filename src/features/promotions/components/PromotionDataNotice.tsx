@@ -5,12 +5,25 @@ import { DataModeContext } from "../../../app/config/DataModeContext";
 /** Promotions remains mock-only until the provider contract is available. */
 export function PromotionDataNotice({ kind }: { kind: string }) {
   const mode = useContext(DataModeContext);
-  if (mode !== "mock" || (kind !== "coupons" && kind !== "coupon-form"))
-    return null;
-  return (
-    <Text size="sm" c="dimmed">
-      Entorno de prueba: la información presentada es de referencia. Consultar
-      un cupón no aplica descuentos ni registra consumo o restitución de usos.
-    </Text>
-  );
+  if (mode !== "mock") return null;
+  if (kind === "coupons" || kind === "coupon-form")
+    return (
+      <Text size="sm" c="dimmed">
+        Entorno de prueba: la información presentada es de referencia. Consultar
+        un cupón no aplica descuentos ni registra consumo o restitución de usos.
+      </Text>
+    );
+  if (
+    kind === "campaigns" ||
+    kind === "campaign-form" ||
+    kind === "campaign-detail" ||
+    kind === "campaign-scope"
+  )
+    return (
+      <Text size="sm" c="dimmed">
+        Entorno de prueba: la información presentada es de referencia y no
+        confirma una aplicación comercial.
+      </Text>
+    );
+  return null;
 }
