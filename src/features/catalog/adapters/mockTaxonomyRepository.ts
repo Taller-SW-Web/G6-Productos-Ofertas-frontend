@@ -13,6 +13,7 @@ import {
 } from "../mocks/taxonomyFixtures";
 import { getTaxonomyServices } from "../../taxonomy/services/taxonomyServices";
 import type { CategoryNode } from "../../taxonomy/types";
+import { isCharacteristicValuePending } from "../../taxonomy/adapters/mockCharacteristicAdapter";
 
 // ---------------------------------------------------------------------------
 // Canonical mapping between Taxonomía IDs and Catálogo IDs (LOP-01 / LOP-02).
@@ -266,7 +267,11 @@ export class MockTaxonomyRepository implements TaxonomyRepository {
           unidad: characteristic.unidad,
           esIdentificadora,
           opciones: values
-            ?.filter((v) => v.estado === "Activo")
+            ?.filter(
+              (v) =>
+                v.estado === "Activo" &&
+                !isCharacteristicValuePending(characteristic.id, v.valorId),
+            )
             .map((v) => ({ id: v.valorId, valor: v.nombre })),
           maxLength:
             characteristic.tipo === "TEXTO"

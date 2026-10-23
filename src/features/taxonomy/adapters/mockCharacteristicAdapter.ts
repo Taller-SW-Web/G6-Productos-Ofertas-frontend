@@ -4,7 +4,10 @@ import {
   isMockPersistenceAvailable,
   loadMockArray,
   persistMockArray,
+  readMockState,
+  saveMockState,
   syncMockArrayOnExternalChange,
+  subscribeExternalMockChanges,
 } from "../../shared/mockState";
 import type {
   CharacteristicDetail,
@@ -152,10 +155,24 @@ const contarActivos = (valores: RegistroValor[]): number =>
 // de una baja asíncrona de valor (202). Este registro mantiene las operaciones
 // pendientes en memoria para que la UI consulte su estado sin inventar un endpoint.
 interface OperacionBajaValor {
+  operacionId: string;
   caracteristicaId: string;
   valorId: string;
   estado: "pendiente" | "confirmada" | "rechazada" | "no-concluyente";
 }
+
+const isOperacionBajaValor = (value: unknown): value is OperacionBajaValor => {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.operacionId === "string" &&
+    typeof row.caracteristicaId === "string" &&
+    typeof row.valorId === "string" &&
+    ["pendiente", "confirmada", "rechazada", "no-concluyente"].includes(
+      String(row.estado),
+    )
+  );
+};
 
 // H-06: test isolation — snapshot/restore baseline store.
 const copiarRegistro = (item: RegistroCaracteristica): RegistroCaracteristica => ({
@@ -171,7 +188,45 @@ export const __resetCharacteristicStore = (): void => {
   __resetCharacteristicMockScenarios();
 };
 
-const operacionesBajaValor = new Map<string, OperacionBajaValor>();
+const operacionesBajaValor = new Map<string, OperacionBajaValor>(
+  (
+    readMockState<OperacionBajaValor[]>(
+      "taxonomy-characteristic-baja",
+      (value): value is OperacionBajaValor[] =>
+        Array.isArray(value) && value.every(isOperacionBajaValor),
+    ) ?? []
+  ).map((operation) => [operation.operacionId, operation]),
+);
+
+const persistirOperacionesBaja = () =>
+  saveMockState(
+    "taxonomy-characteristic-baja",
+    Array.from(operacionesBajaValor.values()),
+  );
+
+subscribeExternalMockChanges("taxonomy-characteristic-baja", () => {
+  const stored = readMockState<OperacionBajaValor[]>(
+    "taxonomy-characteristic-baja",
+    (value): value is OperacionBajaValor[] =>
+      Array.isArray(value) && value.every(isOperacionBajaValor),
+  );
+  if (!stored) return;
+  operacionesBajaValor.clear();
+  for (const operation of stored)
+    operacionesBajaValor.set(operation.operacionId, operation);
+});
+
+export function isCharacteristicValuePending(
+  caracteristicaId: string,
+  valorId: string,
+): boolean {
+  return Array.from(operacionesBajaValor.values()).some(
+    (operation) =>
+      operation.caracteristicaId === caracteristicaId &&
+      operation.valorId === valorId &&
+      operation.estado === "pendiente",
+  );
+}
 
 // Deterministic local states used only for review. The repository contract does not
 // accept scenarios; reviewers change these values to reproduce error or edge cases
@@ -209,6 +264,8 @@ const MOCK: CharacteristicMockScenarios = { ...DEFAULT_MOCK_SCENARIOS };
 export const __setCharacteristicMockScenarios = (
   scenarios: Partial<CharacteristicMockScenarios>,
 ): void => {
+  if (scenarios.baja && scenarios.baja !== MOCK.baja)
+    operacionesBajaValor.clear();
   Object.assign(MOCK, scenarios);
   if (scenarios.valores === "empty") {
     const caracteristica = store.find((item) => item.tipo === "LISTA");
@@ -463,7 +520,21 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
     // La solicitud siempre se admite como pendiente. La comprobación simulada
     // produce el resultado terminal al consultar el estado de la operación.
     const operacionId = `baja-valor-${id}-${valorId}`;
+    const existing = operacionesBajaValor.get(operacionId);
+    if (existing) {
+      return {
+        resultado: "pendiente",
+        valor: actual,
+        mensaje:
+          existing.estado === "pendiente"
+            ? "La solicitud de baja ya está pendiente; no se reenvió la operación."
+            : "La operación de baja ya fue resuelta.",
+        bloqueos: [],
+        operacionId,
+      };
+    }
     operacionesBajaValor.set(operacionId, {
+      operacionId,
       caracteristicaId: id,
       valorId,
       estado:
@@ -473,6 +544,10 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
             ? "no-concluyente"
             : "pendiente",
     });
+    if (!persistirOperacionesBaja() && isMockPersistenceAvailable()) {
+      operacionesBajaValor.delete(operacionId);
+      throw new Error("No se pudo registrar la solicitud de baja. Vuelve a intentarlo.");
+    }
     return {
       resultado: "pendiente",
       valor: actual,
@@ -541,13 +616,14 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
       v.version += 1;
       r.valoresActivos = contarActivos(r.valores ?? []);
       const ok = persist();
-      if (!ok && isMockPersistenceAvailable()) {
+        if (!ok && isMockPersistenceAvailable()) {
         operacion.estado = "pendiente";
         v.estado = prevEstado;
         v.version = prevVersion;
         r.valoresActivos = prevActivos;
-        throw new Error("No se pudo confirmar la baja del valor. Vuelve a intentarlo.");
-      }
+          throw new Error("No se pudo confirmar la baja del valor. Vuelve a intentarlo.");
+        }
+        persistirOperacionesBaja();
       return {
         operacionId,
         estado: "confirmada",
