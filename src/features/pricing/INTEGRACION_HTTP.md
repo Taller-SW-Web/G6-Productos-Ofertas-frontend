@@ -5,6 +5,9 @@ La aplicación productiva todavía no está conectada al Gateway por el cliente
 compartido. Ningún PATCH de esta entrega se presenta como persistido en una
 base real. MK-014 permanece mock.
 
+La revisión del PR #47 del 2026-10-23 se registra al final de este documento.
+Las mediciones y restricciones del 2026-10-17 se conservan como corte histórico.
+
 ## Git y ownership
 
 Frontend: rama `vera`, base de los commits de esta entrega
@@ -180,3 +183,89 @@ React→cliente común→Gateway→Pricing→PostgreSQL, hybrid global e integra
 autenticada compartida: **PENDIENTES**. Homologación externa: **NO ACREDITADA**.
 Oracle y Vercel: **NO EJECUTADO**. No se cierran issues, publica una integración
 como definitiva, hace auto-merge ni se cambia infraestructura.
+
+## Revisión para auditoría — 2026-10-23
+
+Base de esta revisión: Frontend `vera@f99fb6e`. Se conserva esa rama sin integrar
+`master`. El usuario autorizó un commit adicional publicado en el PR #47.
+El PR estaba abierto, sin revisiones formales ni hilos inline; el comentario H4
+remite a Docs #94 y Backend #137, ambos todavía abiertos al consultarlos.
+
+### Hallazgos corregidos
+
+- La lectura previa de edición y los bloqueos de PATCH/POST dependían del ID de
+  selección de UI. Un ID reutilizado por Catálogo podía llevar a un PATCH sobre
+  otro producto sin leer su versión; dos selecciones del mismo producto podían
+  enviar otra mutación tras un resultado incierto. Ahora se usa la ruta del
+  producto/SKU y su canal como identidad del alcance; se comprueba también que
+  la variante conserve su asociación con el producto de la lectura previa.
+- Una relectura para edición podía ejecutarse mientras el PATCH seguía pendiente
+  y alterar la referencia de recuperación. Se rechaza esa relectura hasta que
+  termine el envío; después se conserva la recuperación explícita existente.
+- Las suites HTTP de Pricing quedaban fuera de `npm test` y `npm run test:ci`.
+  Se reutilizan sus configuraciones existentes mediante `test:unit:pricing` y
+  `test:e2e:pricing`. El primer script forma parte de `npm test`; el harness
+  de navegador se ejecuta al final de `test:ci`, después de la suite general.
+  README documenta que las respuestas siguen siendo simuladas.
+
+Se añaden siete regresiones. Cinco se ejecutaron antes de corregir el adaptador
+y fallaron reproduciendo los defectos; se añadieron además dos casos para
+cambios de SKU y producto asociado. No hay dependencias nuevas ni cambios de UI,
+contratos o repositorios Docs/Backend.
+
+### Fuentes verificadas y límites vigentes
+
+Docs oficial `master@1ee0d9e5a788dbe559a376bf96a60c6117af3956`, solo lectura:
+`requisitos/specs/SPEC-013-gestion-precios-individuales-masivos.md`,
+`contratos/http/openapi.yaml` (blob `f64bfe9a097b2a0f74c2600988305443d92f640e`)
+y `contratos/http/catalogo-errores.md`. El OpenAPI mantiene el mismo blob que
+la entrega inicial; no se deduce un desbloqueo por cambios documentales.
+La copia local de Docs está en `vera@b640b7f`; sus rutas antiguas `specs/`,
+`hu/`, `flujos/` y `mockups/MK-013/` se consultaron como antecedentes, con
+component-spec/plan/tasks En revisión y sin validation-report/prototipo HTML.
+El contrato HTTP vigente se verificó en el remoto, no en esa copia antigua.
+
+Referencia H4: SPEC-013 en Docs PR #94, HEAD
+`a8d89296b0eac37315ef30a9390f1e4e30933136`; matriz de operaciones de Backend
+PR #137, HEAD `b3558d742eb010e06eae1b484371c0a97cdea641`, y
+`apps/pricing-svc/INTEGRACION_FRONTEND.md` de Backend `vera`, blob
+`896233d160f5d22dd6f813393a0918038e1bd543`. Esas fuentes distinguen identidad,
+elegibilidad y runtime, y conservan la brecha del provider GET SKU.
+
+Frontend #45 y Backend #109 siguen abiertos: el cliente compartido, sesión/JWT
+y composición global pertenecen a Castilla y no están implementados por #47.
+P-PRI-01/02 y Catálogo siguen bloqueando sus operaciones específicas. No se
+afirma React→Gateway→Pricing→PostgreSQL, autorización G7, auditoría real,
+homologación, despliegue ni aprobación del PR.
+
+### Validación de esta revisión
+
+Node 22.21.0, npm 10.9.4; comandos desde la raíz de Frontend:
+
+| Comando / inspección | Resultado |
+|---|---|
+| `npm run typecheck` | PASS |
+| `npm run lint` | PASS |
+| `npm test` | PASS: 117; 36 Combos + 24 Bulk + 57 Pricing, sin omisiones |
+| `npx playwright test tests/pricing.spec.ts tests/pricing-workflows.spec.ts tests/pricing-audit.spec.ts tests/price-audit.spec.ts --workers=1 --reporter=line` | PASS: 61 a 1440×900, sin retries ni omisiones |
+| `npm run test:e2e:pricing -- --reporter=line` | PASS: 5 con HTTP simulado; repetido después de la suite general para conservar sus capturas, también 5 PASS |
+| `$env:VITE_DATA_MODE='mock'; npm run build` | PASS |
+| `$env:VITE_DATA_MODE='api'; npm run build` | PASS; no acredita conexión con el provider |
+| `git diff --check` | PASS |
+| `npm run test:ci` completo en local | NO EJECUTADO; se ejecutaron las suites afectadas indicadas arriba |
+| Visual 1440 px | Inspeccionadas `consulta-http-1440.png` y `precio-confirmado-http-1440.png` bajo `test-results/pricing-http/`; consulta 12.30→14.00 y versión 4→5 legibles, sin overflow horizontal visible |
+
+Las capturas son artefactos locales ignorados por Git y las vuelve a producir
+el harness. El workflow existente sube `test-results/`; no se atribuye un
+resultado remoto a este commit hasta que GitHub termine sus checks.
+
+- [x] Fuentes, inventario y estado Git inicial comprobados.
+- [x] TypeScript, ambos builds, lint y pruebas indicadas ejecutados.
+- [x] Estados de carga, ausencia, error, conflicto y confirmación cubiertos en las suites.
+- [x] Revisión visual desktop del harness a 1440 px ejecutada.
+- [x] Sin HTTP nuevo en componentes visuales, HEX ni variantes visuales nuevas.
+- [x] Sin contratos/estados/scopes inventados; Docs y Backend sin modificar.
+- [x] Dependencias y límites registrados; UI MOCK_INTEGRATED y HTTP simulado.
+
+Estado de entrega: **PARCIAL / lista para auditoría del adaptador**. La auditoría
+independiente, el cliente compartido y el E2E real continúan pendientes.

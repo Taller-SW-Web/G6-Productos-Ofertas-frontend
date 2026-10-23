@@ -92,13 +92,13 @@ export function createHttpPricingRepository(
 ): PricingRepository {
   const { transport } = dependencies;
   const channelIds = dependencies.channelIds ?? {};
-  const editableReads = new Map<string, PriceView>();
+  const editableReads = new Map<string, { productId: string; price: PriceView }>();
   const uncertainUpdates = new Set<string>();
   const uncertainSchedules = new Set<string>();
   const pendingWrites = new Set<string>();
 
-  function scopeKey(targetId: string, channel: PriceChannel): string {
-    return `${targetId}:${channel}`;
+  function scopeKey(target: PriceTarget, channel: PriceChannel): string {
+    return `${targetPath(target)}:${channel}`;
   }
 
   async function catalogTargets(signal: AbortSignal): Promise<PriceTarget[]> {
@@ -278,7 +278,13 @@ export function createHttpPricingRepository(
 
     async readEditable(writeTarget: WriteTarget, signal) {
       const target = await targetById(writeTarget.targetId, signal);
-      const key = scopeKey(writeTarget.targetId, writeTarget.channel);
+      const key = scopeKey(target, writeTarget.channel);
+      if (pendingWrites.has("update:" + key)) {
+        throw new PricingFailure(
+          "unknown",
+          "Hay un cambio pendiente de confirmación. Espera su resultado antes de volver a leer para editar.",
+        );
+      }
       editableReads.delete(key);
       if (target.kind === "product" && writeTarget.channel === "retail") {
         throw blocked(
@@ -298,7 +304,7 @@ export function createHttpPricingRepository(
         );
       }
       if (price) {
-        editableReads.set(key, price);
+        editableReads.set(key, { productId: target.productId, price });
         uncertainUpdates.delete(key);
       }
       return price;
@@ -306,8 +312,10 @@ export function createHttpPricingRepository(
 
     async update(change: PriceChange, signal) {
       const target = await targetById(change.target.targetId, signal);
-      const key = scopeKey(change.target.targetId, change.target.channel);
-      const before = editableReads.get(key);
+      const key = scopeKey(target, change.target.channel);
+      const snapshot = editableReads.get(key);
+      const before =
+        snapshot?.productId === target.productId ? snapshot.price : undefined;
       if (!before || before.version !== change.version) {
         throw new PricingFailure(
           "conflict",
@@ -391,7 +399,7 @@ export function createHttpPricingRepository(
             "La respuesta no confirma el cambio solicitado. Consulta el precio antes de reintentar.",
           );
         }
-        editableReads.set(key, after);
+        editableReads.set(key, { productId: target.productId, price: after });
         try {
           await dependencies.onUpdated?.(
             target,
@@ -457,7 +465,7 @@ export function createHttpPricingRepository(
         validUntil,
         motivoCambio: draft.reason,
       };
-      const key = scopeKey(targetId, draft.channel);
+      const key = scopeKey(target, draft.channel);
       const pendingKey = "schedule:" + key;
       if (uncertainSchedules.has(key) || pendingWrites.has(pendingKey)) {
         throw new PricingFailure(

@@ -333,3 +333,119 @@ describe("La ausencia y la admisión no sustituyen una confirmación", () => {
     expect(onUpdated).not.toHaveBeenCalled();
   });
 });
+
+describe("Identidad autoritativa y recuperación de escrituras", () => {
+  it("exige una nueva lectura si Catálogo cambia el producto de la selección", async () => {
+    let selected = { ...target };
+    const request = vi.fn(async () => response(price()));
+    const repository = createHttpPricingRepository({
+      transport: { request },
+      listCatalogTargets: async () => [selected],
+    });
+    await repository.readEditable(change.target, signal());
+    selected = { ...target, productId: "otro-producto" };
+
+    await expect(repository.update(change, signal())).rejects.toMatchObject({
+      kind: "conflict",
+    });
+    expect(request).toHaveBeenCalledOnce();
+  });
+
+  it.each(["sku", "productId"] as const)(
+    "exige releer una variante si cambia su %s",
+    async (field) => {
+      let selected: PriceTarget = {
+        ...target,
+        kind: "variant",
+        sku: "SKU-1",
+        productTargetId: "parent",
+      };
+      const request = vi.fn(async () => response(price({
+        sku: "SKU-1", origen: "SKU_OVERRIDE", vigencia_id: "vigencia-1",
+      })));
+      const repository = createHttpPricingRepository({
+        transport: { request },
+        listCatalogTargets: async () => [selected],
+      });
+      await repository.readEditable(change.target, signal());
+      selected = { ...selected, [field]: "otra-identidad" };
+      await expect(repository.update(change, signal())).rejects.toMatchObject({
+        kind: "conflict",
+      });
+      expect(request).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("comparte el bloqueo de PATCH incierto entre selecciones del mismo producto", async () => {
+    const alias = { ...target, id: "alias" };
+    const request = vi.fn(async (_path: string, init: PricingHttpRequest) => {
+      if (init.method === "GET") return response(price());
+      throw new Error("Timeout después del envío");
+    });
+    const repository = createHttpPricingRepository({
+      transport: { request },
+      listCatalogTargets: async () => [target, alias],
+    });
+    await repository.readEditable(change.target, signal());
+    await repository.readEditable(
+      { ...change.target, targetId: alias.id }, signal(),
+    );
+    await expect(repository.update(change, signal())).rejects.toMatchObject({
+      kind: "unknown",
+    });
+    await expect(repository.update({
+      ...change,
+      target: { ...change.target, targetId: alias.id },
+    }, signal())).rejects.toMatchObject({ kind: "unknown" });
+    expect(request.mock.calls.filter(([, init]) => init.method === "PATCH"))
+      .toHaveLength(1);
+  });
+
+  it("comparte el bloqueo de POST incierto entre selecciones del mismo producto", async () => {
+    const alias = { ...target, id: "alias" };
+    const request = vi.fn(async () => {
+      throw new Error("Timeout después del envío");
+    });
+    const repository = createHttpPricingRepository({
+      transport: { request },
+      listCatalogTargets: async () => [target, alias],
+    });
+    await expect(repository.schedule(target.id, draft, signal()))
+      .rejects.toMatchObject({ kind: "unknown" });
+    await expect(repository.schedule(alias.id, draft, signal()))
+      .rejects.toMatchObject({ kind: "unknown" });
+    expect(request).toHaveBeenCalledOnce();
+  });
+
+  it.each([true, false])("no relee para edición durante un PATCH pendiente (confirmado=%s)", async (confirmed) => {
+    let release: (() => void) | undefined;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { repository, request } = setup(async (_path, init) => {
+      if (init.method === "GET") return response(price());
+      await pending;
+      if (!confirmed) throw new Error("Timeout después del envío");
+      return response(price({ precio_regular: 14, price_version: 2 }));
+    });
+    await repository.readEditable(change.target, signal());
+    const write = repository.update(change, signal());
+    // Registrar el rechazo antes de liberar evita una promesa sin manejar.
+    const result = confirmed
+      ? expect(write).resolves.toMatchObject({ version: 2 })
+      : expect(write).rejects.toMatchObject({ kind: "unknown" });
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    try {
+      await expect(repository.readEditable(change.target, signal()))
+        .rejects.toMatchObject({ kind: "unknown" });
+    } finally {
+      release?.();
+      await result;
+    }
+    if (!confirmed) {
+      await expect(repository.update(change, signal()))
+        .rejects.toMatchObject({ kind: "unknown" });
+    }
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+});
