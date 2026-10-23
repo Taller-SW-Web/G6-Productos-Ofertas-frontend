@@ -1,5 +1,38 @@
 # Promotions por Gateway — #77/#78
 
+## Paso 6 — recorrido de sesión unido al Gateway y PostgreSQL
+
+El runner Backend `apps/promotions-svc/test/flow.isolated.e2e.mjs` exige este
+Frontend y ejecuta juntos los recorridos HTTP/UI/PG y AMQP. Conserva el test
+anterior y añade `tests/promotions-session-gateway.spec.ts`: cinco casos sobre
+la entrada real `src/main.tsx`, sin harness, tokens inyectados ni interceptar
+API con Playwright. Todos los datos son descartables.
+
+G7 es un proveedor de contrato HTTPS explícito, con JWT RS256 sintéticos y
+renovación/OTP; Gateway, Promotions, verificación de firma/rol y PostgreSQL/TLS
+ejecutan sus implementaciones reales. Se prueba login/CRUD/409/recarga/logout,
+MFA, rechazo real de JWT expirado y renovación única, refresh revocado y 403 de
+CLIENTE. Las llamadas del proveedor se cuentan, se exige cero reusos de refresh
+y el Backend comprueba el cupón SQL y ausencia de efectos de consumo.
+
+Las cinco pruebas se omiten en `npm test` ordinario porque requieren el entorno
+descartable. El runner dedicado las ejecuta y falla si no hay Frontend; no las
+declara aprobadas por omisión. Registra SHAs, estado limpio/modificado, hashes
+de los archivos ejecutados, resultados y capturas a 1440×900 en
+`flow-evidence.json`. Ejecución desde Backend:
+
+```powershell
+npm run build:all
+$env:G6_TEST_PYTHON = '<python con cryptography>'
+$env:G6_PROMOTIONS_FRONTEND_ROOT = (Resolve-Path '../G6-Productos-Ofertas-frontend').Path
+$env:G6_PROMOTIONS_E2E_OUTPUT_DIR = '<carpeta local de evidencia>'
+node apps/promotions-svc/test/flow.isolated.e2e.mjs
+```
+
+Esto completa las pruebas locales del desarrollo disponible; G7/G5/Inventory
+compartidos, homologación y E2E Oracle siguen separados y pendientes. No modifica
+la UI, adapters, dependencias, permisos ni configuración productiva.
+
 Estado: API_INTEGRATED en entorno local descartable para el recorrido probado; PARCIAL para entorno compartido. Rama cueva. No hay despliegue ni homologación G7.
 
 ## Composición
