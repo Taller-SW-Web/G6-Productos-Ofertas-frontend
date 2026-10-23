@@ -1511,6 +1511,157 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
       expect(calls).toHaveLength(1);
     });
   });
+
+  describe("TAC-P0-12: excepciones tipadas del transporte durante la recepción", () => {
+    it("TAC-T12-01: una InventoryError del transporte posterior al despacho conserva UNCERTAIN", async () => {
+      let postsProcessedByServer = 0;
+      const { repository, calls } = setup(async () => {
+        postsProcessedByServer += 1;
+        throw new InventoryError(
+          "SERVICIO_NO_DISPONIBLE",
+          "Inventario no respondió a la consulta.",
+        );
+      });
+
+      await expect(
+        rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+      ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
+
+      expect(postsProcessedByServer).toBe(1);
+      expect(calls).toHaveLength(1);
+      expect(repository.getTransferWriteRecord("t-1")).toMatchObject({
+        state: "UNCERTAIN",
+        payload: RECEPCION_PAYLOAD,
+      });
+      expect(getUncertainTransferReception("t-1")).toEqual(RECEPCION_PAYLOAD);
+    });
+
+    it("TAC-T12-02: tras el error tipado, otra cantidad, nota u operationId se rechaza sin segundo POST", async () => {
+      const { repository, calls } = setup(async () => {
+        throw new InventoryError(
+          "SERVICIO_NO_DISPONIBLE",
+          "Inventario no respondió a la consulta.",
+        );
+      });
+
+      await expect(
+        rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+      ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
+
+      const session = createTransferReceptionFormSession("t-1");
+      expect(() =>
+        session.prepareSubmission({
+          quantityReceived: 3,
+          disposition: "REINGRESAR_DISPONIBLE",
+          finalReceipt: false,
+          note: "",
+        }),
+      ).toThrowError(InventoryError);
+
+      await expect(
+        rejection(
+          repository.receiveTransfer({
+            ...RECEPCION_PAYLOAD,
+            operationId: "22222222-2222-4222-8222-222222222222",
+          }),
+        ),
+      ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
+      await expect(
+        rejection(
+          repository.receiveTransfer({
+            ...RECEPCION_PAYLOAD,
+            note: "Nota distinta",
+          }),
+        ),
+      ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
+
+      expect(calls).toHaveLength(1);
+    });
+
+    it("TAC-T12-03: reintentar la identidad original recupera la confirmación sin duplicar el efecto", async () => {
+      const durableOperations = new Map<string, number>();
+      let attempt = 0;
+      const { repository, calls } = setup(async (_path, request) => {
+        attempt += 1;
+        const key = request.headers?.["Idempotency-Key"] ?? "";
+        if (!durableOperations.has(key)) durableOperations.set(key, 1);
+        if (attempt === 1)
+          throw new InventoryError(
+            "SERVICIO_NO_DISPONIBLE",
+            "Inventario no respondió a la consulta.",
+          );
+        return jsonResponse(RECEPCION_OK);
+      });
+
+      await expect(
+        rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+      ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
+      expect(durableOperations.get(RECEPCION_PAYLOAD.operationId)).toBe(1);
+
+      await expect(
+        repository.receiveTransfer(RECEPCION_PAYLOAD),
+      ).resolves.toMatchObject({ id: "t-1", quantityReceived: 4 });
+
+      expect(attempt).toBe(2);
+      expect(durableOperations.get(RECEPCION_PAYLOAD.operationId)).toBe(1);
+      expect(calls).toHaveLength(2);
+      expect(calls[0]?.request.headers?.["Idempotency-Key"]).toBe(
+        RECEPCION_PAYLOAD.operationId,
+      );
+      expect(calls[1]?.request.headers?.["Idempotency-Key"]).toBe(
+        RECEPCION_PAYLOAD.operationId,
+      );
+      expect(calls[0]?.request.body).toBe(calls[1]?.request.body);
+      expect(repository.getTransferWriteRecord("t-1")).toMatchObject({
+        state: "RECONCILED",
+      });
+      expect(getUncertainTransferReception("t-1")).toBeNull();
+    });
+
+    it("TAC-T12-04: un 400 o 409 HTTP recibido en el primer intento sigue siendo rechazo definitivo", async () => {
+      const first = setup(async () => problemResponse(400, "VALIDACION"));
+      await expect(
+        rejection(first.repository.receiveTransfer(RECEPCION_PAYLOAD)),
+      ).resolves.toMatchObject({ code: "VALIDACION" });
+      expect(first.repository.getTransferWriteRecord("t-1")).toBeNull();
+      expect(getUncertainTransferReception("t-1")).toBeNull();
+      expect(first.calls).toHaveLength(1);
+
+      const second = setup(async () =>
+        problemResponse(409, "TRASLADO_NO_RECIBIBLE"),
+      );
+      await expect(
+        rejection(second.repository.receiveTransfer(RECEPCION_PAYLOAD)),
+      ).resolves.toMatchObject({ code: "TRASLADO_NO_RECIBIBLE" });
+      expect(second.repository.getTransferWriteRecord("t-1")).toBeNull();
+      expect(getUncertainTransferReception("t-1")).toBeNull();
+      expect(second.calls).toHaveLength(1);
+    });
+
+    it("TAC-T12-05: un error tipado durante un reintento UNCERTAIN no libera el bloqueo", async () => {
+      let attempt = 0;
+      const { repository } = setup(async () => {
+        attempt += 1;
+        if (attempt === 1) return problemResponse(503, "SERVICIO_NO_DISPONIBLE");
+        throw new InventoryError(
+          "SERVICIO_NO_DISPONIBLE",
+          "Inventario no respondió a la consulta.",
+        );
+      });
+
+      await expect(
+        rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+      ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
+      expect(repository.getTransferWriteRecord("t-1")?.state).toBe("UNCERTAIN");
+      expect(getUncertainTransferReception("t-1")).not.toBeNull();
+
+      await expect(
+        rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+      ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
+      expect(repository.getTransferWriteRecord("t-1")?.state).toBe("UNCERTAIN");
+      expect(getUncertainTransferReception("t-1")).not.toBeNull();
+    });
+  });
 });
 
 describe("apiInventoryAdapter — dashboard KPIs (obtenerDashboardInventario)", () => {

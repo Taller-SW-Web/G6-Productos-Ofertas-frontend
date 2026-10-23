@@ -222,16 +222,16 @@ export function createHttpInventoryRepository(
     try {
       response = await transport.request(path, request);
     } catch (error) {
-      if (error instanceof InventoryError) throw error;
-      // TAC-P0-11: a partir de aquí el transporte ya fue invocado; un POST pudo
-      // haber llegado al backend. Cualquier error de transporte (incluido
-      // AbortError) se clasifica como resultado incierto para conservar la
-      // identidad y la Idempotency-Key original.
+      // TAC-P0-12: en una escritura, cualquier excepción posterior a la
+      // invocación del transporte (incluida InventoryError lanzada por el
+      // transporte, AbortError, TypeError o error de red) no puede tratarse como
+      // rechazo definitivo. El POST pudo haberse aplicado y se preserva UNCERTAIN.
       if (write)
         throw new InventoryError(
           "RESULTADO_INCIERTO",
           "No se confirmó el resultado de la recepción. Consulta el traslado antes de reintentar.",
         );
+      if (error instanceof InventoryError) throw error;
       if (request.signal?.aborted || isAbort(error)) throw error;
       throw new InventoryError(
         "SERVICIO_NO_DISPONIBLE",
