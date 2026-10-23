@@ -17,6 +17,38 @@ export function couponRemainingLabel(coupon: CouponView) {
   return String(coupon.remainingUses);
 }
 
+export type CouponPromotionValidity =
+  | "available"
+  | "not-started"
+  | "expired"
+  | "unknown";
+
+export function couponPromotionValidity(
+  coupon: CouponView,
+  now = new Date(),
+): CouponPromotionValidity {
+  const from = coupon.promotion?.validFrom
+    ? new Date(coupon.promotion.validFrom).getTime()
+    : Number.NaN;
+  const until = coupon.promotion?.validUntil
+    ? new Date(coupon.promotion.validUntil).getTime()
+    : Number.NaN;
+  if (!Number.isFinite(from) || !Number.isFinite(until)) return "unknown";
+  if (now.getTime() < from) return "not-started";
+  if (now.getTime() >= until) return "expired";
+  return "available";
+}
+
+export const couponPromotionValidityLabel = (
+  validity: CouponPromotionValidity,
+) =>
+  ({
+    available: "Vigente",
+    "not-started": "Aún no vigente",
+    expired: "Vigencia finalizada",
+    unknown: "No disponible",
+  })[validity];
+
 export const couponPolicyLabel = (coupon: CouponView) =>
   coupon.cancellationPolicy === "restore"
     ? "Restaurar uso al cancelar"

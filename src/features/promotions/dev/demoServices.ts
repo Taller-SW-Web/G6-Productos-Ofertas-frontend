@@ -17,7 +17,7 @@ import {
 // Fault injection wraps productive ports. Only the mock composition selects it in DEV.
 export function createDemoServices(
   base: PromotionServices,
-  scenario: AdministrationScenario | "usage-unavailable",
+  scenario: AdministrationScenario | "expired" | "usage-unavailable",
 ): PromotionServices {
   if (scenario === "default") return base;
   const pending = (signal: AbortSignal) =>
@@ -28,7 +28,9 @@ export function createDemoServices(
       });
     });
   const administrativeScenario =
-    scenario === "usage-unavailable" ? "default" : scenario;
+    scenario === "usage-unavailable" || scenario === "expired"
+      ? "default"
+      : scenario;
   const read = (signal: AbortSignal) =>
     checkAdministrationRead(
       administrativeScenario === "selection-error" ||
@@ -139,9 +141,21 @@ export function createDemoServices(
         await couponRead(signal);
         const record =
           scenario === "missing" ? null : await base.coupons.read(id, signal);
-        return record && scenario === "usage-unavailable"
-          ? { ...record, consumedUses: undefined, remainingUses: undefined }
-          : record;
+        if (!record) return record;
+        if (scenario === "usage-unavailable")
+          return { ...record, consumedUses: undefined, remainingUses: undefined };
+        if (scenario === "expired")
+          return {
+            ...record,
+            promotion: record.promotion
+              ? {
+                  ...record.promotion,
+                  validFrom: "2026-09-01T00:00:00-05:00",
+                  validUntil: "2026-09-30T23:59:59-05:00",
+                }
+              : record.promotion,
+          };
+        return record;
       },
       async create(input, signal) {
         await couponWrite(signal);
