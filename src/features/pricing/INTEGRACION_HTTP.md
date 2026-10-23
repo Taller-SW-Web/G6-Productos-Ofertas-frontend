@@ -315,7 +315,7 @@ lectura no genera asientos de auditoría.
 
 ### Evidencia separada
 
-- Unitarias (`npm test`): **262 PASS**: 56 Combos/foundation, 51 Bulk y
+- Unitarias (`npm test`): **262 PASS**: 56 Combos/Promociones, 51 Bulk y
   155 Pricing. Incluye timeout/AbortError, GET anterior, valores incompatibles,
   confirmación posterior válida y prevención de doble PATCH.
 - Playwright mock de Pricing/Auditoría: **61 PASS** con
