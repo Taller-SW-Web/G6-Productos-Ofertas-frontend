@@ -29,6 +29,11 @@ import { createHttpPromotionCatalog } from "./httpPromotionCatalog";
 export interface PromotionHttpOptions {
   gatewayOrigin: string;
   getAccessToken(signal: AbortSignal): Promise<string | null>;
+  refreshAccessToken?(
+    rejectedToken: string,
+    signal: AbortSignal,
+  ): Promise<string | null>;
+  invalidateAccessToken?(rejectedToken: string): void;
   catalog?: PromotionCatalogRepository;
 }
 class HttpFailure extends Error {
@@ -298,36 +303,65 @@ export function createHttpPromotionServices(
   ): Promise<unknown> {
     signal.throwIfAborted();
     const bounded = AbortSignal.any([signal, AbortSignal.timeout(7500)]);
-    let abort = () => {};
-    let token: string | null;
-    try {
-      token = await Promise.race([
-        Promise.resolve().then(() => options.getAccessToken(bounded)),
-        new Promise<never>((_resolve, reject) => {
-          abort = () =>
-            reject(new DOMException("Consulta cancelada", "AbortError"));
-          bounded.addEventListener("abort", abort, { once: true });
-          if (bounded.aborted) abort();
-        }),
-      ]);
-    } finally {
-      bounded.removeEventListener("abort", abort);
+    async function sessionToken(work: () => Promise<string | null>) {
+      let abort = () => {};
+      try {
+        return await Promise.race([
+          Promise.resolve().then(work),
+          new Promise<never>((_resolve, reject) => {
+            abort = () =>
+              reject(new DOMException("Consulta cancelada", "AbortError"));
+            bounded.addEventListener("abort", abort, { once: true });
+            if (bounded.aborted) abort();
+          }),
+        ]);
+      } finally {
+        bounded.removeEventListener("abort", abort);
+      }
     }
+    const token = await sessionToken(() => options.getAccessToken(bounded));
     bounded.throwIfAborted();
     if (!token || /[\r\n]/.test(token)) throw new HttpFailure(401);
-    const response = await fetch(origin + "/api/v1" + path, {
-      method,
-      signal: bounded,
-      credentials: "omit",
-      redirect: "error",
-      cache: "no-store",
-      headers: {
-        Authorization: "Bearer " + token,
-        "X-Correlation-Id": crypto.randomUUID(),
-        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
+    const send = (accessToken: string) =>
+      fetch(origin + "/api/v1" + path, {
+        method,
+        signal: bounded,
+        credentials: "omit",
+        redirect: "error",
+        cache: "no-store",
+        headers: {
+          Authorization: "Bearer " + accessToken,
+          "X-Correlation-Id": crypto.randomUUID(),
+          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+    let response = await send(token);
+    if (response.status === 401 && options.refreshAccessToken) {
+      let code: unknown;
+      try {
+        const problem: unknown = await response.json();
+        code = record(problem).code;
+      } catch {
+        /* An unknown 401 never triggers refresh or replay. */
+      }
+      if (code === "TOKEN_INVALIDO") {
+        if (method === "GET") {
+          const refresh = options.refreshAccessToken;
+          const renewed = await sessionToken(() => refresh(token, bounded));
+          bounded.throwIfAborted();
+          if (renewed && !/[\r\n]/.test(renewed)) {
+            response = await send(renewed);
+            if (response.status === 401)
+              options.invalidateAccessToken?.(renewed);
+          }
+        } else {
+          // Preserve the existing no-retry rule for writes; the UI reports the
+          // failed action and requires a new explicit authenticated attempt.
+          options.invalidateAccessToken?.(token);
+        }
+      }
+    }
     if (!response.ok) throw new HttpFailure(response.status);
     return response.json();
   }
