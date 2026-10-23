@@ -15,6 +15,7 @@ export type InventoryErrorCode =
   | "SIN_PERMISO"
   | "SERVICIO_NO_DISPONIBLE"
   | "RESULTADO_INCIERTO"
+  | "OPERACION_EN_CURSO"
   // La respuesta no cumple el contrato vigente, o falta una dependencia
   // autoritativa que el composition root debe inyectar (nunca se sustituye
   // por un mock).

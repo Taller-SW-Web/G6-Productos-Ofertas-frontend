@@ -23,6 +23,10 @@ import { DevScenarioSelector } from "../dev/DevScenarioSelector";
 import { useTransfers } from "../hooks/useTransfers";
 import { useInventoryFilterOptions } from "../hooks/useInventoryFilterOptions";
 import {
+  getConfirmedTransferReceptionAwaitingRefresh,
+  getUncertainTransferReception,
+} from "../services/transferReceptionAttempt";
+import {
   isTerminalTransferStatus,
   type ReceiveTransferPayload,
   type TransferFiltersQuery,
@@ -202,21 +206,34 @@ export function TransfersPage() {
       width: 180,
       align: "right",
       render: (row) => {
-        const receivable = !isTerminalTransferStatus(row.status);
+        const uncertain = getUncertainTransferReception(row.id);
+        const confirmedAwaiting =
+          getConfirmedTransferReceptionAwaitingRefresh(row.id);
+        const canReconcile = uncertain !== null;
+        const receivable =
+          !isTerminalTransferStatus(row.status) || canReconcile;
+        const isConfirmedAwaitingLocked = confirmedAwaiting !== null;
+        const label = isTerminalTransferStatus(row.status) && canReconcile
+          ? "Reconciliar recepción"
+          : receivable
+            ? "Recepcionar"
+            : "Cerrado";
         return (
           <Button
             size="sm"
-            variant={receivable ? "filled" : "outline"}
+            variant={receivable && !isConfirmedAwaitingLocked ? "filled" : "outline"}
             disabled={!receivable}
             leftSection={<IconChecklist size={16} />}
             aria-label={
-              receivable
-                ? `Recepcionar traslado ${row.transferCode}`
-                : `Traslado ${row.transferCode} cerrado`
+              isTerminalTransferStatus(row.status) && canReconcile
+                ? `Reconciliar recepción del traslado ${row.transferCode}`
+                : receivable
+                  ? `Recepcionar traslado ${row.transferCode}`
+                  : `Traslado ${row.transferCode} cerrado`
             }
             onClick={() => handleOpenReceptionModal(row)}
           >
-            {receivable ? "Recepcionar" : "Cerrado"}
+            {label}
           </Button>
         );
       },

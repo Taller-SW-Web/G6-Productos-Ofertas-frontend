@@ -143,22 +143,31 @@ export function validateTrasladoDto(value: unknown): TrasladoInventarioDto {
 
 export interface TrasladoListDto {
   items: TrasladoInventarioDto[];
+  pagina: number;
+  tamanio: number;
   total: number;
 }
 
 export function validateTrasladoListDto(value: unknown): TrasladoListDto {
   const dto = record(value);
   if (!Array.isArray(dto.items)) return incompatible();
-  nonNegativeInt(dto, "pagina", 1);
+  const pagina = nonNegativeInt(dto, "pagina", 1);
   const tamanio = nonNegativeInt(dto, "tamanio", 1);
   const total = nonNegativeInt(dto, "total", 0);
   if (dto.items.length > tamanio) return incompatible();
-  return { items: dto.items.map(validateTrasladoDto), total };
+  return {
+    items: dto.items.map(validateTrasladoDto),
+    pagina,
+    tamanio,
+    total,
+  };
 }
 
 export function validateRecepcionResponse(value: unknown): {
   operationId: string;
   traslado: TrasladoInventarioDto;
+  receivedQuantity: number;
+  disposition: DispositionType;
 } {
   const dto = record(value);
   nonEmptyString(dto, "receipt_id");
@@ -169,9 +178,14 @@ export function validateRecepcionResponse(value: unknown): {
     !DISPOSITIONS.includes(disposition as DispositionType)
   )
     incompatible();
-  nonNegativeInt(dto, "received_quantity", 1);
+  const receivedQuantity = nonNegativeInt(dto, "received_quantity", 1);
   dateTime(dto, "completed_at");
-  return { operationId, traslado: validateTrasladoDto(dto.traslado) };
+  return {
+    operationId,
+    traslado: validateTrasladoDto(dto.traslado),
+    receivedQuantity,
+    disposition: disposition as DispositionType,
+  };
 }
 
 export function validateTransferPresentation(

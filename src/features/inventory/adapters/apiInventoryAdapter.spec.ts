@@ -318,7 +318,7 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
     const first = repository.receiveTransfer(RECEPCION_PAYLOAD);
     const second = repository.receiveTransfer(RECEPCION_PAYLOAD);
     await expect(rejection(second)).resolves.toMatchObject({
-      code: "RESULTADO_INCIERTO",
+      code: "OPERACION_EN_CURSO",
     });
     release(jsonResponse(RECEPCION_OK));
     await expect(first).resolves.toMatchObject({ id: "t-1" });

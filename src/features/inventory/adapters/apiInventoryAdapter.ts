@@ -28,9 +28,12 @@ import {
 import {
   areSameReceiveTransferPayloads,
   clearConfirmedTransferReceptionAwaitingRefresh,
+  clearInFlightTransferReception,
   clearUncertainTransferReception,
   freezeReceiveTransferPayload,
   getConfirmedTransferReceptionAwaitingRefresh,
+  isTransferReceptionStorageBlocked,
+  setInFlightTransferReception,
   setUncertainTransferReception,
   type TransferReceptionPresentationRefresh,
   type TransferReceptionWriteRecord,
@@ -209,10 +212,17 @@ export function createHttpInventoryRepository(
     transferWrites.set(transferId, { ...record, presentationRefresh: status });
   }
 
+  function uncertainWriteMessage(writeKind: "reception" | "threshold"): string {
+    return writeKind === "threshold"
+      ? "El umbral podría haberse actualizado, pero no se confirmó el resultado. Consulta el valor actual antes de continuar."
+      : "No se confirmó el resultado de la recepción. Consulta el traslado antes de reintentar.";
+  }
+
   async function send(
     path: string,
     request: InventoryHttpRequest,
     write: boolean,
+    writeKind: "reception" | "threshold" = "reception",
   ): Promise<Response> {
     // TAC-P0-11: esta comprobación ocurre ANTES de invocar al transporte. Si la
     // señal ya estaba abortada, la cancelación es verificablemente anterior al
@@ -225,11 +235,11 @@ export function createHttpInventoryRepository(
       // TAC-P0-12: en una escritura, cualquier excepción posterior a la
       // invocación del transporte (incluida InventoryError lanzada por el
       // transporte, AbortError, TypeError o error de red) no puede tratarse como
-      // rechazo definitivo. El POST pudo haberse aplicado y se preserva UNCERTAIN.
+      // rechazo definitivo. El POST/PUT pudo haberse aplicado.
       if (write)
         throw new InventoryError(
           "RESULTADO_INCIERTO",
-          "No se confirmó el resultado de la recepción. Consulta el traslado antes de reintentar.",
+          uncertainWriteMessage(writeKind),
         );
       if (error instanceof InventoryError) throw error;
       if (request.signal?.aborted || isAbort(error)) throw error;
@@ -243,7 +253,9 @@ export function createHttpInventoryRepository(
       if (response.status !== 200)
         throw new InventoryError(
           write ? "RESULTADO_INCIERTO" : "RESPUESTA_INCOMPATIBLE",
-          "Inventario no devolvió la confirmación HTTP prevista por el contrato.",
+          write
+            ? uncertainWriteMessage(writeKind)
+            : "Inventario no devolvió la confirmación HTTP prevista por el contrato.",
         );
       return response;
     }
@@ -312,8 +324,9 @@ export function createHttpInventoryRepository(
     path: string,
     request: InventoryHttpRequest,
     write: boolean,
+    writeKind: "reception" | "threshold" = "reception",
   ): Promise<unknown> {
-    const response = await send(path, request, write);
+    const response = await send(path, request, write, writeKind);
     try {
       const body: unknown = await response.json();
       if (body === null) throw new Error("Respuesta sin DTO");
@@ -322,7 +335,7 @@ export function createHttpInventoryRepository(
       throw new InventoryError(
         write ? "RESULTADO_INCIERTO" : "RESPUESTA_INCOMPATIBLE",
         write
-          ? "Inventario pudo aplicar la recepción, pero la respuesta no se pudo validar. Consulta el traslado antes de reintentar."
+          ? uncertainWriteMessage(writeKind)
           : "Inventario devolvió una respuesta ilegible.",
       );
     }
@@ -380,7 +393,9 @@ export function createHttpInventoryRepository(
     filters: TransferFiltersQuery | undefined,
   ): Promise<TransferItem[]> {
     const collected: TrasladoInventarioDto[] = [];
+    const seenTransferIds = new Set<string>();
     let pagina = 1;
+    let expectedTotal: number | null = null;
     for (;;) {
       const body = await json(
         `/api/v1/inventario/traslados?${transferQuery(filters, pagina)}`,
@@ -388,6 +403,30 @@ export function createHttpInventoryRepository(
         false,
       );
       const page = validateTrasladoListDto(body);
+      if (page.pagina !== pagina)
+        throw new InventoryError(
+          "RESPUESTA_INCOMPATIBLE",
+          "Inventario devolvió una página de traslados distinta a la solicitada.",
+        );
+      if (page.tamanio !== PAGE_SIZE)
+        throw new InventoryError(
+          "RESPUESTA_INCOMPATIBLE",
+          "Inventario devolvió un tamaño de página incoherente.",
+        );
+      if (expectedTotal === null) expectedTotal = page.total;
+      else if (page.total !== expectedTotal)
+        throw new InventoryError(
+          "RESPUESTA_INCOMPATIBLE",
+          "Inventario cambió el total de traslados durante la paginación.",
+        );
+      for (const item of page.items) {
+        if (seenTransferIds.has(item.traslado_id))
+          throw new InventoryError(
+            "RESPUESTA_INCOMPATIBLE",
+            "Inventario devolvió un traslado duplicado entre páginas.",
+          );
+        seenTransferIds.add(item.traslado_id);
+      }
       collected.push(...page.items);
       if (collected.length > page.total)
         throw new InventoryError(
@@ -488,6 +527,7 @@ export function createHttpInventoryRepository(
           body: JSON.stringify({ umbral: threshold }),
         },
         true,
+        "threshold",
       ).then(toThresholdConfig);
     },
 
@@ -503,6 +543,7 @@ export function createHttpInventoryRepository(
           body: JSON.stringify({ umbral: threshold }),
         },
         true,
+        "threshold",
       ).then(toThresholdConfig);
     },
 
@@ -527,8 +568,8 @@ export function createHttpInventoryRepository(
 
       if (currentRecord?.state === "IN_FLIGHT") {
         throw new InventoryError(
-          "RESULTADO_INCIERTO",
-          "Hay una recepción pendiente de confirmación para este traslado.",
+          "OPERACION_EN_CURSO",
+          "Ya hay una recepción en curso para este traslado; no se inicia una segunda operación.",
         );
       }
 
@@ -566,8 +607,19 @@ export function createHttpInventoryRepository(
         }
       }
 
+      if (isTransferReceptionStorageBlocked(key)) {
+        throw new InventoryError(
+          "CONTRATO_BLOQUEADO",
+          "El registro persistido de recepción está corrupto o no se pudo validar; no se genera una nueva operación.",
+        );
+      }
+
       const priorReconciliation =
         currentRecord?.state === "UNCERTAIN" ? currentRecord.reconciliation : "NONE";
+
+      // TAC-P0-06: persistir IN_FLIGHT antes del envío. Si falla el almacenamiento,
+      // no se despacha el POST.
+      setInFlightTransferReception(frozenPayload);
 
       transferWrites.set(key, {
         state: "IN_FLIGHT",
@@ -621,6 +673,7 @@ export function createHttpInventoryRepository(
           clearUncertainTransferReception(key, frozenPayload.operationId);
           transferWrites.delete(key);
         }
+        clearInFlightTransferReception(key, frozenPayload.operationId);
         throw error;
       }
 
@@ -634,7 +687,9 @@ export function createHttpInventoryRepository(
         // mutación no se puede declarar confirmada y se preserva UNCERTAIN.
         if (
           confirmation.operationId !== frozenPayload.operationId ||
-          confirmation.traslado.traslado_id !== frozenPayload.transferId
+          confirmation.traslado.traslado_id !== frozenPayload.transferId ||
+          confirmation.receivedQuantity !== frozenPayload.quantityReceived ||
+          confirmation.disposition !== frozenPayload.disposition
         ) {
           throw new InventoryError(
             "RESPUESTA_INCOMPATIBLE",
@@ -657,6 +712,7 @@ export function createHttpInventoryRepository(
       // de presentación (TAC-P0-05 / TAC-P0-09). Se guarda el snapshot inmutable
       // original junto al DTO para poder verificar la identidad en un reintento.
       clearUncertainTransferReception(key, frozenPayload.operationId);
+      clearInFlightTransferReception(key, frozenPayload.operationId);
       confirmedReceptions.set(frozenPayload.operationId, {
         payload: frozenPayload,
         dto: traslado,

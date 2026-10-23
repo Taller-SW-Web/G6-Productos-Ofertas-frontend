@@ -93,20 +93,28 @@ function TransferFormInner({
     !isLocked && finalReceipt && numQty < transfer.quantityPending;
   const missingCount = transfer.quantityPending - numQty;
 
+  const submitLockRef = useRef(false);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitLockRef.current) return;
+    submitLockRef.current = true;
+    try {
     // TAC-P1-10: el botón ya está deshabilitado, pero un `requestSubmit`
     // programático no debe poder reenviar mientras la vista siga bloqueada.
     // No se aplica a `UNCERTAIN`: ese caso sí permite reintentar la misma
     // intención con el snapshot inmutable.
-    if (isConfirmedLocked) return;
+    if (isConfirmedLocked) {
+      submitLockRef.current = false;
+      return;
+    }
     if (isNaN(numQty) || !Number.isInteger(numQty) || numQty <= 0) {
       setErrorValidation(
         "La cantidad recibida debe ser un número entero mayor que cero.",
       );
       return;
     }
-    if (numQty > transfer.quantityPending) {
+    if (!isUncertainLocked && numQty > transfer.quantityPending) {
       setErrorValidation(
         `La cantidad recibida (${numQty}) no puede ser mayor que la cantidad pendiente (${transfer.quantityPending}).`,
       );
@@ -162,6 +170,9 @@ function TransferFormInner({
       // cantidad, disposición y recepción final) incluso si el modal se cierra.
       const locked = sessionRef.current.recordFailure(payload, err);
       setUncertainAttempt(locked);
+    }
+    } finally {
+      submitLockRef.current = false;
     }
   };
 
@@ -246,7 +257,14 @@ function TransferFormInner({
           label="Cantidad recibida físicamente"
           description={`Máximo pendiente: ${transfer.quantityPending} unidades.`}
           min={1}
-          max={transfer.quantityPending}
+          max={
+            isUncertainLocked
+              ? Math.max(
+                  transfer.quantityPending,
+                  uncertainAttempt?.quantityReceived ?? transfer.quantityPending,
+                )
+              : transfer.quantityPending
+          }
           allowDecimal={false}
           allowNegative={false}
           value={quantity}
