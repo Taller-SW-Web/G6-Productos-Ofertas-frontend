@@ -17,7 +17,11 @@ export function PromotionDataNotice({ kind }: { kind: string }) {
     kind === "campaigns" ||
     kind === "campaign-form" ||
     kind === "campaign-detail" ||
-    kind === "campaign-scope"
+    kind === "campaign-scope" ||
+    kind === "recommendations" ||
+    kind === "recommendation-form" ||
+    kind === "recommendation-detail" ||
+    kind === "recommendation-selector"
   )
     return (
       <Text size="sm" c="dimmed">
