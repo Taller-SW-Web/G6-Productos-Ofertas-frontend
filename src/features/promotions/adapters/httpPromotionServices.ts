@@ -24,6 +24,8 @@ import type {
 import type { PromotionCatalogRepository } from "../services/catalogRepository";
 import type { PromotionServices } from "../services/promotionServices";
 
+import { createHttpPromotionCatalog } from "./httpPromotionCatalog";
+
 export interface PromotionHttpOptions {
   gatewayOrigin: string;
   getAccessToken(signal: AbortSignal): Promise<string | null>;
@@ -602,19 +604,16 @@ export function createHttpPromotionServices(
         }
       }).then((r) => r!),
   };
-  const unavailableCatalog = async (): Promise<never> => {
-    throw new CouponReadError(
-      "unavailable",
-      "No se pudo consultar el catálogo. Conservamos tu selección; vuelve a consultar.",
-    );
-  };
+  const httpCatalog = createHttpPromotionCatalog(request);
   return {
     campaigns,
     coupons,
     recommendations,
     catalog: options.catalog ?? {
-      products: unavailableCatalog,
-      categories: unavailableCatalog,
+      products: (signal) =>
+        read(() => httpCatalog.products(signal)).then((r) => r!),
+      categories: (signal) =>
+        read(() => httpCatalog.categories(signal)).then((r) => r!),
     },
   };
 }
