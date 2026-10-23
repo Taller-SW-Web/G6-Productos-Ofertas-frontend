@@ -89,10 +89,12 @@ describe("Confirmación y recuperación de escrituras HTTP", () => {
       await expect(repository.update(change, signal())).rejects.toMatchObject({
         kind: "unknown",
       });
+      await expect(repository.readEditable(change.target, signal()))
+        .rejects.toMatchObject({ kind: "unknown" });
       await expect(repository.update(change, signal())).rejects.toMatchObject({
         kind: "unknown",
       });
-      expect(request).toHaveBeenCalledTimes(2);
+      expect(request).toHaveBeenCalledTimes(3);
       expect(onUpdated).not.toHaveBeenCalled();
     },
   );
@@ -126,7 +128,7 @@ describe("Confirmación y recuperación de escrituras HTTP", () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 
-  it("permite verificar explícitamente el resultado por relectura sin reintentar PATCH", async () => {
+  it("mantiene el bloqueo después de timeout y GET con la versión anterior", async () => {
     const { repository, request } = setup(async (_path, init) => {
       if (init.method === "PATCH") throw new Error("Timeout");
       return response(price());
@@ -137,10 +139,83 @@ describe("Confirmación y recuperación de escrituras HTTP", () => {
     });
     await expect(
       repository.readEditable(change.target, signal()),
-    ).resolves.toMatchObject({ version: 1 });
+    ).rejects.toMatchObject({ kind: "unknown" });
+    await expect(repository.update(change, signal())).rejects.toMatchObject({
+      kind: "unknown",
+    });
     expect(
       request.mock.calls.filter(([, init]) => init.method === "PATCH"),
     ).toHaveLength(1);
+  });
+
+  it.each([
+    { precio_regular: 14, price_version: 1 },
+    { precio_regular: 13, price_version: 2 },
+    { precio_regular: 14, precio_oferta: 5, price_version: 2 },
+    { precio_regular: 14, currency: "USD", price_version: 2 },
+  ])("no concilia una lectura que no confirma versión y valores: %j", async (later) => {
+    let stored = price();
+    const { repository, request, onUpdated } = setup(async (_path, init) => {
+      if (init.method === "PATCH") throw new Error("Timeout");
+      return response(stored);
+    });
+    await repository.readEditable(change.target, signal());
+    await expect(repository.update(change, signal())).rejects.toMatchObject({ kind: "unknown" });
+    stored = price(later);
+    await expect(repository.readEditable(change.target, signal()))
+      .rejects.toMatchObject({ kind: "unknown" });
+    await expect(repository.update({ ...change, version: 2 }, signal()))
+      .rejects.toMatchObject({ kind: "unknown" });
+    expect(request.mock.calls.filter(([, init]) => init.method === "PATCH")).toHaveLength(1);
+    expect(onUpdated).not.toHaveBeenCalled();
+  });
+
+  it("solo concilia con relectura editable confirmada y exige una intención con la nueva versión", async () => {
+    let stored = price();
+    let patches = 0;
+    const { repository, request, onUpdated } = setup(async (_path, init) => {
+      if (init.method === "PATCH") {
+        if (++patches === 1) throw new Error("Timeout");
+        stored = price({ precio_regular: 15, price_version: 3 });
+      }
+      return response(stored);
+    });
+    await repository.readEditable(change.target, signal());
+    await expect(repository.update(change, signal())).rejects.toMatchObject({ kind: "unknown" });
+    stored = price({ precio_regular: 14, price_version: 2 });
+    // Una consulta ordinaria no habilita otro PATCH, incluso si los valores coinciden.
+    await repository.read({ targetId: target.id, channel: "global" }, signal());
+    await expect(repository.update(change, signal())).rejects.toMatchObject({ kind: "unknown" });
+    await expect(repository.readEditable(change.target, signal())).resolves.toMatchObject({ version: 2 });
+    expect(request.mock.calls.filter(([, init]) => init.method === "PATCH")).toHaveLength(1);
+    expect(onUpdated).not.toHaveBeenCalled();
+    await expect(repository.update(change, signal())).rejects.toMatchObject({ kind: "conflict" });
+    await expect(repository.update({
+      ...change, version: 2, draft: { ...change.draft, regular: "15" },
+    }, signal())).resolves.toMatchObject({ version: 3 });
+    expect(patches).toBe(2);
+    expect(onUpdated).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { action: "CONSERVAR", offer: 5 },
+    { action: "ELIMINAR", offer: null },
+    { action: "ESTABLECER", offer: 6 },
+  ] as const)("concilia la acción de oferta $action sin reenviar ni crear auditoría", async ({ action, offer }) => {
+    let stored = price({ precio_oferta: 5 });
+    const { repository, request, onUpdated } = setup(async (_path, init) => {
+      if (init.method === "PATCH") throw new DOMException("Cancelado", "AbortError");
+      return response(stored);
+    });
+    await repository.readEditable(change.target, signal());
+    await expect(repository.update({
+      ...change, draft: { ...change.draft, offerAction: action, offer: "6" },
+    }, signal())).rejects.toMatchObject({ kind: "unknown" });
+    await expect(repository.readEditable(change.target, signal())).rejects.toMatchObject({ kind: "unknown" });
+    stored = price({ precio_regular: 14, precio_oferta: offer, price_version: 2 });
+    await expect(repository.readEditable(change.target, signal())).resolves.toMatchObject({ version: 2 });
+    expect(request.mock.calls.filter(([, init]) => init.method === "PATCH")).toHaveLength(1);
+    expect(onUpdated).not.toHaveBeenCalled();
   });
 
   it("mantiene el precio confirmado si falla un callback secundario asíncrono", async () => {

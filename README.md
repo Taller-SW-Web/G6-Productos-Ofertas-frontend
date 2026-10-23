@@ -31,7 +31,7 @@ Después, ejecuta las validaciones:
 ```sh
 npm test                  # pruebas unitarias de Combos, Bulk y Pricing con Vitest
 npm run test:e2e          # suite E2E completa de Playwright
-npm run test:ci           # unitarias + E2E + harness HTTP de Pricing, usado por CI
+npm run test:ci           # agregado local: unitarias + E2E + harness HTTP simulado
 npm run test:unit:combos  # solo unitarias de Combos
 npm run test:unit:bulk    # solo unitarias de Bulk
 npm run test:unit:pricing # adaptador HTTP de Pricing; transporte simulado
@@ -47,6 +47,11 @@ npm run preview
 ```
 
 `npm run preview` sirve `dist/` localmente; no publica ni despliega la aplicación. El workflow [frontend.yml](.github/workflows/frontend.yml) ejecuta typecheck, build, lint, pruebas y verificaciones de build/preview para ambos modos. Que el workflow exista no implica que haya corrido para un cambio concreto.
+
+El workflow actual ejecuta `npm test` y Playwright general; no invoca
+`test:ci` ni `test:e2e:pricing`. El harness HTTP de Pricing se ejecuta por separado
+y usa respuestas simuladas, sin Gateway ni PostgreSQL real. Su incorporación
+al CI queda como dependencia de Castilla; este PR no modifica workflows compartidos.
 
 ## Configuración de datos
 

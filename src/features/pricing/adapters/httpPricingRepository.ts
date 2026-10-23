@@ -53,6 +53,22 @@ export interface HttpPricingRepositoryDependencies {
 
 const pageSize = 20;
 
+type UpdateConfirmation = Pick<
+  PriceView,
+  "version" | "regular" | "offer" | "currency" | "channel" | "origin"
+> & { productId: string };
+
+function confirmsUpdate(price: PriceView, expected: UpdateConfirmation): boolean {
+  return (
+    price.version > expected.version &&
+    price.regular === expected.regular &&
+    price.offer === expected.offer &&
+    price.currency === expected.currency &&
+    price.channel === expected.channel &&
+    price.origin === expected.origin
+  );
+}
+
 function blocked(message: string): PricingFailure {
   return new PricingFailure("blocked_contract", message);
 }
@@ -93,7 +109,7 @@ export function createHttpPricingRepository(
   const { transport } = dependencies;
   const channelIds = dependencies.channelIds ?? {};
   const editableReads = new Map<string, { productId: string; price: PriceView }>();
-  const uncertainUpdates = new Set<string>();
+  const uncertainUpdates = new Map<string, UpdateConfirmation>();
   const uncertainSchedules = new Set<string>();
   const pendingWrites = new Set<string>();
 
@@ -303,9 +319,22 @@ export function createHttpPricingRepository(
           "El precio consultado es heredado o corresponde a otro canal. Pricing no confirmó una definición propia para editar este alcance.",
         );
       }
+      const uncertain = uncertainUpdates.get(key);
+      if (uncertain) {
+        if (
+          !price ||
+          uncertain.productId !== target.productId ||
+          !confirmsUpdate(price, uncertain)
+        ) {
+          throw new PricingFailure(
+            "unknown",
+            "El cambio sigue pendiente de verificación. La lectura no confirma una versión superior con los valores solicitados; no se permite reenviarlo.",
+          );
+        }
+        uncertainUpdates.delete(key);
+      }
       if (price) {
         editableReads.set(key, { productId: target.productId, price });
-        uncertainUpdates.delete(key);
       }
       return price;
     },
@@ -313,6 +342,12 @@ export function createHttpPricingRepository(
     async update(change: PriceChange, signal) {
       const target = await targetById(change.target.targetId, signal);
       const key = scopeKey(target, change.target.channel);
+      if (uncertainUpdates.has(key)) {
+        throw new PricingFailure(
+          "unknown",
+          "El resultado anterior sigue pendiente de verificación. Releer solo desbloquea este alcance si Pricing confirma una versión superior con los valores solicitados.",
+        );
+      }
       const snapshot = editableReads.get(key);
       const before =
         snapshot?.productId === target.productId ? snapshot.price : undefined;
@@ -320,12 +355,6 @@ export function createHttpPricingRepository(
         throw new PricingFailure(
           "conflict",
           "Vuelve a leer el precio exacto de este objetivo y canal antes de guardar.",
-        );
-      }
-      if (uncertainUpdates.has(key)) {
-        throw new PricingFailure(
-          "unknown",
-          "El resultado anterior sigue sin verificarse. Lee el precio actualizado antes de intentar otra vez.",
         );
       }
       if (target.kind === "product" && change.target.channel === "retail") {
@@ -355,6 +384,20 @@ export function createHttpPricingRepository(
       if (change.draft.offerAction === "ESTABLECER")
         body.precioOferta = requestMoney(change.draft.offer);
       if (change.draft.offerAction === "ELIMINAR") body.precioOferta = null;
+      const expected: UpdateConfirmation = {
+        productId: target.productId,
+        version: before.version,
+        regular: String(body.precioRegular),
+        offer:
+          change.draft.offerAction === "CONSERVAR"
+            ? before.offer
+            : change.draft.offerAction === "ELIMINAR"
+              ? null
+              : String(body.precioOferta),
+        currency: body.moneda,
+        channel: change.target.channel,
+        origin: target.kind === "variant" ? "sku" : "product",
+      };
       const pendingKey = "update:" + key;
       if (pendingWrites.has(pendingKey)) {
         throw new PricingFailure(
@@ -377,20 +420,7 @@ export function createHttpPricingRepository(
         let after: PriceView;
         try {
           after = mapPriceDto(response, target, channelIds);
-          const expectedOffer =
-            change.draft.offerAction === "CONSERVAR"
-              ? before.offer
-              : change.draft.offerAction === "ELIMINAR"
-                ? null
-                : String(body.precioOferta);
-          if (
-            after.version <= before.version ||
-            after.channel !== change.target.channel ||
-            after.currency !== body.moneda ||
-            after.regular !== String(body.precioRegular) ||
-            after.offer !== expectedOffer ||
-            (target.kind === "variant" && after.origin !== "sku")
-          ) {
+          if (!confirmsUpdate(after, expected)) {
             throw new Error("Confirmación incompatible");
           }
         } catch {
@@ -415,7 +445,7 @@ export function createHttpPricingRepository(
         return after;
       } catch (error) {
         if (error instanceof PricingFailure && error.kind === "unknown")
-          uncertainUpdates.add(key);
+          uncertainUpdates.set(key, expected);
         throw error;
       } finally {
         pendingWrites.delete(pendingKey);

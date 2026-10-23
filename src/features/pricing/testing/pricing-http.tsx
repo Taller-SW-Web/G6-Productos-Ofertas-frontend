@@ -9,6 +9,7 @@ import "@fontsource/inter/latin-700.css";
 import "@fontsource/oswald/latin-700.css";
 import "../../../theme/global.css";
 import { theme, cssVariablesResolver } from "../../../theme/theme";
+import { ContextNote } from "../../../components/shared";
 import { DataModeContext } from "../../../app/config/DataModeContext";
 import { PricingProvider } from "../components/PricingProvider";
 import { createPricingRuntime } from "../services/pricingService";
@@ -34,7 +35,14 @@ const runtime = await createPricingRuntime("api", {
       transport: { request: (path, init) => fetch(path, init) },
     }),
 });
-const audit = await createAuditRuntime("mock");
+const audit = {
+  ...(await createAuditRuntime("mock")),
+  ReviewTools: () => (
+    <ContextNote title="Auditoría MK-014 mock:">
+      Datos de demostración; sin Gateway, PostgreSQL ni auditoría real.
+    </ContextNote>
+  ),
+};
 history.replaceState(
   null,
   "",

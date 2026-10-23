@@ -158,6 +158,34 @@ test("Pricing API no impide auditoría mock cuando se inyecta explícitamente su
   await expect(page.getByText(/simulad|demostración/i).first()).toBeVisible();
 });
 
+test("API: timeout y relectura anterior conservan formulario y bloqueo sin segundo PATCH", async ({ page }) => {
+  let patches = 0;
+  let stored = { ...price };
+  await page.route("**/api/v1/precios/**", async (route) => {
+    if (route.request().method() === "PATCH") {
+      patches++;
+      await route.abort("timedout");
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(stored) });
+  });
+  await mount(page, "/precios/editar?target=http-test");
+  await confirm(page);
+  await expect(page.getByText("Resultado desconocido", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Releer precio", exact: true }).click();
+  await expect(page.getByText(/La lectura no confirma una versión superior/)).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Nuevo precio regular", exact: true })).toHaveValue("14.00");
+  await expect(page.getByRole("textbox", { name: "Motivo del cambio", exact: true })).toHaveValue("Prueba del adaptador HTTP");
+  await expect(page.getByRole("button", { name: "Guardar cambios", exact: true })).toBeDisabled();
+  await page.screenshot({ path: test.info().outputPath("resultado-incierto-http-1440.png"), fullPage: true });
+  stored = { ...price, precio_regular: 14, price_version: 5 };
+  await page.getByRole("button", { name: "Releer precio", exact: true }).click();
+  await expect(page.getByText("Comparar lectura y propuesta", { exact: true })).toBeVisible();
+  await expect(page.getByText("Precio actualizado", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Guardar cambios", exact: true })).toBeDisabled();
+  expect(patches).toBe(1);
+});
+
 test("API: la galería no muestra controles ni datos de demostración de Pricing", async ({
   page,
 }) => {

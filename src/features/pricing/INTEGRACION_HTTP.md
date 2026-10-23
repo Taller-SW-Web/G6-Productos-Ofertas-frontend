@@ -205,8 +205,10 @@ remite a Docs #94 y Backend #137, ambos todavía abiertos al consultarlos.
 - Las suites HTTP de Pricing quedaban fuera de `npm test` y `npm run test:ci`.
   Se reutilizan sus configuraciones existentes mediante `test:unit:pricing` y
   `test:e2e:pricing`. El primer script forma parte de `npm test`; el harness
-  de navegador se ejecuta al final de `test:ci`, después de la suite general.
-  README documenta que las respuestas siguen siendo simuladas.
+  de navegador se ejecuta al final del agregado local `test:ci`, después de la
+  suite general. El workflow integrado desde master no invoca ese agregado ni
+  el harness; su incorporación al CI corresponde a Castilla. README documenta
+  que las respuestas siguen siendo simuladas.
 
 Se añaden siete regresiones. Cinco se ejecutaron antes de corregir el adaptador
 y fallaron reproduciendo los defectos; se añadieron además dos casos para
@@ -269,3 +271,79 @@ resultado remoto a este commit hasta que GitHub termine sus checks.
 
 Estado de entrega: **PARCIAL / lista para auditoría del adaptador**. La auditoría
 independiente, el cliente compartido y el E2E real continúan pendientes.
+
+## Correcciones de auditoría sobre `527166e` — 2026-10-23
+
+La compilación anterior del HEAD aislado no acreditaba la compilación del merge
+del PR. Se integró `origin/master@bb7051859b2b20c36d825a1d3a8af4864aa2ff0f`
+mediante merge normal `9905595`, sin rebase ni force-push. El merge reproducía
+la eliminación silenciosa del import de `FeedbackAlert`; se conservó
+explícitamente junto a `PageHeader`. Las comprobaciones de esta sección usan
+el resultado integrado. Los workflows compartidos quedan iguales a master;
+este PR no incorpora cambios propios de infraestructura.
+
+### Contrato y conciliación
+
+Se verificó OpenAPI oficial de Docs `master@1ee0d9e5a788dbe559a376bf96a60c6117af3956`,
+`contratos/http/openapi.yaml`, blob `f64bfe9a097b2a0f74c2600988305443d92f640e`.
+Solo se normalizan a null las ausencias que permite cada esquema:
+
+- `PrecioProducto`: `precio_oferta`, `channel_id` y `valid_until`.
+- `Precio` de SKU: `precio_oferta` y `valid_until`; `channel_id` sigue requerido.
+- Ambas programaciones: `channelId` y `validUntil`.
+
+Un campo presente con tipo inválido continúa fallando. No se relajan identidad,
+origen, vigencia, moneda, versión ni validaciones económicas. Las pruebas
+recorren cada omisión y todas sus combinaciones, tipos inválidos y campos
+obligatorios de los cuatro esquemas.
+
+Un PATCH desconocido conserva por alcance la identidad del producto, versión
+anterior y valores solicitados (regular, oferta efectiva, moneda, canal y
+origen). `read()` no lo concilia. `readEditable()` solo lo concilia cuando el
+GET autoritativo valida esa identidad, una versión estrictamente superior y
+todos los valores esperados. Una versión anterior, valores diferentes, error
+o ausencia mantienen el bloqueo. No hay PATCH automático, callback de
+auditoría ni éxito de formulario durante esta verificación. Tras conciliación,
+una nueva intención exige la versión recién leída; la propuesta antigua no se
+reenvía. El formulario desconocido conserva sus valores y permanece bloqueado.
+
+El registro conserva el límite previo de vida de la instancia del repositorio;
+no acredita idempotencia durable entre recargas. No se inventa un endpoint
+para forzar conciliación. MK-014 sigue mock y el harness inyecta su runtime
+explícito, identificado como tal. Un resultado desconocido o conciliado por
+lectura no genera asientos de auditoría.
+
+### Evidencia separada
+
+- Unitarias (`npm test`): **262 PASS**: 56 Combos/foundation, 51 Bulk y
+  155 Pricing. Incluye timeout/AbortError, GET anterior, valores incompatibles,
+  confirmación posterior válida y prevención de doble PATCH.
+- Playwright mock de Pricing/Auditoría: **61 PASS** con
+  `npx playwright test tests/pricing.spec.ts tests/pricing-workflows.spec.ts tests/pricing-audit.spec.ts tests/price-audit.spec.ts --workers=1 --reporter=line`.
+- Harness HTTP (`npm run test:e2e:pricing -- --reporter=line`): **6 PASS**:
+  cinco escenarios previos más timeout con formulario conservado, GET anterior
+  y bloqueo de segundo PATCH. Sus respuestas son simuladas. No acredita
+  React → Gateway → Pricing → PostgreSQL.
+
+`npm run typecheck`, `npm run lint`, `npm run build` con
+`VITE_DATA_MODE=mock`, `npm run build` con `VITE_DATA_MODE=api` y
+`git diff --check`: PASS sobre el árbol integrado. Node 22.21.0 y npm 10.9.4.
+Inspección de las capturas del harness a 1440×900: consulta, precio confirmado
+y formulario con resultado incierto; propuesta conservada y guardado bloqueado.
+Las capturas de página completa son evidencia local bajo `test-results/pricing-http/`.
+
+La primera pasada de TypeScript detectó un import de prueba sin uso, retirado.
+El primer ciclo del harness terminó 5 PASS/1 FAIL porque master había eliminado
+el aviso genérico mock. Se identificó explícitamente el runtime mock de MK-014
+en el propio harness y se repitieron los seis casos, sin debilitar la aserción
+ni modificar el componente productivo de Auditoría.
+
+El workflow integrado ejecuta unitarias y Playwright general; no invoca
+`test:ci` ni `test:e2e:pricing`. El script agregado sigue disponible para uso
+local. Incorporar el harness al CI es dependencia de Castilla. El resultado
+remoto debe consultarse sobre el SHA final del PR #47; la ejecución local no
+se presenta como CI remoto aprobado.
+
+Permanecen las dependencias de Castilla (#45/#109), identidad/elegibilidad de
+Catálogo y P-PRI-01/02 documentadas arriba. No se desbloquean escrituras reales,
+importación, auditoría real ni composición productiva. Estado: **PARCIAL**.

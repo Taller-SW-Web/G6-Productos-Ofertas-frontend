@@ -58,21 +58,28 @@ function requiredNullableString(
   return value as string | null;
 }
 
-function requiredNullableNumber(
+function optionalNullableString(
+  source: Record<string, unknown>,
+  key: string,
+): string | null {
+  return Object.hasOwn(source, key) ? requiredNullableString(source, key) : null;
+}
+
+function optionalNullableNumber(
   source: Record<string, unknown>,
   key: string,
 ): number | null {
-  if (!Object.hasOwn(source, key)) return invalidResponse();
+  if (!Object.hasOwn(source, key)) return null;
   const value = source[key];
   if (value !== null && typeof value !== "number") return invalidResponse();
   return value as number | null;
 }
 
-function requiredNullableDate(
+function optionalNullableDate(
   source: Record<string, unknown>,
   key: string,
 ): string | null {
-  const value = requiredNullableString(source, key);
+  const value = optionalNullableString(source, key);
   if (
     value !== null &&
     (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(
@@ -197,7 +204,9 @@ export function mapPriceDto(
   if (productResponse ? dto.product_id !== target.productId : dto.sku !== sku)
     return invalidResponse();
 
-  const channelId = requiredNullableString(dto, "channel_id");
+  const channelId = productResponse
+    ? optionalNullableString(dto, "channel_id")
+    : requiredNullableString(dto, "channel_id");
   const origin = productResponse
     ? "product"
     : dto.origen === "PRODUCTO"
@@ -205,7 +214,7 @@ export function mapPriceDto(
       : dto.origen === "SKU_OVERRIDE"
         ? "sku"
         : invalidResponse();
-  const offer = requiredNullableNumber(dto, "precio_oferta");
+  const offer = optionalNullableNumber(dto, "precio_oferta");
   const regular = responseMoney(dto.precio_regular);
   const priceOffer = offer === null ? null : responseMoney(offer);
   const currency = requiredString(dto, "currency");
@@ -222,7 +231,7 @@ export function mapPriceDto(
   const displaySku =
     sku ?? (target.kind === "product" ? target.referenceSku : undefined);
   const validFrom = requiredDate(dto, "valid_from");
-  const validUntil = requiredNullableDate(dto, "valid_until");
+  const validUntil = optionalNullableDate(dto, "valid_until");
   if (validUntil !== null && Date.parse(validUntil) <= Date.parse(validFrom))
     return invalidResponse();
   if (productResponse && channelId !== null) return invalidResponse();
@@ -266,8 +275,8 @@ export function mapScheduleDto(
     status !== "CANCELLED"
   )
     return invalidResponse();
-  const channelId = requiredNullableString(dto, "channelId");
-  const validUntil = requiredNullableDate(dto, "validUntil");
+  const channelId = optionalNullableString(dto, "channelId");
+  const validUntil = optionalNullableDate(dto, "validUntil");
   const validFrom = requiredDate(dto, "validFrom");
   if (validUntil !== null && Date.parse(validUntil) <= Date.parse(validFrom))
     return invalidResponse();
