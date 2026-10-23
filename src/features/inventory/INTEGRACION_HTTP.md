@@ -73,6 +73,13 @@ tercera auditoría de Marco:
    `UNVERIFIABLE_BY_AGGREGATE` (`BLOQUEADO_ESPECÍFICO`); si el GET o el
    resolvedor falla antes de comparar, conserva `AWAITING`. En ambos casos el
    bloqueo permanece.
+9. **`TAC-P0-11` — Aborto del transporte en una recepción:** una cancelación
+   verificablemente anterior al despacho HTTP no crea `UNCERTAIN`. Si el
+   transporte ya fue invocado, cualquier error de un `POST` (incluido
+   `AbortError`) se convierte en `RESULTADO_INCIERTO`: se conserva el snapshot
+   inmutable completo y solo se permite reintentar con la misma
+   `Idempotency-Key` y el mismo cuerpo JSON. No se libera la identidad ni se
+   genera otro `operationId` sin conciliación.
 
 ## Fuentes normativas
 
@@ -96,7 +103,7 @@ tercera auditoría de Marco:
 |---|---|
 | `services/transferReceptionAttempt.ts` | Coordinador inmutable de intentos de recepción (`createTransferReceptionFormSession`, `freezeReceiveTransferPayload`, `areSameReceiveTransferPayloads`, `TransferReceptionWriteRecord`). Preserva `operationId`, `receivedAt` y `note` entre reintentos y a través de cierres/reaperturas del modal cuando el intento queda en `UNCERTAIN`. Mantiene `confirmedAwaitingRefresh` (`TAC-P0-08`/`TAC-P1-10`): una recepción confirmada cuya vista no pudo actualizarse bloquea nuevas intenciones hasta un listado completo y coherente. `recordSuccess()` ya no libera ese bloqueo; añade el diagnóstico `presentationRefresh` (`AWAITING`, `REFRESHED`, `UNVERIFIABLE_BY_AGGREGATE`). |
 | `components/ReceiveTransferModal.tsx` | Usa `createTransferReceptionFormSession(transfer.id)`. Reutiliza la solicitud inmutable en reintentos idénticos, genera nueva identidad si cambia cantidad/disposición/cierre/nota tras un `4xx`, y bloquea la edición mostrando aviso explícito cuando existe una operación `UNCERTAIN`. Tras `TAC-P0-08`, un fallo de presentación se muestra como "Recepción registrada — vista pendiente de actualizar" y bloquea el formulario sin repetir el POST. `TAC-P1-10` añade un guard en `handleSubmit` para que ni un `requestSubmit` programático reenvíe el formulario confirmado; `UNCERTAIN` conserva su reintento. |
-| `adapters/apiInventoryAdapter.ts` | Separa los estados `IN_FLIGHT`, `UNCERTAIN` y `RECONCILED` (`getTransferWriteRecord`). En `readTransfers()` registra `UNVERIFIABLE_BY_LIST_CONTRACT` para `UNCERTAIN` y, desde `TAC-P1-10`, solo libera `confirmedAwaitingRefresh` si el agregado del listado coincide exactamente con el DTO confirmado; en caso contrario registra `UNVERIFIABLE_BY_AGGREGATE`. Rechaza cualquier cambio de `operationId` o contenido mientras el traslado esté en `UNCERTAIN`. El caché de confirmaciones (`TAC-P0-09`) almacena `{ payload, dto }` y compara el fingerprint completo antes de devolverlo; el `200` debe traer el `operation_id` y `traslado_id` solicitados. |
+| `adapters/apiInventoryAdapter.ts` | Separa los estados `IN_FLIGHT`, `UNCERTAIN` y `RECONCILED` (`getTransferWriteRecord`). En `readTransfers()` registra `UNVERIFIABLE_BY_LIST_CONTRACT` para `UNCERTAIN` y, desde `TAC-P1-10`, solo libera `confirmedAwaitingRefresh` si el agregado del listado coincide exactamente con el DTO confirmado; en caso contrario registra `UNVERIFIABLE_BY_AGGREGATE`. Rechaza cualquier cambio de `operationId` o contenido mientras el traslado esté en `UNCERTAIN`. El caché de confirmaciones (`TAC-P0-09`) almacena `{ payload, dto }` y compara el fingerprint completo antes de devolverlo; el `200` debe traer el `operation_id` y `traslado_id` solicitados. Desde `TAC-P0-11`, un `AbortError` posterior a la invocación del transporte en un `POST` se clasifica como `RESULTADO_INCIERTO`; una señal ya abortada antes del despacho no crea `UNCERTAIN`. |
 | `hooks/useTransfers.ts` | Distingue el fallo de presentación del fallo transaccional: expone `presentationError`, dispara `notifyInventoryChanged()` para refrescar la vista y nunca marca la recepción como fallida. |
 | `pages/TransfersPage.tsx` | Muestra el aviso de presentación (`FeedbackAlert` warning) y limpia el feedback al abrir el modal de otro traslado. |
 | `services/inventoryMappers.ts` | Validadores/mappers del contrato: `toThresholdConfig`, `toDashboardKpiSummary`, `toLocationDistributionList`, `validateTrasladoDto`, `validateTrasladoListDto`, `validateRecepcionResponse` (devuelve `operationId` para verificar identidad), `validateTransferPresentation`. |
@@ -105,7 +112,7 @@ tercera auditoría de Marco:
 | `services/inventoryProvider.ts` | Punto de inyección `configureInventoryApi(factory)`. Sin factory, el modo API mantiene un fallo controlado bajo demanda; nunca cae al mock. |
 | `hooks/useInventoryDashboard.ts` | Resuelve cada sección con `Promise.allSettled`: un bloqueo de contrato o fallo parcial no borra los KPIs que sí respondieron. Distingue `error` de `blockedReason`. |
 | `components/DashboardKpiGrid.tsx`, `DashboardAlerts.tsx`, `LocationDistributionTable.tsx` | Estados "no verificable" (warning) separados del error de transporte; `null` se muestra como "Sin datos", nunca como `0`. |
-| `adapters/apiInventoryAdapter.spec.ts` | **45 pruebas unitarias y de flujo formulario+adaptador** (incluye los casos obligatorios de `TAC-P0-01`/`TAC-P0-02`, `TAC-P0-05`, `TAC-P1-07`, `TAC-P0-08`, los **6 casos explícitos** de `TAC-P0-09` y los **5 casos de `TAC-P1-10`**). |
+| `adapters/apiInventoryAdapter.spec.ts` | **50 pruebas unitarias y de flujo formulario+adaptador** (incluye los casos obligatorios de `TAC-P0-01`/`TAC-P0-02`, `TAC-P0-05`, `TAC-P1-07`, `TAC-P0-08`, los **6 casos explícitos** de `TAC-P0-09`, los **5 casos de `TAC-P1-10`** y los **5 casos TAC-T11-01…05 de `TAC-P0-11`**). |
 | `tests/inventory-presentation.spec.ts` | Prueba Playwright de `TAC-P0-08`/`TAC-P1-10`: `POST 200` confirmado → fallo de presentación → formulario bloqueado → intento de reenvío sin segundo POST → GET obsoleto que tampoco libera → GET coherente que actualiza la bandeja → nueva intención legítima con otro `operationId`. |
 | `tests/harness/inventory-http.html` / `tests/harness/inventory-http.tsx` | Harness de navegador que compone el **adaptador HTTP real** con un transporte de prueba y un resolutor de presentación controlable; no inventa endpoints ni DTO (usa la forma del contrato ya validada). Añade `setStaleRead()` y `refresh()` para simular la lectura atrasada y la señal interna de refresco. |
 | `package.json` / `adapters/vitest.config.ts` | `npm test` incorpora `test:unit:inventory`, de modo que el CI del PR ejecuta las regresiones del adaptador de inventario junto con Combos y Bulk. |
@@ -304,8 +311,8 @@ modo. Ese desbloqueo corresponde a la composición compartida de Castilla/Marco.
 |---|---|
 | `npm run typecheck` | PASS |
 | `npm run lint` | PASS |
-| `npx vitest run --config src/features/inventory/adapters/vitest.config.ts` | **45/45 PASS** (incluye regresiones `TAC-P0-05`, `TAC-P1-07`, `TAC-P0-08`, `TAC-P1-10` y los 6 casos explícitos `TAC-P0-09`; caracterización `TAC-P0-06`) |
-| `npm test` | `test:unit:combos` 54 PASS; `test:unit:bulk` 51 PASS; `test:unit:inventory` 45 PASS |
+| `npx vitest run --config src/features/inventory/adapters/vitest.config.ts` | **50/50 PASS** (incluye regresiones `TAC-P0-05`, `TAC-P1-07`, `TAC-P0-08`, `TAC-P1-10`, `TAC-P0-11` y los 6 casos explícitos `TAC-P0-09`; caracterización `TAC-P0-06`) |
+| `npm test` | `test:unit:combos` 54 PASS; `test:unit:bulk` 51 PASS; `test:unit:inventory` 50 PASS |
 | `npx playwright test tests/inventory.spec.ts tests/inventory-dashboard.spec.ts tests/inventory-adapter.spec.ts tests/inventory-presentation.spec.ts --reporter=line` | **47/47 PASS** |
 | `npx playwright test --reporter=line` | **360/360 PASS** (suite completa, 11.3 min) |
 | `npm run build` con `VITE_DATA_MODE=mock` | PASS |
@@ -390,4 +397,37 @@ modo. Ese desbloqueo corresponde a la composición compartida de Castilla/Marco.
 - Estado: **PARTIAL** (sin integración React→Gateway→PostgreSQL; ver `TAC-P0-03`
   y dependencias #45/#109). TAC-P0-06 permanece `BLOQUEADO_ESPECÍFICO`. El PR y
   su CI quedan para la revisión del owner; **no se declara merge ni despliegue**.
+
+## Evidencia de la iteración 7 (TAC-P0-11)
+
+- Rama: `taco`.
+- Commit de implementación y pruebas: `48d5d43`.
+- Archivos: `adapters/apiInventoryAdapter.ts`,
+  `adapters/apiInventoryAdapter.spec.ts` e `INTEGRACION_HTTP.md`.
+- Cambios:
+  - `send()` mantiene `throwIfAborted()` antes de invocar al transporte. Una
+    señal ya abortada es una cancelación anterior al despacho y no crea
+    `UNCERTAIN`.
+  - Si el transporte ya fue invocado, cualquier error de un `POST` (incluido
+    `AbortError`) se convierte en `InventoryError("RESULTADO_INCIERTO")`. El
+    snapshot inmutable completo se conserva y solo se permite el reintento con
+    la misma `Idempotency-Key` y el mismo cuerpo.
+  - El adaptador HTTP acepta un `AbortSignal` opcional en `receiveTransfer()`
+    únicamente para distinguir el aborto previo al despacho. No cambia el
+    contrato OpenAPI, el DTO, el fingerprint ni `InventoryRepository`.
+- Casos nuevos: `TAC-T11-01` (aborto posterior conserva `UNCERTAIN`),
+  `TAC-T11-02` (otra cantidad/nota/`operationId` se rechaza sin segundo POST),
+  `TAC-T11-03` (reintento idéntico recupera la confirmación sin duplicar el
+  efecto), `TAC-T11-04` (aborto previo al despacho no crea `UNCERTAIN`) y
+  `TAC-T11-05` (cerrar/reabrir conserva el intento y bloquea cambios).
+- Resultado local: **50/50** pruebas del adaptador; `typecheck`, `lint`,
+  `npm test` (54 + 51 + 50), **47/47** Playwright de inventario, builds
+  `mock`/`api` y `verify-production` (58/53 vistas) **PASS**. Suite Playwright
+  completa: **360/360 PASS**.
+- `npm test` ejecuta `test:unit:inventory`, por lo que el job `quick` del CI
+  también corre las 50 pruebas del adaptador.
+- Estado: **PARTIAL** (sin integración React→Gateway→PostgreSQL; ver `TAC-P0-03`
+  y dependencias #45/#109). `TAC-P0-06` permanece `BLOQUEADO_ESPECÍFICO`; no se
+  implementa persistencia en navegador ni consulta de operaciones. El PR y su CI
+  quedan para la revisión del owner; **no se declara merge ni despliegue**.
 
