@@ -77,6 +77,13 @@ export interface HttpInventoryRepositoryDependencies {
 }
 
 export interface HttpInventoryRepository extends InventoryRepository {
+  // TAC-P0-11: señal opcional para distinguir una cancelación anterior al
+  // despacho HTTP de un AbortError lanzado después de invocar al transporte.
+  // No forma parte del contrato OpenAPI ni del repositorio de negocio.
+  receiveTransfer(
+    payload: ReceiveTransferPayload,
+    signal?: AbortSignal,
+  ): Promise<TransferItem>;
   getTransferWriteRecord(
     transferId: string,
   ): TransferReceptionWriteRecord | null;
@@ -207,18 +214,25 @@ export function createHttpInventoryRepository(
     request: InventoryHttpRequest,
     write: boolean,
   ): Promise<Response> {
+    // TAC-P0-11: esta comprobación ocurre ANTES de invocar al transporte. Si la
+    // señal ya estaba abortada, la cancelación es verificablemente anterior al
+    // despacho y no puede confundirse con un resultado incierto.
     request.signal?.throwIfAborted();
     let response: Response;
     try {
       response = await transport.request(path, request);
     } catch (error) {
-      if (request.signal?.aborted || isAbort(error)) throw error;
       if (error instanceof InventoryError) throw error;
+      // TAC-P0-11: a partir de aquí el transporte ya fue invocado; un POST pudo
+      // haber llegado al backend. Cualquier error de transporte (incluido
+      // AbortError) se clasifica como resultado incierto para conservar la
+      // identidad y la Idempotency-Key original.
       if (write)
         throw new InventoryError(
           "RESULTADO_INCIERTO",
           "No se confirmó el resultado de la recepción. Consulta el traslado antes de reintentar.",
         );
+      if (request.signal?.aborted || isAbort(error)) throw error;
       throw new InventoryError(
         "SERVICIO_NO_DISPONIBLE",
         "Inventario no respondió a la consulta.",
@@ -502,7 +516,10 @@ export function createHttpInventoryRepository(
       return readTransfers(filters);
     },
 
-    async receiveTransfer(payload): Promise<TransferItem> {
+    async receiveTransfer(
+      payload,
+      signal?: AbortSignal,
+    ): Promise<TransferItem> {
       const key = payload.transferId;
       const frozenPayload = freezeReceiveTransferPayload(payload);
       const currentRecord = transferWrites.get(key);
@@ -567,6 +584,7 @@ export function createHttpInventoryRepository(
           `/api/v1/inventario/traslados/${encodeURIComponent(key)}/recepciones`,
           {
             method: "POST",
+            ...(signal ? { signal } : {}),
             headers: {
               "content-type": "application/json",
               "Idempotency-Key": frozenPayload.operationId,

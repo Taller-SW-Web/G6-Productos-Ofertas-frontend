@@ -40,6 +40,12 @@ function problemResponse(status: number, code: string): Response {
   });
 }
 
+function abortError(): Error {
+  const error = new Error("La solicitud fue cancelada por el transporte.");
+  error.name = "AbortError";
+  return error;
+}
+
 const UMBRALES = { umbralGlobal: 5, overrides: [{ sku: "SKU-A", umbral: 3 }] };
 
 function traslado(overrides: Record<string, unknown> = {}) {
@@ -1354,6 +1360,156 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
     // solución requiere acuerdo previo y no se implementa aquí.)
     const newSession = createTransferReceptionFormSession("t-1");
     expect(newSession.getUncertainPayload()).toBeNull();
+  });
+
+  describe("TAC-P0-11: aborto del transporte durante la recepción", () => {
+    it("TAC-T11-01: un AbortError posterior al despacho conserva UNCERTAIN y el payload inmutable", async () => {
+      let postsProcessedByServer = 0;
+      const { repository, calls } = setup(async () => {
+        postsProcessedByServer += 1;
+        throw abortError();
+      });
+
+      await expect(
+        rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+      ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
+
+      expect(postsProcessedByServer).toBe(1);
+      expect(calls).toHaveLength(1);
+      expect(repository.getTransferWriteRecord("t-1")).toMatchObject({
+        state: "UNCERTAIN",
+        payload: RECEPCION_PAYLOAD,
+      });
+      expect(getUncertainTransferReception("t-1")).toEqual(RECEPCION_PAYLOAD);
+    });
+
+    it("TAC-T11-02: tras el AbortError, otra cantidad, nota u operationId se rechaza sin segundo POST", async () => {
+      const { repository, calls } = setup(async () => {
+        throw abortError();
+      });
+
+      await expect(
+        rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+      ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
+
+      const session = createTransferReceptionFormSession("t-1");
+      expect(() =>
+        session.prepareSubmission({
+          quantityReceived: 3,
+          disposition: "REINGRESAR_DISPONIBLE",
+          finalReceipt: false,
+          note: "",
+        }),
+      ).toThrowError(InventoryError);
+
+      await expect(
+        rejection(
+          repository.receiveTransfer({
+            ...RECEPCION_PAYLOAD,
+            operationId: "22222222-2222-4222-8222-222222222222",
+          }),
+        ),
+      ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
+      await expect(
+        rejection(
+          repository.receiveTransfer({
+            ...RECEPCION_PAYLOAD,
+            note: "Nota distinta",
+          }),
+        ),
+      ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
+
+      expect(calls).toHaveLength(1);
+    });
+
+    it("TAC-T11-03: reintentar el payload original recupera la confirmación sin duplicar el efecto", async () => {
+      const durableOperations = new Map<string, number>();
+      let attempt = 0;
+      const { repository, calls } = setup(async (_path, request) => {
+        attempt += 1;
+        const key = request.headers?.["Idempotency-Key"] ?? "";
+        if (!durableOperations.has(key)) durableOperations.set(key, 1);
+        if (attempt === 1) throw abortError();
+        return jsonResponse(RECEPCION_OK);
+      });
+
+      await expect(
+        rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+      ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
+      expect(durableOperations.get(RECEPCION_PAYLOAD.operationId)).toBe(1);
+
+      await expect(
+        repository.receiveTransfer(RECEPCION_PAYLOAD),
+      ).resolves.toMatchObject({ id: "t-1", quantityReceived: 4 });
+
+      expect(attempt).toBe(2);
+      expect(durableOperations.get(RECEPCION_PAYLOAD.operationId)).toBe(1);
+      expect(calls).toHaveLength(2);
+      expect(calls[0]?.request.headers?.["Idempotency-Key"]).toBe(
+        RECEPCION_PAYLOAD.operationId,
+      );
+      expect(calls[1]?.request.headers?.["Idempotency-Key"]).toBe(
+        RECEPCION_PAYLOAD.operationId,
+      );
+      expect(calls[0]?.request.body).toBe(calls[1]?.request.body);
+      expect(repository.getTransferWriteRecord("t-1")).toMatchObject({
+        state: "RECONCILED",
+      });
+      expect(getUncertainTransferReception("t-1")).toBeNull();
+    });
+
+    it("TAC-T11-04: una cancelación anterior al despacho no crea UNCERTAIN", async () => {
+      const controller = new AbortController();
+      controller.abort();
+      const { repository, request } = setup(async () =>
+        jsonResponse(RECEPCION_OK),
+      );
+
+      const cancellation = await repository
+        .receiveTransfer(RECEPCION_PAYLOAD, controller.signal)
+        .then(
+          () => null,
+          (error: unknown) => error,
+        );
+
+      expect(cancellation).toBeInstanceOf(Error);
+      expect((cancellation as Error).name).toBe("AbortError");
+      expect(request).not.toHaveBeenCalled();
+      expect(repository.getTransferWriteRecord("t-1")).toBeNull();
+      expect(getUncertainTransferReception("t-1")).toBeNull();
+    });
+
+    it("TAC-T11-05: cerrar y reabrir el formulario conserva el intento y bloquea cambios", async () => {
+      const { repository, calls } = setup(async () => {
+        throw abortError();
+      });
+
+      await expect(
+        rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+      ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
+
+      const reopenedSession = createTransferReceptionFormSession("t-1");
+      expect(reopenedSession.getUncertainPayload()).toEqual(
+        RECEPCION_PAYLOAD,
+      );
+      expect(() =>
+        reopenedSession.prepareSubmission({
+          quantityReceived: 3,
+          disposition: "REINGRESAR_DISPONIBLE",
+          finalReceipt: false,
+          note: "",
+        }),
+      ).toThrowError(InventoryError);
+      expect(
+        reopenedSession.prepareSubmission({
+          quantityReceived: 4,
+          disposition: "REINGRESAR_DISPONIBLE",
+          finalReceipt: false,
+          note: "",
+        }),
+      ).toEqual(RECEPCION_PAYLOAD);
+      expect(calls).toHaveLength(1);
+    });
   });
 });
 
