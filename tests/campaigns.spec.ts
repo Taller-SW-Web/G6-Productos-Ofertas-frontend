@@ -42,6 +42,12 @@ test("@smoke MK-006 S01/S05: typed filters and detail retain list context", asyn
   page,
 }) => {
   await page.goto("/promociones?estado=active&modalidad=automatic&tamanio=1");
+  await expect(
+    page.getByText(
+      "Entorno de prueba: la información presentada es de referencia y no confirma una aplicación comercial.",
+      { exact: true },
+    ),
+  ).toBeVisible();
   await page
     .getByRole("link", {
       name: "Ver detalle de Carrera de octubre",
