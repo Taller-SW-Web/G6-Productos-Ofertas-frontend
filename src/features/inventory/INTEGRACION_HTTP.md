@@ -472,3 +472,30 @@ pm test ejecuta 	est:unit:inventory, por lo que el job quick del CI
   y dependencias #45/#109). TAC-P0-06 permanece BLOQUEADO_ESPECIFICO; no se
   implementa persistencia en navegador ni consulta de operaciones. El PR y su CI
   quedan para la revision del owner; **no se declara merge ni despliegue**.
+
+## Evidencia de la iteracion 9 (correcciones auditoria PR #55)
+
+- Rama: 	aco.
+- Commit de implementacion: b9a535.
+- Archivos: services/transferReceptionAttempt.ts, components/ReceiveTransferModal.tsx,
+  pages/TransfersPage.tsx, services/inventoryMappers.ts,
+  dapters/apiInventoryAdapter.ts, services/inventoryErrors.ts.
+- Cambios:
+  - TAC-P0-06: persistencia por pestana en sessionStorage para operaciones
+    inciertas y confirmaciones con refresco pendiente, con restauracion
+    conservadora de IN_FLIGHT como UNCERTAIN.
+  - Reconciliacion de recepciones aunque el traslado este terminal, usando el
+    snapshot persistido y sin modificarlo.
+  - Validacion completa de operation_id, 	raslado_id, eceived_quantity y
+    disposition en la confirmacion HTTP.
+  - Bloqueo sincrono de doble envio concurrente y codigo local OPERACION_EN_CURSO.
+  - Validacion de paginacion: pagina solicitada, duplicados y total consistente.
+  - Mensajes y recuperacion separados para escrituras PUT de umbrales.
+- Resultado local: **55/55** pruebas del adaptador; 	ypecheck, lint,
+  
+pm test (54 + 51 + 55), **47/47** Playwright de inventario, builds
+  mock/pi **PASS**.
+- Estado: **PARTIAL** (sin integracion React->Gateway->PostgreSQL). TAC-P0-06
+  queda resuelto solo para la pestana actual; no garantiza conciliacion entre
+  dispositivos ni tras borrar manualmente los datos del navegador. No se declara
+  merge ni despliegue.
