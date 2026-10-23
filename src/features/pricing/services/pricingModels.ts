@@ -36,6 +36,7 @@ export interface ScheduleView {
   start: string;
   end: string | null;
   status: "SCHEDULED" | "ACTIVE" | "HISTORICAL" | "CANCELLED";
+  version?: number;
 }
 export interface SchedulePage {
   items: ScheduleView[];
