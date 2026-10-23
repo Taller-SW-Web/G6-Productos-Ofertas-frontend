@@ -197,6 +197,7 @@ const operacionesBajaValor = new Map<string, OperacionBajaValor>(
     ) ?? []
   ).map((operation) => [operation.operacionId, operation]),
 );
+let secuenciaOperacionBaja = 0;
 
 const persistirOperacionesBaja = () =>
   saveMockState(
@@ -519,8 +520,13 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
     }
     // La solicitud siempre se admite como pendiente. La comprobación simulada
     // produce el resultado terminal al consultar el estado de la operación.
-    const operacionId = `baja-valor-${id}-${valorId}`;
-    const existing = operacionesBajaValor.get(operacionId);
+    const baseOperacionId = `baja-valor-${id}-${valorId}`;
+    const existing = Array.from(operacionesBajaValor.values()).find(
+      (operation) =>
+        operation.caracteristicaId === id &&
+        operation.valorId === valorId &&
+        operation.estado === "pendiente",
+    );
     if (existing) {
       return {
         resultado: "pendiente",
@@ -530,19 +536,15 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
             ? "La solicitud de baja ya está pendiente; no se reenvió la operación."
             : "La operación de baja ya fue resuelta.",
         bloqueos: [],
-        operacionId,
+        operacionId: existing.operacionId,
       };
     }
+    const operacionId = `${baseOperacionId}-${++secuenciaOperacionBaja}`;
     operacionesBajaValor.set(operacionId, {
       operacionId,
       caracteristicaId: id,
       valorId,
-      estado:
-        valorId === "m" || MOCK.baja === "rechazada-asincrona"
-          ? "rechazada"
-          : MOCK.baja === "no-concluyente"
-            ? "no-concluyente"
-            : "pendiente",
+      estado: "pendiente",
     });
     if (!persistirOperacionesBaja() && isMockPersistenceAvailable()) {
       operacionesBajaValor.delete(operacionId);
@@ -575,6 +577,17 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
 
     if (MOCK.baja === "error-consulta") {
       throw new Error("No se pudo consultar el resultado de la comprobación.");
+    }
+
+    if (
+      operacion.estado === "pendiente" &&
+      (operacion.valorId === "m" || MOCK.baja === "rechazada-asincrona")
+    ) {
+      operacion.estado = "rechazada";
+      persistirOperacionesBaja();
+    } else if (operacion.estado === "pendiente" && MOCK.baja === "no-concluyente") {
+      operacion.estado = "no-concluyente";
+      persistirOperacionesBaja();
     }
 
     if (operacion.estado === "rechazada") {
