@@ -20,6 +20,7 @@ import {
 } from "@tabler/icons-react";
 import {
   EntityTable,
+  FeedbackAlert,
   FilterBar,
   PageHeader,
   SearchField,
@@ -31,19 +32,34 @@ import { useCategoryTree } from "../hooks/useCategoryTree";
 import { estadoSemantic } from "../services/estadoSemantic";
 import type { CategoryNode } from "../types";
 
+const STORAGE_KEY = "taxonomy_tree_colapsados";
+
 // MK-008-S01: listado / árbol de categorías en `/categorias`.
 export function CategoryTreePage() {
   const navigate = useNavigate();
-  const { state } = useCategoryTree();
+  const { state, reload } = useCategoryTree();
   const [busqueda, setBusqueda] = useState<string>("");
-  const [colapsados, setColapsados] = useState<string[]>([]);
+  const [colapsados, setColapsados] = useState<string[]>(() => {
+    try {
+      const guardado = sessionStorage.getItem(STORAGE_KEY);
+      return guardado ? (JSON.parse(guardado) as string[]) : [];
+    } catch {
+      return [];
+    }
+  });
 
   const alternar = (id: string) => {
-    setColapsados((actual) =>
-      actual.includes(id)
+    setColapsados((actual) => {
+      const siguiente = actual.includes(id)
         ? actual.filter((item) => item !== id)
-        : [...actual, id],
-    );
+        : [...actual, id];
+      try {
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(siguiente));
+      } catch {
+        // ignorar fallo de almacenamiento
+      }
+      return siguiente;
+    });
   };
 
   const arbol = useMemo<CategoryNode[]>(
@@ -85,6 +101,7 @@ export function CategoryTreePage() {
                   ? `Expandir ${nodo.nombre}`
                   : `Contraer ${nodo.nombre}`
               }
+              aria-expanded={!colapsados.includes(nodo.id)}
               onClick={() => alternar(nodo.id)}
             >
               {colapsados.includes(nodo.id) ? (
@@ -216,15 +233,29 @@ export function CategoryTreePage() {
             />
           </Box>
         </FilterBar>
-        <EntityTable
-          caption="Árbol de categorías"
-          columns={columnas}
-          rows={filas}
-          rowKey={(nodo) => nodo.id}
-          state={tablaState}
-          minWidth={900}
-          empty={vacio}
-        />
+        {state.status === "error" ? (
+          <FeedbackAlert
+            semantic="error"
+            title="No se pudo cargar el árbol"
+            actions={
+              <Button variant="outline" onClick={reload}>
+                Reintentar consulta
+              </Button>
+            }
+          >
+            {state.message}
+          </FeedbackAlert>
+        ) : (
+          <EntityTable
+            caption="Árbol de categorías"
+            columns={columnas}
+            rows={filas}
+            rowKey={(nodo) => nodo.id}
+            state={tablaState}
+            minWidth={900}
+            empty={vacio}
+          />
+        )}
       </Stack>
     </>
   );

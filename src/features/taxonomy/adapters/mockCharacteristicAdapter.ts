@@ -4,10 +4,12 @@ import {
   isMockPersistenceAvailable,
   loadMockArray,
   persistMockArray,
+  readMockState,
+  saveMockState,
   syncMockArrayOnExternalChange,
+  subscribeExternalMockChanges,
 } from "../../shared/mockState";
 import type {
-  BloqueoDependencia,
   CharacteristicDetail,
   CharacteristicListItem,
   CharacteristicType,
@@ -91,7 +93,7 @@ const isCharacteristic = (value: unknown): value is RegistroCaracteristica => {
   return (
     typeof row.id === "string" &&
     typeof row.nombre === "string" &&
-    (row.tipo === "TEXTO" || row.tipo === "NUMERICO" || row.tipo === "LISTA") &&
+    (row.tipo === "TEXTO" || row.tipo === "NUMERO" || row.tipo === "LISTA") &&
     (row.estado === "Activo" || row.estado === "Inactivo")
   );
 };
@@ -153,12 +155,79 @@ const contarActivos = (valores: RegistroValor[]): number =>
 // de una baja asíncrona de valor (202). Este registro mantiene las operaciones
 // pendientes en memoria para que la UI consulte su estado sin inventar un endpoint.
 interface OperacionBajaValor {
+  operacionId: string;
   caracteristicaId: string;
   valorId: string;
-  estado: "pendiente" | "confirmada";
+  estado: "pendiente" | "confirmada" | "rechazada" | "no-concluyente";
 }
 
-const operacionesBajaValor = new Map<string, OperacionBajaValor>();
+const isOperacionBajaValor = (value: unknown): value is OperacionBajaValor => {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.operacionId === "string" &&
+    typeof row.caracteristicaId === "string" &&
+    typeof row.valorId === "string" &&
+    ["pendiente", "confirmada", "rechazada", "no-concluyente"].includes(
+      String(row.estado),
+    )
+  );
+};
+
+// H-06: test isolation — snapshot/restore baseline store.
+const copiarRegistro = (item: RegistroCaracteristica): RegistroCaracteristica => ({
+  ...item,
+  valores: item.valores?.map((valor) => ({ ...valor })),
+});
+const estadoInicialCaracteristicas: RegistroCaracteristica[] = store.map(copiarRegistro);
+
+export const __resetCharacteristicStore = (): void => {
+  store.length = 0;
+  store.push(...estadoInicialCaracteristicas.map(copiarRegistro));
+  operacionesBajaValor.clear();
+  __resetCharacteristicMockScenarios();
+};
+
+const operacionesBajaValor = new Map<string, OperacionBajaValor>(
+  (
+    readMockState<OperacionBajaValor[]>(
+      "taxonomy-characteristic-baja",
+      (value): value is OperacionBajaValor[] =>
+        Array.isArray(value) && value.every(isOperacionBajaValor),
+    ) ?? []
+  ).map((operation) => [operation.operacionId, operation]),
+);
+let secuenciaOperacionBaja = 0;
+
+const persistirOperacionesBaja = () =>
+  saveMockState(
+    "taxonomy-characteristic-baja",
+    Array.from(operacionesBajaValor.values()),
+  );
+
+subscribeExternalMockChanges("taxonomy-characteristic-baja", () => {
+  const stored = readMockState<OperacionBajaValor[]>(
+    "taxonomy-characteristic-baja",
+    (value): value is OperacionBajaValor[] =>
+      Array.isArray(value) && value.every(isOperacionBajaValor),
+  );
+  if (!stored) return;
+  operacionesBajaValor.clear();
+  for (const operation of stored)
+    operacionesBajaValor.set(operation.operacionId, operation);
+});
+
+export function isCharacteristicValuePending(
+  caracteristicaId: string,
+  valorId: string,
+): boolean {
+  return Array.from(operacionesBajaValor.values()).some(
+    (operation) =>
+      operation.caracteristicaId === caracteristicaId &&
+      operation.valorId === valorId &&
+      operation.estado === "pendiente",
+  );
+}
 
 // Deterministic local states used only for review. The repository contract does not
 // accept scenarios; reviewers change these values to reproduce error or edge cases
@@ -166,15 +235,65 @@ const operacionesBajaValor = new Map<string, OperacionBajaValor>();
 type EscenarioLista = "default" | "empty" | "error";
 type EscenarioCatalogo = "default" | "error" | "no-encontrado";
 type EscenarioFormulario = "default" | "error";
-
-const MOCK: {
+type EscenarioValores = "default" | "empty" | "lista-limite" | "error";
+type EscenarioBajaValor =
+  | "default"
+  | "error-solicitud"
+  | "pendiente-prolongado"
+  | "error-consulta"
+  | "rechazada-asincrona"
+  | "no-concluyente";
+export interface CharacteristicMockScenarios {
   lista: EscenarioLista;
   catalogo: EscenarioCatalogo;
   formulario: EscenarioFormulario;
-} = {
+  valores: EscenarioValores;
+  baja: EscenarioBajaValor;
+}
+
+const DEFAULT_MOCK_SCENARIOS: CharacteristicMockScenarios = {
   lista: "default",
   catalogo: "default",
   formulario: "default",
+  valores: "default",
+  baja: "default",
+};
+const MOCK: CharacteristicMockScenarios = { ...DEFAULT_MOCK_SCENARIOS };
+
+// Adapter-only controls for reproducible UI review and tests. They do not form
+// part of CharacteristicRepository or select a data mode.
+export const __setCharacteristicMockScenarios = (
+  scenarios: Partial<CharacteristicMockScenarios>,
+): void => {
+  if (scenarios.baja && scenarios.baja !== MOCK.baja)
+    operacionesBajaValor.clear();
+  Object.assign(MOCK, scenarios);
+  if (scenarios.valores === "empty") {
+    const caracteristica = store.find((item) => item.tipo === "LISTA");
+    if (caracteristica) {
+      caracteristica.valores = [];
+      caracteristica.valoresActivos = 0;
+    }
+  }
+  if (scenarios.valores === "lista-limite") {
+    const caracteristica = store.find((item) => item.tipo === "LISTA");
+    if (caracteristica) {
+      caracteristica.valores = Array.from(
+        { length: characteristicConfigDefaults.maxValoresLista },
+        (_, index) => ({
+          valorId: `fixture-${index + 1}`,
+          nombre: `Valor permitido ${String(index + 1).padStart(2, "0")}`,
+          estado: "Activo" as const,
+          version: 1,
+        }),
+      );
+      caracteristica.valoresActivos = caracteristica.valores.length;
+    }
+  }
+};
+
+export const __resetCharacteristicMockScenarios = (): void => {
+  Object.assign(MOCK, DEFAULT_MOCK_SCENARIOS);
 };
 
 export const mockCharacteristicAdapter: CharacteristicRepository = {
@@ -219,6 +338,12 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
         "No se pudo crear la característica. Inténtalo de nuevo.",
       );
     }
+    if (!input.nombre.trim())
+      throw new Error("Ingresa el nombre de la característica.");
+    if (input.tipo !== "TEXTO" && input.tipo !== "NUMERO" && input.tipo !== "LISTA")
+      throw new Error("Selecciona un tipo de característica válido.");
+    if (input.tipo === "NUMERO" && !input.unidad?.trim())
+      throw new Error("Ingresa la unidad para una característica NUMERO.");
     const unidad = input.tipo === "NUMERO" ? input.unidad : undefined;
     const registro: RegistroCaracteristica = {
       id: generarId(input.nombre),
@@ -281,7 +406,40 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
     await esperar(300);
     signal?.throwIfAborted();
     const r = hallar(id);
-    return r ? ((r.valores ?? []).map((v) => ({ ...v })) as CharacteristicValue[]) : null;
+    if (!r) return null;
+    if (MOCK.valores === "error") {
+      throw new Error("No se pudieron cargar los valores. Inténtalo de nuevo.");
+    }
+    if (MOCK.valores === "empty") return [];
+    return (r.valores ?? []).map((v) => ({ ...v })) as CharacteristicValue[];
+  },
+
+  async renombrarValor(id, valorId, nombre, signal) {
+    signal?.throwIfAborted();
+    await esperar(300);
+    signal?.throwIfAborted();
+    const r = hallar(id);
+    const v = r?.valores?.find((item) => item.valorId === valorId);
+    const nombreLimpio = nombre.trim();
+    if (!r || !v) throw new Error("El valor ya no está disponible para renombrar.");
+    if (r.estado !== "Activo") {
+      throw new Error("La característica está inactiva y sus valores son de solo lectura.");
+    }
+    if (!nombreLimpio) throw new Error("Ingresa el nombre del valor.");
+    if (MOCK.formulario === "error") {
+      throw new Error("No se pudo renombrar el valor. Inténtalo de nuevo.");
+    }
+    const prevNombre = v.nombre;
+    const prevVersion = v.version;
+    v.nombre = nombreLimpio;
+    v.version += 1;
+    const ok = persist();
+    if (!ok && isMockPersistenceAvailable()) {
+      v.nombre = prevNombre;
+      v.version = prevVersion;
+      throw new Error("No se pudo renombrar el valor. Vuelve a intentarlo.");
+    }
+    return { ...v };
   },
 
   async agregarValor(id, nombre, signal) {
@@ -290,6 +448,10 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
     signal?.throwIfAborted();
     const r = hallar(id);
     if (!r) throw new Error("Característica no encontrada.");
+    if (r.estado !== "Activo") {
+      throw new Error("La característica está inactiva y no admite nuevos valores.");
+    }
+    if (!nombre.trim()) throw new Error("Ingresa el nombre del valor.");
     // SPEC-009: el límite de valores permitidos se aplica también aquí y no solo como
     // restricción visual del formulario (maxValoresLista sobre valores activos).
     const existentes = r.valores ?? [];
@@ -341,6 +503,9 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
         "El valor no existe o ya no está disponible para una baja.",
       );
     }
+    if (r.estado !== "Activo") {
+      throw new Error("La característica está inactiva y sus valores son de solo lectura.");
+    }
     if (v.estado !== "Activo") {
       throw new Error("El valor ya no está activo; no se aplicó ninguna baja.");
     }
@@ -350,69 +515,48 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
       estado: v.estado,
       version: v.version,
     };
-    // SPEC-010: un valor referenciado por el esquema de un tipo de producto activo
-    // no puede desactivarse. Demostración determinista para la revisión del piloto.
-    if (valorId === "m") {
-      const bloqueos: BloqueoDependencia[] = [
-        {
-          tipo: "productos",
-          cantidad: 2,
-          detalle:
-            "Valor usado por el esquema de un tipo de producto activo (SPEC-010).",
-        },
-      ];
-      return {
-        resultado: "rechazada",
-        valor: actual,
-        mensaje:
-          "No se puede dar de baja: el valor está referenciado por el esquema de un tipo de producto activo.",
-        bloqueos,
-      };
+    if (MOCK.baja === "error-solicitud") {
+      throw new Error("No se pudo solicitar la comprobación de uso.");
     }
-    // Demostración de verificación en curso (equivalente a 202): la solicitud se
-    // admite pero el valor conserva su estado hasta que se confirme.
-    if (valorId === "negro") {
-      const operacionId = `baja-valor-${valorId}`;
-      operacionesBajaValor.set(operacionId, {
-        caracteristicaId: id,
-        valorId,
-        estado: "pendiente",
-      });
+    // La solicitud siempre se admite como pendiente. La comprobación simulada
+    // produce el resultado terminal al consultar el estado de la operación.
+    const baseOperacionId = `baja-valor-${id}-${valorId}`;
+    const existing = Array.from(operacionesBajaValor.values()).find(
+      (operation) =>
+        operation.caracteristicaId === id &&
+        operation.valorId === valorId &&
+        operation.estado === "pendiente",
+    );
+    if (existing) {
       return {
         resultado: "pendiente",
         valor: actual,
         mensaje:
-          "Solicitud de baja admitida en revisión. El valor continúa Activo; la desactivación no quedó confirmada.",
+          existing.estado === "pendiente"
+            ? "La solicitud de baja ya está pendiente; no se reenvió la operación."
+            : "La operación de baja ya fue resuelta.",
         bloqueos: [],
-        operacionId,
+        operacionId: existing.operacionId,
       };
     }
-    const prevEstado = v.estado;
-    const prevVersion = v.version;
-    const prevActivos = r.valoresActivos;
-    v.estado = "Inactivo";
-    v.version += 1;
-    if (r.valores) {
-      r.valoresActivos = contarActivos(r.valores);
-    }
-    const ok = persist();
-    if (!ok && isMockPersistenceAvailable()) {
-      v.estado = prevEstado;
-      v.version = prevVersion;
-      r.valoresActivos = prevActivos;
-      throw new Error("No se pudo dar de baja el valor. Vuelve a intentarlo.");
+    const operacionId = `${baseOperacionId}-${++secuenciaOperacionBaja}`;
+    operacionesBajaValor.set(operacionId, {
+      operacionId,
+      caracteristicaId: id,
+      valorId,
+      estado: "pendiente",
+    });
+    if (!persistirOperacionesBaja() && isMockPersistenceAvailable()) {
+      operacionesBajaValor.delete(operacionId);
+      throw new Error("No se pudo registrar la solicitud de baja. Vuelve a intentarlo.");
     }
     return {
-      resultado: "exito",
-      valor: {
-        valorId: v.valorId,
-        nombre: v.nombre,
-        estado: v.estado,
-        version: v.version,
-      },
+      resultado: "pendiente",
+      valor: actual,
       mensaje:
-        "Baja confirmada. El valor quedó Inactivo sin eliminar el registro.",
+        "Solicitud de baja admitida en revisión. El valor continúa Activo; la desactivación no quedó confirmada.",
       bloqueos: [],
+      operacionId,
     };
   },
 
@@ -431,6 +575,51 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
       throw new Error("El valor ya no está disponible.");
     }
 
+    if (MOCK.baja === "error-consulta") {
+      throw new Error("No se pudo consultar el resultado de la comprobación.");
+    }
+
+    if (
+      operacion.estado === "pendiente" &&
+      (operacion.valorId === "m" || MOCK.baja === "rechazada-asincrona")
+    ) {
+      operacion.estado = "rechazada";
+      persistirOperacionesBaja();
+    } else if (operacion.estado === "pendiente" && MOCK.baja === "no-concluyente") {
+      operacion.estado = "no-concluyente";
+      persistirOperacionesBaja();
+    }
+
+    if (operacion.estado === "rechazada") {
+      return {
+        operacionId,
+        estado: "rechazada",
+        mensaje:
+          "No se puede dar de baja: el valor está referenciado por el esquema activo o por productos activos.",
+        valor: { ...v },
+      };
+    }
+
+    if (operacion.estado === "no-concluyente") {
+      return {
+        operacionId,
+        estado: "no-concluyente",
+        mensaje:
+          "No pudimos confirmar que la baja sea segura. No se realizó ningún cambio.",
+        valor: { ...v },
+      };
+    }
+
+    if (operacion.estado === "pendiente" && MOCK.baja === "pendiente-prolongado") {
+      return {
+        operacionId,
+        estado: "pendiente",
+        mensaje:
+          "La comprobación sigue pendiente. El valor conserva su estado actual.",
+        valor: { ...v },
+      };
+    }
+
     if (operacion.estado === "pendiente") {
       operacion.estado = "confirmada";
       const prevEstado = v.estado;
@@ -440,13 +629,14 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
       v.version += 1;
       r.valoresActivos = contarActivos(r.valores ?? []);
       const ok = persist();
-      if (!ok && isMockPersistenceAvailable()) {
+        if (!ok && isMockPersistenceAvailable()) {
         operacion.estado = "pendiente";
         v.estado = prevEstado;
         v.version = prevVersion;
         r.valoresActivos = prevActivos;
-        throw new Error("No se pudo confirmar la baja del valor. Vuelve a intentarlo.");
-      }
+          throw new Error("No se pudo confirmar la baja del valor. Vuelve a intentarlo.");
+        }
+        persistirOperacionesBaja();
       return {
         operacionId,
         estado: "confirmada",

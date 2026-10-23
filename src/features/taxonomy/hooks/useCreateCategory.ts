@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { categoryService } from "../services/categoryService";
-import { generarSlug } from "../services/slug";
+import { CategorySlugConflictError } from "../services/categoryRepository";
 import type {
   CategoryCreateInput,
   CategoryCreateResult,
@@ -25,8 +25,6 @@ export function useCreateCategory() {
   useEffect(() => () => controllerRef.current?.abort(), []);
 
   const comprobar = (nombre: string) => {
-    const propuesto = generarSlug(nombre);
-    setSlug(propuesto);
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -34,7 +32,7 @@ export function useCreateCategory() {
     setSlugCheck(null);
     setCreado(null);
     setPhase("comprobando");
-    void categoryService.comprobarSlug(propuesto, controller.signal).then(
+    void categoryService.proponerSlug(nombre, controller.signal).then(
       (result) => {
         if (controller.signal.aborted) return;
         setSlugCheck(result);
@@ -66,6 +64,30 @@ export function useCreateCategory() {
       },
       (err: unknown) => {
         if (controller.signal.aborted) return;
+        if (err instanceof CategorySlugConflictError) {
+          setError(
+            "El slug dejó de estar disponible. Revisa la nueva propuesta antes de volver a confirmar.",
+          );
+          setPhase("comprobando");
+          void categoryService.proponerSlug(input.nombre, controller.signal).then(
+            (result) => {
+              if (controller.signal.aborted) return;
+              setSlugCheck(result);
+              setSlug(result.slug);
+              setPhase("confirmando");
+            },
+            (resolutionError: unknown) => {
+              if (controller.signal.aborted) return;
+              setError(
+                resolutionError instanceof Error
+                  ? `No se pudo obtener una nueva propuesta: ${resolutionError.message}`
+                  : "No se pudo obtener una nueva propuesta. Inténtalo de nuevo.",
+              );
+              setPhase("confirmando");
+            },
+          );
+          return;
+        }
         setError(
           err instanceof Error ? err.message : "No se pudo crear la categoría.",
         );

@@ -10,7 +10,7 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
-import { IconTrash } from "@tabler/icons-react";
+import { IconCheck, IconPencil, IconTrash, IconX } from "@tabler/icons-react";
 import {
   EntityTable,
   FeedbackAlert,
@@ -56,7 +56,7 @@ export function CharacteristicValuesPage() {
 
 function CharacteristicValuesLoader({ id }: { id: string }) {
   const navigate = useNavigate();
-  const { state } = useCharacteristicDetail(id);
+  const { state, reload } = useCharacteristicDetail(id);
 
   if (state.status === "loading") {
     return (
@@ -72,9 +72,12 @@ function CharacteristicValuesLoader({ id }: { id: string }) {
         semantic="error"
         title="No se pudo cargar la característica"
         actions={
-          <Button variant="outline" onClick={() => navigate("/caracteristicas")}>
-            Volver al listado
-          </Button>
+          <Group gap="sm">
+            <Button variant="outline" onClick={reload}>Reintentar consulta</Button>
+            <Button variant="outline" onClick={() => navigate("/caracteristicas")}>
+              Volver al listado
+            </Button>
+          </Group>
         }
       >
         {state.message}
@@ -134,8 +137,26 @@ function CharacteristicValuesContent({
   const [nuevoValor, setNuevoValor] = useState("");
   const [agregando, setAgregando] = useState(false);
   const [agregarError, setAgregarError] = useState<string | null>(null);
+  const [renamingValueId, setRenamingValueId] = useState<string | null>(null);
+  const [renamingName, setRenamingName] = useState("");
+  const [renamingError, setRenamingError] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [renamingMessage, setRenamingMessage] = useState<string | null>(null);
   const [baja, setBaja] = useState<BajaValorUi>({ status: "idle" });
   const bajaControllerRef = useRef<AbortController | null>(null);
+  const soloLectura = detalle.estado !== "Activo";
+  const valoresActivos = useMemo(
+    () => valores.filter((valor) => valor.estado === "Activo").length,
+    [valores],
+  );
+  const maxLista = characteristicConfigDefaults.maxValoresLista;
+  const limiteAlcanzado = valoresActivos >= maxLista;
+  const valorEnComprobacionId =
+    baja.status === "verificando"
+      ? baja.valor.valorId
+      : baja.status === "pendiente"
+        ? baja.result.valor.valorId
+        : null;
 
   const termino = busqueda.trim().toLocaleLowerCase("es");
   const filas = useMemo(
@@ -214,6 +235,7 @@ function CharacteristicValuesContent({
   };
 
   const handleAgregar = () => {
+    if (soloLectura || limiteAlcanzado || baja.status !== "idle") return;
     const nombre = nuevoValor.trim();
     if (nombre === "") {
       setAgregarError("Ingresa el nombre del valor.");
@@ -238,8 +260,60 @@ function CharacteristicValuesContent({
       });
   };
 
+  const iniciarRenombrado = (valor: CharacteristicValue) => {
+    if (soloLectura || baja.status !== "idle") return;
+    setRenamingValueId(valor.valorId);
+    setRenamingName(valor.nombre);
+    setRenamingError(null);
+    setRenamingMessage(null);
+  };
+
+  const cancelarRenombrado = () => {
+    setRenamingValueId(null);
+    setRenamingName("");
+    setRenamingError(null);
+    setRenaming(false);
+  };
+
+  const handleRenombrar = (valor: CharacteristicValue) => {
+    if (soloLectura || baja.status !== "idle" || renaming) return;
+    const nombre = renamingName.trim();
+    if (!nombre) {
+      setRenamingError("Ingresa el nombre del valor.");
+      return;
+    }
+    if (nombre === valor.nombre) {
+      cancelarRenombrado();
+      return;
+    }
+
+    const controller = new AbortController();
+    setRenaming(true);
+    setRenamingError(null);
+    setRenamingMessage(null);
+    characteristicService
+      .renombrarValor(detalle.id, valor.valorId, nombre, controller.signal)
+      .then((renombrado) => {
+        setValores((prev) =>
+          prev.map((item) =>
+            item.valorId === renombrado.valorId ? renombrado : item,
+          ),
+        );
+        setRenamingMessage(
+          `El valor se renombró en la demostración; se conservó el identificador ${renombrado.valorId}.`,
+        );
+        cancelarRenombrado();
+      })
+      .catch((err) => {
+        setRenamingError(
+          err instanceof Error ? err.message : "No se pudo renombrar el valor.",
+        );
+      })
+      .finally(() => setRenaming(false));
+  };
+
   const handleSolicitarBaja = (valor: CharacteristicValue) => {
-    if (baja.status !== "idle") return;
+    if (soloLectura || baja.status !== "idle" || renaming) return;
     bajaControllerRef.current?.abort();
     const controller = new AbortController();
     bajaControllerRef.current = controller;
@@ -355,36 +429,106 @@ function CharacteristicValuesContent({
       key: "nombre",
       header: "Valor",
       render: (item) => (
-        <Text size="sm" fw={600}>
-          {item.nombre}
-        </Text>
+        <Stack gap={0}>
+          {renamingValueId === item.valorId ? (
+            <TextInput
+              aria-label={`Nuevo nombre de ${item.nombre}`}
+              value={renamingName}
+              error={renamingError}
+              disabled={renaming}
+              onChange={(event) => {
+                setRenamingName(event.currentTarget.value);
+                setRenamingError(null);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  handleRenombrar(item);
+                }
+                if (event.key === "Escape") cancelarRenombrado();
+              }}
+            />
+          ) : (
+            <Text size="sm" fw={600}>
+              {item.nombre}
+            </Text>
+          )}
+        </Stack>
       ),
+    },
+    {
+      key: "identificador",
+      header: "Identificador",
+      width: 200,
+      render: (item) => <Text size="sm">{item.valorId}</Text>,
     },
     {
       key: "estado",
       header: "Estado",
       width: 140,
       render: (item) => (
-        <StatusBadge semantic={estadoCaracteristicaSemantic[item.estado]}>
-          {item.estado}
+        <StatusBadge
+          semantic={
+            valorEnComprobacionId === item.valorId
+              ? "info"
+              : estadoCaracteristicaSemantic[item.estado]
+          }
+        >
+          {valorEnComprobacionId === item.valorId ? "Comprobando uso" : item.estado}
         </StatusBadge>
       ),
     },
     {
       key: "acciones",
       header: "Acciones",
-      width: 120,
+      width: 150,
       align: "right",
       render: (item) => (
         <Group gap="xs" justify="flex-end" wrap="nowrap">
-          <ActionIcon
-            variant="subtle"
-            disabled={item.estado !== "Activo" || baja.status !== "idle"}
-            aria-label={`Solicitar baja de ${item.nombre}`}
-            onClick={() => handleSolicitarBaja(item)}
-          >
-            <IconTrash size={16} stroke={2} aria-hidden="true" />
-          </ActionIcon>
+          {renamingValueId === item.valorId ? (
+            <>
+              <ActionIcon
+                variant="subtle"
+                aria-label={`Guardar nombre de ${item.nombre}`}
+                disabled={renaming}
+                onClick={() => handleRenombrar(item)}
+              >
+                <IconCheck size={16} stroke={2} aria-hidden="true" />
+              </ActionIcon>
+              <ActionIcon
+                variant="subtle"
+                aria-label={`Cancelar renombrado de ${item.nombre}`}
+                disabled={renaming}
+                onClick={cancelarRenombrado}
+              >
+                <IconX size={16} stroke={2} aria-hidden="true" />
+              </ActionIcon>
+            </>
+          ) : (
+            <>
+              <ActionIcon
+                variant="subtle"
+                aria-label={`Renombrar ${item.nombre}`}
+                disabled={soloLectura || baja.status !== "idle" || renaming}
+                onClick={() => iniciarRenombrado(item)}
+              >
+                <IconPencil size={16} stroke={2} aria-hidden="true" />
+              </ActionIcon>
+              <ActionIcon
+                variant="subtle"
+                disabled={
+                  item.estado !== "Activo" ||
+                  soloLectura ||
+                  baja.status !== "idle" ||
+                  renaming
+                }
+                aria-label={`Solicitar baja de ${item.nombre}`}
+                onClick={() => handleSolicitarBaja(item)}
+              >
+                <IconTrash size={16} stroke={2} aria-hidden="true" />
+              </ActionIcon>
+            </>
+          )}
         </Group>
       ),
     },
@@ -416,8 +560,6 @@ function CharacteristicValuesContent({
           description: "Ningún valor coincide con la búsqueda.",
         };
 
-  const maxLista = characteristicConfigDefaults.maxValoresLista;
-
   return (
     <>
       <PageHeader
@@ -436,6 +578,18 @@ function CharacteristicValuesContent({
         }
       />
       <Stack gap="lg">
+        {soloLectura && (
+          <FeedbackAlert semantic="info" title="Característica inactiva">
+            Los valores se muestran en modo de solo lectura. No se admiten nuevas
+            altas, renombrados ni bajas.
+          </FeedbackAlert>
+        )}
+        {renamingMessage && (
+          <FeedbackAlert semantic="success" title="Valor renombrado">
+            {renamingMessage}
+          </FeedbackAlert>
+        )}
+
         {baja.status === "verificando" && (
           <FeedbackAlert
             semantic="info"
@@ -462,7 +616,6 @@ function CharacteristicValuesContent({
                     Consultar estado
                   </Button>
                 )}
-                <Button onClick={cancelarBaja}>Entendido</Button>
               </Group>
             }
           >
@@ -543,22 +696,37 @@ function CharacteristicValuesContent({
 
         <SectionCard
           title="Agregar valor permitido"
-          description={`Valores permitidos activos: ${filas.filter((v) => v.estado === "Activo").length} (máx. ${maxLista})`}
+          description={`Valores permitidos activos: ${valoresActivos} (máx. ${maxLista})`}
         >
           <Stack gap="md">
+            {soloLectura && (
+              <Text size="sm" c="dimmed">
+                Reactiva la característica para administrar sus valores.
+              </Text>
+            )}
+            {limiteAlcanzado && !soloLectura && (
+              <FeedbackAlert semantic="warning" title="Límite de valores activos alcanzado">
+                Renombra o solicita la baja de un valor existente antes de agregar
+                otro.
+              </FeedbackAlert>
+            )}
             <TextInput
               label="Nombre del valor"
               placeholder="Ej. XL"
               value={nuevoValor}
               error={agregarError}
-              disabled={agregando}
+              disabled={agregando || soloLectura || limiteAlcanzado || baja.status !== "idle"}
               onChange={(e) => {
                 setNuevoValor(e.currentTarget.value);
                 setAgregarError(null);
               }}
             />
             <Group justify="flex-start">
-              <Button onClick={handleAgregar} loading={agregando}>
+              <Button
+                onClick={handleAgregar}
+                loading={agregando}
+                disabled={soloLectura || limiteAlcanzado || baja.status !== "idle"}
+              >
                 Agregar valor
               </Button>
             </Group>

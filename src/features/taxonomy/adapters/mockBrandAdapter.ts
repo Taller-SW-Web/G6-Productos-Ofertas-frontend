@@ -66,6 +66,33 @@ const storeFixtures: RegistroMarca[] = [
     descripcion: null,
     version: 1,
   },
+  {
+    marcaId: "BRD-INKA",
+    nombre: "Inka Athletic",
+    estado: "Activo",
+    logoUrl: null,
+    paisOrigenIso: "PE",
+    descripcion: "Marca de alto rendimiento andino.",
+    version: 1,
+  },
+  {
+    marcaId: "BRD-ANDES",
+    nombre: "Andean Peak",
+    estado: "Activo",
+    logoUrl: null,
+    paisOrigenIso: "PE",
+    descripcion: "Equipamiento de montaña.",
+    version: 1,
+  },
+  {
+    marcaId: "BRD-QENTE",
+    nombre: "Q'ente Sport",
+    estado: "Activo",
+    logoUrl: null,
+    paisOrigenIso: "PE",
+    descripcion: "Prendas deportivas peruanas.",
+    version: 1,
+  },
 ];
 
 const isBrand = (value: unknown): value is RegistroMarca => {
@@ -82,6 +109,12 @@ const isBrand = (value: unknown): value is RegistroMarca => {
 // Demo state restored from the current-browser session when available; otherwise a
 // fresh clone of the fixtures. Cross-tab writes rehydrate this same array in place.
 const store: RegistroMarca[] = loadMockArray("taxonomy-brands", storeFixtures, isBrand);
+
+export const __resetBrandStore = (): void => {
+  store.splice(0, store.length, ...storeFixtures.map((item) => ({ ...item })));
+  if (isMockPersistenceAvailable())
+    persistMockArray("taxonomy-brands", store);
+};
 syncMockArrayOnExternalChange("taxonomy-brands", store, isBrand);
 
 const persist = () => persistMockArray("taxonomy-brands", store);
