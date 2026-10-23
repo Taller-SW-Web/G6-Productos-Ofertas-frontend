@@ -22,6 +22,7 @@ import {
   validateCouponDraft,
 } from "../src/features/promotions/services/couponValidation";
 import {
+  couponDateLabel,
   couponPromotionValidity,
   type CouponPromotionValidity,
 } from "../src/features/promotions/services/couponPresentation";
@@ -60,7 +61,13 @@ test("presentación de vigencia usa instantes completos y clasifica límites", (
     expect(couponPromotionValidity(coupon, now)).toBe(expected);
 });
 
-test("el repositorio mock conserva consumo y capacidad informada sin simular redención", async () => {
+test("presentación de vigencia conserva fecha, hora y zona de Lima", () => {
+  const label = couponDateLabel("2026-10-31T00:00:00-05:00");
+  expect(label).toContain("31 oct.");
+  expect(label).toContain("12:00");
+});
+
+test("el repositorio mock conserva contadores durante consultas", async () => {
   const services = createMockPromotionServices({}, { persist: false });
   const signal = new AbortController().signal;
   const known = await services.coupons.read("cyberinka20", signal);

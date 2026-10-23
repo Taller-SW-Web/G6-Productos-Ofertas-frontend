@@ -63,6 +63,7 @@ export const couponPolicyLabel = (coupon: CouponView) =>
 export function couponDateLabel(value: string) {
   return new Intl.DateTimeFormat("es-PE", {
     dateStyle: "medium",
+    timeStyle: "short",
     timeZone: "America/Lima",
   }).format(new Date(value));
 }
