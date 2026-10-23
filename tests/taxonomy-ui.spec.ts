@@ -65,7 +65,7 @@ for (const module of taxonomySections) {
       ).toHaveCount(0);
       await expect(
         page.getByText("Datos de demostración", { exact: true }),
-      ).toBeVisible();
+      ).toHaveCount(0);
       const navigation = page.getByRole("navigation", {
         name: "Navegación de la aplicación",
       });
@@ -93,7 +93,7 @@ for (const module of taxonomySections) {
   });
 }
 
-test("MK-008: category creation and edit forms expose the expected fields", async ({
+test("@smoke MK-008: category creation and edit forms expose the expected fields", async ({
   page,
 }) => {
   await page.goto("/categorias/nueva");

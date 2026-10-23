@@ -1,6 +1,12 @@
 import { mockCharacteristicAdapter } from "./mockCharacteristicAdapter";
 import type { ProductTypeRepository } from "../services/productTypeRepository";
 import { PRODUCT_TYPE_ATTRIBUTE_LIMIT } from "../services/productTypeRepository";
+import {
+  isMockPersistenceAvailable,
+  loadMockArray,
+  persistMockArray,
+  syncMockArrayOnExternalChange,
+} from "../../shared/mockState";
 import type {
   CharacteristicListItem,
   ProductTypeAssociarInput,
@@ -28,7 +34,7 @@ interface RegistroTipoProducto {
   asociadas: RegistroAsociacion[];
 }
 
-const store: RegistroTipoProducto[] = [
+const storeFixtures: RegistroTipoProducto[] = [
   {
     tipoProductoId: "calzado",
     nombre: "Calzado deportivo",
@@ -62,6 +68,25 @@ const store: RegistroTipoProducto[] = [
     asociadas: [],
   },
 ];
+
+const isProductType = (value: unknown): value is RegistroTipoProducto => {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.tipoProductoId === "string" &&
+    typeof row.nombre === "string" &&
+    (row.estado === "Activo" || row.estado === "Inactivo") &&
+    typeof row.schemaVersion === "number" &&
+    Array.isArray(row.asociadas)
+  );
+};
+
+// Demo state restored from the current-browser session when available; otherwise a
+// fresh clone of the fixtures. Cross-tab writes rehydrate this same array in place.
+const store: RegistroTipoProducto[] = loadMockArray("taxonomy-product-types", storeFixtures, isProductType);
+syncMockArrayOnExternalChange("taxonomy-product-types", store, isProductType);
+
+const persist = () => persistMockArray("taxonomy-product-types", store);
 
 const esperar = (ms: number) =>
   new Promise((resolve) => setTimeout(resolve, ms));
@@ -191,6 +216,11 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
       asociadas: [],
     };
     store.push(registro);
+    const ok = persist();
+    if (!ok && isMockPersistenceAvailable()) {
+      store.pop();
+      throw new Error("No se pudo crear el tipo de producto. Vuelve a intentarlo.");
+    }
     const resultado: ProductTypeCreateResult = {
       tipoProductoId: registro.tipoProductoId,
       nombre: registro.nombre,
@@ -258,6 +288,12 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
       obligatoria: input.obligatoria,
     });
     registro.schemaVersion += 1;
+    const ok = persist();
+    if (!ok && isMockPersistenceAvailable()) {
+      registro.asociadas.pop();
+      registro.schemaVersion -= 1;
+      throw new Error("No se pudo asociar la característica. Vuelve a intentarlo.");
+    }
     return aDetalle(registro, catalogo);
   },
 
@@ -290,10 +326,17 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
         operacionId,
       };
     }
+    const prevAsociadas = [...registro.asociadas];
     registro.asociadas = registro.asociadas.filter(
       (item) => item.caracteristicaId !== caracteristicaId,
     );
     registro.schemaVersion += 1;
+    const ok = persist();
+    if (!ok && isMockPersistenceAvailable()) {
+      registro.asociadas = prevAsociadas;
+      registro.schemaVersion -= 1;
+      throw new Error("No se pudo desasociar la característica. Vuelve a intentarlo.");
+    }
     return {
       resultado: "exito",
       mensaje:
@@ -320,6 +363,9 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
 
     if (operacion.estado === "pendiente") {
       operacion.estado = "confirmada";
+      const prevAsociadas = registro.asociadas;
+      const prevSchemaVersion = registro.schemaVersion;
+      const prevEstado = registro.estado;
       if (operacion.tipo === "desasocio" && operacion.caracteristicaId) {
         registro.asociadas = registro.asociadas.filter(
           (item) => item.caracteristicaId !== operacion.caracteristicaId,
@@ -327,6 +373,14 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
         registro.schemaVersion += 1;
       } else if (operacion.tipo === "desactivacion") {
         registro.estado = "Inactivo";
+      }
+      const ok = persist();
+      if (!ok && isMockPersistenceAvailable()) {
+        operacion.estado = "pendiente";
+        registro.asociadas = prevAsociadas;
+        registro.schemaVersion = prevSchemaVersion;
+        registro.estado = prevEstado;
+        throw new Error("No se pudo confirmar la operación del tipo de producto. Vuelve a intentarlo.");
       }
     }
 
@@ -376,7 +430,13 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
         operacionId,
       };
     }
+    const prevEstado = registro.estado;
     registro.estado = "Inactivo";
+    const ok = persist();
+    if (!ok && isMockPersistenceAvailable()) {
+      registro.estado = prevEstado;
+      throw new Error("No se pudo desactivar el tipo de producto. Vuelve a intentarlo.");
+    }
     return {
       resultado: "exito",
       mensaje: "El tipo de producto se desactivó correctamente.",

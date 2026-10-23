@@ -156,3 +156,10 @@ export function dateLabel(instant: string) {
   if (!isValidAuditInstant(instant)) return "Fecha no válida";
   return `${new Intl.DateTimeFormat("es-PE", { timeZone: "America/Bogota", dateStyle: "short", timeStyle: "medium" }).format(new Date(instant))} · UTC−5`;
 }
+
+export function displayAuditId(id: string): string {
+  if (id.startsWith("demo-pricing-")) {
+    return `aud-${id.slice("demo-pricing-".length)}`;
+  }
+  return id;
+}

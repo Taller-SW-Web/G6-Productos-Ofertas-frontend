@@ -5,7 +5,7 @@ export function createUnavailableApiCatalogRepository(): CatalogRepository {
   async function unavailable(): Promise<never> {
     throw new CatalogError(
       "server",
-      "El adapter API de Catálogo no está configurado. No se utilizarán datos simulados como sustitución.",
+      "La consulta del catálogo no está disponible.",
     );
   }
 

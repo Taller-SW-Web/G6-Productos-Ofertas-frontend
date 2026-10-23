@@ -15,8 +15,8 @@ export function AuditScope({
       title="Filtros aplicados"
       description={
         total === undefined
-          ? "Cantidad no disponible. Consulta el historial antes de asegurar compatibilidad con un formato."
-          : `${total.toLocaleString("es-PE")} registros en todo el resultado, no solo en esta página.`
+          ? "Cantidad no disponible."
+          : `${total.toLocaleString("es-PE")} registros encontrados.`
       }
     >
       <Stack gap="xs">

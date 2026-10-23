@@ -18,14 +18,14 @@ export const initialBrands: TaxonomyBrand[] = [
 ];
 
 export const initialProductTypes: TaxonomyProductType[] = [
-  { id: "TIP-CAMISA", nombre: "Camisa", activo: true },
+  { id: "TIP-CAMISETA", nombre: "Camiseta deportiva", activo: true },
   { id: "TIP-CASACA", nombre: "Casaca", activo: true },
   { id: "TIP-ZAPATILLA", nombre: "Zapatilla", activo: true },
   { id: "TIP-MOCHILA", nombre: "Mochila", activo: true },
 ];
 
 export const attributeSchemasByType: Record<string, AttributeSchema[]> = {
-  "TIP-CAMISA": [
+  "TIP-CAMISETA": [
     {
       caracteristicaId: "CAR-COLOR",
       nombre: "Color principal",

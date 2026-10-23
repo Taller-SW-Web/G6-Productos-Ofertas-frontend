@@ -59,7 +59,7 @@ test("LISTA preserves stable IDs, NUMERO accepts negatives when permitted, TEXTO
 test("complete variant starts BORRADOR/PENDING, waits for confirmation and only retries when authorized", async () => {
   const catalog = new MockCatalogRepository();
   const attributes = [{ caracteristicaId: "CAR-COLOR", nombre: "Color principal", tipo: "LISTA" as const, valor: "Rojo Carmesí", valorId: "COL-ROJ" }];
-  const variant = await catalog.createVariant("PROD-OXF-001", {
+  const variant = await catalog.createVariant("PROD-RUN-001", {
     sku: "TEST-COMPLETE", identifyingAttributes: attributes,
     nonIdentifyingAttributes: [{ caracteristicaId: "CAR-MAT", nombre: "Material principal", tipo: "TEXTO", valor: "Algodón" }],
     imageUrl: "https://example.com/image.jpg", physicalProfile: { pesoKg: 1, largoCm: 2, anchoCm: 3, altoCm: 4 },
@@ -81,7 +81,7 @@ test("complete variant starts BORRADOR/PENDING, waits for confirmation and only 
 test("simple product retry requires permission independently in Pricing and Inventory", async () => {
   const catalog = new MockCatalogRepository();
   const created = await catalog.create({
-    nombre: "Test", descripcion: "Test", categoriaId: "CAT-ROPA", tipoProductoId: "TIP-CAMISA", marcaId: "BRD-INKA",
+    nombre: "Test", descripcion: "Test", categoriaId: "CAT-ROPA", tipoProductoId: "TIP-CAMISETA", marcaId: "BRD-INKA",
     skuBase: "TEST-SIMPLE", tieneVariantes: false, precioBaseInicial: 20, atributos: [],
   });
   for (const dependencia of ["PRICING", "INVENTARIO"] as const) {

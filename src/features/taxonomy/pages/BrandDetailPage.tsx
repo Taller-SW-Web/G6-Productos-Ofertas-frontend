@@ -114,7 +114,7 @@ function BrandDetailContent({
               Editar
             </Button>
             {detalle.estado === "Activo" && baja.state.status === "idle" && (
-              <Button color="danger" onClick={() => setConfirmar(true)}>
+              <Button variant="outline" onClick={() => setConfirmar(true)}>
                 Solicitar desactivación
               </Button>
             )}

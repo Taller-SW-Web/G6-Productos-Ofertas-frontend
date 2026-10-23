@@ -12,6 +12,11 @@ const errors = [];
 const requests = [];
 page.on("pageerror", (error) => errors.push(error.message));
 page.on("request", (request) => requests.push(request.url()));
+async function verifyCommercialCopy() {
+  assert.doesNotMatch(await page.locator("main").innerText(),
+    /\b(?:mock|fixtures?|adapters?|providers?|backend|piloto)\b|datos (?:ficticios|simulados|de demostración)|(?:viven|cambios) en memoria|MK-\d{3}|Q-\d{3}/i);
+  assert.equal(await page.getByRole("combobox", { name: /Escenario de|Respuesta ficticia|Caso de demostración/ }).count(), 0);
+}
 try {
   // Loop grueso: rutas de listado y entrada de cada módulo, simulando en DEV los
   // estados loading/forbidden que el navegador no puede reproducir por URL.
@@ -29,7 +34,7 @@ try {
       if (path === "/precios") {
         // Bloqueo específico del adapter de Pricing sin provider configurado y
         // persistencia del error tras reintento y tras recarga de la página.
-        assert.match(mensaje, /adapter API de Pricing no está configurado/);
+        assert.match(mensaje, /Esta función no está disponible en el modo actual/);
         const reintento = page.getByRole("button", {
           name: /Volver a cargar productos y SKU/,
         });
@@ -38,19 +43,19 @@ try {
         await alert.waitFor();
         assert.match(
           await alert.innerText(),
-          /adapter API de Pricing no está configurado/,
+          /Esta función no está disponible en el modo actual/,
         );
         assert.equal(await page.getByRole("table").count(), 0);
         await page.reload();
         await alert.waitFor();
         assert.match(
           await alert.innerText(),
-          /adapter API de Pricing no está configurado/,
+          /Esta función no está disponible en el modo actual/,
         );
       } else {
         // Bloqueo específico del gate de Promotions (cupones, promociones y
         // recomendaciones) en modo API.
-        assert.match(mensaje, /Integración API no disponible/);
+        assert.match(mensaje, /Función no disponible/);
       }
       assert.equal(await page.getByRole("table").count(), 0);
       assert.equal(await page.locator("main form").count(), 0);
@@ -62,6 +67,7 @@ try {
       assert.equal(await page.locator("main form").count(), 0);
       assert.equal(await page.getByRole("combobox", { name: /Escenario/ }).count(), 0);
     }
+    await verifyCommercialCopy();
     assert.equal(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,
@@ -93,7 +99,7 @@ try {
       await page.getByRole("alert").waitFor();
       assert.match(
         await page.getByRole("alert").innerText(),
-        /Integración API no disponible/,
+        /Función no disponible/,
       );
       assert.equal(await page.locator("main form").count(), 0);
       assert.equal(await page.getByRole("table").count(), 0);
@@ -104,16 +110,17 @@ try {
       assert.equal(await page.getByRole("alert").count(), 0);
       if (path.endsWith("/estado")) await page.getByRole("dialog").waitFor();
     }
+    await verifyCommercialCopy();
     assert.equal(
       await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
       true,
     );
   }
   const catalogPaths = [
-    "/productos", "/productos/nuevo", "/productos/PROD-OXF-001",
-    "/productos/PROD-OXF-001/editar", "/productos/PROD-OXF-001/preparacion",
-    "/productos/PROD-OXF-001/variantes", "/productos/PROD-OXF-001/variantes/nueva",
-    "/productos/PROD-OXF-001/variantes/VAR-OXF-BLA-M/preparacion",
+    "/productos", "/productos/nuevo", "/productos/PROD-RUN-001",
+    "/productos/PROD-RUN-001/editar", "/productos/PROD-RUN-001/preparacion",
+    "/productos/PROD-RUN-001/variantes", "/productos/PROD-RUN-001/variantes/nueva",
+    "/productos/PROD-RUN-001/variantes/VAR-RUN-BLA-M/preparacion",
   ];
   for (const path of catalogPaths) {
     await page.goto(baseURL + path);
@@ -129,11 +136,12 @@ try {
       if (/\/nuevo$|\/editar$|\/nueva$/.test(path)) await page.locator("main form").waitFor();
       if (path === "/productos" || path.endsWith("/variantes")) await page.getByRole("table").waitFor();
     }
+    await verifyCommercialCopy();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   }
   // Taxonomía (MK-008 a MK-012), estrictamente ADITIVO sobre los loops anteriores:
   // las secciones y rutas internas representativas no alteran ningún check previo.
-  // En modo mock cada ruta debe estar operativa y con aviso de demostración; en
+  // En modo mock cada ruta debe estar operativa y sin avisos técnicos; en
   // modo api el gate debe bloquear con el mensaje exacto y sin formularios,
   // tablas, diálogos ni aviso de demo (prohibido el fallback silencioso).
   const taxonomyPaths = [
@@ -156,7 +164,7 @@ try {
       await alert.waitFor();
       assert.match(
         await alert.innerText(),
-        /Integración con API real no disponible actualmente para el módulo de Taxonomía/,
+        /Función no disponible/,
       );
       assert.equal(await page.getByRole("table").count(), 0);
       assert.equal(await page.locator("main form").count(), 0);
@@ -167,9 +175,10 @@ try {
       if (table) await page.getByRole("table").waitFor();
       if (form) await page.locator("main form").waitFor();
       assert.equal(await page.getByRole("alert").count(), 0);
-      assert.equal(await page.getByText("Datos de demostración", { exact: true }).count(), 1);
+      assert.equal(await page.getByText("Datos de demostración", { exact: true }).count(), 0);
       assert.equal(await page.getByRole("combobox", { name: /Escenario/ }).count(), 0);
     }
+    await verifyCommercialCopy();
     assert.equal(
       await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
       true,
@@ -203,7 +212,7 @@ try {
     if (mode === "api") {
       const alert = page.getByRole("alert").first();
       await alert.waitFor();
-      assert.match(await alert.innerText(), /adapter API de auditoría de precios no está configurado/);
+      assert.match(await alert.innerText(), /La consulta del historial de precios no está disponible/);
       assert.equal(await page.getByRole("table", { includeHidden: true }).count(), 0);
       assert.equal(await page.getByText("Datos de demostración", { exact: true }).count(), 0);
     } else {
@@ -212,6 +221,7 @@ try {
       else await page.getByRole("button", { name: /Solicitar (CSV|PDF)/ }).waitFor();
       assert.equal(await page.getByRole("combobox", { name: "Caso de demostración de auditoría" }).count(), 0);
     }
+    await verifyCommercialCopy();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   }
   // Verificaciones aditivas de las cuatro rutas de Inventario (MK-015 y MK-016)
@@ -242,6 +252,7 @@ try {
       path: "/inventario/traslados",
       mockCheck: async (p) => {
         await p.getByRole("heading", { level: 1 }).waitFor();
+        await p.getByRole("table").or(p.getByText("No hay traslados", { exact: false })).first().waitFor();
         assert.ok(await p.getByRole("heading", { level: 1 }).isVisible());
         const hasTable = (await p.getByRole("table").count()) > 0;
         const hasEmpty =
@@ -253,6 +264,8 @@ try {
       path: "/inventario/dashboard",
       mockCheck: async (p) => {
         await p.getByRole("heading", { level: 1 }).waitFor();
+        await p.getByRole("table").or(p.getByText("Total unidades físicas", { exact: false }))
+          .or(p.getByText("Unidades disponibles", { exact: false })).first().waitFor();
         assert.ok(await p.getByRole("heading", { level: 1 }).isVisible());
         const hasKpi =
           (await p.getByText("Total unidades físicas", { exact: false }).count()) > 0 ||
@@ -268,7 +281,7 @@ try {
       const alert = page.getByRole("alert");
       await alert.waitFor();
       const message = await alert.innerText();
-      assert.match(message, /Integración API no disponible/);
+      assert.match(message, /Función no disponible/);
       assert.equal(await page.getByRole("table").count(), 0);
       assert.equal(await page.locator("main form").count(), 0);
       assert.equal(await page.getByRole("dialog").count(), 0);
@@ -281,8 +294,9 @@ try {
         await page.getByRole("combobox", { name: /Escenario/ }).count(),
         0,
       );
-      assert.equal(await page.getByText("Integración API no disponible").count(), 0);
+      assert.equal(await page.getByText("Función no disponible").count(), 0);
     }
+    await verifyCommercialCopy();
     assert.equal(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,
@@ -305,7 +319,7 @@ try {
     if (mode === "api") {
       const alert = page.getByRole("alert");
       await alert.waitFor();
-      assert.match(await alert.innerText(), /Provider API de Combos no configurado/);
+      assert.match(await alert.innerText(), /Función no disponible/);
       assert.equal(await page.getByRole("table").count(), 0);
       assert.equal(await page.locator("main form").count(), 0);
       assert.equal(await page.getByRole("dialog").count(), 0);
@@ -316,6 +330,7 @@ try {
       if (form) await page.locator("main form").waitFor();
       assert.equal(await page.getByText("Datos de demostración", { exact: true }).count(), 0);
     }
+    await verifyCommercialCopy();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   }
   // Estado de error de listado: alerta con reintento que recupera el listado.
@@ -325,6 +340,7 @@ try {
     assert.match(await page.getByRole("alert").innerText(), /No se pudieron consultar los combos/);
     await page.getByRole("button", { name: "Reintentar" }).click();
     await page.getByRole("table").waitFor();
+    await verifyCommercialCopy();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   }
   if (mode === "mock") {
@@ -339,8 +355,13 @@ try {
     const detail = page.getByRole("dialog");
     await detail.getByText(/VER-01 producción simulada/).waitFor();
     assert.match(await detail.innerText(), /VER-01 producción simulada/);
-    assert.match(await detail.innerText(), /demo-pricing/);
+    const detailText = await detail.innerText();
+
+    assert.match(detailText, /aud-/);
+    assert.doesNotMatch(detailText, /demo-pricing/);
+    assert.match(detailText, /ZAP-TRL-EXP/);
     await page.getByRole("button", { name: "Volver al historial", exact: true }).click();
+    await verifyCommercialCopy();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     console.log("PASS VER-01 producción: edición → asiento simulado, sin herramientas DEV");
   }

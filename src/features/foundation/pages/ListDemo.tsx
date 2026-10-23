@@ -11,7 +11,6 @@ import {
 import { IconEye, IconRefresh } from "@tabler/icons-react";
 import {
   EntityTable,
-  FeedbackAlert,
   FilterBar,
   PageHeader,
   SearchField,
@@ -113,10 +112,6 @@ export function ListDemo() {
         }
       />
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Demostración con datos ficticios">
-          Esta galería permite revisar componentes. No consulta ni modifica
-          productos reales.
-        </FeedbackAlert>
         <FilterBar
           summary={
             state.status === "success"

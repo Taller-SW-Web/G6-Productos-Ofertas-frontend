@@ -20,7 +20,10 @@ import { AdministrationStateDialog } from "../components/AdministrationStateDial
 import { RecommendationCandidates } from "../components/RecommendationCandidates";
 import { useAdministrationRead } from "../hooks/useAdministrationRead";
 
-import { recommendationKindLabel } from "../services/recommendationRepository";
+import {
+  recommendationKindLabel,
+  type RecommendationView,
+} from "../services/recommendationRepository";
 export function RecommendationDetailPage({
   changeState = false,
 }: {
@@ -50,15 +53,27 @@ export function RecommendationDetailPage({
     `${ruleId}:${revision + queryRevision}`,
     read,
   );
+  const [cachedRecord, setCachedRecord] = useState<RecommendationView | null>(null);
+  const [prevResult, setPrevResult] = useState<RecommendationView | null>(null);
+  if (state.status === "success" && state.result !== prevResult) {
+    setPrevResult(state.result);
+    setCachedRecord(state.result);
+  }
+  const record = state.status === "success" ? state.result : cachedRecord;
   const readCatalog = useCallback(
     async (signal: AbortSignal) => ({
-      products: await confirmedServices.catalog.products(signal),
+      products: await confirmedServices.catalog.products(signal, record ? {
+        productIds: [
+          ...(record.configuration.originType === "product" ? [record.configuration.originId] : []),
+          ...record.configuration.candidates.map((candidate) => candidate.productId),
+        ],
+        skus: [],
+      } : undefined),
       categories: await confirmedServices.catalog.categories(signal),
     }),
-    [confirmedServices],
+    [confirmedServices, record],
   );
-  const catalog = useAdministrationRead("catalog", readCatalog),
-    record = state.status === "success" ? state.result : null;
+  const catalog = useAdministrationRead(`catalog:${revision + queryRevision}:${record?.id ?? ""}`, readCatalog);
   useEffect(() => {
     if (record && (location.state?.focusState || updated))
       trigger.current?.focus();
@@ -167,8 +182,7 @@ export function RecommendationDetailPage({
               }
             />
             <Text size="sm" c="dimmed">
-              Precio y disponibilidad por producto: No disponible. La
-              configuración administrativa no depende de estos enriquecimientos.
+              Precio y disponibilidad por producto: No disponible.
             </Text>
             <Group gap="sm">
               <Button

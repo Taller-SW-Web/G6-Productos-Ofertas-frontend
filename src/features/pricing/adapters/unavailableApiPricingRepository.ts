@@ -6,7 +6,7 @@ export function createUnavailableApiPricingRepository(): PricingRepository {
   async function unavailable(): Promise<never> {
     throw new PricingFailure(
       "configuration",
-      "El adapter API de Pricing no está configurado. No se utilizarán datos simulados como sustitución.",
+      "Esta función no está disponible en el modo actual.",
     );
   }
   return {

@@ -21,7 +21,7 @@ import {
   IconRefresh,
   IconX,
 } from "@tabler/icons-react";
-import { FeedbackAlert, PageHeader, SectionCard } from "../../../components/shared";
+import { FeedbackAlert, PageHeader, SectionCard, StatusBadge } from "../../../components/shared";
 import { useVariantPreparation } from "../hooks/useVariantPreparation";
 import { formatIdentifyingAttributes, isPhysicalProfileComplete } from "../services/catalogPresentation";
 
@@ -75,12 +75,12 @@ export function VariantPreparationPage() {
     variant?.inventoryStatus ??
     variant?.inventoryPreparationStatus ??
     "PENDING";
-  const prepColor =
+  const prepSemantic =
     inventoryStatus === "COMPLETED"
-      ? "green"
+      ? "success"
       : inventoryStatus === "REJECTED"
-        ? "red"
-        : "yellow";
+        ? "error"
+        : "warning";
 
   const hasCompletePhysical = isPhysicalProfileComplete(variant?.physicalProfile);
 
@@ -110,7 +110,7 @@ export function VariantPreparationPage() {
               Ficha del SKU
             </Button>
             <Button
-              variant="default"
+              variant="outline"
               size="sm"
               leftSection={<IconRefresh size={16} />}
               onClick={() => reload()}
@@ -119,7 +119,6 @@ export function VariantPreparationPage() {
             </Button>
             {canRetry && (
               <Button
-                color="orange"
                 size="sm"
                 loading={retrying}
                 leftSection={<IconRefresh size={16} />}
@@ -146,7 +145,7 @@ export function VariantPreparationPage() {
         )}
 
         {/* Identity & Status Card */}
-        <Paper p="md" withBorder>
+        <Paper p="lg" withBorder>
           <Group justify="space-between" align="center">
             <div>
               <Text size="xs" c="dimmed">
@@ -159,15 +158,15 @@ export function VariantPreparationPage() {
                 <Badge size="xs" variant="filled" color="dark">
                   {variant && formatIdentifyingAttributes(variant.identifyingAttributes)}
                 </Badge>
-                <Badge size="xs" color={prepColor}>
+                <StatusBadge semantic={prepSemantic}>
                   Inventario: {inventoryStatus}
-                </Badge>
-                <Badge size="xs" variant="outline">
+                </StatusBadge>
+                <StatusBadge>
                   Variante: {variant?.status}
-                </Badge>
+                </StatusBadge>
               </Group>
             </div>
-            <Paper p="xs" withBorder bg="var(--mantine-color-gray-0)">
+            <Paper p="xs" withBorder bg="var(--po-subtle)">
               <Text size="xs" c="dimmed">
                 Producto Padre:
               </Text>
@@ -182,19 +181,17 @@ export function VariantPreparationPage() {
           {/* Main Status & Retry Section */}
           <Grid.Col span={{ base: 12, md: 7 }}>
             <SectionCard
-              title="Estado de Integración con Inventario"
-              description="Seguimiento de la inicialización de stock y perfil de embalaje en los servicios de Inventario."
+              title="Estado de preparación"
+              description="Seguimiento de la inicialización de stock y perfil de embalaje."
             >
               <Stack gap="md">
                 {inventoryStatus === "COMPLETED" && (
                   <Alert icon={<IconCheck size={20} />} color="teal" variant="light">
                     <Text size="sm" fw={600}>
-                      Preparación Completada (COMPLETED)
+                      Preparación completada
                     </Text>
                     <Text size="xs" mt={2}>
-                      El SKU se encuentra registrado y validado en el sistema de Inventario. La
-                      inicialización es definitiva y este SKU está listo para registrar existencias y ser
-                      activado comercialmente.
+                      La preparación del SKU fue completada.
                     </Text>
                   </Alert>
                 )}
@@ -202,11 +199,10 @@ export function VariantPreparationPage() {
                 {inventoryStatus === "PENDING" && (
                   <Alert icon={<IconClock size={20} />} color="yellow" variant="light">
                     <Text size="sm" fw={600}>
-                      En Proceso de Inicialización (PENDING)
+                      Preparación en proceso
                     </Text>
                     <Text size="xs" mt={2}>
-                      La solicitud de alta del SKU fue enviada al módulo de Inventario y está siendo
-                      procesada asíncronamente. La variante permanecerá en este estado hasta confirmación.
+                      La preparación del SKU está en curso. La variante permanecerá en este estado hasta su confirmación.
                     </Text>
                   </Alert>
                 )}
@@ -214,21 +210,21 @@ export function VariantPreparationPage() {
                 {inventoryStatus === "REJECTED" && (
                   <Alert icon={<IconAlertTriangle size={20} />} color="red" variant="light">
                     <Text size="sm" fw={600}>
-                      Preparación Rechazada o Bloqueada (REJECTED)
+                      Preparación pendiente
                     </Text>
                     <Text size="xs" mt={2}>
-                      El servicio de Inventario no pudo inicializar el SKU. Puede solicitar un reintento
+                      No se pudo inicializar el SKU. Puede solicitar un reintento
                       manual para reevaluar la preparación si las condiciones están corregidas.
                     </Text>
                     {canRetry && (
                       <Button
-                        color="red"
+                        variant="outline"
                         size="xs"
                         mt="xs"
                         loading={retrying}
                         onClick={() => retry()}
                       >
-                        Reintentar ahora (202 Accepted)
+                        Reintentar ahora
                       </Button>
                     )}
                   </Alert>

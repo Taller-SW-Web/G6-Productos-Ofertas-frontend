@@ -196,16 +196,21 @@ export function TransfersPage() {
     {
       key: "actions",
       header: "Acción",
-      width: 140,
+      width: 180,
       align: "right",
       render: (row) => {
         const receivable = !isTerminalTransferStatus(row.status);
         return (
           <Button
-            size="xs"
-            variant={receivable ? "filled" : "light"}
+            size="sm"
+            variant={receivable ? "filled" : "outline"}
             disabled={!receivable}
-            leftSection={<IconChecklist size={14} />}
+            leftSection={<IconChecklist size={16} />}
+            aria-label={
+              receivable
+                ? `Recepcionar traslado ${row.transferCode}`
+                : `Traslado ${row.transferCode} cerrado`
+            }
             onClick={() => handleOpenReceptionModal(row)}
           >
             {receivable ? "Recepcionar" : "Cerrado"}
@@ -256,10 +261,6 @@ export function TransfersPage() {
       />
 
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Recepción física y disposición contable">
-          Al recibir un traslado, las unidades se acreditan al saldo físico de destino según su disposición
-          (reingreso a disponible o reingreso bloqueado). Las mermas no acreditan stock vendible.
-        </FeedbackAlert>
 
         {successMessage && (
           <FeedbackAlert
@@ -274,6 +275,7 @@ export function TransfersPage() {
             {successMessage}
           </FeedbackAlert>
         )}
+
 
         {isRevisionMode && <DevScenarioSelector />}
 

@@ -60,9 +60,7 @@ export function CreateCategoryPage() {
 
   const handleConfirmar = () => {
     if (
-      !slugCheck ||
-      phase === "comprobando" ||
-      phase === "guardando"
+      !slugCheck || phase !== "confirmando"
     ) {
       return;
     }
@@ -111,7 +109,7 @@ export function CreateCategoryPage() {
               </Group>
             }
           >
-            {`Se creó «${creado.nombre}» con el slug «${creado.slug}». La creación es simulada y no se guarda en un backend.`}
+            {`Se creó «${creado.nombre}» con el slug «${creado.slug}».`}
           </FeedbackAlert>
         ) : (
           <>
@@ -173,6 +171,7 @@ export function CreateCategoryPage() {
         title="Confirmar slug SEO"
         confirmLabel="Crear categoría"
         submitting={phase === "guardando"}
+        confirmDisabled={phase !== "confirmando" || !slugCheck}
         onCancel={cerrar}
         onConfirm={handleConfirmar}
         error={

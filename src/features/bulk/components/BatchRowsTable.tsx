@@ -29,7 +29,7 @@ function renderDomainStep(row: BulkImportRow, domain: BulkDomain) {
     );
   } else if (step?.status === "PROCESSING") {
     badge = (
-      <StatusBadge semantic="warning">
+      <StatusBadge semantic="info">
         <span style={{ whiteSpace: "nowrap" }}>En proceso</span>
       </StatusBadge>
     );
@@ -73,7 +73,7 @@ function renderRowStatus(status: BulkRowStatus) {
       break;
     case "PROCESSING":
       badge = (
-        <StatusBadge semantic="warning">
+        <StatusBadge semantic="info">
           <span style={{ whiteSpace: "nowrap" }}>En proceso</span>
         </StatusBadge>
       );
@@ -209,7 +209,7 @@ export function BatchRowsTable({
       empty={{
         title: "Sin filas de detalle",
         description:
-          "El lote no incluye filas individuales en el reporte actual o aún no se ha generado el desglose.",
+          "No hay filas de detalle disponibles.",
       }}
       pagination={
         rows.length > pageSize

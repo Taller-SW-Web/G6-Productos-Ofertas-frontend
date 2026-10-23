@@ -12,14 +12,19 @@ import {
 import { triggerDownload } from "../utils/downloadAsset";
 import { useBulkRepository, useBulkRepositorySelection } from "./useBulkRepository";
 import {
+  canDownloadExport,
+  canResumeBatch,
   isExportSnapshotStale,
+  resumeBatchWhenAllowed,
   selectBatchQueryView,
   type BatchQueryState,
 } from "./bulkQueryState";
+import { useMockStateRevision } from "../../shared/useMockStateRevision";
 
 export function useBulkBatch(batchId: string | undefined) {
   const repository = useBulkRepository();
   const [revision, setRevision] = useState(0);
+  const mockRevision = useMockStateRevision(["bulk"]);
   const [response, setResponse] = useState<{
     key: string;
     state: BatchQueryState;
@@ -35,7 +40,7 @@ export function useBulkBatch(batchId: string | undefined) {
   const resumeInFlight = useRef(false);
   const reportInFlight = useRef(false);
 
-  const requestKey = JSON.stringify([batchId, revision]);
+  const requestKey = JSON.stringify([batchId, revision + mockRevision]);
 
   useEffect(() => {
     if (!batchId) return;
@@ -62,32 +67,54 @@ export function useBulkBatch(batchId: string | undefined) {
     return () => controller.abort();
   }, [batchId, requestKey, repository]);
 
+  const batchView = selectBatchQueryView({
+    batchId,
+    requestKey,
+    response,
+    lastSuccess,
+  });
+  const reportAvailable = Boolean(
+    batchView.batch && canRequestImportReport(repository, batchView.batch),
+  );
+  // Eligibility is derived from the visible snapshot; a stale/loading/errored
+  // batch never authorizes a resumption write.
+  const canResume = canResumeBatch({
+    batch: batchView.batch,
+    loading: batchView.loading,
+    error: batchView.error,
+    isStale: batchView.isStale,
+    isNotFound: batchView.isNotFound,
+    resuming,
+  });
+
   const refreshBatch = useCallback(() => {
     setRevision((prev) => prev + 1);
   }, []);
 
   const resumeBatch = useCallback(async () => {
-    if (!batchId || resumeInFlight.current) return;
-    resumeInFlight.current = true;
-    setResuming(true);
-    setResumeError(null);
-    try {
-      const resumed = await repository.resumeImport(batchId);
-      setLastSuccess({ batchId, batch: resumed });
-      setResponse({ key: requestKey, state: { status: "success", batch: resumed } });
-      return resumed;
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : "No se pudo reanudar el lote de importación.";
-      setResumeError(message);
-      throw err;
-    } finally {
-      resumeInFlight.current = false;
-      setResuming(false);
-    }
-  }, [batchId, repository, requestKey]);
+    return resumeBatchWhenAllowed(canResume, async () => {
+      if (!batchId || resumeInFlight.current) return undefined;
+      resumeInFlight.current = true;
+      setResuming(true);
+      setResumeError(null);
+      try {
+        const resumed = await repository.resumeImport(batchId);
+        setLastSuccess({ batchId, batch: resumed });
+        setResponse({ key: requestKey, state: { status: "success", batch: resumed } });
+        return resumed;
+      } catch (err: unknown) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : "No se pudo reanudar el lote de importación.";
+        setResumeError(message);
+        throw err;
+      } finally {
+        resumeInFlight.current = false;
+        setResuming(false);
+      }
+    });
+  }, [batchId, canResume, repository, requestKey]);
 
   const downloadReport = useCallback(async () => {
     if (!batchId || reportInFlight.current) return;
@@ -113,16 +140,6 @@ export function useBulkBatch(batchId: string | undefined) {
     }
   }, [batchId, repository]);
 
-  const batchView = selectBatchQueryView({
-    batchId,
-    requestKey,
-    response,
-    lastSuccess,
-  });
-  const reportAvailable = Boolean(
-    batchView.batch && canRequestImportReport(repository, batchView.batch),
-  );
-
   return {
     batch: batchView.batch,
     loading: batchView.loading,
@@ -131,6 +148,7 @@ export function useBulkBatch(batchId: string | undefined) {
     isStale: batchView.isStale,
     resuming,
     resumeError,
+    canResume,
     downloadingReport,
     reportError,
     reportAvailable,
@@ -236,6 +254,13 @@ export function useBulkDownloads(initialExportId?: string) {
     currentQueryStatus: matchingQuery?.status,
     refreshErrorExportId: refreshErrorForExport?.exportId,
   });
+  // Only a completed, current job with a genuine resource may be downloaded. A
+  // stale snapshot never authorizes a download.
+  const downloadExportAllowed = canDownloadExport({
+    job: visibleJob,
+    isStale: exportJobStale,
+    dataMode: mode,
+  });
 
   const requestExport = useCallback(
     async (format: BulkExportFormat) => {
@@ -305,7 +330,7 @@ export function useBulkDownloads(initialExportId?: string) {
   }, [initialExportId]);
 
   const downloadExportFile = useCallback(async () => {
-    if (!visibleJob || visibleJob.status !== "COMPLETED") return;
+    if (!downloadExportAllowed || !visibleJob) return;
     setDownloadingExport(true);
     setError(null);
     try {
@@ -320,7 +345,7 @@ export function useBulkDownloads(initialExportId?: string) {
     } finally {
       setDownloadingExport(false);
     }
-  }, [mode, repository, visibleJob]);
+  }, [downloadExportAllowed, mode, repository, visibleJob]);
 
   const downloadTemplate = useCallback(
     async (format: BulkExportFormat) => {
@@ -353,6 +378,7 @@ export function useBulkDownloads(initialExportId?: string) {
     initialQueryStatus,
     initialQueryError,
     isStale: exportJobStale,
+    canDownloadExport: downloadExportAllowed,
     requestExport,
     refreshJob,
     retryInitialQuery,

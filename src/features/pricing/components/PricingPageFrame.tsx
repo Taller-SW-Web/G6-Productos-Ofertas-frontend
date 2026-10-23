@@ -51,11 +51,6 @@ export function PricingPageFrame({
         }
       />
       <Stack gap="lg">
-        {runtime.notice && (
-          <FeedbackAlert semantic="info" title={runtime.notice.title}>
-            {runtime.notice.description}
-          </FeedbackAlert>
-        )}
         {Tools && (
           <Suspense fallback={null}>
             <Tools />

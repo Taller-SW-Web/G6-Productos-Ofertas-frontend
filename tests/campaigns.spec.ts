@@ -1,5 +1,8 @@
 import { evidencePath } from "./support/evidence";
 import { expect, test, type Page } from "@playwright/test";
+
+const campaignMockNotice =
+  "Entorno de prueba: la información presentada es de referencia y no confirma una aplicación comercial.";
 async function choose(page: Page, label: string, option: string) {
   await page.getByRole("combobox", { name: label, exact: true }).click();
   await page.getByRole("option", { name: option, exact: true }).click();
@@ -27,21 +30,22 @@ async function selectScope(page: Page) {
     .click();
   await page
     .getByRole("checkbox", {
-      name: "Producto completo: Running Essential",
+      name: "Producto completo: Camiseta Running Endurance",
       exact: true,
     })
     .check();
   await page
-    .getByRole("checkbox", { name: /SKU específico: RUN-PRO-42/ })
+    .getByRole("checkbox", { name: /SKU específico: CAM-RUN-BLA-M/ })
     .check();
   await page
     .getByRole("button", { name: "Confirmar alcance", exact: true })
     .click();
 }
-test("MK-006 S01/S05: typed filters and detail retain list context", async ({
+test("@smoke MK-006 S01/S05: typed filters and detail retain list context", async ({
   page,
 }) => {
   await page.goto("/promociones?estado=active&modalidad=automatic&tamanio=1");
+  await expect(page.getByText(campaignMockNotice, { exact: true })).toBeVisible();
   await page
     .getByRole("link", {
       name: "Ver detalle de Carrera de octubre",
@@ -71,6 +75,21 @@ test("MK-006 S01/S05: typed filters and detail retain list context", async ({
   await expect(
     page.getByRole("link", { name: "Ver detalle de Carrera de octubre" }),
   ).toBeVisible();
+});
+
+test("MK-006: mock notice is visible in every campaign view", async ({ page }) => {
+  for (const route of [
+    "/promociones",
+    "/promociones/nueva",
+    "/promociones/carrera/editar",
+    "/promociones/nueva/alcance",
+    "/promociones/carrera/editar/alcance",
+    "/promociones/carrera",
+    "/promociones/carrera/estado",
+  ]) {
+    await page.goto(route);
+    await expect(page.getByText(campaignMockNotice, { exact: true })).toBeVisible();
+  }
 });
 test("MK-006 S02/S04: validate discount/channels and preserve draft and typed scope across selector cancellation", async ({
   page,
@@ -105,13 +124,13 @@ test("MK-006 S02/S04: validate discount/channels and preserve draft and typed sc
     .click();
   await page
     .getByRole("checkbox", {
-      name: "Producto completo: Running Essential",
+      name: "Producto completo: Camiseta Running Endurance",
       exact: true,
     })
     .uncheck();
   await page
     .getByRole("checkbox", {
-      name: "Producto completo: Gorra deportiva Inka Shield",
+      name: "Producto completo: Casaca Cortaviento Trail",
       exact: true,
     })
     .check();
@@ -119,8 +138,8 @@ test("MK-006 S02/S04: validate discount/channels and preserve draft and typed sc
     .getByRole("link", { name: "Cancelar selección", exact: true })
     .click();
   const scope = page.getByRole("region", { name: "Canales y alcance" });
-  await expect(scope).toContainText("Producto completo: Running Essential");
-  await expect(scope).not.toContainText("Producto completo: Gorra");
+  await expect(scope).toContainText("Producto completo: Camiseta Running Endurance");
+  await expect(scope).not.toContainText("Producto completo: Casaca");
   await page
     .getByRole("button", { name: "Crear promoción", exact: true })
     .click();
@@ -131,10 +150,10 @@ test("MK-006 S02/S04: validate discount/channels and preserve draft and typed sc
     name: "Alcance de productos y SKU",
   });
   await expect(savedScope).toContainText(
-    "Producto completo: Running Essential",
+    "Producto completo: Camiseta Running Endurance",
   );
-  await expect(savedScope).not.toContainText("SKU-RUN-ESS-40");
-  await expect(savedScope).toContainText("SKU específico: RUN-PRO-42");
+  await expect(savedScope).not.toContainText("CAM-RUN-AZU-L");
+  await expect(savedScope).toContainText("SKU específico: CAM-RUN-BLA-M");
 });
 test("MK-006 S03/S06: allowed modality is revalidated and activation history survives deactivation", async ({
   page,
@@ -231,8 +250,22 @@ test("MK-005/MK-006: coupon selection reads created coupon-mode campaign and ass
     .getByRole("navigation", { name: "Navegación de la aplicación" })
     .getByRole("link", { name: "Ofertas y promociones" })
     .click();
+  const campaignRow = page
+    .getByRole("row")
+    .filter({ hasText: "Campaña para cupón" });
+
+  await campaignRow
+    .getByRole("button", {
+      name: "Más acciones de Campaña para cupón",
+      exact: true,
+    })
+    .click();
+
   await page
-    .getByRole("link", { name: "Editar Campaña para cupón", exact: true })
+    .getByRole("menuitem", {
+      name: "Editar",
+      exact: true,
+    })
     .click();
   await expect(
     page.getByRole("combobox", { name: "Modalidad comercial" }),
@@ -318,7 +351,7 @@ test("MK-006: desktop evidence for all six views", async ({ page }) => {
     else if (file === "s04")
       await expect(
         page.getByRole("checkbox", {
-          name: "Producto completo: Running Essential",
+          name: "Producto completo: Camiseta Running Endurance",
         }),
       ).toBeVisible();
     expect(

@@ -118,7 +118,7 @@ function CurrentPriceContent({
       {state.status === "success" && !state.result && (
         <EmptyState
           title="Sin precio aplicable"
-          description="No hay un precio disponible para la selección. Esto no confirma preparación ni representa un importe de cero."
+          description="No hay un precio disponible para la selección."
         />
       )}
     </Stack>

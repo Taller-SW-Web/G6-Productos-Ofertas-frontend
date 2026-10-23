@@ -102,7 +102,6 @@ export function ScheduleForm({
                 label="Moneda"
                 value={form.draft.currency}
                 readOnly
-                description="Moneda de la lectura; no se convierten importes. Su cambio requiere definición del provider."
                 error={form.errors.currency}
               />
               <Select
@@ -182,7 +181,7 @@ export function ScheduleForm({
               >
                 {form.action.error.message}
                 {form.action.error.kind === "unknown" &&
-                  " El formulario se conserva y el reenvío está bloqueado; consulta la lista sin asumir que prueba la autoría."}
+                  " El formulario se conserva. Consulta la lista para comprobar el resultado antes de volver a enviar."}
               </FeedbackAlert>
             )}
             {form.action.result && (

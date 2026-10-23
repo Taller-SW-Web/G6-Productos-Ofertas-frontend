@@ -1,5 +1,8 @@
 import { evidencePath } from "./support/evidence";
 import { expect, test, type Page } from "@playwright/test";
+
+const recommendationMockNotice =
+  "Entorno de prueba: la información presentada es de referencia y no confirma una aplicación comercial.";
 async function choose(page: Page, label: string, option: string) {
   await page.getByRole("combobox", { name: label, exact: true }).click();
   await page.getByRole("option", { name: option, exact: true }).click();
@@ -7,7 +10,7 @@ async function choose(page: Page, label: string, option: string) {
 async function fillRule(page: Page, name: string) {
   await page.getByLabel("Nombre de la regla", { exact: true }).fill(name);
   await choose(page, "Tipo de origen", "Producto");
-  await choose(page, "Producto de origen", "Running Essential");
+  await choose(page, "Producto de origen", "Camiseta Running Endurance");
   await choose(page, "Estado inicial", "Inactiva");
   await page.getByLabel("Prioridad", { exact: true }).fill("2");
   await page
@@ -25,7 +28,7 @@ async function add(page: Page, names: string[]) {
     })
     .click();
   await expect(
-    page.getByRole("checkbox", { name: "Running Essential", exact: true }),
+    page.getByRole("checkbox", { name: "Camiseta Running Endurance", exact: true }),
   ).toHaveCount(0);
   for (const name of names)
     await page.getByRole("checkbox", { name, exact: true }).check();
@@ -37,6 +40,9 @@ test("MK-007 S01/S06: filters, origins, pagination and read-only enrichments ret
   page,
 }) => {
   await page.goto("/recomendaciones?estado=inactive&tipo=upsell&tamanio=1");
+  await expect(
+    page.getByText(recommendationMockNotice, { exact: true }),
+  ).toBeVisible();
   await page
     .getByRole("link", {
       name: "Ver detalle de Mejora tu rendimiento",
@@ -67,16 +73,31 @@ test("MK-007 S01/S06: filters, origins, pagination and read-only enrichments ret
     page.getByRole("region", { name: "Configuración de la regla" }),
   ).toContainText("Origen por categoría: Running");
 });
+
+test("MK-007: mock notice is visible in every recommendation view", async ({
+  page,
+}) => {
+  for (const route of [
+    "/recomendaciones",
+    "/recomendaciones/nueva/venta-cruzada",
+    "/recomendaciones/completa-carrera/editar",
+    "/recomendaciones/nueva/upselling",
+    "/recomendaciones/nueva/venta-cruzada/productos",
+    "/recomendaciones/completa-carrera",
+    "/recomendaciones/completa-carrera/estado",
+  ]) {
+    await page.goto(route);
+    await expect(
+      page.getByText(recommendationMockNotice, { exact: true }),
+    ).toBeVisible();
+  }
+});
 test("MK-007 S02/S05: selector excludes origin/duplicates, cancellation preserves draft, order persists", async ({
   page,
 }) => {
   await page.goto("/recomendaciones/nueva/venta-cruzada");
   await fillRule(page, "Complementos de prueba");
-  await add(page, ["Medias técnicas", "Cinturón de hidratación"]);
-  await page.getByLabel("Orden de Medias técnicas", { exact: true }).fill("2");
-  await page
-    .getByLabel("Orden de Cinturón de hidratación", { exact: true })
-    .fill("1");
+  await add(page, ["Casaca Cortaviento Trail"]);
   await page
     .getByRole("link", {
       name: "Seleccionar productos recomendados",
@@ -84,18 +105,15 @@ test("MK-007 S02/S05: selector excludes origin/duplicates, cancellation preserve
     })
     .click();
   await expect(
-    page.getByRole("checkbox", { name: "Medias técnicas", exact: true }),
+    page.getByRole("checkbox", { name: "Casaca Cortaviento Trail", exact: true }),
   ).toHaveCount(0);
-  await page
-    .getByRole("checkbox", { name: "Running Pro", exact: true })
-    .check();
   await page
     .getByRole("link", { name: "Cancelar selección", exact: true })
     .click();
   await expect(
     page.getByLabel("Nombre de la regla", { exact: true }),
   ).toHaveValue("Complementos de prueba");
-  await expect(page.getByRole("table")).not.toContainText("Running Pro");
+  await expect(page.getByRole("table")).toContainText("Casaca Cortaviento Trail");
   await page
     .getByRole("button", { name: "Crear regla de venta cruzada", exact: true })
     .click();
@@ -103,22 +121,21 @@ test("MK-007 S02/S05: selector excludes origin/duplicates, cancellation preserve
     page.getByRole("heading", { name: "Complementos de prueba", exact: true }),
   ).toBeVisible();
   const rows = page.getByRole("table").getByRole("row");
-  await expect(rows.nth(1)).toContainText("Cinturón de hidratación");
-  await expect(rows.nth(2)).toContainText("Medias técnicas");
+  await expect(rows.nth(1)).toContainText("Casaca Cortaviento Trail");
 });
 test("MK-007 S03/S04: upselling requires explicit criterion, valid order/period and bounded justification", async ({
   page,
 }) => {
   await page.goto("/recomendaciones/nueva/upselling");
   await fillRule(page, "Alternativa de prueba");
-  await add(page, ["Running Pro"]);
+  await add(page, ["Casaca Cortaviento Trail"]);
   await expect(
     page.getByRole("combobox", {
-      name: "Criterio para Running Pro",
+      name: "Criterio para Casaca Cortaviento Trail",
       exact: true,
     }),
   ).toHaveValue("");
-  await page.getByLabel("Orden de Running Pro", { exact: true }).fill("0");
+  await page.getByLabel("Orden de Casaca Cortaviento Trail", { exact: true }).fill("0");
   await page
     .getByLabel("Fecha y hora de fin", { exact: true })
     .fill("2026-09-01T00:00");
@@ -137,10 +154,10 @@ test("MK-007 S03/S04: upselling requires explicit criterion, valid order/period 
   await page
     .getByLabel("Fecha y hora de fin", { exact: true })
     .fill("2026-11-01T00:00");
-  await page.getByLabel("Orden de Running Pro", { exact: true }).fill("1");
-  await choose(page, "Criterio para Running Pro", "Mejor material");
+  await page.getByLabel("Orden de Casaca Cortaviento Trail", { exact: true }).fill("1");
+  await choose(page, "Criterio para Casaca Cortaviento Trail", "Mejor material");
   await page
-    .getByLabel("Justificación para Running Pro", { exact: true })
+    .getByLabel("Justificación para Casaca Cortaviento Trail", { exact: true })
     .fill("a".repeat(501));
   await page
     .getByRole("button", { name: "Crear regla de upselling", exact: true })
@@ -151,10 +168,10 @@ test("MK-007 S03/S04: upselling requires explicit criterion, valid order/period 
     }),
   ).toBeVisible();
   await expect(
-    page.getByLabel("Justificación para Running Pro", { exact: true }),
+    page.getByLabel("Justificación para Casaca Cortaviento Trail", { exact: true }),
   ).toBeFocused();
   await page
-    .getByLabel("Justificación para Running Pro", { exact: true })
+    .getByLabel("Justificación para Casaca Cortaviento Trail", { exact: true })
     .fill("Criterio comercial explícito.");
   await page
     .getByRole("button", { name: "Crear regla de upselling", exact: true })
@@ -165,7 +182,7 @@ test("MK-007 S03/S04: upselling requires explicit criterion, valid order/period 
   await page.getByRole("link", { name: "Editar regla", exact: true }).click();
   await expect(
     page.getByRole("combobox", {
-      name: "Criterio para Running Pro",
+      name: "Criterio para Casaca Cortaviento Trail",
       exact: true,
     }),
   ).toHaveValue("Mejor material");
@@ -328,7 +345,7 @@ test("MK-007: seven desktop views and pending submission protection", async ({
       ).toHaveValue("Mejora tu rendimiento");
     else if (file === "s05")
       await expect(
-        page.getByRole("checkbox", { name: "Running Essential", exact: true }),
+        page.getByRole("checkbox", { name: "Camiseta Running Endurance", exact: true }),
       ).toBeVisible();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= 1440),
@@ -342,7 +359,7 @@ test("MK-007: seven desktop views and pending submission protection", async ({
     "/recomendaciones/nueva/venta-cruzada?modoRevision=1&escenario=saving",
   );
   await fillRule(page, "Guardando sin duplicar");
-  await add(page, ["Medias técnicas"]);
+  await add(page, ["Casaca Cortaviento Trail"]);
   await page
     .getByRole("button", { name: "Crear regla de venta cruzada", exact: true })
     .click();

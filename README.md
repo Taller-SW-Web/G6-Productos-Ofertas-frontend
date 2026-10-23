@@ -54,7 +54,7 @@ La única variable de entorno de la aplicación es `VITE_DATA_MODE` (ver [.env.e
 
 | Valor | Comportamiento |
 |---|---|
-| `mock` | Demostración con repositorios en memoria y fixtures. No requiere Backend, credenciales ni conexión de red. Las escrituras simuladas se pierden al recargar. |
+| `mock` | Demostración con repositorios en memoria y fixtures. No requiere Backend, credenciales ni conexión de red. Las escrituras simuladas se conservan en `localStorage` de este navegador (ver «Persistencia de la demostración»). |
 | `api` | Selecciona puertos API cuando hay providers configurados; sin ellos, cada módulo define su respuesta. Bulk y Combos se detallan debajo. |
 
 **Excepción en Bulk:** `bulkService.ts` usa `mockBulkRepository` directamente, incluso cuando `VITE_DATA_MODE=api`; `/carga-masiva` no está entre las rutas que `CommercialModeGate` bloquea o trata según el modo. Por tanto, ese flujo sigue siendo una simulación en ambos modos. Es una discrepancia funcional que requiere corrección independiente; este cambio solo la documenta.
@@ -62,6 +62,12 @@ La única variable de entorno de la aplicación es `VITE_DATA_MODE` (ver [.env.e
 En desarrollo, la aplicación usa `mock` si la variable no está definida. Para `npm run build` se requiere definir `VITE_DATA_MODE` expresamente como `mock` o `api`; un valor ausente o inválido detiene el build. Copiar `.env.example` a `.env.local` configura `mock`. Vite carga las variables al arrancar: reinicia el servidor o vuelve a construir tras cambiarlas.
 
 `api` no configura por sí solo una URL, autenticación ni servicios. En esta base no hay adapters HTTP de negocio conectados. Algunos módulos admiten inyectar implementaciones compatibles con sus puertos, lo que se prueba con dobles/harnesses; eso acredita sustituibilidad, no integración funcional con Backend.
+
+### Persistencia de la demostración
+
+En modo `mock` y con un navegador real, las escrituras confirmadas de la demostración se guardan en `localStorage` bajo el prefijo `g6-productos-ofertas:mock:v1:<dominio>`, un registro por dominio (`catalog`, `taxonomy`, `pricing`, `price-audit`, `inventory`, `combos`, `promotions`, `bulk`). Al recargar, cada repositorio restaura su dominio **antes** de responder la primera consulta; si no hay estado válido, usa las fixtures. Un estado inválido o de versión incompatible se descarta en lugar de aplicarse.
+
+Esta persistencia es **local a este navegador**: no sincroniza entre dispositivos y no sustituye a Backend. Las pestañas del mismo navegador se sincronizan mediante eventos `storage`: al escribir otra pestaña el dominio afectado, la pestaña receptora vuelve a hidratarlo y notifica a sus consumidores. Solo se guarda estado confirmado; banderas transitorias (carga, hover, modales, errores de UI) nunca se persisten. La persistencia queda deshabilitada en modo `api` y en ejecuciones de pruebas (Node/Vitest/Playwright), que mantienen su almacenamiento aislado en memoria. No hay todavía una acción de fábrica visible para borrar el estado guardado; `clearMockState(dominio)` existe para las acciones de reinicio de la demostración.
 
 ## Funcionalidades y estado de datos
 
@@ -72,7 +78,7 @@ La tabla resume lo que muestran el código y la configuración de esta rama; la 
 | Productos y variantes/SKU | Pantallas y flujos de demostración mock. Los puertos permiten inyección; no hay provider HTTP configurado por defecto. |
 | Taxonomía (categorías, características, tipos, marcas y SEO) | Pantallas disponibles en mock. En `api`, `TaxonomyModeGate` bloquea estas rutas independientemente de los providers. Habilitar la integración requiere configurar los servicios/adapters y adaptar el gate; inyectar un provider por sí solo no desbloquea las pantallas. |
 | Precios y programaciones/importación | Flujos de demostración mock. El modo `api` requiere un adapter; la implementación predeterminada falla explícitamente, sin fallback. Las operaciones de archivo no acreditan procesamiento comercial de Backend. |
-| Auditoría de precios | Listado, detalle y exportación de demostración mock. Las ediciones confirmadas de Pricing incorporan asientos simulados durante la sesión; recargar los elimina. El runtime permite inyección, pero no incluye provider API predeterminado. Los archivos disponibles son muestras. |
+| Auditoría de precios | Listado, detalle y exportación de demostración mock. Las ediciones confirmadas de Pricing incorporan asientos simulados por sesión de navegador; recargar conserva los asientos emitidos. El runtime permite inyección, pero no incluye provider API predeterminado. Los archivos disponibles son muestras. |
 | Cupones, promociones y recomendaciones | Flujos de demostración mock. En modo `api`, `CommercialModeGate` bloquea estas rutas incondicionalmente. Una integración futura requiere configurar el provider y adaptar el gate; inyectar el provider por sí solo no desbloquea la interfaz. Las recomendaciones no calculan un precio final ni garantizan stock; ambos datos figuran como no disponibles en la demostración. |
 | Carga masiva | Simulación mock tanto en `mock` como en `api` por la excepción descrita arriba. La revisión local de archivos no sustituye la validación comercial; XLSX y procesamiento/exportación reales requieren Backend. Ver [límites de carga masiva](docs/ESTADO_CARGA_MASIVA.md). |
 | Combos | Gestión de combos (MK-002) con puertos tipados y adapters mock; la disponibilidad es información de catálogo compartido, sin consultar ni reservar stock real. En `api` sin provider la integración se muestra cerrada, sin fallback a fixtures. |
@@ -85,7 +91,7 @@ La demo conjunta de Pricing y Auditoría comparte únicamente las ediciones conf
 
 ## Gestión de combos (MK-002)
 
-Implementa S01–S04 como vistas administrativas con puertos tipados y adapters en memoria sobre el catálogo compartido de MK-003/MK-004. Rutas: `/combos` (S01), `/combos/nuevo` (S02 crear), `/combos/:comboId/editar` (S02 editar), `/combos/:comboId` (S03) y `/combos/:comboId/no-disponible` (S04). Se pueden crear, consultar, editar y desactivar combos en la sesión; recargar reinicia los cambios.
+Implementa S01–S04 como vistas administrativas con puertos tipados y adapters en memoria sobre el catálogo compartido de MK-003/MK-004. Rutas: `/combos` (S01), `/combos/nuevo` (S02 crear), `/combos/:comboId/editar` (S02 editar), `/combos/:comboId` (S03) y `/combos/:comboId/no-disponible` (S04). Se pueden crear, consultar, editar y desactivar combos; los cambios se conservan en este navegador mientras no se reinicie la demostración (ver «Persistencia de la demostración»).
 
 La elegibilidad de componentes, las reglas económicas y la disponibilidad informativa consultan las identidades del Catálogo compartido (no un catálogo paralelo). La disponibilidad se calcula como `min(floor(stockDisponibleSKU / cantidadRequeridaSKU))` sobre un snapshot inyectable; si los datos no permiten verificar, se muestra información incompleta o no verificable en lugar de un cero inventado. Los precios vigentes de referencia provienen del puerto de Pricing y se distinguen del precio comercial guardado.
 

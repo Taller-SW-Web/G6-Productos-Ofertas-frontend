@@ -44,7 +44,7 @@ export function PricingPatternsPage() {
     <>
       <PageHeader
         title="Componentes para Pricing"
-        description="Muestras de composición basadas en S02–S05; el piloto funcional de esta foundation es S01."
+        description="Explora los formularios y estados de gestión de precios."
         breadcrumbs={[
           { label: "Precios", to: `/precios?${returnParams}` },
           { label: "Componentes" },
@@ -60,10 +60,6 @@ export function PricingPatternsPage() {
         }
       />
       <Stack gap="lg">
-        <FeedbackAlert semantic="info" title="Muestras de componentes">
-          Los formularios permiten revisar controles y estados. No guardan
-          precios, crean programaciones ni importan archivos.
-        </FeedbackAlert>
         <Tabs
           value={panel}
           onChange={(value) => {

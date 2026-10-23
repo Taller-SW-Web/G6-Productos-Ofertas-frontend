@@ -14,6 +14,8 @@
     "lint": "eslint .",
     "test": "npm run test:unit:combos && npm run test:unit:bulk && npm run test:unit:pricing",
     "test:e2e": "playwright test",
+    "test:e2e:smoke": "playwright test --grep @smoke",
+    "test:e2e:full": "playwright test",
     "test:e2e:smoke:bulk": "playwright test tests/bulk.spec.ts",
     "test:ci": "npm run test && npm run test:e2e -- --reporter=line && npm run test:e2e:pricing -- --reporter=line",
     "test:unit:pricing": "vitest run --config src/features/pricing/adapters/vitest.config.ts",
