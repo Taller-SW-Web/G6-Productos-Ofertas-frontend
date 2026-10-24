@@ -7,6 +7,9 @@ import {
   createTransferReceptionFormSession,
   getConfirmedTransferReceptionAwaitingRefresh,
   getUncertainTransferReception,
+  isTransferReceptionStorageBlocked,
+  markTransferReceptionConfirmedAwaitingRefreshWithDto,
+  rehydrateTransferReceptionsForTesting,
   resetConfirmedTransferReceptionsAwaitingRefresh,
   resetUncertainTransferReceptions,
   setInFlightTransferReception,
@@ -21,7 +24,10 @@ import {
   type InventoryHttpRequest,
   type InventoryHttpTransport,
 } from "./apiInventoryAdapter";
-import type { TransferPresentationResolver } from "../services/inventoryMappers";
+import type {
+  TransferPresentationResolver,
+  TrasladoInventarioDto,
+} from "../services/inventoryMappers";
 
 beforeEach(() => {
   resetUncertainTransferReceptions();
@@ -50,7 +56,7 @@ function abortError(): Error {
 
 const UMBRALES = { umbralGlobal: 5, overrides: [{ sku: "SKU-A", umbral: 3 }] };
 
-function traslado(overrides: Record<string, unknown> = {}) {
+function traslado(overrides: Record<string, unknown> = {}): TrasladoInventarioDto {
   return {
     traslado_id: "t-1",
     source_incident_id: null,
@@ -60,11 +66,11 @@ function traslado(overrides: Record<string, unknown> = {}) {
     missing_quantity: 6,
     source_location_id: "loc-1",
     target_location_id: "loc-2",
-    estado: "EN_TRANSITO",
+    estado: "EN_TRANSITO" as const,
     created_at: "2026-10-01T00:00:00.000Z",
     updated_at: "2026-10-02T00:00:00.000Z",
     ...overrides,
-  };
+  } as TrasladoInventarioDto;
 }
 
 const PRESENTATION = {
@@ -182,6 +188,55 @@ describe("apiInventoryAdapter — umbrales (mapeo total)", () => {
     await expect(rejection(repository.getThresholds())).resolves.toMatchObject({
       code: "RESPUESTA_INCOMPATIBLE",
     });
+  });
+
+  it("clasifica como RESULTADO_INCIERTO cuando PUT /umbrales/global recibe HTTP 200 pero el DTO no supera toThresholdConfig", async () => {
+    const { repository, calls } = setup(async () =>
+      jsonResponse({ malformed: true, sinUmbralGlobal: true }, 200),
+    );
+    await expect(
+      rejection(repository.updateGlobalThreshold(8)),
+    ).resolves.toMatchObject({
+      code: "RESULTADO_INCIERTO",
+    });
+    expect(calls[0]?.path).toBe("/api/v1/inventario/umbrales/global");
+  });
+
+  it("clasifica como RESULTADO_INCIERTO cuando PUT /umbrales/skus recibe HTTP 200 pero el DTO no supera toThresholdConfig", async () => {
+    const { repository, calls } = setup(async () =>
+      jsonResponse({ malformed: true }, 200),
+    );
+    await expect(
+      rejection(repository.updateSkuThreshold("SKU-1", 8)),
+    ).resolves.toMatchObject({
+      code: "RESULTADO_INCIERTO",
+    });
+    expect(calls[0]?.path).toBe("/api/v1/inventario/umbrales/skus/SKU-1");
+  });
+
+  it("trata HTTP 408 como RESULTADO_INCIERTO para PUT de umbrales", async () => {
+    const { repository, calls } = setup(async () =>
+      new Response(JSON.stringify({ code: "TIMEOUT" }), { status: 408 }),
+    );
+    await expect(
+      rejection(repository.updateGlobalThreshold(8)),
+    ).resolves.toMatchObject({
+      code: "RESULTADO_INCIERTO",
+    });
+    expect(calls[0]?.path).toBe("/api/v1/inventario/umbrales/global");
+  });
+
+  it("trata HTTP 408 como RESULTADO_INCIERTO para POST de recepciones", async () => {
+    const { repository, calls } = setup(async () =>
+      new Response(JSON.stringify({ code: "TIMEOUT" }), { status: 408 }),
+    );
+    await expect(
+      rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+    ).resolves.toMatchObject({
+      code: "RESULTADO_INCIERTO",
+    });
+    expect(calls[0]?.path).toContain("/recepciones");
+    expect(repository.getTransferWriteRecord("t-1")?.state).toBe("UNCERTAIN");
   });
 });
 
@@ -1344,24 +1399,148 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
     expect(calls).toHaveLength(2);
   });
 
-  it("TAC-P0-06: el registro incierto es solo en memoria y se pierde al reiniciar la sesión (limitación documentada, BLOQUEADO_ESPECÍFICO)", async () => {
-    const { repository } = setup(async () =>
-      problemResponse(503, "SERVICIO_NO_DISPONIBLE"),
-    );
-    await expect(
-      rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
-    ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
-    expect(getUncertainTransferReception("t-1")).not.toBeNull();
+  describe("TAC-P0-06: rehidratación tras recarga del navegador conservando sessionStorage", () => {
+    function createMockStorage(): Storage {
+      const values = new Map<string, string>();
+      return {
+        get length() {
+          return values.size;
+        },
+        clear() {
+          values.clear();
+        },
+        getItem(key: string) {
+          return values.has(key) ? values.get(key)! : null;
+        },
+        key(index: number) {
+          return [...values.keys()][index] ?? null;
+        },
+        removeItem(key: string) {
+          values.delete(key);
+        },
+        setItem(key: string, value: string) {
+          values.set(key, value);
+        },
+      };
+    }
 
-    // Simula una recarga completa del navegador: el Map en memoria se vacía.
-    resetUncertainTransferReceptions();
-    expect(getUncertainTransferReception("t-1")).toBeNull();
+    it("TAC-P0-06-R1: una operación IN_FLIGHT se rehidrata conservadoramente como UNCERTAIN tras recarga", async () => {
+      const storage = createMockStorage();
+      globalThis.sessionStorage = storage;
+      resetUncertainTransferReceptions();
 
-    // Una nueva sesión del formulario ya no restaura la operación incierta.
-    // (Este es el hueco exacto que Marco marca como BLOQUEADO_ESPECÍFICO: la
-    // solución requiere acuerdo previo y no se implementa aquí.)
-    const newSession = createTransferReceptionFormSession("t-1");
-    expect(newSession.getUncertainPayload()).toBeNull();
+      // Se persiste un intento IN_FLIGHT antes del envío
+      setInFlightTransferReception(RECEPCION_PAYLOAD);
+
+      // Simula recarga del navegador: se conserva sessionStorage y se rehidrata el módulo/repositorio
+      rehydrateTransferReceptionsForTesting();
+
+      const { repository: repo2, calls } = setup(async () => jsonResponse(RECEPCION_OK));
+      const record = repo2.getTransferWriteRecord("t-1");
+      expect(record?.state).toBe("UNCERTAIN");
+      expect(record?.payload.operationId).toBe(RECEPCION_PAYLOAD.operationId);
+      expect(record?.payload.receivedAt).toBe(RECEPCION_PAYLOAD.receivedAt);
+      expect(record?.payload.quantityReceived).toBe(RECEPCION_PAYLOAD.quantityReceived);
+      expect(record?.payload.disposition).toBe(RECEPCION_PAYLOAD.disposition);
+      expect(record?.payload.finalReceipt).toBe(RECEPCION_PAYLOAD.finalReceipt);
+
+      // Formulario recupera la operación incierta sin generar nuevo operationId
+      const formSession = createTransferReceptionFormSession("t-1");
+      const restored = formSession.getUncertainPayload();
+      expect(restored?.operationId).toBe(RECEPCION_PAYLOAD.operationId);
+
+      // Reintento idéntico reutiliza exactamente el mismo operationId
+      await repo2.receiveTransfer(RECEPCION_PAYLOAD);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.request.headers?.["Idempotency-Key"]).toBe(RECEPCION_PAYLOAD.operationId);
+
+      delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
+    });
+
+    it("TAC-P0-06-R2: una operación UNCERTAIN persiste tras recarga con snapshot inmutable exacto", async () => {
+      const storage = createMockStorage();
+      globalThis.sessionStorage = storage;
+      resetUncertainTransferReceptions();
+
+      let postAttempts = 0;
+      const { repository } = setup(async () => {
+        postAttempts += 1;
+        return problemResponse(503, "SERVICIO_NO_DISPONIBLE");
+      });
+
+      const payloadWithNote: ReceiveTransferPayload = {
+        ...RECEPCION_PAYLOAD,
+        note: "Nota original verificable",
+      };
+
+      await expect(
+        rejection(repository.receiveTransfer(payloadWithNote)),
+      ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
+      expect(postAttempts).toBe(1);
+
+      // Simula recarga del navegador
+      rehydrateTransferReceptionsForTesting();
+
+      const { repository: repo2, calls: calls2 } = setup(async () => jsonResponse(RECEPCION_OK));
+      const record = repo2.getTransferWriteRecord("t-1");
+      expect(record?.state).toBe("UNCERTAIN");
+      expect(record?.payload.operationId).toBe(payloadWithNote.operationId);
+      expect(record?.payload.receivedAt).toBe(payloadWithNote.receivedAt);
+      expect(record?.payload.note).toBe("Nota original verificable");
+      expect(record?.payload.quantityReceived).toBe(4);
+
+      // Modificar cantidad o nota se rechaza con RESULTADO_INCIERTO sin emitir POST
+      const alteredSession = createTransferReceptionFormSession("t-1");
+      expect(() =>
+        alteredSession.prepareSubmission({
+          quantityReceived: 8,
+          disposition: "REINGRESAR_DISPONIBLE",
+          finalReceipt: false,
+          note: "Nota original verificable",
+        }),
+      ).toThrow(InventoryError);
+      expect(calls2).toHaveLength(0);
+
+      // Reintento idéntico confirma la operación sin duplicar POST
+      await repo2.receiveTransfer(payloadWithNote);
+      expect(calls2).toHaveLength(1);
+      expect(calls2[0]?.request.headers?.["Idempotency-Key"]).toBe(payloadWithNote.operationId);
+
+      delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
+    });
+
+    it("TAC-P0-06-R3: una confirmación RECONCILED con refresco pendiente persiste y no duplica POST", async () => {
+      const storage = createMockStorage();
+      globalThis.sessionStorage = storage;
+      resetUncertainTransferReceptions();
+
+      markTransferReceptionConfirmedAwaitingRefreshWithDto(RECEPCION_PAYLOAD, TRASLADO_CONFIRMADO);
+
+      // Simula recarga del navegador
+      rehydrateTransferReceptionsForTesting();
+
+      const { repository: repo2, calls: calls2 } = setup(async () => {
+        throw new Error("No debe llamar a transporte");
+      });
+
+      const record = repo2.getTransferWriteRecord("t-1");
+      expect(record?.state).toBe("RECONCILED");
+      expect(record?.presentationRefresh).toBe("AWAITING");
+      expect(record?.payload.operationId).toBe(RECEPCION_PAYLOAD.operationId);
+
+      // La solicitud con la misma identidad devuelve el DTO confirmado sin salir a la red
+      const result = await repo2.receiveTransfer(RECEPCION_PAYLOAD);
+      expect(result.id).toBe("t-1");
+      expect(calls2).toHaveLength(0);
+
+      // Alterar la intención se rechaza como conflicto de idempotencia sin salir a la red
+      await expect(
+        rejection(repo2.receiveTransfer({ ...RECEPCION_PAYLOAD, quantityReceived: 7 })),
+      ).resolves.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
+      expect(calls2).toHaveLength(0);
+
+      delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
+    });
   });
 
   describe("TAC-P0-11: aborto del transporte durante la recepción", () => {
@@ -1698,38 +1877,152 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
       delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
     });
 
-    it("TAC-P0-06-B: un error de almacenamiento impide persistir el intento", () => {
+    it("cuota agotada con estado previo existente: restaura lastGoodPersistedState, falla-cerrado y conserva UNCERTAIN", async () => {
       const values = new Map<string, string>();
       const storage: Storage = {
-        get length() {
-          return values.size;
-        },
-        clear() {
-          values.clear();
-        },
-        getItem(key: string) {
-          return values.has(key) ? values.get(key)! : null;
-        },
-        key(index: number) {
-          return [...values.keys()][index] ?? null;
-        },
-        removeItem(key: string) {
-          values.delete(key);
-        },
-        setItem(key: string, value: string) {
-          values.set(key, value);
-        },
+        get length() { return values.size; },
+        clear() { values.clear(); },
+        getItem(key: string) { return values.has(key) ? values.get(key)! : null; },
+        key(index: number) { return [...values.keys()][index] ?? null; },
+        removeItem(key: string) { values.delete(key); },
+        setItem(key: string, value: string) { values.set(key, value); },
       };
       globalThis.sessionStorage = storage;
+      resetUncertainTransferReceptions();
+
+      // Guardar un estado inicial válido (lastGoodPersistedState)
+      setUncertainTransferReception(RECEPCION_PAYLOAD);
+      const initialPersisted = storage.getItem("inventory.transferReceptionAttempts.v1");
+      expect(initialPersisted).not.toBeNull();
+
+      const { repository, calls } = setup(async () => jsonResponse(RECEPCION_OK));
+
+      // Simular que setItem lanza por cuota agotada al intentar persistir el nuevo intento
       const originalSetItem = storage.setItem.bind(storage);
       storage.setItem = () => {
-        throw new Error("quota");
+        throw new Error("QuotaExceededError");
       };
-      expect(() =>
-        setInFlightTransferReception(RECEPCION_PAYLOAD),
-      ).toThrow();
+
+      // Debe rechazar con CONTRATO_BLOQUEADO y NO despachar el POST
+      await expect(
+        rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+      ).resolves.toMatchObject({ code: "CONTRATO_BLOQUEADO" });
+      expect(calls).toHaveLength(0);
+
+      // El bloqueo previo de UNCERTAIN se conserva en memoria tras el rollback fail-closed
+      expect(getUncertainTransferReception("t-1")).toMatchObject({
+        operationId: RECEPCION_PAYLOAD.operationId,
+      });
+
       storage.setItem = originalSetItem;
       resetUncertainTransferReceptions();
+      delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
+    });
+
+    it("restauración fallida: error al escribir y error al restaurar estado previo lanza CONTRATO_BLOQUEADO", () => {
+      const values = new Map<string, string>();
+      const storage: Storage = {
+        get length() { return values.size; },
+        clear() { values.clear(); },
+        getItem(key: string) { return values.has(key) ? values.get(key)! : null; },
+        key(index: number) { return [...values.keys()][index] ?? null; },
+        removeItem(key: string) { values.delete(key); },
+        setItem(key: string, value: string) { values.set(key, value); },
+      };
+      globalThis.sessionStorage = storage;
+      resetUncertainTransferReceptions();
+
+      // Primer estado exitoso
+      setUncertainTransferReception(RECEPCION_PAYLOAD);
+
+      // Ahora setItem falla siempre (tanto en el intento nuevo como en la restauración)
+      storage.setItem = () => {
+        throw new Error("Hardware/Storage catastrophic failure");
+      };
+
+      expect(() =>
+        setInFlightTransferReception({
+          ...RECEPCION_PAYLOAD,
+          transferId: "t-2",
+        }),
+      ).toThrow(InventoryError);
+
+      delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
+    });
+
+    it("registros corruptos: restoreFromStorage conserva registros corruptos en storage para no perder bloqueo al recargar", () => {
+      const values = new Map<string, string>();
+      const storage: Storage = {
+        get length() { return values.size; },
+        clear() { values.clear(); },
+        getItem(key: string) { return values.has(key) ? values.get(key)! : null; },
+        key(index: number) { return [...values.keys()][index] ?? null; },
+        removeItem(key: string) { values.delete(key); },
+        setItem(key: string, value: string) { values.set(key, value); },
+      };
+      globalThis.sessionStorage = storage;
+
+      // Inyectar un payload corrupto para t-corrupt
+      const corruptState = {
+        version: 2,
+        uncertain: [{ transferId: "t-corrupt", invalid: "bad payload structure" }],
+        inFlight: [],
+        confirmedAwaiting: [],
+      };
+      storage.setItem("inventory.transferReceptionAttempts.v1", JSON.stringify(corruptState));
+
+      // Primera recarga: detecta corrupción y bloquea el traslado
+      rehydrateTransferReceptionsForTesting();
+      expect(isTransferReceptionStorageBlocked("t-corrupt")).toBe(true);
+
+      // Verifica que NO se eliminó silenciosamente el registro corrupto de storage
+      const rawAfterFirst = storage.getItem("inventory.transferReceptionAttempts.v1");
+      expect(rawAfterFirst).toContain("t-corrupt");
+
+      // Segunda recarga: el bloqueo se mantiene gracias a que no se limpió silenciosamente
+      rehydrateTransferReceptionsForTesting();
+      expect(isTransferReceptionStorageBlocked("t-corrupt")).toBe(true);
+
+      // prepareSubmission rechaza y no genera operationId
+      const formSession = createTransferReceptionFormSession("t-corrupt");
+      expect(() =>
+        formSession.prepareSubmission({
+          quantityReceived: 5,
+          disposition: "REINGRESAR_DISPONIBLE",
+          finalReceipt: true,
+        }),
+      ).toThrow(InventoryError);
+
+      delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
+    });
+
+    it("ausencia de POST cuando el intento de recepción no quedó persistido", async () => {
+      const values = new Map<string, string>();
+      const storage: Storage = {
+        get length() { return values.size; },
+        clear() { values.clear(); },
+        getItem(key: string) { return values.has(key) ? values.get(key)! : null; },
+        key(index: number) { return [...values.keys()][index] ?? null; },
+        removeItem(key: string) { values.delete(key); },
+        setItem(key: string, value: string) { values.set(key, value); },
+      };
+      globalThis.sessionStorage = storage;
+      resetUncertainTransferReceptions();
+
+      const { repository, calls } = setup(async () => jsonResponse(RECEPCION_OK));
+
+      // storage.setItem falla
+      storage.setItem = () => {
+        throw new Error("QuotaExceededError");
+      };
+
+      await expect(
+        rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+      ).resolves.toMatchObject({ code: "CONTRATO_BLOQUEADO" });
+
+      // Verificación estricta: NO se despachó la llamada HTTP
+      expect(calls).toHaveLength(0);
+
       delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
     });
 
@@ -1863,6 +2156,7 @@ describe("apiInventoryAdapter — dashboard KPIs (obtenerDashboardInventario)", 
       transfersInTransit: null,
       transfersPartiallyReceived: null,
       transfersWithDiscrepancy: null,
+      generatedAt: "2026-10-20T00:00:00.000Z",
     });
     expect(calls[0]?.path).toBe("/api/v1/inventario/dashboard?locationId=loc-1");
   });
@@ -1920,6 +2214,58 @@ describe("apiInventoryAdapter — dashboard KPIs (obtenerDashboardInventario)", 
       rejection(repository.getLocationDistribution({ search: "SKU-A" })),
     ).resolves.toMatchObject({ code: "CONTRATO_BLOQUEADO" });
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it("conserva y expone generatedAt de DashboardInventario", async () => {
+    const { repository } = setup(async () => jsonResponse(DASHBOARD_DTO));
+    const kpis = await repository.getDashboardKpis();
+    expect(kpis.generatedAt).toBe("2026-10-20T00:00:00.000Z");
+  });
+
+  it("informa null en métricas no publicadas sin sustituirlas por cero", async () => {
+    const { repository } = setup(async () => jsonResponse(DASHBOARD_DTO));
+    const kpis = await repository.getDashboardKpis();
+    expect(kpis.blockedUnits).toBeNull();
+    expect(kpis.totalVendibleSkus).toBeNull();
+    expect(kpis.totalPendingTransfers).toBeNull();
+    expect(kpis.transfersInTransit).toBeNull();
+    expect(kpis.transfersPartiallyReceived).toBeNull();
+    expect(kpis.transfersWithDiscrepancy).toBeNull();
+  });
+
+  it("admite filtros contractuales del agregado (category, brand, locationId)", async () => {
+    const { repository, calls } = setup(async () => jsonResponse(DASHBOARD_DTO));
+    await repository.getDashboardKpis({ category: "cat-1", brand: "brand-1", locationId: "loc-1" });
+    expect(calls[0]?.path).toContain("categoriaId=cat-1");
+    expect(calls[0]?.path).toContain("marcaId=brand-1");
+    expect(calls[0]?.path).toContain("locationId=loc-1");
+  });
+
+  it("separación de filtros del dashboard: una búsqueda por SKU en tabla no bloquea consulta agregada", async () => {
+    const { repository } = setup(async () => jsonResponse(DASHBOARD_DTO));
+    const filters = { search: "SKU-99", category: "cat-1", status: "AGOTADO", locationId: "loc-1" };
+    const aggregateFilters = {
+      category: filters.category,
+      locationId: filters.locationId,
+    };
+    const kpis = await repository.getDashboardKpis(aggregateFilters);
+    expect(kpis.availableUnits).toBe(125);
+    const dist = await repository.getLocationDistribution(aggregateFilters);
+    expect(dist).toHaveLength(1);
+  });
+
+  it("fallos parciales: secciones no soportadas (alertas/stock) no invalidan KPIs ni distribución", async () => {
+    const { repository } = setup(async () => jsonResponse(DASHBOARD_DTO));
+    const [kpiRes, alertsRes, distRes, stockRes] = await Promise.allSettled([
+      repository.getDashboardKpis(),
+      repository.getDashboardAlerts(),
+      repository.getLocationDistribution(),
+      repository.getStockItems(),
+    ]);
+    expect(kpiRes.status).toBe("fulfilled");
+    expect(distRes.status).toBe("fulfilled");
+    expect(alertsRes.status).toBe("rejected");
+    expect(stockRes.status).toBe("rejected");
   });
 });
 

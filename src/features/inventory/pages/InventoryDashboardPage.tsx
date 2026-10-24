@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import {
   ActionIcon,
   Button,
+  Group,
   Select,
   Stack,
   Text,
@@ -52,6 +53,7 @@ export function InventoryDashboardPage() {
 
   const {
     kpis,
+    generatedAt,
     alerts,
     distribution,
     stockItems,
@@ -327,9 +329,16 @@ export function InventoryDashboardPage() {
 
         {/* Zona 3: 12 KPIs normativos */}
         <div>
-          <Title order={2} size="h3" mb="sm">
-            Resumen de indicadores clave
-          </Title>
+          <Group justify="space-between" align="baseline" mb="sm">
+            <Title order={2} size="h3">
+              Resumen de indicadores clave
+            </Title>
+            {generatedAt && (
+              <Text size="xs" c="dimmed">
+                Fecha/hora de generación: {generatedAt}
+              </Text>
+            )}
+          </Group>
           <DashboardKpiGrid
             kpis={kpis}
             loading={loading}

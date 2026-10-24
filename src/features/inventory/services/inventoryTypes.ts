@@ -101,6 +101,8 @@ export interface InventoryKpiSummary {
   transfersInTransit: KpiMetricValue;
   transfersPartiallyReceived: KpiMetricValue;
   transfersWithDiscrepancy: KpiMetricValue;
+  // Fecha/hora de generación del snapshot según DashboardInventario (OpenAPI)
+  generatedAt?: string | null;
 }
 
 export interface InventoryAlert {

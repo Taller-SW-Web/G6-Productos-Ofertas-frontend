@@ -272,12 +272,17 @@ function persistState(): void {
   const serialized = JSON.stringify(state);
   try {
     storage.setItem(STORAGE_KEY, serialized);
+    if (typeof storage.getItem === "function") {
+      const verified = storage.getItem(STORAGE_KEY);
+      if (verified !== serialized) {
+        throw new Error("Persisted snapshot verification failed");
+      }
+    }
     lastGoodPersistedState = serialized;
   } catch {
-    if (lastGoodPersistedState !== null && typeof storage.getItem === "function") {
+    if (lastGoodPersistedState !== null && typeof storage.setItem === "function") {
       try {
         storage.setItem(STORAGE_KEY, lastGoodPersistedState);
-        return;
       } catch {
         // Fall through to throw
       }
@@ -292,7 +297,7 @@ function persistState(): void {
 function restoreFromStorage(): void {
   const storage = getSessionStorage();
   if (!storage) return;
-  let rawToParse: string | null = null;
+  let rawToParse: string | null;
   try {
     rawToParse = storage.getItem(STORAGE_KEY);
   } catch {
@@ -367,12 +372,23 @@ function restoreFromStorage(): void {
 
   // El estado IN_FLIGHT ya fue promovido a UNCERTAIN; no se conserva como tal.
   inFlightReceptionsByTransferId.clear();
-  try {
-    const current = storage.getItem(STORAGE_KEY);
-    if (current !== null) lastGoodPersistedState = current;
-    persistState();
-  } catch {
-    // La restauración no debe lanzar durante la carga del módulo.
+
+  // Fail-closed: si hay corrupción (storageCorruptedAll o blockedTransferIds.size > 0),
+  // NUNCA reescribir storage; de lo contrario se eliminarían silenciosamente los
+  // registros corruptos y se perdería el bloqueo al recargar el navegador.
+  if (storageCorruptedAll || blockedTransferIds.size > 0) {
+    return;
+  }
+
+  // Si hubo IN_FLIGHT promovido a UNCERTAIN y el storage está sano, persistir la promoción.
+  if (Array.isArray(parsed.inFlight) && parsed.inFlight.length > 0) {
+    try {
+      persistState();
+    } catch {
+      // La restauración no debe lanzar durante la carga del módulo.
+    }
+  } else {
+    lastGoodPersistedState = rawToParse;
   }
 }
 
@@ -491,6 +507,19 @@ export function resetUncertainTransferReceptions(): void {
   }
 }
 
+// Simula la rehidratación conservando el contenido existente de sessionStorage
+// y reconstruyendo el estado del módulo (reemplaza reset() en pruebas de recarga).
+export function rehydrateTransferReceptionsForTesting(): void {
+  uncertainReceptionsByTransferId.clear();
+  inFlightReceptionsByTransferId.clear();
+  confirmedReceptionsAwaitingRefreshByTransferId.clear();
+  confirmedReceptionsAwaitingRefreshWithDtoByTransferId.clear();
+  blockedTransferIds.clear();
+  storageCorruptedAll = false;
+  lastGoodPersistedState = null;
+  restoreFromStorage();
+}
+
 export function setInFlightTransferReception(
   payload: ReceiveTransferPayload,
 ): Readonly<ReceiveTransferPayload> {
@@ -508,9 +537,51 @@ export function setInFlightTransferReception(
     }
   }
   const frozen = freezeReceiveTransferPayload(payload);
-  uncertainReceptionsByTransferId.delete(frozen.transferId);
-  inFlightReceptionsByTransferId.set(frozen.transferId, frozen);
-  persistState();
+  const transferId = frozen.transferId;
+
+  if (isTransferReceptionStorageBlocked(transferId)) {
+    throw new InventoryError(
+      "CONTRATO_BLOQUEADO",
+      "El registro persistido de recepción está corrupto o no se pudo validar; no se genera una nueva operación.",
+    );
+  }
+
+  // Conservar estado previo de los mapas para rollback fail-closed si falla la persistencia
+  const prevUncertain = uncertainReceptionsByTransferId.get(transferId);
+  const prevInFlight = inFlightReceptionsByTransferId.get(transferId);
+  const prevConfirmed = confirmedReceptionsAwaitingRefreshByTransferId.get(transferId);
+  const prevConfirmedWithDto = confirmedReceptionsAwaitingRefreshWithDtoByTransferId.get(transferId);
+
+  uncertainReceptionsByTransferId.delete(transferId);
+  inFlightReceptionsByTransferId.set(transferId, frozen);
+
+  try {
+    persistState();
+  } catch (error) {
+    // Rollback fail-closed: restaurar mapas al estado previo exacto
+    if (prevUncertain) {
+      uncertainReceptionsByTransferId.set(transferId, prevUncertain);
+    } else {
+      uncertainReceptionsByTransferId.delete(transferId);
+    }
+    if (prevInFlight) {
+      inFlightReceptionsByTransferId.set(transferId, prevInFlight);
+    } else {
+      inFlightReceptionsByTransferId.delete(transferId);
+    }
+    if (prevConfirmed) {
+      confirmedReceptionsAwaitingRefreshByTransferId.set(transferId, prevConfirmed);
+    } else {
+      confirmedReceptionsAwaitingRefreshByTransferId.delete(transferId);
+    }
+    if (prevConfirmedWithDto) {
+      confirmedReceptionsAwaitingRefreshWithDtoByTransferId.set(transferId, prevConfirmedWithDto);
+    } else {
+      confirmedReceptionsAwaitingRefreshWithDtoByTransferId.delete(transferId);
+    }
+    throw error;
+  }
+
   return frozen;
 }
 

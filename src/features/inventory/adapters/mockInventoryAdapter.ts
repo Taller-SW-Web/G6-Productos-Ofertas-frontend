@@ -845,6 +845,7 @@ export class MockInventoryAdapter implements InventoryRepository {
       transfersInTransit,
       transfersPartiallyReceived,
       transfersWithDiscrepancy,
+      generatedAt: new Date().toISOString(),
     };
   }
 

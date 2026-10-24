@@ -217,7 +217,7 @@ export function toThresholdConfig(value: unknown): ThresholdConfig {
 
 export function toDashboardKpiSummary(value: unknown): InventoryKpiSummary {
   const dto = record(value);
-  dateTime(dto, "generatedAt");
+  const generatedAt = dateTime(dto, "generatedAt");
   nonNegativeInt(dto, "totalSkus", 0);
   const totalOnHand = nonNegativeInt(dto, "totalOnHand", 0);
   const totalReserved = nonNegativeInt(dto, "totalReserved", 0);
@@ -251,6 +251,7 @@ export function toDashboardKpiSummary(value: unknown): InventoryKpiSummary {
     transfersInTransit: null,
     transfersPartiallyReceived: null,
     transfersWithDiscrepancy: null,
+    generatedAt,
   };
 }
 

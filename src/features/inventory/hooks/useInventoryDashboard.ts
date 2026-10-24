@@ -63,6 +63,7 @@ function fulfilled<T>(result: PromiseSettledResult<T>, fallback: T): T {
 export function useInventoryDashboard(filters: DashboardFiltersQuery) {
   const revision = useInventoryChangeSignal();
   const { search, category, brand, locationId, status } = filters;
+
   // Token de recarga explícito para reintentos reales sin alterar los filtros.
   const [reloadToken, setReloadToken] = useState(0);
   const requestKey = JSON.stringify([
@@ -78,6 +79,7 @@ export function useInventoryDashboard(filters: DashboardFiltersQuery) {
   const [response, setResponse] = useState<{
     requestKey: string;
     kpis: InventoryKpiSummary | null;
+    generatedAt: string | null;
     alerts: InventoryAlert[];
     distribution: LocationDistribution[];
     stockItems: StockItem[];
@@ -87,44 +89,33 @@ export function useInventoryDashboard(filters: DashboardFiltersQuery) {
   useEffect(() => {
     let cancelled = false;
 
+    // Filtros contractuales admitidos por obtenerDashboardInventario (agregado)
+    const aggregateFilters: DashboardFiltersQuery = { category, brand, locationId };
+    // Filtros de tabla y búsqueda detallada por SKU
+    const tableFilters: DashboardFiltersQuery = {
+      search,
+      category,
+      brand,
+      locationId,
+      status,
+    };
+
     const repository = getInventoryRepository();
-    // Cada sección se resuelve por separado: una operación bloqueada por
-    // contrato (alertas, stock) o un fallo parcial no debe borrar los KPIs
-    // autoritativos que sí respondieron.
+    // Separación de filtros: una búsqueda de SKU o filtro de estado en la tabla
+    // no debe bloquear ni invalidar los KPIs ni la distribución por ubicación,
+    // que consultan el agregado con los filtros admitidos por el contrato.
     void Promise.allSettled([
-      repository.getDashboardKpis({
-        search,
-        category,
-        brand,
-        locationId,
-        status,
-      }),
-      repository.getDashboardAlerts({
-        search,
-        category,
-        brand,
-        locationId,
-        status,
-      }),
-      repository.getLocationDistribution({
-        search,
-        category,
-        brand,
-        locationId,
-        status,
-      }),
-      repository.getStockItems({
-        search,
-        category,
-        brand,
-        locationId,
-        status,
-      }),
+      repository.getDashboardKpis(aggregateFilters),
+      repository.getDashboardAlerts(tableFilters),
+      repository.getLocationDistribution(aggregateFilters),
+      repository.getStockItems(tableFilters),
     ]).then(([kpiResult, alertsResult, distResult, stockResult]) => {
       if (cancelled) return;
+      const kpis = fulfilled(kpiResult, null);
       setResponse({
         requestKey,
-        kpis: fulfilled(kpiResult, null),
+        kpis,
+        generatedAt: kpis?.generatedAt ?? null,
         alerts: fulfilled(alertsResult, []),
         distribution: fulfilled(distResult, []),
         stockItems: fulfilled(stockResult, []),
@@ -159,6 +150,7 @@ export function useInventoryDashboard(filters: DashboardFiltersQuery) {
 
   return {
     kpis: isCurrent ? response.kpis : null,
+    generatedAt: isCurrent ? (response.generatedAt ?? null) : null,
     alerts: isCurrent ? response.alerts : [],
     distribution: isCurrent ? response.distribution : [],
     stockItems: isCurrent ? response.stockItems : [],

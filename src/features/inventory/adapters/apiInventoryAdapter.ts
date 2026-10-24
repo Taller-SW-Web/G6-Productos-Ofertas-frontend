@@ -350,7 +350,7 @@ export function createHttpInventoryRepository(
         "VALIDACION",
         "Inventario rechazó los datos enviados. Revisa el formulario.",
       );
-    if (write && status >= 500)
+    if (write && (status >= 500 || status === 408))
       throw new InventoryError(
         "RESULTADO_INCIERTO",
         uncertainWriteMessage(writeKind),
@@ -578,7 +578,16 @@ export function createHttpInventoryRepository(
         },
         true,
         "threshold",
-      ).then(toThresholdConfig);
+      ).then((body) => {
+        try {
+          return toThresholdConfig(body);
+        } catch {
+          throw new InventoryError(
+            "RESULTADO_INCIERTO",
+            uncertainWriteMessage("threshold"),
+          );
+        }
+      });
     },
 
     updateSkuThreshold(
@@ -594,7 +603,16 @@ export function createHttpInventoryRepository(
         },
         true,
         "threshold",
-      ).then(toThresholdConfig);
+      ).then((body) => {
+        try {
+          return toThresholdConfig(body);
+        } catch {
+          throw new InventoryError(
+            "RESULTADO_INCIERTO",
+            uncertainWriteMessage("threshold"),
+          );
+        }
+      });
     },
 
     getTransferWriteRecord(

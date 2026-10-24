@@ -123,7 +123,7 @@ tercera auditoría de Marco:
 | `services/inventoryProvider.ts` | Punto de inyección `configureInventoryApi(factory)`. Sin factory, el modo API mantiene un fallo controlado bajo demanda; nunca cae al mock. |
 | `hooks/useInventoryDashboard.ts` | Resuelve cada sección con `Promise.allSettled`: un bloqueo de contrato o fallo parcial no borra los KPIs que sí respondieron. Distingue `error` de `blockedReason`. |
 | `components/DashboardKpiGrid.tsx`, `DashboardAlerts.tsx`, `LocationDistributionTable.tsx` | Estados "no verificable" (warning) separados del error de transporte; `null` se muestra como "Sin datos", nunca como `0`. |
-| `adapters/apiInventoryAdapter.spec.ts` | **63 pruebas unitarias y de flujo formulario+adaptador** (incluye los casos obligatorios de `TAC-P0-01`/`TAC-P0-02`, `TAC-P0-05`, `TAC-P1-07`, `TAC-P0-08`, los **6 casos explícitos** de `TAC-P0-09`, los **5 casos de `TAC-P1-10`**, los **5 casos TAC-T11-01…05 de `TAC-P0-11`**, los **5 casos TAC-T12-01…05 de `TAC-P0-12`** y regresiones adicionales de `TAC-P0-06`, `TAC-P0-03`, `TAC-P1-05` y `TAC-P1-06`). |
+| `adapters/apiInventoryAdapter.spec.ts` | **77 pruebas unitarias y de flujo formulario+adaptador** (incluye los casos obligatorios de `TAC-P0-01`/`TAC-P0-02`, `TAC-P0-05`, `TAC-P1-07`, `TAC-P0-08`, los **6 casos explícitos** de `TAC-P0-09`, los **5 casos de `TAC-P1-10`**, los **5 casos TAC-T11-01…05 de `TAC-P0-11`**, los **5 casos TAC-T12-01…05 de `TAC-P0-12`**, las **3 pruebas de rehidratación `TAC-P0-06-R1…R3`**, las **4 pruebas de persistencia fail-closed**, las **4 pruebas de umbrales con resultado incierto (PUT 200 con DTO inválido y HTTP 408)** y las **4 pruebas de filtros y frescura del dashboard**). |
 | `tests/inventory-presentation.spec.ts` | Prueba Playwright de `TAC-P0-08`/`TAC-P1-10`: `POST 200` confirmado → fallo de presentación → formulario bloqueado → intento de reenvío sin segundo POST → GET obsoleto que tampoco libera → GET coherente que actualiza la bandeja → nueva intención legítima con otro `operationId`. |
 | `tests/harness/inventory-http.html` / `tests/harness/inventory-http.tsx` | Harness de navegador que compone el **adaptador HTTP real** con un transporte de prueba y un resolutor de presentación controlable; no inventa endpoints ni DTO (usa la forma del contrato ya validada). Añade `setStaleRead()` y `refresh()` para simular la lectura atrasada y la señal interna de refresco. |
 | `package.json` / `adapters/vitest.config.ts` | `npm test` incorpora `test:unit:inventory`, de modo que el CI del PR ejecuta las regresiones del adaptador de inventario junto con Combos y Bulk. |
@@ -309,8 +309,8 @@ modo. Ese desbloqueo corresponde a la composición compartida de Castilla/Marco.
 |---|---|
 | `npm run typecheck` | PASS |
 | `npm run lint` | PASS |
-| `npx vitest run --config src/features/inventory/adapters/vitest.config.ts` | **63/63 PASS** (incluye regresiones `TAC-P0-05`, `TAC-P1-07`, `TAC-P0-08`, `TAC-P1-10`, `TAC-P0-11`, `TAC-P0-12`, `TAC-P0-06`, `TAC-P0-03`, `TAC-P1-05`, `TAC-P1-06` y los 6 casos explícitos `TAC-P0-09`; caracterización `TAC-P0-06`) |
-| `npm test` | `test:unit:combos` 54 PASS; `test:unit:bulk` 51 PASS; `test:unit:inventory` 63 PASS |
+| `npx vitest run --config src/features/inventory/adapters/vitest.config.ts` | **77/77 PASS** (incluye regresiones `TAC-P0-05`, `TAC-P1-07`, `TAC-P0-08`, `TAC-P1-10`, `TAC-P0-11`, `TAC-P0-12`, los 6 casos de `TAC-P0-09`, rehidratación `TAC-P0-06-R1…R3`, persistencia fail-closed, umbrales inciertos y filtros/frescura del dashboard) |
+| `npm test` | `test:unit:combos` 54 PASS; `test:unit:bulk` 51 PASS; `test:unit:inventory` 77 PASS; `test:unit:pricing` 157 PASS (**339/339 total PASS**) |
 | `npx playwright test tests/inventory.spec.ts tests/inventory-dashboard.spec.ts tests/inventory-adapter.spec.ts tests/inventory-presentation.spec.ts --reporter=line` | **47/47 PASS** |
 | `npx playwright test --reporter=line` | **360/360 PASS** (suite completa, 11.3 min) |
 | `npm run build` con `VITE_DATA_MODE=mock` | PASS |
@@ -489,3 +489,47 @@ pm test (54 + 51 + 55), **47/47** Playwright de inventario, builds
   queda resuelto solo para la pestana actual; no garantiza conciliacion entre
   dispositivos ni tras borrar manualmente los datos del navegador. No se declara
   merge ni despliegue.
+
+## Evidencia de la iteración 10 (auditoría PR #57 / MK-015 y MK-016 Hito 4)
+
+- Rama: `taco`.
+- Archivos involucrados:
+  - `src/features/inventory/services/transferReceptionAttempt.ts`
+  - `src/features/inventory/adapters/apiInventoryAdapter.ts`
+  - `src/features/inventory/hooks/useThresholds.ts`
+  - `src/features/inventory/hooks/useInventoryDashboard.ts`
+  - `src/features/inventory/pages/InventoryDashboardPage.tsx`
+  - `src/features/inventory/services/inventoryTypes.ts`
+  - `src/features/inventory/services/inventoryMappers.ts`
+  - `src/features/inventory/adapters/mockInventoryAdapter.ts`
+  - `src/features/inventory/adapters/apiInventoryAdapter.spec.ts`
+  - `src/features/inventory/INTEGRACION_HTTP.md`
+- Cambios realizados:
+  1. **[P0] CI y calidad de código:**
+     - Eliminada asignación inicial innecesaria de `rawToParse` en `transferReceptionAttempt.ts:295`, resolviendo la advertencia de ESLint `no-useless-assignment` en el job `quick`/`validate` sin deshabilitar reglas ni añadir excepciones.
+  2. **[P0] Persistencia fail-closed de recepciones:**
+     - `persistState()` no devuelve éxito cuando la escritura falla y solo restaura `lastGoodPersistedState`. Comportamiento fail-closed verificado mediante re-lectura `storage.getItem(STORAGE_KEY) === serialized`. Si falla o no coincide, lanza `CONTRATO_BLOQUEADO`.
+     - `setInFlightTransferReception()` solo habilita el despacho HTTP cuando el snapshot nuevo quedó persistido y verificado. Si falla la persistencia, ejecuta rollback de los mapas en memoria (`uncertainReceptionsByTransferId`, `inFlightReceptionsByTransferId`, confirmaciones) preservando el bloqueo de cualquier operación previamente `UNCERTAIN` y abortando el envío.
+     - `restoreFromStorage()` no elimina silenciosamente registros corruptos durante la recarga: si se detectan registros corruptos o traslados bloqueados, aborta la reescritura conservando el contenido íntegro en `sessionStorage` para no perder el bloqueo en recargas subsiguientes.
+     - No se genera automáticamente otro `operationId` para operaciones cuyo resultado sigue siendo incierto.
+  3. **[P1] Confirmación incierta de umbrales:**
+     - En `apiInventoryAdapter.ts`, cuando un PUT recibe HTTP 200 pero el DTO no supera `toThresholdConfig()`, se clasifica como `RESULTADO_INCIERTO` (no como escritura definitivamente fallida).
+     - Se clasifica también HTTP 408 como `RESULTADO_INCIERTO` para escrituras (`POST`/`PUT`).
+     - En `useThresholds.ts`, se realiza lectura autoritativa mediante `getThresholds()` antes de acreditar el nuevo valor en la UI. Si la lectura no confirma el valor solicitado o falla, se expone el estado incierto y no se genera reenvío automático.
+  4. **[P1] Filtros contractuales y frescura del dashboard:**
+     - En `useInventoryDashboard.ts`, se separan los filtros contractuales del agregado (`category`, `brand`, `locationId`) pasados a `getDashboardKpis` y `getLocationDistribution`, de los filtros exclusivos de la tabla por SKU (`search`, `status`) pasados a `getStockItems` y `getDashboardAlerts`.
+     - Una búsqueda de SKU o filtro de status no bloquea ni invalida los KPIs ni la distribución geográfica cuando esas operaciones admiten consultar el agregado.
+     - Se conserva y expone `generatedAt` de `DashboardInventario` en el hook y en `InventoryDashboardPage.tsx` como fecha/hora de generación de los datos, sin umbrales arbitrarios de obsolescencia.
+  5. **[P1] Pruebas de recuperación reales:**
+     - Se sustituyó la prueba `TAC-P0-06` (que borraba el almacenamiento con `resetUncertainTransferReceptions()`) por pruebas de rehidratación auténticas (`TAC-P0-06-R1`, `TAC-P0-06-R2`, `TAC-P0-06-R3`) que conservan `sessionStorage` y reconstruyen el repositorio/módulo (`rehydrateTransferReceptionsForTesting()`).
+     - Cubre `IN_FLIGHT → UNCERTAIN`, `UNCERTAIN` persistido y `RECONCILED` pendiente de refresco, verificando conservación exacta de `operationId`, `receivedAt`, nota y cantidades, sin duplicación de POST.
+     - Se agregaron regresiones para cuota agotada con estado previo existente, restauración fallida, registros corruptos y ausencia de POST cuando el intento no quedó persistido.
+- Resultados de validación:
+  - `npm run lint`: **PASS** (0 errores, 0 advertencias).
+  - `npm run typecheck`: **PASS** (0 errores).
+  - `test:unit:inventory`: **77/77 PASS**.
+  - `npm test`: **339/339 PASS** (combos: 54, bulk: 51, inventory: 77, pricing: 157).
+  - `tests/inventory*.spec.ts` (Playwright): **61/61 PASS** (23 en `inventory.spec.ts` + 38 en `inventory-adapter`, `inventory-dashboard`, `inventory-presentation`, `inventory-idempotency`).
+  - `npm run build` (`VITE_DATA_MODE=mock` y `VITE_DATA_MODE=api`): **PASS**.
+- Estado: **PARTIAL** (sin integración React→Gateway→PostgreSQL; endpoints pendientes de Gateway y composición compartida; issues #17/#18 continúan abiertos).
+
