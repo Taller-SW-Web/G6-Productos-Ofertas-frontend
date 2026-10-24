@@ -312,7 +312,7 @@ export function createHttpInventoryRepository(
     if (write && status >= 500)
       throw new InventoryError(
         "RESULTADO_INCIERTO",
-        "Inventario no confirmó el resultado. Consulta el traslado antes de reintentar.",
+        uncertainWriteMessage(writeKind),
       );
     throw new InventoryError(
       "SERVICIO_NO_DISPONIBLE",
