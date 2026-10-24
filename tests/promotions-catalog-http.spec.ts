@@ -160,6 +160,31 @@ for (const retain of [{ productIds: ["missing-product"], skus: [] }, { productId
     });
   });
 }
+for (const skuBase of [null, undefined]) {
+  test(`Catalog HTTP retain: unrelated inactive simple product with ${skuBase} SKU cannot block a retained variant`, async () => {
+    const unrelated = { ...simple, product_id: "unrelated", sku_base: skuBase };
+    await fixture(url => ({ body: url.pathname === "/api/v1/productos" && url.searchParams.get("estado") === "INACTIVO"
+      ? pageBody([unrelated]) : retainedDto(url, true) }), async (origin, requests) => {
+      const products = await apiFor(origin).catalog.products(new AbortController().signal, { productIds: [], skus: ["SKU-L"] });
+      expect(products.map(product => product.id)).toEqual([variable.product_id]);
+      expect(products[0]?.skus).toContainEqual({ sku: "SKU-L", label: "SKU-L", active: false });
+      expect(requests.every(request => request.method === "GET")).toBe(true);
+    });
+  });
+  test(`Catalog HTTP retain: historical product ID without ${skuBase} SKU keeps identity without inventing a SKU`, async () => {
+    const historical = { ...simple, sku_base: skuBase };
+    await fixture(url => ({ body: url.pathname === "/api/v1/productos" && url.searchParams.get("estado") === "INACTIVO"
+      ? pageBody([historical]) : retainedDto(url, true) }), async origin => {
+      const products = await apiFor(origin).catalog.products(new AbortController().signal, { productIds: [simple.product_id], skus: [] });
+      expect(products.find(product => product.id === simple.product_id)).toEqual({
+        id: simple.product_id, name: simple.name, categoryId: simple.categoria_id, active: false, skus: [],
+      });
+      await expect(apiFor(origin).catalog.products(new AbortController().signal, {
+        productIds: [simple.product_id], skus: [simple.sku_base],
+      })).rejects.toMatchObject({ kind: "unavailable" });
+    });
+  });
+}
 for (const status of [401, 403, 503]) {
   test(`Catalog HTTP retain: inactive lookup ${status} propagates without silently dropping associations`, async () => {
     await fixture(url => url.searchParams.get("estado") === "INACTIVO" ? { status } : { body: retainedDto(url, true) }, async origin => {

@@ -62,6 +62,14 @@ export function createHttpPromotionCatalog(
         bounded.throwIfAborted();
         const row = object(value);
         const id = text(row.product_id);
+        const active = group.state === "ACTIVO";
+        if (!active && !retainedIds.has(id)) {
+          if (!retainedSkus.size) continue;
+          // A simple product can only resolve its own published base SKU.
+          // Ignore unrelated inactive rows before mapping optional SKU data.
+          if (row.tiene_variantes === false &&
+              (typeof row.sku_base !== "string" || !retainedSkus.has(row.sku_base))) continue;
+        }
         unique(ids, id);
         const name = text(row.name);
         const categoryId = text(row.categoria_id);
@@ -76,8 +84,6 @@ export function createHttpPromotionCatalog(
           state(row.status, ["BORRADOR", "ACTIVO", "INACTIVO"]);
           if (row.status !== group.state) continue;
         }
-        const active = group.state === "ACTIVO";
-        if (!active && !retainedIds.has(id) && !retainedSkus.size) continue;
         const choices: CatalogProductChoice["skus"] = [];
         if (row.tiene_variantes) {
           const variants = await pages(
@@ -103,9 +109,9 @@ export function createHttpPromotionCatalog(
             // not required and no barcode/product_id is substituted for it.
             choices.push({ sku, label: sku, active: active && variant.status === "ACTIVA" });
           }
-        } else {
-          // sku_base is optional in the response schema. Without a confirmed
-          // sellable SKU the selector fails visibly rather than inventing one.
+        } else if (active || row.sku_base != null) {
+          // Active selections still require a confirmed sellable SKU. An
+          // inactive product retained by ID can preserve identity without one.
           const sku = text(row.sku_base);
           unique(skus, sku);
           choices.push({ sku, label: name, active });

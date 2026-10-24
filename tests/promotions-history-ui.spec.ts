@@ -22,7 +22,7 @@ const pageDto = (items: unknown[], nested = false) => {
 };
 async function setup(page: Page) {
   const html = await (await page.request.get("/tests/harness/promotions-http.html")).text();
-  const state = { inactive: false, fail: false, writes: [] as { method: string; body: Record<string, unknown> }[] };
+  const state = { inactive: false, nullBase: false, fail: false, writes: [] as { method: string; body: Record<string, unknown> }[] };
   let campaign = structuredClone(parent);
   let recommendation = structuredClone(rule);
   await page.addInitScript(() => { window.__promotionsHttpTest = { token: "synthetic-history-user" }; });
@@ -40,7 +40,10 @@ async function setup(page: Page) {
     }
     if (path === "/api/v1/productos") {
       if (state.fail) return route.fulfill({ status: 503, json: {} });
-      return route.fulfill({ json: pageDto(url.searchParams.get("estado") === "INACTIVO" ? state.inactive ? [simple, old] : [] : state.inactive ? [variable] : [simple, variable, old]) });
+      return route.fulfill({ json: pageDto(url.searchParams.get("estado") === "INACTIVO" ? state.inactive ? [
+        { ...simple, product_id: "unrelated", name: "Inactivo no relacionado", sku_base: null },
+        { ...simple, sku_base: state.nullBase ? null : simple.sku_base }, old,
+      ] : [] : state.inactive ? [variable] : [simple, variable, old]) });
     }
     if (path.endsWith("/variantes")) return route.fulfill({ json: pageDto(url.searchParams.get("estado") === "INACTIVA"
       ? state.inactive ? [{ variant_id: "v-l", sku: "SKU-L", status: "INACTIVA" }] : []
@@ -51,7 +54,7 @@ async function setup(page: Page) {
   return state;
 }
 
-test("HTTP campaign: active creation then inactive product/SKU editing preserves until explicit removal", async ({ page }, info) => {
+test("HTTP campaign: creation then inactive SKU editing ignores an unrelated inactive product with null base SKU", async ({ page }, info) => {
   const state = await setup(page);
   await page.goto("/promociones/nueva");
   await page.getByLabel("Nombre de la promoción", { exact: true }).fill(parent.nombre);
@@ -77,6 +80,7 @@ test("HTTP campaign: active creation then inactive product/SKU editing preserves
   await page.getByRole("link", { name: "Seleccionar alcance", exact: true }).click();
   await expect(page.getByRole("checkbox", { name: "Conservar producto: Producto anterior", exact: true })).toBeChecked();
   await expect(page.getByRole("checkbox", { name: "Conservar SKU: SKU-L", exact: true })).toBeChecked();
+  await expect(page.getByRole("checkbox", { name: /Inactivo no relacionado/ })).toHaveCount(0);
   await expect(page.getByRole("checkbox", { name: "Producto completo: Producto anterior", exact: true })).toHaveCount(0);
   await expect(page.getByRole("checkbox", { name: "SKU específico: SKU-L · SKU-L", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Confirmar alcance", exact: true }).click();
@@ -85,6 +89,21 @@ test("HTTP campaign: active creation then inactive product/SKU editing preserves
   await expect(page.getByRole("heading", { name: "Solo nombre actualizado", exact: true })).toBeVisible();
   expect(state.writes.at(-1)?.body).toEqual({ nombre: "Solo nombre actualizado" });
   await page.screenshot({ path: info.outputPath("historical-campaign-1440.png") });
+});
+
+test("HTTP campaign: historical product ID with null base SKU stays visible without a fabricated SKU", async ({ page }) => {
+  const state = await setup(page);
+  state.inactive = true; state.nullBase = true;
+  await page.goto("/promociones/parent/editar/alcance");
+  await expect(page.getByRole("checkbox", { name: "Conservar producto: Producto anterior", exact: true })).toBeChecked();
+  await expect(page.getByRole("checkbox", { name: "Conservar SKU: SKU-L", exact: true })).toBeChecked();
+  await expect(page.getByRole("checkbox", { name: /SKU-SIMPLE/ })).toHaveCount(0);
+  await expect(page.getByRole("checkbox", { name: /Inactivo no relacionado/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Confirmar alcance", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Confirmar alcance", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Canales y alcance" })).toContainText(simple.name);
+  await expect(page.getByRole("region", { name: "Canales y alcance" })).toContainText("SKU-L");
+  expect(state.writes).toEqual([]);
 });
 
 test("HTTP campaign: historical product/SKU associations are removed only by explicit selection", async ({ page }) => {
