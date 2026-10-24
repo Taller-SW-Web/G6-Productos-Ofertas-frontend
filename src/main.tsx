@@ -14,6 +14,8 @@ import { createPricingRuntime } from "./features/pricing/services/pricingService
 import { PricingProvider } from "./features/pricing/components/PricingProvider";
 import { resolveDataMode } from "./app/config/dataMode";
 import { DataModeContext } from "./app/config/DataModeContext";
+import { PromotionApiContext } from "./app/config/PromotionApiContext";
+import { PromotionSessionContext } from "./app/config/PromotionSessionContext";
 import { createCombosRuntime } from "./features/combos/services/combosService";
 import { CombosProvider } from "./features/combos/components/CombosProvider";
 
@@ -24,6 +26,16 @@ async function start() {
     import.meta.env.DEV,
   );
   const runtime = await createPricingRuntime(mode);
+  const gatewayOrigin = import.meta.env.VITE_GATEWAY_ORIGIN as
+    string | undefined;
+  const securityApiBase = import.meta.env.VITE_G7_API_BASE as
+    string | undefined;
+  const promotions =
+    mode === "api" && gatewayOrigin && securityApiBase
+      ? (
+          await import("./features/promotions/services/promotionSessionRuntime")
+        ).createOptionalPromotionSessionRuntime(gatewayOrigin, securityApiBase)
+      : null;
   const combosRuntime = await createCombosRuntime(mode, runtime);
   root.render(
     <StrictMode>
@@ -34,9 +46,17 @@ async function start() {
       >
         <DataModeContext.Provider value={mode}>
           <PricingProvider runtime={runtime}>
-            <CombosProvider mode={mode} runtime={combosRuntime}>
-              <App />
-            </CombosProvider>
+            <PromotionSessionContext.Provider
+              value={promotions?.session ?? null}
+            >
+              <PromotionApiContext.Provider
+                value={promotions?.services ?? null}
+              >
+                <CombosProvider mode={mode} runtime={combosRuntime}>
+                  <App />
+                </CombosProvider>
+              </PromotionApiContext.Provider>
+            </PromotionSessionContext.Provider>
           </PricingProvider>
         </DataModeContext.Provider>
       </MantineProvider>

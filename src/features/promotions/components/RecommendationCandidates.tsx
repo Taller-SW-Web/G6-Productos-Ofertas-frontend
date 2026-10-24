@@ -41,6 +41,9 @@ export function RecommendationCandidates({
           <Text size="sm" fw={600}>
             {name(row.productId)}
           </Text>
+          {products.some(item => item.id === row.productId && !item.active) && (
+            <Text size="sm">Inactivo · asociación conservada</Text>
+          )}
           {errors[`candidate-${row.index}`] && (
             <Text size="sm" c="var(--po-errorText)" role="alert">
               {errors[`candidate-${row.index}`]}

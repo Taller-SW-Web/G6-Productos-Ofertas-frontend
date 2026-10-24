@@ -32,12 +32,18 @@ test.describe("MK-003 Gestión de productos (CRUD principal)", () => {
 
     // Clear search
     await searchInput.fill("");
+    // URL navigation commits before React finishes rendering the next result.
+    // Wait for the cleared query's actual rows before selecting another filter.
+    await expect(page).not.toHaveURL(/q=Oxford/);
+    await expect(page.getByText("Mochila Deportiva Endurance")).toBeVisible();
 
     // Filter by sale model "Con variantes"
     const modelSelect = page.getByRole("combobox", { name: "Modelo" });
     await modelSelect.click();
     await page.getByRole("option", { name: "Con variantes" }).click();
     await expect(page).toHaveURL(/modelo=variants/);
+    await expect(modelSelect).toHaveValue("Con variantes");
+    await expect(page.getByText("Mochila Deportiva Endurance")).toHaveCount(0);
 
     // Navigate to detail and return
     await page

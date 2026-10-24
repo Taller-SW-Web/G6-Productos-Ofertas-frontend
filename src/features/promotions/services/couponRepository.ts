@@ -1,6 +1,8 @@
 // Presentation models for administrative reading; these are not HTTP DTOs.
 export type CouponStatus = "active" | "inactive";
 export interface CouponView {
+  // Presentation warning after a confirmed write; never a backend state.
+  relatedDataUnavailable?: boolean;
   id: string;
   promotionId: string;
   code: string;
