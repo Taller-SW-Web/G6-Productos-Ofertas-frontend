@@ -17,6 +17,44 @@ export function couponRemainingLabel(coupon: CouponView) {
   return String(coupon.remainingUses);
 }
 
+export type CouponPromotionValidity =
+  | "available"
+  | "not-started"
+  | "expired"
+  | "unknown";
+
+export function couponPromotionValidity(
+  coupon: CouponView,
+  now = new Date(),
+): CouponPromotionValidity {
+  const from = coupon.promotion?.validFrom
+    ? new Date(coupon.promotion.validFrom).getTime()
+    : Number.NaN;
+  const until = coupon.promotion?.validUntil
+    ? new Date(coupon.promotion.validUntil).getTime()
+    : Number.NaN;
+  if (
+    !Number.isFinite(from) ||
+    !Number.isFinite(until) ||
+    until <= from
+  )
+    return "unknown";
+  const timestamp = now.getTime();
+  if (timestamp < from) return "not-started";
+  if (timestamp >= until) return "expired";
+  return "available";
+}
+
+export const couponPromotionValidityLabel = (
+  validity: CouponPromotionValidity,
+) =>
+  ({
+    available: "Vigente",
+    "not-started": "Aún no vigente",
+    expired: "Vigencia finalizada",
+    unknown: "No disponible",
+  })[validity];
+
 export const couponPolicyLabel = (coupon: CouponView) =>
   coupon.cancellationPolicy === "restore"
     ? "Restaurar uso al cancelar"
@@ -25,6 +63,7 @@ export const couponPolicyLabel = (coupon: CouponView) =>
 export function couponDateLabel(value: string) {
   return new Intl.DateTimeFormat("es-PE", {
     dateStyle: "medium",
+    timeStyle: "short",
     timeZone: "America/Lima",
   }).format(new Date(value));
 }

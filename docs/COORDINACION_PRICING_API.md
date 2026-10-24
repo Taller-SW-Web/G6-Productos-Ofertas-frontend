@@ -72,3 +72,51 @@ Tras integración autorizada: revisar que se conserve el callback de auditoría 
 ### Callback `onUpdated`
 
 Se conserva la corrección de `9315210`: el callback secundario está protegido por `try...catch`; si falla, el precio confirmado queda guardado, se devuelve su versión nueva y no se fuerza reenvío. VER-05 comprueba ese comportamiento; no es una garantía de entrega de Auditoría.
+
+## 5. Adaptador HTTP preparado en `vera`
+
+La rama `vera` incorpora `src/features/pricing/adapters/httpPricingRepository.ts` y su mapper explícito DTO → modelo de Pricing. El adapter usa únicamente un transporte inyectado que recibe rutas `/api/v1/...`, `AbortSignal`, método, headers y body; no crea otro cliente HTTP, no reintenta escrituras y no recurre a fixtures cuando el servidor falla. Las respuestas 404 solo se convierten en ausencia para `PRECIO_NO_ENCONTRADO` o `LOTE_NO_ENCONTRADO`. Las respuestas de precio conservan importe, null de oferta, moneda, canal, versión y vigencia; el desglose queda vacío cuando el contrato no devuelve sus filas. `readEditable` exige una definición SKU propia en el canal exacto y bloquea la escritura si la lectura solo devuelve herencia/fallback; Pricing no crea overrides desde esta integración.
+
+La composición de Castilla (#45/#109) puede inyectarlo mediante el factory ya existente:
+
+```ts
+createPricingRuntime("api", {
+  api: async () =>
+    createHttpPricingRepository({
+      transport: sharedGatewayTransport,
+      listCatalogTargets: authoritativeCatalogPricingTargets,
+      channelIds: canonicalPricingChannelIds,
+    }),
+});
+```
+
+`sharedGatewayTransport` debe adaptar el cliente compartido a `PricingHttpTransport.request(path, { method, signal, headers, body }): Promise<Response>` y tratar la ruta recibida como ya versionada con `/api/v1`. `authoritativeCatalogPricingTargets` debe entregar `PriceTarget[]` desde un provider real de Catálogo y validar estado/elegibilidad; sin ese provider, `listTargets` falla explícitamente. No se debe conectar el repositorio mock ni derivar IDs de fixtures. `canonicalPricingChannelIds.retail` debe ser el `channelId` real del provider para escrituras/programaciones Retail; no se asigna el texto `RETAIL` por analogía. La dependencia opcional `onUpdated` solo se ejecuta tras validar un PATCH confirmado y cuando exista la lectura previa exacta/versionada; su error secundario no altera el resultado del precio.
+
+La composición global permanece pendiente de Castilla: `main.tsx`, `src/app/config/**`, selección hybrid y `AuditRuntimeContext` no se modificaron. Auditoría continúa usando su runtime mock explícito cuando ese composition root se integre.
+
+### Límites contractuales observados
+
+| Fuente | Regla observada | Problema | Propuesta | Owner de decisión |
+|---|---|---|---|---|
+| Docs `contratos/http/openapi.yaml` (`PrecioUpdateRequest`/`ProgramacionPrecioRequest`) y Backend `apps/pricing-svc/src/domain/price.ts`, `src/persistence/pricing.schema.ts` | OpenAPI tipa importes como `number` sin escala; Pricing persiste `numeric(12,2)` y acepta como máximo diez dígitos enteros y dos decimales. | El adapter no puede enviar con seguridad más precisión que la soportada por el provider. Rechaza esos valores sin redondear; la precisión anunciada y la ejecutada no están homologadas. | Documentar escala y límite en el contrato aprobado, o acordar otro formato decimal compatible. | Backend Pricing + Docs/arquitectura |
+| Docs `contratos/http/openapi.yaml` (`Precio.channel_id`, `PrecioUpdateRequest.channelId`) y Backend `apps/pricing-svc/src/persistence/pricing.schema.ts` | La respuesta SKU publica `channel_id` como `Canal`; la escritura acepta `channelId: string | null`; la persistencia guarda `channel_id` como texto. | No hay mapeo publicado desde `PriceChannel = "retail"` al identificador de canal que esperan las escrituras. El adapter exige inyección de un ID canónico y rechaza otros canales de respuesta. | Publicar/confirmar el catálogo de IDs por canal y el formato de `channel_id` para lectura/escritura. | Backend Pricing + Catálogo + Docs |
+
+### Estado de la integración de esta revisión
+
+| Operación | Estado de handler en Backend `vera` | Estado desde React |
+|---|---|---|
+| `consultarPrecios` | `BLOCKED_CONTRACT`: falta contexto autoritativo de Catálogo | `BLOCKED_CONTRACT` |
+| `obtenerPrecioSku` | `BLOCKED_CONTRACT`: falta contexto/elegibilidad de Catálogo | Implementado en adapter; handler pendiente |
+| `actualizarPrecioSku` | `BLOCKED_CONTRACT`: handler y payload Outbox P-PRI-02 | Implementado en adapter; no habilitado por provider |
+| `listarProgramacionesPrecioSku` | Handler existente; provisional interno | Implementado en adapter |
+| `programarPrecioSku` | `BLOCKED_CONTRACT`: handler y payload Outbox P-PRI-02 | Implementado en adapter; no habilitado por provider |
+| `prevalidarImportacionPrecios` | `BLOCKED_CONTRACT`: P-PRI-01 | `BLOCKED_CONTRACT`; no envía el archivo |
+| `crearImportacionPrecios` | `BLOCKED_CONTRACT`: P-PRI-01/P-PRI-02 | Sin método en `PricingRepository` |
+| `obtenerImportacionPrecios` | Handler existente; provisional interno | Implementado en adapter |
+| `descargarReporteImportacionPrecios` | `BLOCKED_CONTRACT`: P-PRI-01 | Implementado como GET CSV real; handler pendiente |
+| `obtenerPrecioBaseProducto` | Handler existente; provisional interno | Implementado en adapter |
+| `actualizarPrecioBaseProducto` | `BLOCKED_CONTRACT`: handler y payload Outbox P-PRI-02 | Implementado en adapter; no habilitado por provider |
+| `listarProgramacionesPrecioProducto` | Handler existente; provisional interno | Implementado en adapter |
+| `programarPrecioBaseProducto` | `BLOCKED_CONTRACT`: handler y payload Outbox P-PRI-02 | Implementado en adapter; no habilitado por provider |
+
+“Implementado en adapter” solo acredita la construcción del cliente para la forma publicada; no acredita que Gateway o `pricing-svc` sirvan esa ruta. La suite focalizada del adapter usa transporte de prueba. El E2E React → cliente compartido → Gateway → Pricing → PostgreSQL sigue pendiente hasta que Castilla integre el transporte/composición, Catálogo provea objetivos elegibles y Backend desbloquee las operaciones requeridas.
