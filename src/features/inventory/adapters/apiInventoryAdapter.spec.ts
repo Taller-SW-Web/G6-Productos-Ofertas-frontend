@@ -9,6 +9,8 @@ import {
   getUncertainTransferReception,
   resetConfirmedTransferReceptionsAwaitingRefresh,
   resetUncertainTransferReceptions,
+  setInFlightTransferReception,
+  setUncertainTransferReception,
 } from "../services/transferReceptionAttempt";
 import type {
   ReceiveTransferPayload,
@@ -1662,6 +1664,163 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
       expect(getUncertainTransferReception("t-1")).not.toBeNull();
     });
   });
+
+  describe("TAC-P0-06 / TAC-P0-03 / TAC-P1-05 / TAC-P1-06: regresiones adicionales", () => {
+    it("TAC-P0-06-A: setUncertainTransferReception persiste el snapshot en sessionStorage", () => {
+      const values = new Map<string, string>();
+      const storage: Storage = {
+        get length() {
+          return values.size;
+        },
+        clear() {
+          values.clear();
+        },
+        getItem(key: string) {
+          return values.has(key) ? values.get(key)! : null;
+        },
+        key(index: number) {
+          return [...values.keys()][index] ?? null;
+        },
+        removeItem(key: string) {
+          values.delete(key);
+        },
+        setItem(key: string, value: string) {
+          values.set(key, value);
+        },
+      };
+      globalThis.sessionStorage = storage;
+      resetUncertainTransferReceptions();
+      setUncertainTransferReception(RECEPCION_PAYLOAD);
+      const raw = storage.getItem("inventory.transferReceptionAttempts.v1");
+      expect(raw).toContain(RECEPCION_PAYLOAD.operationId);
+      resetUncertainTransferReceptions();
+      expect(storage.getItem("inventory.transferReceptionAttempts.v1")).toBeNull();
+      delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
+    });
+
+    it("TAC-P0-06-B: un error de almacenamiento impide persistir el intento", () => {
+      const values = new Map<string, string>();
+      const storage: Storage = {
+        get length() {
+          return values.size;
+        },
+        clear() {
+          values.clear();
+        },
+        getItem(key: string) {
+          return values.has(key) ? values.get(key)! : null;
+        },
+        key(index: number) {
+          return [...values.keys()][index] ?? null;
+        },
+        removeItem(key: string) {
+          values.delete(key);
+        },
+        setItem(key: string, value: string) {
+          values.set(key, value);
+        },
+      };
+      globalThis.sessionStorage = storage;
+      const originalSetItem = storage.setItem.bind(storage);
+      storage.setItem = () => {
+        throw new Error("quota");
+      };
+      expect(() =>
+        setInFlightTransferReception(RECEPCION_PAYLOAD),
+      ).toThrow();
+      storage.setItem = originalSetItem;
+      resetUncertainTransferReceptions();
+      delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
+    });
+
+    it("TAC-P0-03-A: una confirmación con cantidad distinta conserva UNCERTAIN", async () => {
+      const { repository } = setup(async () =>
+        jsonResponse({ ...RECEPCION_OK, received_quantity: 5 }),
+      );
+      await expect(
+        rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+      ).resolves.toMatchObject({ code: "RESPUESTA_INCOMPATIBLE" });
+      expect(getUncertainTransferReception("t-1")).not.toBeNull();
+    });
+
+    it("TAC-P0-03-B: una confirmación con disposición distinta conserva UNCERTAIN", async () => {
+      const { repository } = setup(async () =>
+        jsonResponse({ ...RECEPCION_OK, disposition: "CONFIRMAR_MERMA" }),
+      );
+      await expect(
+        rejection(repository.receiveTransfer(RECEPCION_PAYLOAD)),
+      ).resolves.toMatchObject({ code: "RESPUESTA_INCOMPATIBLE" });
+      expect(getUncertainTransferReception("t-1")).not.toBeNull();
+    });
+
+    it("TAC-P1-05-A: una página recibida distinta a la solicitada se rechaza", async () => {
+      const { repository } = setup(async () =>
+        jsonResponse({
+          items: [TRASLADO_CONFIRMADO],
+          pagina: 2,
+          tamanio: 100,
+          total: 1,
+        }),
+      );
+      await expect(rejection(repository.getTransfers())).resolves.toMatchObject({
+        code: "RESPUESTA_INCOMPATIBLE",
+      });
+    });
+
+    it("TAC-P1-05-B: un traslado duplicado entre páginas se rechaza", async () => {
+      const { repository } = setup(async (path) => {
+        if (path.includes("pagina=2")) {
+          return jsonResponse({
+            items: [TRASLADO_CONFIRMADO],
+            pagina: 2,
+            tamanio: 100,
+            total: 2,
+          });
+        }
+        return jsonResponse({
+          items: [TRASLADO_CONFIRMADO],
+          pagina: 1,
+          tamanio: 100,
+          total: 2,
+        });
+      });
+      await expect(rejection(repository.getTransfers())).resolves.toMatchObject({
+        code: "RESPUESTA_INCOMPATIBLE",
+      });
+    });
+
+    it("TAC-P1-05-C: un total inconsistente durante la paginación se rechaza", async () => {
+      const { repository } = setup(async (path) => {
+        if (path.includes("pagina=2")) {
+          return jsonResponse({
+            items: [traslado({ traslado_id: "t-2" })],
+            pagina: 2,
+            tamanio: 100,
+            total: 1,
+          });
+        }
+        return jsonResponse({
+          items: [TRASLADO_CONFIRMADO],
+          pagina: 1,
+          tamanio: 100,
+          total: 2,
+        });
+      });
+      await expect(rejection(repository.getTransfers())).resolves.toMatchObject({
+        code: "RESPUESTA_INCOMPATIBLE",
+      });
+    });
+
+    it("TAC-P1-06-A: un PUT de umbral incierto usa mensaje de umbral", async () => {
+      const { repository } = setup(async () =>
+        problemResponse(503, "SERVICIO_NO_DISPONIBLE"),
+      );
+      const error = await rejection(repository.updateGlobalThreshold(7));
+      expect(error.code).toBe("RESULTADO_INCIERTO");
+      expect(error.message).toContain("umbral");
+    });
+  });
+
 });
 
 describe("apiInventoryAdapter — dashboard KPIs (obtenerDashboardInventario)", () => {
