@@ -572,3 +572,35 @@ pm test (54 + 51 + 55), **47/47** Playwright de inventario, builds
   - `tests/inventory*.spec.ts` (Playwright): **61/61 PASS**.
   - `npm run build` (`VITE_DATA_MODE=mock` y `VITE_DATA_MODE=api`): **PASS**.
 
+## Evidencia de la iteración 12 (auditoría PR #59 / MK-015 y MK-016 Hito 4)
+
+- Rama: `taco`.
+- Archivos involucrados:
+  - `src/features/inventory/hooks/useThresholds.ts`
+  - `src/features/inventory/adapters/thresholdReconciliation.spec.ts`
+  - `src/features/inventory/INTEGRACION_HTTP.md`
+- Cambios realizados:
+  1. **[P1] useThresholds.ts — Acreditación directa ante PUT 200 y conciliación ante RESULTADO_INCIERTO:**
+     - En `updateGlobal` y `updateSku`, cuando el PUT devuelve una respuesta contractual válida (`ThresholdConfig`), se utiliza directamente esa configuración para actualizar el estado, confirmar el éxito (`"Umbral global actualizado correctamente."` / `"Umbral para SKU {sku} actualizado correctamente."`) y notificar el cambio con `notifyInventoryChanged()`. Se elimina la dependencia previa de un GET posterior para reconocer una escritura confirmada (cero peticiones GET tras un PUT 200 exitoso).
+     - Cuando el PUT devuelva `RESULTADO_INCIERTO` (por ejemplo tras HTTP 408, 503, 504, abort o timeout de transporte), se consultan los umbrales autoritativos mediante `getThresholds()`.
+     - Si el valor autoritativo coincide con el solicitado (`authoritative.globalThreshold === val` o `authoritative.skuOverrides[sku] === val`), se comunica que el valor deseado está verificado (`"El valor deseado fue verificado en el servidor."`) sin afirmar necesariamente que esta solicitud particular produjo el cambio, se actualiza el estado, se notifica el cambio y se confirma la operación (`return true`).
+     - Si el GET de conciliación falla o devuelve un valor distinto, se conserva íntegro el estado incierto (`RESULTADO_INCIERTO`), se expone en `saveError` y **no se realiza ningún reintento automático de escritura** (`return false`).
+  2. **[P1] Pruebas unitarias de conciliación y transporte HTTP:**
+     - Se crearon 14 pruebas unitarias en `src/features/inventory/adapters/thresholdReconciliation.spec.ts` que validan:
+       - Umbral global: PUT 200 válido sin dependencia de un GET posterior (`expect(getThresholds).not.toHaveBeenCalled()`).
+       - Umbral global: PUT incierto seguido de GET coincidente (comunica verificación en el servidor sin reintento de escritura).
+       - Umbral global: PUT incierto seguido de GET no coincidente (conserva estado incierto y no reintenta la escritura).
+       - Umbral global: PUT incierto seguido de GET fallido (conserva estado incierto y no reintenta la escritura).
+       - Umbral por SKU: los 4 casos análogos para `updateSkuThresholdWithReconciliation`.
+       - Integración con `createHttpInventoryRepository` sobre el transporte HTTP para ambos tipos de umbral, verificando que ante fallos 503 o 504 no se despache un segundo PUT y que tras un PUT 200 no se ejecute un GET.
+  3. **[P1] Alcance y delimitación del estado:**
+     - Estado formal: **`PARTIAL`**. Se distingue claramente la implementación aislada del adaptador HTTP y las pruebas automatizadas frente a la integración real con el Gateway, la cual permanece pendiente del composition root compartido (#45/#109) y el desbloqueo de `CommercialModeGate`. No se declaran completas las historias MK-015 ni MK-016 de extremo a extremo, ni se cierran los issues #17 y #18.
+- Resultados de validación:
+  - `npm run lint`: **PASS** (0 errores, 0 advertencias).
+  - `npm run typecheck`: **PASS** (0 errores).
+  - `test:unit:inventory`: **96/96 PASS** (82 en `apiInventoryAdapter.spec.ts` + 14 en `thresholdReconciliation.spec.ts`).
+  - `npm test`: **358/358 PASS** (combos: 56, bulk: 51, inventory: 96, pricing: 155).
+  - `tests/inventory*.spec.ts` (Playwright): **61/61 PASS**.
+  - `npm run build` (`VITE_DATA_MODE=mock` y `VITE_DATA_MODE=api`): **PASS**.
+
+

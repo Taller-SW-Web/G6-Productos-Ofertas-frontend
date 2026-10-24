@@ -5,6 +5,73 @@ import { getInventoryRepository } from "../services/inventoryProvider";
 import { useInventoryChangeSignal } from "./useInventoryChangeSignal";
 import type { ThresholdConfig } from "../services/inventoryTypes";
 
+export interface ThresholdMutationSuccess {
+  status: "CONFIRMED" | "VERIFIED";
+  config: ThresholdConfig;
+  message: string;
+}
+
+export async function updateGlobalThresholdWithReconciliation(
+  val: number,
+  repository = getInventoryRepository(),
+): Promise<ThresholdMutationSuccess> {
+  try {
+    const updated = await repository.updateGlobalThreshold(val);
+    return {
+      status: "CONFIRMED",
+      config: updated,
+      message: "Umbral global actualizado correctamente.",
+    };
+  } catch (err: unknown) {
+    if (err instanceof InventoryError && err.code === "RESULTADO_INCIERTO") {
+      try {
+        const authoritative = await repository.getThresholds();
+        if (authoritative.globalThreshold === val) {
+          return {
+            status: "VERIFIED",
+            config: authoritative,
+            message: "El valor deseado fue verificado en el servidor.",
+          };
+        }
+      } catch {
+        // Si el GET de conciliación falla, conservamos el estado incierto
+      }
+    }
+    throw err;
+  }
+}
+
+export async function updateSkuThresholdWithReconciliation(
+  sku: string,
+  val: number,
+  repository = getInventoryRepository(),
+): Promise<ThresholdMutationSuccess> {
+  try {
+    const updated = await repository.updateSkuThreshold(sku, val);
+    return {
+      status: "CONFIRMED",
+      config: updated,
+      message: `Umbral para SKU ${sku} actualizado correctamente.`,
+    };
+  } catch (err: unknown) {
+    if (err instanceof InventoryError && err.code === "RESULTADO_INCIERTO") {
+      try {
+        const authoritative = await repository.getThresholds();
+        if (authoritative.skuOverrides[sku] === val) {
+          return {
+            status: "VERIFIED",
+            config: authoritative,
+            message: "El valor deseado fue verificado en el servidor.",
+          };
+        }
+      } catch {
+        // Si el GET de conciliación falla, conservamos el estado incierto
+      }
+    }
+    throw err;
+  }
+}
+
 export function useThresholds() {
   const revision = useInventoryChangeSignal();
   const requestKey = JSON.stringify([revision]);
@@ -49,43 +116,15 @@ export function useThresholds() {
     setSaveError(null);
     setSuccessMessage(null);
     try {
-      let putError: unknown = null;
-      try {
-        await getInventoryRepository().updateGlobalThreshold(val);
-      } catch (err: unknown) {
-        if (
-          err instanceof InventoryError &&
-          err.code === "RESULTADO_INCIERTO"
-        ) {
-          putError = err;
-        } else {
-          throw err;
-        }
-      }
-
-      // Lectura autoritativa antes de acreditar el nuevo valor
-      try {
-        const authoritative = await getInventoryRepository().getThresholds();
-        if (authoritative.globalThreshold === val) {
-          setResponse({
-            requestKey,
-            thresholds: authoritative,
-            error: null,
-          });
-          setSuccessMessage("Umbral global actualizado correctamente.");
-          notifyInventoryChanged();
-          return true;
-        }
-      } catch {
-        // Fall through to show uncertain state
-      }
-
-      throw putError instanceof Error
-        ? putError
-        : new InventoryError(
-            "RESULTADO_INCIERTO",
-            "El umbral podría haberse actualizado, pero no se confirmó el resultado. Consulta el valor actual antes de continuar.",
-          );
+      const result = await updateGlobalThresholdWithReconciliation(val);
+      setResponse({
+        requestKey,
+        thresholds: result.config,
+        error: null,
+      });
+      setSuccessMessage(result.message);
+      notifyInventoryChanged();
+      return true;
     } catch (err: unknown) {
       setSaveError(
         err instanceof Error
@@ -103,43 +142,15 @@ export function useThresholds() {
     setSaveError(null);
     setSuccessMessage(null);
     try {
-      let putError: unknown = null;
-      try {
-        await getInventoryRepository().updateSkuThreshold(sku, val);
-      } catch (err: unknown) {
-        if (
-          err instanceof InventoryError &&
-          err.code === "RESULTADO_INCIERTO"
-        ) {
-          putError = err;
-        } else {
-          throw err;
-        }
-      }
-
-      // Lectura autoritativa antes de acreditar el nuevo valor
-      try {
-        const authoritative = await getInventoryRepository().getThresholds();
-        if (authoritative.skuOverrides[sku] === val) {
-          setResponse({
-            requestKey,
-            thresholds: authoritative,
-            error: null,
-          });
-          setSuccessMessage(`Umbral para SKU ${sku} actualizado correctamente.`);
-          notifyInventoryChanged();
-          return true;
-        }
-      } catch {
-        // Fall through to show uncertain state
-      }
-
-      throw putError instanceof Error
-        ? putError
-        : new InventoryError(
-            "RESULTADO_INCIERTO",
-            "El umbral podría haberse actualizado, pero no se confirmó el resultado. Consulta el valor actual antes de continuar.",
-          );
+      const result = await updateSkuThresholdWithReconciliation(sku, val);
+      setResponse({
+        requestKey,
+        thresholds: result.config,
+        error: null,
+      });
+      setSuccessMessage(result.message);
+      notifyInventoryChanged();
+      return true;
     } catch (err: unknown) {
       setSaveError(
         err instanceof Error ? err.message : "Error al actualizar umbral.",
