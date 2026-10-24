@@ -39,17 +39,19 @@ for (const [name, mode, gateway, security, integrated] of [
     await page.goto("/precios");
     await expect(page.getByRole("navigation", { name: "Navegación de la aplicación" })).toBeVisible();
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-    for (const label of ["Gestión de productos", "Gestión de combos"]) {
+    for (const [label, path] of [["Gestión de productos", "/productos"], ["Gestión de combos", "/combos"]]) {
       await page.getByRole("link", { name: label, exact: true }).click();
+      await expect(page).toHaveURL(new RegExp(`${path}$`));
       await expect(page.locator("main")).toBeVisible();
       await expect(page.getByRole("heading", { name: "Iniciar sesión", exact: true })).toHaveCount(0);
       if (mode === "mock") await expect(page.getByRole("heading", { name: label, exact: true })).toBeVisible();
     }
     await page.getByRole("link", { name: "Cupones de descuento", exact: true }).click();
+    await expect(page).toHaveURL(/\/cupones$/);
     if (mode === "mock") await expect(page.getByRole("heading", { name: "Cupones de descuento", exact: true })).toBeVisible();
     else if (integrated) await expect(page.getByRole("heading", { name: "Iniciar sesión", exact: true })).toBeVisible();
     else {
-      await expect(page.getByRole("alert")).toContainText("Función no disponible");
+      await expect(page.getByRole("alert", { name: "Función no disponible", exact: true })).toBeVisible();
       await expect(page.getByRole("table")).toHaveCount(0);
     }
     expect(calls).toEqual([]);
