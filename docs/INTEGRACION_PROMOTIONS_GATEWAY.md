@@ -84,8 +84,11 @@ explícitos; no acreditan servicios compartidos.
 
 La reconciliación con `master` conserva el provider de Combos, los gates de
 Combos/Inventario y la persistencia mock incorporados por sus responsables,
-junto con el catálogo compartido y la sesión G7 de Promotions. Los comandos
-vigentes de la suite general son `npm test` (unitarias) y `npm run test:e2e`
+junto con el catálogo compartido y la sesión G7 de Promotions.
+Los fixtures y pruebas de Promotions referencian ahora `PROD-RUN-001`, sus
+variantes `VAR-RUN-*` y SKU `CAM-RUN-*`, existentes en el catálogo vigente de
+`master`; no se restaura el producto Oxford eliminado por su responsable.
+Los comandos vigentes de la suite general son `npm test` (unitarias) y `npm run test:e2e`
 (Playwright); el harness separado de Pricing usa `npm run test:e2e:pricing`.
 La evidencia, SHAs exactos y CI de esta corrección se registran en el
 [PR #56](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/56).

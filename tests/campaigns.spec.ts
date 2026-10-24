@@ -30,7 +30,7 @@ async function selectScope(page: Page) {
     .click();
   await page
     .getByRole("checkbox", {
-      name: "Producto completo: Camisa Oxford Manga Larga",
+      name: "Producto completo: Camiseta Running Endurance",
       exact: true,
     })
     .check();
@@ -57,7 +57,7 @@ test("@smoke MK-006 S01/S05: typed filters and detail retain list context", asyn
   ).toBeVisible();
   await expect(
     page.getByRole("region", { name: "Alcance de productos y SKU" }),
-  ).toContainText("Camisa Oxford Manga Larga");
+  ).toContainText("Camiseta Running Endurance");
   await expect(
     page.getByRole("region", { name: "Alcance de productos y SKU" }),
   ).toContainText("CAS-COR-001");
@@ -124,7 +124,7 @@ test("MK-006 S02/S04: validate discount/channels and preserve draft and typed sc
     .click();
   await page
     .getByRole("checkbox", {
-      name: "Producto completo: Camisa Oxford Manga Larga",
+      name: "Producto completo: Camiseta Running Endurance",
       exact: true,
     })
     .uncheck();
@@ -138,8 +138,8 @@ test("MK-006 S02/S04: validate discount/channels and preserve draft and typed sc
     .getByRole("link", { name: "Cancelar selección", exact: true })
     .click();
   const scope = page.getByRole("region", { name: "Canales y alcance" });
-  await expect(scope).toContainText("Producto completo: Camisa Oxford Manga Larga");
-  await expect(scope).not.toContainText("Producto completo: Gorra");
+  await expect(scope).toContainText("Producto completo: Camiseta Running Endurance");
+  await expect(scope).not.toContainText("Producto completo: Casaca");
   await page
     .getByRole("button", { name: "Crear promoción", exact: true })
     .click();
@@ -150,9 +150,9 @@ test("MK-006 S02/S04: validate discount/channels and preserve draft and typed sc
     name: "Alcance de productos y SKU",
   });
   await expect(savedScope).toContainText(
-    "Producto completo: Camisa Oxford Manga Larga",
+    "Producto completo: Camiseta Running Endurance",
   );
-  await expect(savedScope).not.toContainText("CAM-OXF-BLA-M");
+  await expect(savedScope).not.toContainText("CAM-RUN-BLA-M");
   await expect(savedScope).toContainText("SKU específico: CAS-COR-001");
 });
 test("MK-006 S03/S06: allowed modality is revalidated and activation history survives deactivation", async ({
@@ -351,7 +351,7 @@ test("MK-006: desktop evidence for all six views", async ({ page }) => {
     else if (file === "s04")
       await expect(
         page.getByRole("checkbox", {
-          name: "Producto completo: Camisa Oxford Manga Larga",
+          name: "Producto completo: Camiseta Running Endurance",
         }),
       ).toBeVisible();
     expect(

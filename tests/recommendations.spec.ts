@@ -3,14 +3,17 @@ import { expect, test, type Page } from "@playwright/test";
 
 const recommendationMockNotice =
   "Entorno de prueba: la información presentada es de referencia y no confirma una aplicación comercial.";
-async function choose(page: Page, label: string, option: string) {
+async function choose(page: Page, label: string, option: string, id?: string) {
   await page.getByRole("combobox", { name: label, exact: true }).click();
-  await page.getByRole("option", { name: option, exact: true }).click();
+  const choice = page.getByRole("option", { name: option, exact: true });
+  // Historical and editable Taxonomy records may share a label; their IDs
+  // remain distinct. Select the fixture's actual reference without merging it.
+  await (id ? choice.and(page.locator(`[value="${id}"]`)) : choice).click();
 }
 async function fillRule(page: Page, name: string) {
   await page.getByLabel("Nombre de la regla", { exact: true }).fill(name);
   await choose(page, "Tipo de origen", "Producto");
-  await choose(page, "Producto de origen", "Camisa Oxford Manga Larga");
+  await choose(page, "Producto de origen", "Camiseta Running Endurance");
   await choose(page, "Estado inicial", "Inactiva");
   await page.getByLabel("Prioridad", { exact: true }).fill("2");
   await page
@@ -28,7 +31,7 @@ async function add(page: Page, names: string[]) {
     })
     .click();
   await expect(
-    page.getByRole("checkbox", { name: "Camisa Oxford Manga Larga", exact: true }),
+    page.getByRole("checkbox", { name: "Camiseta Running Endurance", exact: true }),
   ).toHaveCount(0);
   for (const name of names)
     await page.getByRole("checkbox", { name, exact: true }).check();
@@ -110,7 +113,7 @@ test("MK-007 S02/S05: selector excludes origin/duplicates, cancellation preserve
     .fill("1");
   await choose(page, "Tipo de origen", "Categoría");
   await page.getByRole("dialog").getByRole("button", { name: "Cambiar origen", exact: true }).click();
-  await choose(page, "Categoría de origen", "Ropa");
+  await choose(page, "Categoría de origen", "Ropa", "CAT-ROPA");
   await page
     .getByRole("link", {
       name: "Seleccionar productos recomendados",
@@ -121,7 +124,7 @@ test("MK-007 S02/S05: selector excludes origin/duplicates, cancellation preserve
     page.getByRole("checkbox", { name: "Casaca Cortaviento Trail", exact: true }),
   ).toHaveCount(0);
   await page
-    .getByRole("checkbox", { name: "Camisa Oxford Manga Larga", exact: true })
+    .getByRole("checkbox", { name: "Camiseta Running Endurance", exact: true })
     .check();
   await page
     .getByRole("link", { name: "Cancelar selección", exact: true })
@@ -129,7 +132,7 @@ test("MK-007 S02/S05: selector excludes origin/duplicates, cancellation preserve
   await expect(
     page.getByLabel("Nombre de la regla", { exact: true }),
   ).toHaveValue("Complementos de prueba");
-  await expect(page.getByRole("table")).not.toContainText("Camisa Oxford Manga Larga");
+  await expect(page.getByRole("table")).not.toContainText("Camiseta Running Endurance");
   await page
     .getByRole("button", { name: "Crear regla de venta cruzada", exact: true })
     .click();
@@ -221,7 +224,7 @@ test("MK-007: changing origin and discarding require confirmation without erasin
     .click();
   await expect(
     page.getByRole("combobox", { name: "Producto de origen", exact: true }),
-  ).toHaveValue("Camisa Oxford Manga Larga");
+  ).toHaveValue("Camiseta Running Endurance");
   await choose(page, "Tipo de origen", "Categoría");
   await page
     .getByRole("dialog")
@@ -231,7 +234,7 @@ test("MK-007: changing origin and discarding require confirmation without erasin
     page.getByRole("combobox", { name: "Categoría de origen", exact: true }),
   ).toHaveValue("");
   await expect(page.getByRole("table")).toContainText("Casaca Cortaviento Trail");
-  await choose(page, "Categoría de origen", "Ropa");
+  await choose(page, "Categoría de origen", "Ropa", "CAT-ROPA");
   await page.getByRole("button", { name: "Cancelar", exact: true }).click();
   await page
     .getByRole("dialog")
@@ -362,7 +365,7 @@ test("MK-007: seven desktop views and pending submission protection", async ({
       ).toHaveValue("Mejora tu rendimiento");
     else if (file === "s05")
       await expect(
-        page.getByRole("checkbox", { name: "Camisa Oxford Manga Larga", exact: true }),
+        page.getByRole("checkbox", { name: "Camiseta Running Endurance", exact: true }),
       ).toBeVisible();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= 1440),

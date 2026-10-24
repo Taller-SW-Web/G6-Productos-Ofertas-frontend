@@ -14,17 +14,17 @@ function setup() {
 test("CUE-01/04: same provider edits, product activation/deactivation and SKU status feed both consumers", async () => {
   const { catalog, services } = setup();
   let products = await services.catalog.products(signal());
-  expect(products.map(row => row.id)).toEqual(["PROD-OXF-001", "PROD-CAS-001"]);
-  expect(products[0]!.skus.map(row => row.sku)).toEqual(["CAM-OXF-BLA-M", "CAM-OXF-AZU-L"]);
+  expect(products.map(row => row.id)).toEqual(["PROD-RUN-001", "PROD-CAS-001"]);
+  expect(products[0]!.skus.map(row => row.sku)).toEqual(["CAM-RUN-BLA-M", "CAM-RUN-AZU-L"]);
   expect(products[1]!.skus[0]!.sku).toBe("CAS-COR-001");
   const current = (await catalog.getById("PROD-CAS-001"))!;
   await catalog.update(current.id, { nombre: "Casaca actualizada", descripcion: current.description, categoriaId: current.categoryId, marcaId: current.brandId, catalogVersion: current.catalogVersion, atributos: current.attributes, imagenes: current.images, perfilFisico: current.physicalProfile });
   expect((await services.catalog.products(signal())).find(row => row.id === current.id)?.name).toBe("Casaca actualizada");
   await catalog.activate("PROD-MOCH-001");
   expect((await services.catalog.products(signal())).map(row => row.id)).toContain("PROD-MOCH-001");
-  await catalog.deactivateVariant("PROD-OXF-001", "VAR-OXF-BLA-M");
+  await catalog.deactivateVariant("PROD-RUN-001", "VAR-RUN-BLA-M");
   products = await services.catalog.products(signal());
-  expect(products.find(row => row.id === "PROD-OXF-001")?.skus.map(row => row.sku)).toEqual(["CAM-OXF-AZU-L"]);
+  expect(products.find(row => row.id === "PROD-RUN-001")?.skus.map(row => row.sku)).toEqual(["CAM-RUN-AZU-L"]);
   await catalog.deactivate(current.id);
   expect((await services.catalog.products(signal())).map(row => row.id)).not.toContain(current.id);
 
@@ -41,7 +41,7 @@ test("CUE-03: integrated seed supports campaign edit, coupon creation and both r
   const { services } = setup();
   const campaign = (await services.campaigns.read("bienvenida", signal()))!;
   const saved = await services.campaigns.save(campaign.id, { ...campaign.configuration, name: "Campaña integrada" }, signal());
-  expect(saved.configuration.productIds).toEqual(["PROD-OXF-001"]);
+  expect(saved.configuration.productIds).toEqual(["PROD-RUN-001"]);
   await services.coupons.create({ code: "INTEGRADO", promotionId: saved.id, status: "inactive", globalLimit: null, customerLimit: null, minimumAmount: null, cancellationPolicy: "restore" }, signal());
   expect((await services.campaigns.read(saved.id, signal()))?.canChangeMode).toBe(false);
   for (const id of ["completa-carrera", "mejora-rendimiento", "categoria-running"]) {
@@ -78,8 +78,8 @@ test("CUE-03: provider pagination is fully consumed without rewriting opaque IDs
   catalog.listVariants = (id, query, scenario, abort) => originalVariants(id, { ...query, pageSize: 1 }, scenario, abort);
   const adapter = createCatalogPromotionRepository({ catalog, taxonomy: mockTaxonomyRepository });
   const rows = await adapter.products(signal());
-  expect(rows.map(row => row.id)).toEqual(["PROD-OXF-001", "PROD-CAS-001"]);
-  expect(rows[0]!.skus.map(row => row.sku)).toEqual(["CAM-OXF-BLA-M", "CAM-OXF-AZU-L"]);
+  expect(rows.map(row => row.id)).toEqual(["PROD-RUN-001", "PROD-CAS-001"]);
+  expect(rows[0]!.skus.map(row => row.sku)).toEqual(["CAM-RUN-BLA-M", "CAM-RUN-AZU-L"]);
 });
 
 test("CUE-03: errors and aborted reads propagate without isolated fixture fallback", async () => {
@@ -97,12 +97,12 @@ test("CUE-04: altas en borrador no son elegibles; un SKU nuevo aparece tras acti
   const { catalog, services } = setup();
   const product = await catalog.create({
     nombre: "Nuevo producto", descripcion: "Alta de prueba", categoriaId: "CAT-ROPA",
-    tipoProductoId: "TIP-CAMISA", marcaId: "BRD-INKA", skuBase: "ALTA-CUEVA",
+    tipoProductoId: "TIP-CAMISETA", marcaId: "BRD-INKA", skuBase: "ALTA-CUEVA",
     tieneVariantes: false, precioBaseInicial: 20,
   });
   expect(product.status).toBe("BORRADOR");
   expect((await services.catalog.products(signal())).some(row => row.id === product.id)).toBe(false);
-  const variant = await catalog.createVariant("PROD-OXF-001", {
+  const variant = await catalog.createVariant("PROD-RUN-001", {
     sku: "CUEVA-NUEVA-VARIANTE",
     identifyingAttributes: [{ caracteristicaId: "CAR-COLOR", nombre: "Color principal", tipo: "LISTA", valor: "Rojo Carmesí", valorId: "COL-ROJ" }],
     nonIdentifyingAttributes: [{ caracteristicaId: "CAR-MAT", nombre: "Material principal", tipo: "TEXTO", valor: "Algodón" }],

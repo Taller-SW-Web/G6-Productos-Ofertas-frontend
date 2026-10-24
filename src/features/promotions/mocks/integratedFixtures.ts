@@ -8,7 +8,7 @@ export const integratedCampaignFixtures = campaignFixtures.map(record => ({
   ...structuredClone(record),
   configuration: {
     ...structuredClone(record.configuration),
-    productIds: ["PROD-OXF-001"],
+    productIds: ["PROD-RUN-001"],
     skus: record.configuration.skus.length ? ["CAS-COR-001"] : [],
   },
 }));
@@ -17,7 +17,7 @@ export const integratedRecommendationFixtures = recommendationFixtures.map(recor
   ...structuredClone(record),
   configuration: {
     ...structuredClone(record.configuration),
-    originId: record.configuration.originType === "category" ? "CAT-ROPA" : "PROD-OXF-001",
+    originId: record.configuration.originType === "category" ? "CAT-ROPA" : "PROD-RUN-001",
     candidates: record.configuration.candidates.map(candidate => ({
       ...candidate,
       productId: "PROD-CAS-001",

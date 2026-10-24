@@ -178,7 +178,7 @@ test("MK-007: self-origin correction and conflict resolution retain typed candid
     .getByRole("combobox", { name: "Producto de origen", exact: true })
     .click();
   await page
-    .getByRole("option", { name: "Camisa Oxford Manga Larga", exact: true })
+    .getByRole("option", { name: "Camiseta Running Endurance", exact: true })
     .click();
   await page
     .getByLabel("Nombre de la regla", { exact: true })

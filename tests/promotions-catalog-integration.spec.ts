@@ -1,31 +1,31 @@
 import { expect, test } from "@playwright/test";
 
 test("CUE-01/CUE-04: editar en Catálogo actualiza el alcance de Promociones en la misma sesión", async ({ page }) => {
-  await page.goto("/productos/PROD-OXF-001/editar");
-  await page.getByLabel("Nombre del producto").fill("Oxford actualizado desde Catálogo");
+  await page.goto("/productos/PROD-RUN-001/editar");
+  await page.getByLabel("Nombre del producto").fill("Running actualizado desde Catálogo");
   await page.getByRole("button", { name: "Guardar cambios", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Oxford actualizado desde Catálogo", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Running actualizado desde Catálogo", exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Ofertas y promociones", exact: true }).click();
   await page.getByRole("link", { name: "Crear promoción", exact: true }).click();
   await page.getByRole("link", { name: "Seleccionar alcance", exact: true }).click();
-  await expect(page.getByRole("checkbox", { name: "Producto completo: Oxford actualizado desde Catálogo", exact: true })).toBeVisible();
-  await expect(page.getByRole("checkbox", { name: /SKU específico: CAM-OXF-BLA-M/ })).toBeVisible();
-  await expect(page.getByRole("checkbox", { name: /SKU específico: CAM-OXF-NEG-S/ })).toHaveCount(0);
+  await expect(page.getByRole("checkbox", { name: "Producto completo: Running actualizado desde Catálogo", exact: true })).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: /SKU específico: CAM-RUN-BLA-M/ })).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: /SKU específico: CAM-RUN-NEG-S/ })).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath("catalog-edited-promotion-scope-1440.png"), fullPage: true });
 });
 
 test("CUE-04: SKU y producto desactivados desde Catálogo se excluyen de los selectores", async ({ page }) => {
-  await page.goto("/productos/PROD-OXF-001/variantes/VAR-OXF-BLA-M");
+  await page.goto("/productos/PROD-RUN-001/variantes/VAR-RUN-BLA-M");
   await page.getByRole("button", { name: "Desactivar", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Desactivar Variante", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.getByRole("link", { name: "Ofertas y promociones", exact: true }).click();
   await page.getByRole("link", { name: "Crear promoción", exact: true }).click();
   await page.getByRole("link", { name: "Seleccionar alcance", exact: true }).click();
-  await expect(page.getByRole("checkbox", { name: /SKU específico: CAM-OXF-AZU-L/ })).toBeVisible();
-  await expect(page.getByRole("checkbox", { name: /SKU específico: CAM-OXF-BLA-M/ })).toHaveCount(0);
+  await expect(page.getByRole("checkbox", { name: /SKU específico: CAM-RUN-AZU-L/ })).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: /SKU específico: CAM-RUN-BLA-M/ })).toHaveCount(0);
   await page.getByRole("link", { name: "Gestión de productos", exact: true }).click();
-  await page.getByRole("row").filter({ hasText: "Camisa Oxford Manga Larga" }).getByRole("link", { name: "Ver detalle", exact: true }).click();
+  await page.getByRole("link", { name: "Ver detalle de Camiseta Running Endurance", exact: true }).click();
   await page.getByRole("button", { name: "Desactivar", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Desactivar Producto", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
@@ -33,7 +33,7 @@ test("CUE-04: SKU y producto desactivados desde Catálogo se excluyen de los sel
   await page.getByRole("link", { name: "Crear venta cruzada", exact: true }).click();
   await page.getByRole("link", { name: "Seleccionar productos recomendados", exact: true }).click();
   await expect(page.getByRole("checkbox", { name: "Casaca Cortaviento Trail", exact: true })).toBeVisible();
-  await expect(page.getByRole("checkbox", { name: "Camisa Oxford Manga Larga", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("checkbox", { name: "Camiseta Running Endurance", exact: true })).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath("catalog-deactivated-recommendation-selector-1440.png"), fullPage: true });
 });
 
