@@ -88,6 +88,12 @@ junto con el catálogo compartido y la sesión G7 de Promotions.
 Los fixtures y pruebas de Promotions referencian ahora `PROD-RUN-001`, sus
 variantes `VAR-RUN-*` y SKU `CAM-RUN-*`, existentes en el catálogo vigente de
 `master`; no se restaura el producto Oxford eliminado por su responsable.
+El adapter de Catálogo también conserva las referencias inactivas solicitadas
+mediante `retain` para leer detalles históricos, con nombres actuales y
+`active: false`; siguen excluidas de nuevas selecciones. Se conserva así el
+comportamiento de `master`. La prueba de reintento de Combos espera a completar
+la carga inicial compartida antes de activar su error de un solo uso, evitando
+que una invalidación de arranque lo consuma antes de pulsar Reintentar.
 Los comandos vigentes de la suite general son `npm test` (unitarias) y `npm run test:e2e`
 (Playwright); el harness separado de Pricing usa `npm run test:e2e:pricing`.
 La evidencia, SHAs exactos y CI de esta corrección se registran en el

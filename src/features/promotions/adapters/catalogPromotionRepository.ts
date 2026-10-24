@@ -11,38 +11,42 @@ export function createCatalogPromotionRepository({
   taxonomy,
 }: CatalogServices): PromotionCatalogRepository {
   return {
-    async products(signal) {
+    async products(signal, retain) {
       const products: CatalogProductChoice[] = [];
+      const retainedIds = new Set(retain?.productIds ?? []);
+      const retainedSkus = new Set(retain?.skus ?? []);
+      const retaining = retainedIds.size > 0 || retainedSkus.size > 0;
       for (let page = 1; ; page++) {
         signal.throwIfAborted();
         const result = await catalog.list(
-          { status: "ACTIVO", page, pageSize: 100 },
+          { status: retaining ? "all" : "ACTIVO", page, pageSize: 100 },
           undefined,
           signal,
         );
         signal.throwIfAborted();
         for (const product of result.items) {
-          if (product.status !== "ACTIVO") continue;
+          const active = product.status === "ACTIVO";
+          if (!active && !retainedIds.has(product.id) && !retainedSkus.size) continue;
           const skus: CatalogProductChoice["skus"] = [];
           if (product.hasVariants) {
             for (let variantPage = 1; ; variantPage++) {
               const variants = await catalog.listVariants(
                 product.id,
-                { status: "ACTIVA", page: variantPage, pageSize: 100 },
+                { status: retaining ? "all" : "ACTIVA", page: variantPage, pageSize: 100 },
                 undefined,
                 signal,
               );
               signal.throwIfAborted();
               skus.push(
                 ...variants.items
-                  .filter((row) => row.status === "ACTIVA")
+                  .filter((row) => row.status === "ACTIVA" || retainedSkus.has(row.sku))
                   .map((row) => ({
                     sku: row.sku,
                     label:
                       row.identifyingAttributes
                         .map((attribute) => `${attribute.nombre}: ${attribute.valor}`)
                         .join(" · ") || row.sku,
-                    active: true,
+                    active: active && row.status === "ACTIVA",
                   })),
               );
               if (variants.page * variants.pageSize >= variants.total) break;
@@ -53,12 +57,13 @@ export function createCatalogPromotionRepository({
             }
           } else {
             // Catalog explicitly defines skuBase as the sellable SKU for simple products.
-            skus.push({ sku: product.skuBase, label: product.name, active: true });
+            skus.push({ sku: product.skuBase, label: product.name, active });
           }
+          if (!active && !retainedIds.has(product.id) && !skus.some(row => retainedSkus.has(row.sku))) continue;
           products.push({
             id: product.id,
             name: product.name,
-            active: true,
+            active,
             categoryId: product.categoryId,
             skus,
           });

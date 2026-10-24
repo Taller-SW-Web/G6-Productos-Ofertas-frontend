@@ -63,7 +63,14 @@ test("creación de un combo directo y desactivación conservando el histórico",
 });
 
 test("error de listado con reintento sin mostrar un estado vacío", async ({ page }) => {
-  await page.goto("/combos?scenario=list-error");
+  // Finish the shared runtime's initial reads before delivering its one-shot
+  // error. Startup invalidation can otherwise consume the fixture's retry.
+  await page.goto("/combos");
+  await expect(page.getByRole("row").filter({ hasText: "Conjunto Trail Esencial" })).toBeVisible();
+  await page.evaluate(() => {
+    history.pushState({}, "", "/combos?scenario=list-error");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
   await expect(page.getByRole("alert")).toContainText("No se pudieron consultar los combos");
   await expect(page.getByText("No hay combos para mostrar")).toHaveCount(0);
 

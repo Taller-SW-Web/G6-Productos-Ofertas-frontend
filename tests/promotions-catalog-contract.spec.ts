@@ -52,6 +52,21 @@ test("CUE-03: integrated seed supports campaign edit, coupon creation and both r
   expect((await setup().services.coupons.list({ status: "all", page: 1, pageSize: 100 }, signal())).items.some(row => row.code === "INTEGRADO")).toBe(false);
 });
 
+test("integrated Catalog retains current inactive references for detail, excluding them from new selections", async () => {
+  const { catalog, services } = setup();
+  await catalog.deactivateVariant("PROD-RUN-001", "VAR-RUN-BLA-M");
+  const retain = { productIds: [], skus: ["CAM-RUN-BLA-M"] };
+  const retainedVariant = (await services.catalog.products(signal(), retain)).find(row => row.id === "PROD-RUN-001");
+  expect(retainedVariant?.skus).toContainEqual(expect.objectContaining({ sku: "CAM-RUN-BLA-M", active: false }));
+  expect((await services.catalog.products(signal())).flatMap(row => row.skus).some(row => row.sku === "CAM-RUN-BLA-M")).toBe(false);
+  await catalog.deactivate("PROD-RUN-001");
+  const retainedProduct = (await services.catalog.products(signal(), retain)).find(row => row.id === "PROD-RUN-001");
+  expect(retainedProduct).toMatchObject({ name: "Camiseta Running Endurance", active: false });
+  expect(retainedProduct?.skus.every(row => !row.active)).toBe(true);
+  expect((await services.catalog.products(signal())).some(row => row.id === "PROD-RUN-001")).toBe(false);
+  expect((await services.catalog.products(signal(), { productIds: ["PROD-RUN-001"], skus: [] })).some(row => row.id === "PROD-RUN-001")).toBe(true);
+});
+
 test("MK-005/MK-006: nombre y vigencia del cupón se consultan desde la promoción vigente", async () => {
   const { services } = setup();
   const before = (await services.coupons.read("bienvenida15", signal()))!;
