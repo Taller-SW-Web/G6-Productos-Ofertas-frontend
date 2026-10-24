@@ -24,9 +24,10 @@ import {
   type InventoryHttpRequest,
   type InventoryHttpTransport,
 } from "./apiInventoryAdapter";
-import type {
-  TransferPresentationResolver,
-  TrasladoInventarioDto,
+import {
+  toTransferItem,
+  type TransferPresentationResolver,
+  type TrasladoInventarioDto,
 } from "../services/inventoryMappers";
 
 beforeEach(() => {
@@ -1541,6 +1542,74 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
 
       delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
     });
+
+    it("P0: fallo de sessionStorage.setItem únicamente durante la confirmación tras 200 conserva el bloqueo y evita segundo POST", async () => {
+      const storage = createMockStorage();
+      globalThis.sessionStorage = storage;
+      resetUncertainTransferReceptions();
+
+      // Permitir la primera escritura (IN_FLIGHT antes del POST),
+      // pero hacer que falle la segunda escritura (confirmación tras 200).
+      let writeCount = 0;
+      const originalSetItem = storage.setItem;
+      storage.setItem = (key: string, value: string) => {
+        writeCount += 1;
+        if (writeCount === 1) {
+          originalSetItem(key, value);
+        } else {
+          throw new Error("QuotaExceededError durante confirmación");
+        }
+      };
+
+      const { repository, calls } = setup(async () => jsonResponse(RECEPCION_OK));
+
+      // 1. La llamada HTTP recibe 200 y completa sin rechazar la operación autoritativa
+      const result = await repository.receiveTransfer(RECEPCION_PAYLOAD);
+      expect(result.id).toBe("t-1");
+      expect(calls).toHaveLength(1);
+
+      // 2. En storage no quedó un estado vacío: conserva el snapshot IN_FLIGHT previo
+      const rawInStorage = storage.getItem("inventory.transferReceptionAttempts.v1");
+      expect(rawInStorage).not.toBeNull();
+      expect(rawInStorage).toContain(RECEPCION_PAYLOAD.operationId);
+
+      // Restaurar setItem para la fase de recarga
+      storage.setItem = originalSetItem;
+
+      // 3. Simula recarga de pestaña (reload)
+      rehydrateTransferReceptionsForTesting();
+
+      const { repository: repo2, calls: calls2 } = setup(async () => jsonResponse(RECEPCION_OK));
+      const record = repo2.getTransferWriteRecord("t-1");
+
+      // La recarga conserva el bloqueo en UNCERTAIN con el operationId y payload originales
+      expect(record?.state).toBe("UNCERTAIN");
+      expect(record?.payload.operationId).toBe(RECEPCION_PAYLOAD.operationId);
+      expect(record?.payload.quantityReceived).toBe(RECEPCION_PAYLOAD.quantityReceived);
+
+      // 4. Intentar una nueva intención con otro operationId se bloquea de inmediato
+      const alteredSession = createTransferReceptionFormSession("t-1");
+      expect(() =>
+        alteredSession.prepareSubmission({
+          quantityReceived: 8,
+          disposition: "REINGRESAR_DISPONIBLE",
+          finalReceipt: false,
+        }),
+      ).toThrow(InventoryError);
+
+      await expect(
+        rejection(
+          repo2.receiveTransfer({
+            ...RECEPCION_PAYLOAD,
+            operationId: "op-divergent-new",
+          }),
+        ),
+      ).resolves.toMatchObject({ code: "RESULTADO_INCIERTO" });
+      // Nunca aparece un segundo POST con otro operationId
+      expect(calls2).toHaveLength(0);
+
+      delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
+    });
   });
 
   describe("TAC-P0-11: aborto del transporte durante la recepción", () => {
@@ -2284,5 +2353,98 @@ describe("apiInventoryAdapter — operaciones sin fuente contractual", () => {
       expect(error.code).toBe("CONTRATO_BLOQUEADO");
     }
     expect(request).not.toHaveBeenCalled();
+  });
+});
+
+describe("toTransferItem — distinción de cantidad pendiente frente a faltante", () => {
+  const presentation = {
+    transferCode: "TR-2026-TEST",
+    productName: "Producto de Prueba",
+    sourceLocationName: "Almacén Origen",
+    targetLocationName: "Almacén Destino",
+  };
+
+  it("asigna quantityPending en 0 y missingQuantity positivo para COMPLETADO_CON_DISCREPANCIA", () => {
+    const dto: TrasladoInventarioDto = {
+      traslado_id: "tr-disc-1",
+      sku: "SKU-DISC",
+      quantity_shipped: 10,
+      quantity_received: 4,
+      missing_quantity: 6,
+      source_location_id: "loc-src",
+      target_location_id: "loc-dst",
+      estado: "COMPLETADO_CON_DISCREPANCIA",
+      created_at: "2026-10-20T00:00:00Z",
+      updated_at: "2026-10-20T01:00:00Z",
+    };
+
+    const item = toTransferItem(dto, presentation);
+    expect(item.quantityShipped).toBe(10);
+    expect(item.quantityReceived).toBe(4);
+    // Un traslado cerrado no tiene unidades pendientes de recepción
+    expect(item.quantityPending).toBe(0);
+    // El faltante registrado es 6
+    expect(item.missingQuantity).toBe(6);
+    expect(item.status).toBe("COMPLETADO_CON_DISCREPANCIA");
+  });
+
+  it("asigna quantityPending positivo y missingQuantity en 0 para traslados activos RECIBIDO_PARCIAL", () => {
+    const dto: TrasladoInventarioDto = {
+      traslado_id: "tr-parc-1",
+      sku: "SKU-PARC",
+      quantity_shipped: 10,
+      quantity_received: 4,
+      missing_quantity: 0,
+      source_location_id: "loc-src",
+      target_location_id: "loc-dst",
+      estado: "RECIBIDO_PARCIAL",
+      created_at: "2026-10-20T00:00:00Z",
+      updated_at: "2026-10-20T01:00:00Z",
+    };
+
+    const item = toTransferItem(dto, presentation);
+    expect(item.quantityPending).toBe(6);
+    expect(item.missingQuantity).toBe(0);
+    expect(item.status).toBe("RECIBIDO_PARCIAL");
+  });
+
+  it("asigna quantityPending total y missingQuantity en 0 para traslados activos EN_TRANSITO", () => {
+    const dto: TrasladoInventarioDto = {
+      traslado_id: "tr-trans-1",
+      sku: "SKU-TRANS",
+      quantity_shipped: 15,
+      quantity_received: 0,
+      missing_quantity: 0,
+      source_location_id: "loc-src",
+      target_location_id: "loc-dst",
+      estado: "EN_TRANSITO",
+      created_at: "2026-10-20T00:00:00Z",
+      updated_at: "2026-10-20T01:00:00Z",
+    };
+
+    const item = toTransferItem(dto, presentation);
+    expect(item.quantityPending).toBe(15);
+    expect(item.missingQuantity).toBe(0);
+    expect(item.status).toBe("EN_TRANSITO");
+  });
+
+  it("asigna quantityPending en 0 y missingQuantity en 0 para traslados COMPLETADO limpio", () => {
+    const dto: TrasladoInventarioDto = {
+      traslado_id: "tr-comp-1",
+      sku: "SKU-COMP",
+      quantity_shipped: 8,
+      quantity_received: 8,
+      missing_quantity: 0,
+      source_location_id: "loc-src",
+      target_location_id: "loc-dst",
+      estado: "COMPLETADO",
+      created_at: "2026-10-20T00:00:00Z",
+      updated_at: "2026-10-20T01:00:00Z",
+    };
+
+    const item = toTransferItem(dto, presentation);
+    expect(item.quantityPending).toBe(0);
+    expect(item.missingQuantity).toBe(0);
+    expect(item.status).toBe("COMPLETADO");
   });
 });

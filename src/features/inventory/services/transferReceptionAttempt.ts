@@ -639,21 +639,40 @@ export function markTransferReceptionConfirmedAwaitingRefresh(
   return frozen;
 }
 
-export function markTransferReceptionConfirmedAwaitingRefreshWithDto(
+export function transitionToConfirmedAwaitingRefreshWithDto(
   payload: ReceiveTransferPayload,
   dto: TrasladoInventarioDto,
 ): Readonly<ReceiveTransferPayload> {
   const frozen = freezeReceiveTransferPayload(payload);
-  uncertainReceptionsByTransferId.delete(frozen.transferId);
-  inFlightReceptionsByTransferId.delete(frozen.transferId);
-  confirmedReceptionsAwaitingRefreshByTransferId.set(frozen.transferId, frozen);
-  confirmedReceptionsAwaitingRefreshWithDtoByTransferId.set(frozen.transferId, {
+  const transferId = frozen.transferId;
+
+  // Transición atómica de mapas en memoria (sin pasar por estados intermedios vacíos)
+  uncertainReceptionsByTransferId.delete(transferId);
+  inFlightReceptionsByTransferId.delete(transferId);
+  confirmedReceptionsAwaitingRefreshByTransferId.set(transferId, frozen);
+  confirmedReceptionsAwaitingRefreshWithDtoByTransferId.set(transferId, {
     payload: frozen,
     dto,
   });
-  persistState();
+
+  try {
+    persistState();
+  } catch {
+    // Si la persistencia de la confirmación falla (ej. cuota de sessionStorage agotada):
+    // 1. En storage, persistState() restaura lastGoodPersistedState (o setItem fallido no modifica el storage),
+    //    manteniendo el snapshot IN_FLIGHT previo intacto con el operationId y payload originales.
+    // 2. Al recargar la pestaña, restoreFromStorage() promoverá ese IN_FLIGHT a UNCERTAIN,
+    //    conservando la identidad inmutable y el bloqueo estricto contra nuevas intenciones.
+    // 3. En la sesión actual en memoria no se revierte la confirmación, pues el servidor
+    //    ya acreditó el 200 con DTO válido. No se presenta el fallo local de storage
+    //    como un rechazo de la mutación.
+  }
+
   return frozen;
 }
+
+export const markTransferReceptionConfirmedAwaitingRefreshWithDto =
+  transitionToConfirmedAwaitingRefreshWithDto;
 
 export function clearConfirmedTransferReceptionAwaitingRefresh(
   transferId: string,

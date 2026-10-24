@@ -54,6 +54,7 @@ export interface TransferItem {
   quantityShipped: number;
   quantityReceived: number;
   quantityPending: number;
+  missingQuantity?: number;
   status: TransferStatus;
   shippedAt: string;
   notes?: string;

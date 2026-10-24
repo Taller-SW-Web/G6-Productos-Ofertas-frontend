@@ -36,7 +36,7 @@ import {
   getAllUncertainTransferReceptions,
   getConfirmedTransferReceptionAwaitingRefresh,
   isTransferReceptionStorageBlocked,
-  markTransferReceptionConfirmedAwaitingRefreshWithDto,
+  transitionToConfirmedAwaitingRefreshWithDto,
   setInFlightTransferReception,
   setUncertainTransferReception,
   type TransferReceptionPresentationRefresh,
@@ -793,10 +793,9 @@ export function createHttpInventoryRepository(
       }
 
       // Fase C — registrar la confirmación autoritativa ANTES del enriquecimiento
-      // de presentación (TAC-P0-05 / TAC-P0-09). Se guarda el snapshot inmutable
-      // original junto al DTO para poder verificar la identidad en un reintento.
-      clearUncertainTransferReception(key, frozenPayload.operationId);
-      clearInFlightTransferReception(key, frozenPayload.operationId);
+      // de presentación (TAC-P0-05 / TAC-P0-09). Transición única persistente
+      // de IN_FLIGHT/UNCERTAIN a confirmación pendiente de refresco.
+      // NO se eliminan ni persisten estados intermedios vacíos que dejen al traslado sin identidad.
       confirmedReceptions.set(frozenPayload.operationId, {
         payload: frozenPayload,
         dto: traslado,
@@ -807,11 +806,7 @@ export function createHttpInventoryRepository(
         reconciliation: "CONFIRMED_BY_IDEMPOTENT_RETRY",
         updatedAt: traslado.updated_at,
       });
-      try {
-        markTransferReceptionConfirmedAwaitingRefreshWithDto(frozenPayload, traslado);
-      } catch {
-        // Ignorar fallo de persistencia del DTO; el bloqueo se mantiene vía listado.
-      }
+      transitionToConfirmedAwaitingRefreshWithDto(frozenPayload, traslado);
 
       // Fase D — enriquecimiento de presentación (no autoritativo). Si falla, la
       // mutación YA está confirmada y el estado permanece RECONCILED; el POST no

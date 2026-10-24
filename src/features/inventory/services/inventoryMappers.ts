@@ -300,6 +300,20 @@ export function toTransferItem(
   dto: TrasladoInventarioDto,
   presentation: TransferPresentation,
 ): TransferItem {
+  const isCompletedWithDiscrepancy =
+    dto.estado === "COMPLETADO_CON_DISCREPANCIA";
+  const isCompleted = dto.estado === "COMPLETADO";
+  const rawPending = Math.max(
+    dto.quantity_shipped - dto.quantity_received,
+    0,
+  );
+  const missing =
+    typeof dto.missing_quantity === "number" && dto.missing_quantity >= 0
+      ? dto.missing_quantity
+      : isCompletedWithDiscrepancy
+        ? rawPending
+        : 0;
+
   return {
     id: dto.traslado_id,
     transferCode: presentation.transferCode,
@@ -311,7 +325,11 @@ export function toTransferItem(
     targetLocationName: presentation.targetLocationName,
     quantityShipped: dto.quantity_shipped,
     quantityReceived: dto.quantity_received,
-    quantityPending: Math.max(dto.quantity_shipped - dto.quantity_received, 0),
+    // Un traslado culminado (sea completado limpio o con discrepancia) no tiene unidades pendientes de recepción.
+    quantityPending:
+      isCompleted || isCompletedWithDiscrepancy ? 0 : rawPending,
+    // Los faltantes corresponden a la discrepancia registrada cuando el traslado culmina incompleto.
+    missingQuantity: isCompletedWithDiscrepancy ? missing : 0,
     status: dto.estado,
     shippedAt: dto.created_at,
   };

@@ -162,13 +162,31 @@ export function TransfersPage() {
     {
       key: "pending",
       header: "Pendiente",
-      width: 100,
+      width: 130,
       align: "right",
-      render: (row) => (
-        <Text size="sm" c={row.quantityPending > 0 ? undefined : "dimmed"} fw={700}>
-          {row.quantityPending}
-        </Text>
-      ),
+      render: (row) => {
+        if (row.status === "COMPLETADO_CON_DISCREPANCIA") {
+          const missing =
+            row.missingQuantity !== undefined
+              ? row.missingQuantity
+              : Math.max(row.quantityShipped - row.quantityReceived, 0);
+          return (
+            <div>
+              <Text size="sm" c="dimmed" fw={600}>
+                0 pend.
+              </Text>
+              <Text size="xs" c="red.7" fw={700}>
+                {missing} faltante{missing === 1 ? "" : "s"}
+              </Text>
+            </div>
+          );
+        }
+        return (
+          <Text size="sm" c={row.quantityPending > 0 ? undefined : "dimmed"} fw={700}>
+            {row.quantityPending}
+          </Text>
+        );
+      },
     },
     {
       key: "status",
