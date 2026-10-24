@@ -1,8 +1,76 @@
 import { useEffect, useState } from "react";
+import { InventoryError } from "../services/inventoryErrors";
 import { notifyInventoryChanged } from "../services/inventoryEvents";
 import { getInventoryRepository } from "../services/inventoryProvider";
 import { useInventoryChangeSignal } from "./useInventoryChangeSignal";
 import type { ThresholdConfig } from "../services/inventoryTypes";
+
+export interface ThresholdMutationSuccess {
+  status: "CONFIRMED" | "VERIFIED";
+  config: ThresholdConfig;
+  message: string;
+}
+
+export async function updateGlobalThresholdWithReconciliation(
+  val: number,
+  repository = getInventoryRepository(),
+): Promise<ThresholdMutationSuccess> {
+  try {
+    const updated = await repository.updateGlobalThreshold(val);
+    return {
+      status: "CONFIRMED",
+      config: updated,
+      message: "Umbral global actualizado correctamente.",
+    };
+  } catch (err: unknown) {
+    if (err instanceof InventoryError && err.code === "RESULTADO_INCIERTO") {
+      try {
+        const authoritative = await repository.getThresholds();
+        if (authoritative.globalThreshold === val) {
+          return {
+            status: "VERIFIED",
+            config: authoritative,
+            message: "El valor deseado fue verificado en el servidor.",
+          };
+        }
+      } catch {
+        // Si el GET de conciliación falla, conservamos el estado incierto
+      }
+    }
+    throw err;
+  }
+}
+
+export async function updateSkuThresholdWithReconciliation(
+  sku: string,
+  val: number,
+  repository = getInventoryRepository(),
+): Promise<ThresholdMutationSuccess> {
+  try {
+    const updated = await repository.updateSkuThreshold(sku, val);
+    return {
+      status: "CONFIRMED",
+      config: updated,
+      message: `Umbral para SKU ${sku} actualizado correctamente.`,
+    };
+  } catch (err: unknown) {
+    if (err instanceof InventoryError && err.code === "RESULTADO_INCIERTO") {
+      try {
+        const authoritative = await repository.getThresholds();
+        if (authoritative.skuOverrides[sku] === val) {
+          return {
+            status: "VERIFIED",
+            config: authoritative,
+            message: "El valor deseado fue verificado en el servidor.",
+          };
+        }
+      } catch {
+        // Si el GET de conciliación falla, conservamos el estado incierto
+      }
+    }
+    throw err;
+  }
+}
 
 export function useThresholds() {
   const revision = useInventoryChangeSignal();
@@ -48,14 +116,13 @@ export function useThresholds() {
     setSaveError(null);
     setSuccessMessage(null);
     try {
-      const updated =
-        await getInventoryRepository().updateGlobalThreshold(val);
+      const result = await updateGlobalThresholdWithReconciliation(val);
       setResponse({
         requestKey,
-        thresholds: updated,
+        thresholds: result.config,
         error: null,
       });
-      setSuccessMessage("Umbral global actualizado correctamente.");
+      setSuccessMessage(result.message);
       notifyInventoryChanged();
       return true;
     } catch (err: unknown) {
@@ -75,16 +142,13 @@ export function useThresholds() {
     setSaveError(null);
     setSuccessMessage(null);
     try {
-      const updated = await getInventoryRepository().updateSkuThreshold(
-        sku,
-        val,
-      );
+      const result = await updateSkuThresholdWithReconciliation(sku, val);
       setResponse({
         requestKey,
-        thresholds: updated,
+        thresholds: result.config,
         error: null,
       });
-      setSuccessMessage(`Umbral para SKU ${sku} actualizado correctamente.`);
+      setSuccessMessage(result.message);
       notifyInventoryChanged();
       return true;
     } catch (err: unknown) {
