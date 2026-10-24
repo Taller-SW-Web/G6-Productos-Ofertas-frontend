@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
-import { Avatar, Button, Group, Stack, Text } from "@mantine/core";
+import { ActionIcon, Avatar, Button, Group, Stack, Text } from "@mantine/core";
 import { IconEye, IconPlus } from "@tabler/icons-react";
 import {
   EntityTable,
@@ -18,12 +18,21 @@ import {
 } from "../services/catalogPresentation";
 import type { CatalogQuery, ProductView } from "../services/catalogRepository";
 import { useTaxonomyFilters } from "../hooks/useTaxonomyFilters";
+import { useMockStateRevision } from "../../shared/useMockStateRevision";
 
 export function ProductsPage() {
   const [params, setParams] = useSearchParams();
   const location = useLocation();
   const [revision, setRevision] = useState(0);
-  const taxonomy = useTaxonomyFilters(revision);
+  const mockRevision = useMockStateRevision([
+    "catalog",
+    "taxonomy",
+    "taxonomy-categories",
+    "taxonomy-brands",
+    "taxonomy-product-types",
+  ]);
+  const effectiveRevision = revision + mockRevision;
+  const taxonomy = useTaxonomyFilters(effectiveRevision);
 
   const query: CatalogQuery = {
     q: params.get("q") || undefined,
@@ -36,7 +45,7 @@ export function ProductsPage() {
   };
 
   const scenario = readCatalogScenario(params);
-  const state = useProductList(query, scenario, revision);
+  const state = useProductList(query, scenario, effectiveRevision);
 
   const updateQuery = (patch: Partial<CatalogQuery>) => {
     setParams((current) => {
@@ -197,19 +206,17 @@ export function ProductsPage() {
     {
       key: "actions",
       header: "ACCIONES",
-      width: 160,
+      width: 80,
       align: "right",
       render: (row) => (
-        <Button
+        <ActionIcon
           component={Link}
           to={{ pathname: `/productos/${row.id}`, search: location.search }}
-          variant="outline"
-          size="xs"
-          leftSection={<IconEye size={14} />}
-          styles={{ label: { whiteSpace: "nowrap" } }}
+          aria-label={`Ver detalle de ${row.name}`}
+          title="Ver detalle"
         >
-          Ver detalle
-        </Button>
+          <IconEye size={16} />
+        </ActionIcon>
       ),
     },
   ];
@@ -249,7 +256,6 @@ export function ProductsPage() {
           <Button
             component={Link}
             to="/productos/nuevo"
-            color="orange"
             leftSection={<IconPlus size={16} />}
           >
             Crear producto
@@ -278,7 +284,7 @@ export function ProductsPage() {
           semantic="error"
           title="Error al consultar productos"
           actions={
-            <Button size="xs" variant="outline" color="red" onClick={handleRetry}>
+            <Button size="xs" variant="outline" onClick={handleRetry}>
               Reintentar consulta
             </Button>
           }
@@ -307,7 +313,6 @@ export function ProductsPage() {
               <Button
                 component={Link}
                 to="/productos/nuevo"
-                color="orange"
                 size="xs"
                 leftSection={<IconPlus size={14} />}
               >

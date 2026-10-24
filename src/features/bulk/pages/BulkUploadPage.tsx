@@ -94,7 +94,7 @@ export function BulkUploadPage() {
 
             <Group justify="flex-end" gap="sm">
               {selectedFile && (
-                <Button variant="subtle" color="gray" onClick={clearSelection} disabled={checking}>
+                <Button variant="subtle" onClick={clearSelection} disabled={checking}>
                   Limpiar selección
                 </Button>
               )}

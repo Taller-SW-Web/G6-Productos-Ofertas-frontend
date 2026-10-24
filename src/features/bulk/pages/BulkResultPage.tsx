@@ -31,7 +31,11 @@ export function BulkResultPage() {
     isNotFound,
     isStale,
     resuming,
+    resumeError,
+    canResume,
     downloadingReport,
+    reportError,
+    reportAvailable,
     refreshBatch,
     resumeBatch,
     downloadReport,
@@ -75,23 +79,25 @@ export function BulkResultPage() {
             >
               Nueva carga masiva
             </Button>
-            {batch && isTerminal && batch.failed_rows > 0 && Boolean(batch.rows && batch.rows.some((r) => r.status === "FAILED")) && (
+            {batch && isTerminal && reportAvailable && (
               <Button
                 variant="outline"
                 leftSection={<IconDownload size={18} stroke={2} aria-hidden="true" />}
                 onClick={downloadReport}
                 loading={downloadingReport}
+                disabled={downloadingReport}
               >
                 Descargar reporte de errores
               </Button>
             )}
-            {batch && isTerminal && batch.needs_reconciliation && (
+            {batch && canResume && (
               <Button
                 leftSection={
                   <IconRotateClockwise size={18} stroke={2} aria-hidden="true" />
                 }
                 onClick={() => setConfirmResumeOpen(true)}
                 loading={resuming}
+                disabled={resuming || loading}
               >
                 Reanudar operaciones pendientes
               </Button>
@@ -122,9 +128,27 @@ export function BulkResultPage() {
             {error}
             {isStale && (
               <Text size="xs" mt="xs" c="dimmed">
-                Nota: Se muestra la última información confirmada del lote antes de producirse el error de conexión.
+                Se muestra la última información confirmada del lote.
               </Text>
             )}
+          </FeedbackAlert>
+        )}
+
+        {reportError && (
+          <FeedbackAlert semantic="error" title="Reporte no disponible">
+            {reportError}
+          </FeedbackAlert>
+        )}
+
+        {batch && isTerminal && batch.failed_rows > 0 && !reportAvailable && (
+          <FeedbackAlert semantic="info" title="Reporte de errores no disponible">
+            No hay un reporte descargable para este lote.
+          </FeedbackAlert>
+        )}
+
+        {resumeError && (
+          <FeedbackAlert semantic="error" title="No se pudo reanudar el lote">
+            {resumeError}
           </FeedbackAlert>
         )}
 
@@ -169,10 +193,11 @@ export function BulkResultPage() {
               batch={batch}
               onRefresh={refreshBatch}
               onResume={
-                batch.needs_reconciliation
+                canResume
                   ? () => setConfirmResumeOpen(true)
                   : undefined
               }
+              canResume={canResume}
               refreshing={loading}
               resuming={resuming}
             />
@@ -192,6 +217,7 @@ export function BulkResultPage() {
         onCancel={() => setConfirmResumeOpen(false)}
         onConfirm={handleConfirmResume}
         submitting={resuming}
+        confirmDisabled={!canResume}
       >
         <Stack gap="sm">
           <Text size="sm">

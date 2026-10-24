@@ -59,8 +59,21 @@ import {
   BulkProgressPage,
   BulkResultPage,
   BulkDownloadsPage,
+  StockControlPage,
+  ThresholdsPage,
+  TransfersPage,
+  InventoryDashboardPage,
+  ComboListPage,
+  ComboCreatePage,
+  ComboDetailPage,
+  ComboEditPage,
 } from "./productPages";
 export const productRoutes: RouteObject[] = [
+  { path: "/combos", element: <ComboListPage /> },
+  { path: "/combos/nuevo", element: <ComboCreatePage /> },
+  { path: "/combos/:comboId/editar", element: <ComboEditPage /> },
+  { path: "/combos/:comboId/no-disponible", element: <ComboDetailPage unavailable /> },
+  { path: "/combos/:comboId", element: <ComboDetailPage /> },
   { path: "/productos", element: <ProductsPage /> },
   { path: "/productos/nuevo", element: <ProductCreatePage /> },
   { path: "/productos/:productId", element: <ProductDetailPage /> },
@@ -216,4 +229,9 @@ export const productRoutes: RouteObject[] = [
       { path: "descargas", element: <BulkDownloadsPage /> },
     ],
   },
+  // MK-015 y MK-016: Control de stock, umbrales, traslados y dashboard analítico
+  { path: "/inventario", element: <StockControlPage /> },
+  { path: "/inventario/umbrales", element: <ThresholdsPage /> },
+  { path: "/inventario/traslados", element: <TransfersPage /> },
+  { path: "/inventario/dashboard", element: <InventoryDashboardPage /> },
 ];

@@ -60,7 +60,6 @@ const integer = (v: unknown): number => {
   if (!Number.isSafeInteger(n) || n < 0) throw new Error("INVALID_RESPONSE");
   return n;
 };
-const nullable = (v: unknown) => (v === null ? null : number(v));
 const boolean = (v: unknown): boolean => {
   if (typeof v !== "boolean") throw new Error("INVALID_RESPONSE");
   return v;
@@ -372,6 +371,7 @@ export function createHttpPromotionServices(
     try {
       return await work();
     } catch (e) {
+      if (e instanceof CouponReadError) throw e;
       if (e instanceof HttpFailure && missing && e.status === 404) return null;
       throw new CouponReadError(
         e instanceof HttpFailure && e.status === 401
@@ -417,19 +417,10 @@ export function createHttpPromotionServices(
         : new AdministrationError(kind, message);
     }
   }
-  const campaignDates = new Map<
-    string,
-    { validFrom: string; validUntil: string }
-  >();
   const campaignSnapshots = new Map<string, CampaignDraft>(),
     ruleSnapshots = new Map<string, RecommendationDraft>();
   function mapCampaign(v: unknown) {
-    const source = record(v);
     const r = campaign(v);
-    campaignDates.set(r.id, {
-      validFrom: text(source.validFrom),
-      validUntil: text(source.validUntil),
-    });
     campaignSnapshots.set(r.id, structuredClone(r.configuration));
     return r;
   }
@@ -526,34 +517,35 @@ export function createHttpPromotionServices(
         ).then(mapRule),
       ),
   };
-  async function mapCoupon(
-    v: unknown,
-    signal: AbortSignal,
-  ): Promise<CouponView> {
-    const r = record(v),
-      parent = await campaigns.read(text(r.promocionId), signal);
-    if (!parent) throw new Error("MISSING_PROMOTION");
+  function coupon(v: unknown): CouponView {
+    const r = record(v);
+    // Validate the administrative response before confirming any write. Parent
+    // data is a separate read and cannot revoke this confirmation.
+    localDate(r.createdAt);
+    localDate(r.updatedAt);
+    const limit = (v: unknown, minimum: number) => {
+      if (v === undefined || v === null) return v;
+      const n = integer(v);
+      if (n < minimum) throw new Error("INVALID_RESPONSE");
+      return n;
+    };
+    const minimumAmount = r.montoMinimo;
+    if (
+      minimumAmount !== undefined &&
+      minimumAmount !== null &&
+      number(minimumAmount) <= 0
+    )
+      throw new Error("INVALID_RESPONSE");
     return {
       id: text(r.cuponId),
       promotionId: text(r.promocionId),
       code: text(r.codigo),
       status: choice(r.estado, states),
-      promotion: {
-        name: parent.name,
-        validFrom: campaignDates.get(parent.id)?.validFrom,
-        validUntil: campaignDates.get(parent.id)?.validUntil,
-      },
-      globalLimit:
-        r.maxUsosGlobal === undefined ? undefined : nullable(r.maxUsosGlobal),
-      customerLimit:
-        r.maxUsosPorCliente === undefined
-          ? undefined
-          : nullable(r.maxUsosPorCliente),
+      promotion: null,
+      globalLimit: limit(r.maxUsosGlobal, 1),
+      customerLimit: limit(r.maxUsosPorCliente, 1),
       consumedUses: integer(r.usosGlobalesConsumidos),
-      remainingUses:
-        r.usosDisponibles === undefined
-          ? undefined
-          : nullable(r.usosDisponibles),
+      remainingUses: limit(r.usosDisponibles, 0),
       minimumAmount:
         r.montoMinimo === undefined
           ? undefined
@@ -566,13 +558,84 @@ export function createHttpPromotionServices(
       }),
     };
   }
+  async function readCouponPromotion(id: string, signal: AbortSignal) {
+    return (await read(async () => {
+      const source = record(
+        await request("/promociones/" + encodeURIComponent(id), signal),
+      );
+      const parent = campaign(source);
+      if (parent.id !== id) throw new Error("INVALID_RESPONSE");
+      return {
+        name: parent.name,
+        validFrom: text(source.validFrom),
+        validUntil: text(source.validUntil),
+      };
+    }))!;
+  }
+  async function enrichCoupon(
+    result: CouponView,
+    signal: AbortSignal,
+  ): Promise<CouponView> {
+    return {
+      ...result,
+      promotion: await readCouponPromotion(result.promotionId, signal),
+    };
+  }
+  async function writeCoupon(
+    path: string,
+    signal: AbortSignal,
+    method: string,
+    body?: unknown,
+  ): Promise<CouponView> {
+    const confirmed = await write(
+      async () => coupon(await request(path, signal, method, body)),
+      true,
+    );
+    try {
+      return await enrichCoupon(confirmed, signal);
+    } catch {
+      return { ...confirmed, relatedDataUnavailable: true };
+    }
+  }
   const coupons: PromotionServices["coupons"] = {
     list: (q, s) =>
       read(async () => {
         const r = record(await request("/cupones?" + query(q), s)),
           meta = record(r.meta);
+        const rows = array(r.items).map(coupon);
+        // This cache and queue belong only to this list operation. Duplicate
+        // IDs share the same promise, including its failure; nothing survives
+        // a later read or another user's session.
+        const parents = new Map<string, ReturnType<typeof readCouponPromotion>>();
+        const waiting: (() => void)[] = [];
+        let active = 0;
+        const parentFor = (id: string) => {
+          let pending = parents.get(id);
+          if (!pending) {
+            pending = (async () => {
+              if (active >= 4)
+                await new Promise<void>((done) => waiting.push(done));
+              else active++;
+              try {
+                s.throwIfAborted();
+                return await readCouponPromotion(id, s);
+              } finally {
+                const next = waiting.shift();
+                if (next) next();
+                else active--;
+              }
+            })();
+            parents.set(id, pending);
+          }
+          return pending;
+        };
         return {
-          items: await Promise.all(array(r.items).map((v) => mapCoupon(v, s))),
+          items: await Promise.all(
+            rows.map(async (row) => ({
+              ...row,
+              promotion: await parentFor(row.promotionId),
+            })),
+          ),
           total: integer(meta.total),
           page: integer(meta.pagina),
         };
@@ -581,40 +644,25 @@ export function createHttpPromotionServices(
       read(
         () =>
           request("/cupones/" + encodeURIComponent(id), s).then((v) =>
-            mapCoupon(v, s),
+            enrichCoupon(coupon(v), s),
           ),
         true,
       ),
-    create: (d, s) =>
-      write(
-        () =>
-          request("/cupones", s, "POST", couponDto(d)).then((v) =>
-            mapCoupon(v, s),
-          ),
-        true,
-      ),
+    create: (d, s) => writeCoupon("/cupones", s, "POST", couponDto(d)),
     update: (id, d, s) =>
-      write(
-        () =>
-          request(
-            "/cupones/" + encodeURIComponent(id),
-            s,
-            "PATCH",
-            couponDto(d),
-          ).then((v) => mapCoupon(v, s)),
-        true,
+      writeCoupon(
+        "/cupones/" + encodeURIComponent(id),
+        s,
+        "PATCH",
+        couponDto(d),
       ),
     changeStatus: (id, status, s) =>
-      write(
-        () =>
-          request(
-            "/cupones/" +
-              encodeURIComponent(id) +
-              (status === "active" ? "/activar" : "/desactivar"),
-            s,
-            "POST",
-          ).then((v) => mapCoupon(v, s)),
-        true,
+      writeCoupon(
+        "/cupones/" +
+          encodeURIComponent(id) +
+          (status === "active" ? "/activar" : "/desactivar"),
+        s,
+        "POST",
       ),
     promotions: (s) =>
       read(async () => {

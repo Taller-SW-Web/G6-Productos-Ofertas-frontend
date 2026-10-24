@@ -6,7 +6,7 @@ import { createCatalogServices } from "../src/features/catalog/services/catalogS
 
 test("failed physical validation leaves every product field and version unchanged", async () => {
   const repository = new MockCatalogRepository();
-  const before = await repository.create({ nombre: "Original", descripcion: "Original", categoriaId: "CAT-ROPA", tipoProductoId: "TIP-CAMISA", marcaId: "BRD-INKA", skuBase: "ATOMIC", tieneVariantes: false, precioBaseInicial: 20, atributos: [] });
+  const before = await repository.create({ nombre: "Original", descripcion: "Original", categoriaId: "CAT-ROPA", tipoProductoId: "TIP-CAMISETA", marcaId: "BRD-INKA", skuBase: "ATOMIC", tieneVariantes: false, precioBaseInicial: 20, atributos: [] });
   await expect(repository.update(before.id, { nombre: "Changed", descripcion: "Changed", categoriaId: "different", marcaId: "different", tipoProductoId: "different", atributos: [], imagenes: [{ url: "https://example.com/changed.png", principal: true }], perfilFisico: { pesoKg: -1 }, catalogVersion: before.catalogVersion })).rejects.toThrow();
   expect(await repository.getById(before.id)).toEqual(before);
   const after = await repository.update(before.id, { nombre: "Saved", descripcion: "Saved", categoriaId: before.categoryId, marcaId: before.brandId, catalogVersion: before.catalogVersion, perfilFisico: { pesoKg: 1 } });
@@ -19,7 +19,7 @@ test("consecutive product and variant creates remain unique with a frozen clock"
   const original = Date.now;
   Date.now = () => 123450000;
   try {
-    const products = await Promise.all(Array.from({ length: 100 }, (_, index) => repository.create({ nombre: `Product ${index}`, descripcion: "Test", categoriaId: "CAT-ROPA", tipoProductoId: "TIP-CAMISA", marcaId: "BRD-INKA", skuBase: `UNIQUE-${index}`, tieneVariantes: true, precioBaseInicial: 20, atributos: [] })));
+    const products = await Promise.all(Array.from({ length: 100 }, (_, index) => repository.create({ nombre: `Product ${index}`, descripcion: "Test", categoriaId: "CAT-ROPA", tipoProductoId: "TIP-CAMISETA", marcaId: "BRD-INKA", skuBase: `UNIQUE-${index}`, tieneVariantes: true, precioBaseInicial: 20, atributos: [] })));
     expect(new Set(products.map(product => product.id)).size).toBe(100);
     const variants = await Promise.all(products.map((product, index) => repository.createVariant(product.id, { sku: `SKU-${index}`, identifyingAttributes: [{ caracteristicaId: "CAR-COLOR", nombre: "Color", tipo: "LISTA", valor: "Azul", valorId: "COL-AZU" }] })));
     expect(new Set(variants.map(variant => variant.variantId)).size).toBe(100);
@@ -40,7 +40,7 @@ test("official Taxonomy adapter preserves provider IDs, limits and missing roles
   expect(text?.maxLength).toBe((await official.characteristic.list()).config.maxTexto);
   const list = schema.find(attribute => attribute.tipo === "LISTA");
   expect(list?.opciones).toEqual((await official.characteristic.listarValores(list!.caracteristicaId))?.filter(value => value.estado === "Activo").map(value => ({ id: value.valorId, valor: value.nombre })));
-  await expect(adapter.getAttributeSchema("TIP-CAMISA")).rejects.toThrow("mapeo confirmado");
+  await expect(adapter.getAttributeSchema("TIP-CAMISETA")).rejects.toThrow("mapeo confirmado");
 });
 
 test("product edit blocks loading and schema errors, including programmatic submits", async ({ page }) => {

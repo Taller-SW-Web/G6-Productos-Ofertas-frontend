@@ -17,6 +17,9 @@ import {
   createPromotionHistory,
   promotionHistoryFixtures,
 } from "../mocks/promotionHistory";
+import { campaignFixtures } from "../mocks/campaigns";
+import { couponFixtures } from "../mocks/coupons";
+import { recommendationFixtures } from "../mocks/recommendations";
 import { createReviewServiceResolver } from "../dev/reviewServices";
 import type { DataMode } from "../../../app/config/dataMode";
 import {
@@ -59,10 +62,10 @@ export function createPromotionRuntime(
   if (mode !== "mock" && mode !== "api")
     throw new Error("VITE_DATA_MODE debe ser mock o api.");
   if (mode === "api" && !dependencies.api)
-    throw new Error("El provider API de Promotions no está configurado.");
+    throw new Error("La administración de promociones no está disponible.");
   const services =
     mode === "mock"
-      ? (dependencies.mock?.() ?? createMockPromotionServices())
+      ? (dependencies.mock?.() ?? createMockPromotionServices({}, { persist: true }))
       : createPromotionServices(dependencies.api!());
   const context: PromotionServiceContext = {
     services,
@@ -91,12 +94,13 @@ export function createPromotionServices(
 
 export function createMockPromotionServices(
   overrides: Partial<PromotionServices> = {},
-  fixtures: {
+  options: {
+    persist?: boolean;
     campaigns?: readonly CampaignView[];
     recommendations?: readonly RecommendationView[];
   } = {},
 ): PromotionServices {
-  const history = createPromotionHistory(promotionHistoryFixtures);
+  const history = createPromotionHistory(promotionHistoryFixtures, options);
   const observe = (record: CouponView | null) => {
     if (record) history.observe(record);
     return record;
@@ -148,10 +152,11 @@ export function createMockPromotionServices(
         hasCoupons: async (id, signal) =>
           (await observeAll(signal)).some((coupon) => coupon.promotionId === id),
       },
-      fixtures.campaigns,
+      options.campaigns ?? campaignFixtures,
+      options,
     );
   const couponAdapter =
-    overrides.coupons ?? createMockCouponRepository({ promotions });
+    overrides.coupons ?? createMockCouponRepository({ promotions }, couponFixtures, options);
   async function withCurrentPromotion(
     record: CouponView,
     signal: AbortSignal,
@@ -205,7 +210,9 @@ export function createMockPromotionServices(
   };
   const recommendations =
     overrides.recommendations ??
-    createMockRecommendationRepository(() => catalog, fixtures.recommendations);
+    createMockRecommendationRepository(
+      () => catalog, options.recommendations ?? recommendationFixtures, options,
+    );
   return createPromotionServices({
     coupons,
     campaigns,
@@ -219,17 +226,19 @@ export function createMockPromotionServices(
 const runtimes = new Map<DataMode, PromotionRuntime>();
 export function createCatalogMockPromotionServices(
   catalog: CatalogServices,
+  options: { persist?: boolean } = {},
 ): PromotionServices {
   return createMockPromotionServices(
     { catalog: createCatalogPromotionRepository(catalog) },
     {
+      ...options,
       campaigns: integratedCampaignFixtures,
       recommendations: integratedRecommendationFixtures,
     },
   );
 }
 const dependencies: PromotionRuntimeDependencies = {
-  mock: () => createCatalogMockPromotionServices(getCatalogServices("mock")),
+  mock: () => createCatalogMockPromotionServices(getCatalogServices("mock"), { persist: true }),
 };
 export function getPromotionRuntime(mode: DataMode): PromotionRuntime {
   let runtime = runtimes.get(mode);

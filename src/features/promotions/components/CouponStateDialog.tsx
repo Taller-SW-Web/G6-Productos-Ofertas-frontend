@@ -25,12 +25,21 @@ export function CouponStateDialog({
   confirmedRepository?: CouponRepository;
   opened: boolean;
   onCancel: () => void;
-  onConfirmed: () => void;
+  onConfirmed: (coupon: CouponView) => void;
 }) {
   const command = usePromotionCommand<CouponView>();
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string>();
-  const target = coupon.status === "active" ? "inactive" : "active";
+  const [target, setTarget] = useState<"active" | "inactive">(
+    coupon.status === "active" ? "inactive" : "active",
+  );
+  const [prevOpened, setPrevOpened] = useState(false);
+  if (opened && !prevOpened) {
+    setPrevOpened(true);
+    setTarget(coupon.status === "active" ? "inactive" : "active");
+  } else if (!opened && prevOpened) {
+    setPrevOpened(false);
+  }
   const unknown =
     command.error instanceof CouponWriteError &&
     command.error.kind === "unknown";
@@ -43,7 +52,7 @@ export function CouponStateDialog({
           coupon.id,
           new AbortController().signal,
         );
-        if (result?.status === target) onConfirmed();
+        if (result?.status === target) onConfirmed(result);
         else
           setCheckError(
             "La consulta no confirmó el estado solicitado. No se reenviará el cambio automáticamente.",
@@ -60,7 +69,7 @@ export function CouponStateDialog({
     const result = await command.run((signal) =>
       repository.changeStatus(coupon.id, target, signal),
     );
-    if (result) onConfirmed();
+    if (result) onConfirmed(result);
   };
   return (
     <ConfirmDialog

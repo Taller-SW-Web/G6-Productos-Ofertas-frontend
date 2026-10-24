@@ -1,5 +1,8 @@
 import { evidencePath } from "./support/evidence";
 import { expect, test, type Page } from "@playwright/test";
+
+const campaignMockNotice =
+  "Entorno de prueba: la información presentada es de referencia y no confirma una aplicación comercial.";
 async function choose(page: Page, label: string, option: string) {
   await page.getByRole("combobox", { name: label, exact: true }).click();
   await page.getByRole("option", { name: option, exact: true }).click();
@@ -38,10 +41,11 @@ async function selectScope(page: Page) {
     .getByRole("button", { name: "Confirmar alcance", exact: true })
     .click();
 }
-test("MK-006 S01/S05: typed filters and detail retain list context", async ({
+test("@smoke MK-006 S01/S05: typed filters and detail retain list context", async ({
   page,
 }) => {
   await page.goto("/promociones?estado=active&modalidad=automatic&tamanio=1");
+  await expect(page.getByText(campaignMockNotice, { exact: true })).toBeVisible();
   await page
     .getByRole("link", {
       name: "Ver detalle de Carrera de octubre",
@@ -71,6 +75,21 @@ test("MK-006 S01/S05: typed filters and detail retain list context", async ({
   await expect(
     page.getByRole("link", { name: "Ver detalle de Carrera de octubre" }),
   ).toBeVisible();
+});
+
+test("MK-006: mock notice is visible in every campaign view", async ({ page }) => {
+  for (const route of [
+    "/promociones",
+    "/promociones/nueva",
+    "/promociones/carrera/editar",
+    "/promociones/nueva/alcance",
+    "/promociones/carrera/editar/alcance",
+    "/promociones/carrera",
+    "/promociones/carrera/estado",
+  ]) {
+    await page.goto(route);
+    await expect(page.getByText(campaignMockNotice, { exact: true })).toBeVisible();
+  }
 });
 test("MK-006 S02/S04: validate discount/channels and preserve draft and typed scope across selector cancellation", async ({
   page,
@@ -231,8 +250,22 @@ test("MK-005/MK-006: coupon selection reads created coupon-mode campaign and ass
     .getByRole("navigation", { name: "Navegación de la aplicación" })
     .getByRole("link", { name: "Ofertas y promociones" })
     .click();
+  const campaignRow = page
+    .getByRole("row")
+    .filter({ hasText: "Campaña para cupón" });
+
+  await campaignRow
+    .getByRole("button", {
+      name: "Más acciones de Campaña para cupón",
+      exact: true,
+    })
+    .click();
+
   await page
-    .getByRole("link", { name: "Editar Campaña para cupón", exact: true })
+    .getByRole("menuitem", {
+      name: "Editar",
+      exact: true,
+    })
     .click();
   await expect(
     page.getByRole("combobox", { name: "Modalidad comercial" }),

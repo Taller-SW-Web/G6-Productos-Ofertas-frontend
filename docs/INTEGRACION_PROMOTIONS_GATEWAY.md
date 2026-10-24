@@ -49,6 +49,48 @@ El contexto vive en src/app/config/PromotionApiContext.ts para no cargar la feat
 
 ## Adaptador administrativo
 
+### Correcciones del PR #56
+
+Las escrituras de cupones se confirman únicamente con HTTP exitoso y un
+`CuponAdmin` válido. El adapter valida el cupón antes de enriquecerlo con el
+nombre y las fechas de la promoción. Si solo falla ese GET (incluidos 404,
+503, timeout o cancelación), devuelve el cupón confirmado con
+`relatedDataUnavailable: true` y `promotion: null`. Es una advertencia del
+modelo de presentación, no un nuevo estado o campo del contrato HTTP.
+La UI conserva la confirmación y el registro recibido al navegar al detalle,
+incluso si la nueva lectura del detalle falla. Una respuesta inválida de la
+escritura o su fallo de transporte sigue siendo un resultado incierto.
+No se reenvían POST, PATCH ni cambios de estado automáticamente.
+
+Cada operación `coupons.list` mantiene su propio mapa de promesas por
+`promocionId` y una cola de hasta cuatro consultas relacionadas simultáneas.
+No reutiliza ese mapa en otra llamada ni sesión. Comparte tanto resultados
+como rechazos; conserva errores de sesión/permisos, falla el listado completo
+si falla una promoción y respeta la cancelación de consultas activas y en cola.
+Los datos se vuelven a consultar en cada listado, sin fallback a fixtures.
+
+Pruebas de regresión:
+
+```powershell
+npx playwright test tests/promotions-coupon-http.spec.ts tests/promotions-http-contract.spec.ts --workers=2 --reporter=line
+```
+
+Cubren POST/PATCH/activar/desactivar seguidos de GET 503/timeout/404;
+escrituras no confirmadas; 100 cupones con una promoción; 100 cupones con 12
+promociones, límite de cuatro, actualización entre listados, propagación de
+401/403/404/503 y cancelación de consultas en cola; además de confirmación y
+advertencia visibles en crear/editar/activar a 1440 px. Son fixtures HTTP
+explícitos; no acreditan servicios compartidos.
+
+La reconciliación con `master` conserva el provider de Combos, los gates de
+Combos/Inventario y la persistencia mock incorporados por sus responsables,
+junto con el catálogo compartido y la sesión G7 de Promotions. Los comandos
+vigentes de la suite general son `npm test` (unitarias) y `npm run test:e2e`
+(Playwright); el harness separado de Pricing usa `npm run test:e2e:pricing`.
+La evidencia, SHAs exactos y CI de esta corrección se registran en el
+[PR #56](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/56).
+G7 y Catálogo reales continúan pendientes de homologación: estado PARCIAL.
+
 - Cupones: listar, detalle, promociones de modalidad CUPON, crear, editar y cambiar estado.
 - Promociones y reglas: listar, detalle, crear, editar y activar/desactivar por rutas oficiales. Altas/ediciones/activaciones sujetas a las referencias autorizadas del backend.
 - Mapeo explícito ACTIVO/INACTIVO, modalidades, tipos de descuento, canales (incluye sales → VENTAS), criterios UPSELL y fechas Lima con zona -05:00.

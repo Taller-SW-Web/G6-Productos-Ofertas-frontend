@@ -1,7 +1,6 @@
 import { SimpleGrid, Stack, Text } from "@mantine/core";
 import {
   EntityTable,
-  FeedbackAlert,
   MetricCard,
   type TableColumn,
   StatusBadge,
@@ -27,20 +26,13 @@ const columns: TableColumn<Row>[] = [
 export function ImportResultExample() {
   return (
     <Stack gap="lg">
-      <FeedbackAlert
-        semantic="warning"
-        title="Completado parcialmente — ejemplo"
-      >
-        Fixture de S05 con 2 filas confirmadas y 1 rechazada. No proviene de un
-        archivo seleccionado ni de un lote real.
-      </FeedbackAlert>
       <SimpleGrid cols={3} spacing="lg">
         <MetricCard label="Total de filas" value="3" />
         <MetricCard label="Confirmadas" value="2" />
         <MetricCard label="Rechazadas" value="1" />
       </SimpleGrid>
       <EntityTable
-        caption="Resultado por fila del fixture de Pricing"
+        caption="Resultado por fila"
         columns={columns}
         rows={sampleImportRows}
         rowKey={(row) => row.id}
@@ -54,10 +46,6 @@ export function ImportResultExample() {
         Las filas confirmadas se conservan. La recuperación de Pricing requiere
         corregir el archivo y revisar un nuevo intento; no se ofrece reanudar el
         lote.
-      </Text>
-      <Text size="sm" c="dimmed">
-        La descarga del reporte y el seguimiento del lote requieren implementar
-        el adapter correspondiente.
       </Text>
     </Stack>
   );

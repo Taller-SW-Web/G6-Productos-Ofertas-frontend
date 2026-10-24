@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Avatar, Box, Button, Stack, Text } from "@mantine/core";
-import { IconPlus } from "@tabler/icons-react";
+import { ActionIcon, Avatar, Box, Button, Stack, Text } from "@mantine/core";
+import { IconEye, IconPlus } from "@tabler/icons-react";
 import {
   EntityTable,
   FilterBar,
@@ -13,12 +13,14 @@ import {
 } from "../../../components/shared";
 import { useBrandList } from "../hooks/useBrandList";
 import type { BrandListItem } from "../types";
+import { useMockStateRevision } from "../../shared/useMockStateRevision";
 
 export function BrandListPage() {
   const navigate = useNavigate();
   const [revision, setRevision] = useState(0);
+  const mockRevision = useMockStateRevision(["taxonomy", "taxonomy-brands"]);
   const [busqueda, setBusqueda] = useState("");
-  const { state } = useBrandList(revision);
+  const { state } = useBrandList(revision + mockRevision);
 
   const resultado = state.status === "success" ? state.result : undefined;
   const marcas = useMemo(() => resultado?.items ?? [], [resultado]);
@@ -44,7 +46,7 @@ export function BrandListPage() {
       key: "nombre",
       header: "Marca",
       render: (item) => (
-        <Text size="sm" fw={600} style={{ cursor: "pointer" }} onClick={() => navigate(`/marcas/${item.marcaId}`)}>
+        <Text size="sm" fw={600}>
           {item.nombre}
         </Text>
       ),
@@ -60,6 +62,21 @@ export function BrandListPage() {
       header: "Estado",
       width: 120,
       render: (item) => <StatusBadge semantic="neutral">{item.estado}</StatusBadge>,
+    },
+    {
+      key: "acciones",
+      header: "Acciones",
+      width: 80,
+      align: "right",
+      render: (item) => (
+        <ActionIcon
+          aria-label={`Ver detalle de ${item.nombre}`}
+          title="Ver detalle"
+          onClick={() => navigate(`/marcas/${item.marcaId}`)}
+        >
+          <IconEye size={16} stroke={2} aria-hidden="true" />
+        </ActionIcon>
+      ),
     },
   ];
 

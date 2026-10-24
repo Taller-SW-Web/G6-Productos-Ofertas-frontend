@@ -9,6 +9,7 @@ export interface ConfirmDialogProps {
   onCancel: () => void;
   onConfirm: () => void;
   submitting?: boolean;
+  confirmDisabled?: boolean;
   error?: ReactNode;
   destructive?: boolean;
 }
@@ -20,6 +21,7 @@ export function ConfirmDialog({
   onCancel,
   onConfirm,
   submitting = false,
+  confirmDisabled = false,
   error,
   destructive = false,
 }: ConfirmDialogProps) {
@@ -52,7 +54,7 @@ export function ConfirmDialog({
           <Button
             onClick={onConfirm}
             loading={submitting}
-            disabled={submitting}
+            disabled={submitting || confirmDisabled}
             color={destructive ? "danger" : undefined}
           >
             {confirmLabel}

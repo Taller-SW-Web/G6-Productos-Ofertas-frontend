@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
-test("MK-006/MK-007: access guards apply to list, direct creation, edit and state routes", async ({
-  page,
-}) => {
-  for (const scenario of ["session", "forbidden"]) {
+for (const scenario of ["session", "forbidden"]) {
+  test(`MK-006/MK-007: access guards (${scenario}) apply to list, direct creation, edit and state routes`, async ({
+    page,
+  }) => {
     for (const [route, action] of [
       ["/promociones", "Crear promoción"],
       ["/recomendaciones", "Crear venta cruzada"],
@@ -32,8 +32,8 @@ test("MK-006/MK-007: access guards apply to list, direct creation, edit and stat
         0,
       );
     }
-  }
-});
+  });
+}
 test("MK-006/MK-007: loading, empty, missing and retry are distinct and preserve list filters", async ({
   page,
 }) => {
@@ -110,8 +110,10 @@ test("MK-006: unknown normalized edit and state reconcile without a duplicate wr
       .getByRole("main")
       .getByRole("button", { name: "Activar promoción", exact: true }),
   ).toBeFocused();
+  // La desactivación confirmada de "carrera" ahora persiste al navegar. La revisión de
+  // estado sin confirmar se ejercita sobre otra promoción que sigue activa.
   await page.goto(
-    "/promociones/carrera/estado?modoRevision=1&escenario=unknown-result",
+    "/promociones/running/estado?modoRevision=1&escenario=unknown-result",
   );
   await page
     .getByRole("dialog")

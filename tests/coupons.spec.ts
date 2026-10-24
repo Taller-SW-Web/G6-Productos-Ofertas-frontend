@@ -122,6 +122,32 @@ test("MK-005: unavailable usage is not zero or unlimited; known exhausted capaci
   ).toBeVisible();
 });
 
+test("MK-005: invalid code is rejected and expired promotion is visible without consumption", async ({
+  page,
+}) => {
+  await page.goto("/cupones/nuevo");
+  const code = page.getByLabel("Código del cupón", { exact: true });
+  await expect(code).toBeVisible();
+  await expect(code).toBeEnabled();
+  await page.getByRole("button", { name: "Crear cupón", exact: true }).click();
+  await code.fill("codigo invalido");
+  await page.getByRole("button", { name: "Crear cupón", exact: true }).click();
+  await expect(
+    page.getByText("Ingresa un código con letras A–Z, números, guion o guion bajo.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/cupones\/nuevo$/);
+
+  await page.goto("/cupones/cyberinka20?modoRevision=1&escenario=expired");
+  await expect(page.getByText("Vigencia finalizada", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Validar un cupón en una compra no consume un uso.", {
+      exact: false,
+    }),
+  ).toBeVisible();
+});
+
 test("MK-005: empty, filtered empty, read error, pending and access failure are distinct", async ({
   page,
 }) => {

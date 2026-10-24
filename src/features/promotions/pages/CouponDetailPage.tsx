@@ -17,6 +17,7 @@ import {
 import { CouponSummary } from "../components/CouponSummary";
 import { CouponStateDialog } from "../components/CouponStateDialog";
 import { useCoupon } from "../hooks/useCoupons";
+import type { CouponView } from "../services/couponRepository";
 
 export function CouponDetailPage({
   limitsOnly = false,
@@ -36,11 +37,22 @@ export function CouponDetailPage({
   const [revision, setRevision] = useState(0);
   const [dialogOpened, setDialogOpened] = useState(false);
   const [stateUpdated, setStateUpdated] = useState(false);
+  const [relatedDataUnavailable, setRelatedDataUnavailable] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
   const state = useCoupon(couponId, services.coupons, revision + queryRevision);
-  const coupon = state.status === "success" ? state.result : null;
+  const [cachedCoupon, setCachedCoupon] = useState<CouponView | null>(() =>
+    location.state?.confirmedCoupon?.id === couponId
+      ? location.state.confirmedCoupon
+      : null,
+  );
+  const [prevResult, setPrevResult] = useState<CouponView | null>(null);
+  if (state.status === "success" && state.result !== prevResult) {
+    setPrevResult(state.result);
+    setCachedCoupon(state.result);
+  }
+  const coupon = state.status === "success" ? state.result : cachedCoupon;
   const suffix = params.size ? `?${params.toString()}` : "";
   useEffect(() => {
     if (coupon && (location.state?.focusState || stateUpdated))
@@ -96,7 +108,14 @@ export function CouponDetailPage({
             El nuevo estado fue confirmado. Los usos registrados se conservan.
           </FeedbackAlert>
         )}
-        {state.status === "loading" && (
+        {(location.state?.couponPromotionUnavailable || relatedDataUnavailable) && (
+          <FeedbackAlert semantic="warning" title="Datos relacionados no disponibles">
+            El backend confirmó el cambio del cupón. No se pudieron consultar
+            los datos actuales de su promoción. Puedes volver a consultar el
+            detalle; no es necesario reenviar el cambio.
+          </FeedbackAlert>
+        )}
+        {state.status === "loading" && !coupon && (
           <Stack role="status" aria-label="Cargando cupón">
             <Text size="sm">Cargando cupón…</Text>
             <Skeleton height={180} />
@@ -169,7 +188,9 @@ export function CouponDetailPage({
               confirmedRepository={confirmedServices.coupons}
               opened={dialogOpened || changeState}
               onCancel={closeState}
-              onConfirmed={() => {
+              onConfirmed={(confirmed) => {
+                setCachedCoupon(confirmed);
+                setRelatedDataUnavailable(confirmed.relatedDataUnavailable === true);
                 setRevision((value) => value + 1);
                 setStateUpdated(true);
                 closeState();

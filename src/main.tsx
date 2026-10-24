@@ -16,6 +16,8 @@ import { resolveDataMode } from "./app/config/dataMode";
 import { DataModeContext } from "./app/config/DataModeContext";
 import { PromotionApiContext } from "./app/config/PromotionApiContext";
 import { PromotionSessionContext } from "./app/config/PromotionSessionContext";
+import { createCombosRuntime } from "./features/combos/services/combosService";
+import { CombosProvider } from "./features/combos/components/CombosProvider";
 
 const root = createRoot(document.getElementById("root")!);
 async function start() {
@@ -38,6 +40,7 @@ async function start() {
           await import("./features/promotions/services/promotionSessionRuntime")
         ).createPromotionSessionRuntime(gatewayOrigin, securityApiBase)
       : null;
+  const combosRuntime = await createCombosRuntime(mode, runtime);
   root.render(
     <StrictMode>
       <MantineProvider
@@ -53,7 +56,9 @@ async function start() {
               <PromotionApiContext.Provider
                 value={promotions?.services ?? null}
               >
-                <App />
+                <CombosProvider mode={mode} runtime={combosRuntime}>
+                  <App />
+                </CombosProvider>
               </PromotionApiContext.Provider>
             </PromotionSessionContext.Provider>
           </PricingProvider>

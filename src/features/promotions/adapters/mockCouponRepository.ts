@@ -12,14 +12,80 @@ import {
   type CouponConfiguration,
 } from "../services/couponValidation";
 import { pageOf } from "../services/administration";
+import {
+  isMockPersistenceAvailable,
+  isRecord,
+  publishMockChange,
+  readMockState,
+  saveMockState,
+  subscribeExternalMockChanges,
+} from "../../shared/mockState";
+
+interface MockCouponState {
+  records: CouponView[];
+  sequence: number;
+}
+
+function isCouponRecord(value: unknown): value is CouponView {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    value.id.trim().length > 0 &&
+    typeof value.code === "string" &&
+    value.code.trim().length > 0 &&
+    typeof value.status === "string" &&
+    ["active", "inactive", "expired"].includes(value.status)
+  );
+}
+
+function isMockCouponState(value: unknown): value is MockCouponState {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.records) &&
+    value.records.every(isCouponRecord) &&
+    typeof value.sequence === "number" &&
+    Number.isFinite(value.sequence) &&
+    value.sequence >= 0
+  );
+}
+
 export function createMockCouponRepository(
   dependencies: {
     promotions: (signal: AbortSignal) => Promise<CouponPromotion[]>;
   },
   fixtures: readonly CouponView[] = couponFixtures,
+  options: { persist?: boolean } = {},
 ): CouponRepository {
-  const records = fixtures.map((item) => structuredClone(item));
-  let sequence = 0;
+  const persistEnabled = options.persist === true && isMockPersistenceAvailable();
+  const restored = persistEnabled
+    ? readMockState<MockCouponState>("promotions-coupons", isMockCouponState)
+    : null;
+  const records = restored ? restored.records : fixtures.map((item) => structuredClone(item));
+  let sequence = restored ? restored.sequence : 0;
+  const persist = (): boolean => {
+    // A non-persistent instance (persist: false) must never touch `localStorage`.
+    let ok = true;
+    if (persistEnabled) {
+      ok = saveMockState("promotions-coupons", { records, sequence } satisfies MockCouponState);
+    }
+    publishMockChange("promotions-coupons");
+    publishMockChange("promotions");
+    return ok;
+  };
+  if (persistEnabled) {
+    subscribeExternalMockChanges("promotions-coupons", () => {
+      const stored = readMockState<MockCouponState>(
+        "promotions-coupons",
+        isMockCouponState,
+      );
+      if (!stored) return;
+      records.length = 0;
+      records.push(...stored.records);
+      sequence = stored.sequence;
+      publishMockChange("promotions-coupons");
+      publishMockChange("promotions");
+    });
+  }
   async function configure(
     values: CouponConfiguration,
     signal: AbortSignal,
@@ -98,6 +164,12 @@ export function createMockCouponRepository(
         remainingUses: values.globalLimit === null ? null : undefined,
       };
       records.push(coupon);
+      if (!persist() && persistEnabled) {
+        throw new CouponWriteError(
+          "rejected",
+          "No se pudo guardar el cambio. Vuelve a intentarlo.",
+        );
+      }
       return structuredClone(coupon);
     },
     async update(id, values, signal) {
@@ -128,6 +200,12 @@ export function createMockCouponRepository(
               : undefined,
       };
       records[records.findIndex((item) => item.id === id)] = coupon;
+      if (!persist() && persistEnabled) {
+        throw new CouponWriteError(
+          "rejected",
+          "No se pudo guardar el cambio. Vuelve a intentarlo.",
+        );
+      }
       return structuredClone(coupon);
     },
     async changeStatus(id, status, signal) {
@@ -147,6 +225,12 @@ export function createMockCouponRepository(
         );
       const coupon = { ...previous, status };
       records[index] = coupon;
+      if (!persist() && persistEnabled) {
+        throw new CouponWriteError(
+          "rejected",
+          "No se pudo guardar el cambio. Vuelve a intentarlo.",
+        );
+      }
       return structuredClone(coupon);
     },
     async list(query, signal) {

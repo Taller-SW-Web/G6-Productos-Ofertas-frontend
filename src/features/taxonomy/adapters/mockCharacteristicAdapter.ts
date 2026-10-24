@@ -1,5 +1,11 @@
 import type { CharacteristicRepository } from "../services/characteristicRepository";
 import { characteristicConfigDefaults } from "../services/characteristicRepository";
+import {
+  isMockPersistenceAvailable,
+  loadMockArray,
+  persistMockArray,
+  syncMockArrayOnExternalChange,
+} from "../../shared/mockState";
 import type {
   BloqueoDependencia,
   CharacteristicDetail,
@@ -27,7 +33,7 @@ interface RegistroCaracteristica {
   valores?: RegistroValor[];
 }
 
-const store: RegistroCaracteristica[] = [
+const storeFixtures: RegistroCaracteristica[] = [
   {
     id: "talla",
     nombre: "Talla",
@@ -78,6 +84,24 @@ const store: RegistroCaracteristica[] = [
     ],
   },
 ];
+
+const isCharacteristic = (value: unknown): value is RegistroCaracteristica => {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.id === "string" &&
+    typeof row.nombre === "string" &&
+    (row.tipo === "TEXTO" || row.tipo === "NUMERICO" || row.tipo === "LISTA") &&
+    (row.estado === "Activo" || row.estado === "Inactivo")
+  );
+};
+
+// Demo state restored from the current-browser session when available; otherwise a
+// fresh clone of the fixtures. Cross-tab writes rehydrate this same array in place.
+const store: RegistroCaracteristica[] = loadMockArray("taxonomy-characteristics", storeFixtures, isCharacteristic);
+syncMockArrayOnExternalChange("taxonomy-characteristics", store, isCharacteristic);
+
+const persist = () => persistMockArray("taxonomy-characteristics", store);
 
 const esperar = (ms: number) =>
   new Promise((resolve) => setTimeout(resolve, ms));
@@ -206,6 +230,13 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
       valores: input.tipo === "LISTA" ? [] : undefined,
     };
     store.push(registro);
+    const ok = persist();
+    if (!ok && isMockPersistenceAvailable()) {
+      store.pop();
+      throw new Error(
+        "No se pudo crear la característica. Vuelve a intentarlo.",
+      );
+    }
     return {
       id: registro.id,
       nombre: registro.nombre,
@@ -230,8 +261,18 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
         "No se pudo guardar la característica. Inténtalo de nuevo.",
       );
     }
+    const prevNombre = registro.nombre;
+    const prevUnidad = registro.unidad;
     registro.nombre = input.nombre;
     registro.unidad = registro.tipo === "NUMERO" ? input.unidad : undefined;
+    const ok = persist();
+    if (!ok && isMockPersistenceAvailable()) {
+      registro.nombre = prevNombre;
+      registro.unidad = prevUnidad;
+      throw new Error(
+        "No se pudo guardar la característica. Vuelve a intentarlo.",
+      );
+    }
     return aDetalle(registro);
   },
 
@@ -280,6 +321,12 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
     if (!r.valores) r.valores = [];
     r.valores.push(v);
     r.valoresActivos = contarActivos(r.valores);
+    const ok = persist();
+    if (!ok && isMockPersistenceAvailable()) {
+      r.valores.pop();
+      r.valoresActivos = contarActivos(r.valores);
+      throw new Error("No se pudo agregar el valor. Vuelve a intentarlo.");
+    }
     return { ...v };
   },
 
@@ -340,10 +387,20 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
         operacionId,
       };
     }
+    const prevEstado = v.estado;
+    const prevVersion = v.version;
+    const prevActivos = r.valoresActivos;
     v.estado = "Inactivo";
     v.version += 1;
     if (r.valores) {
       r.valoresActivos = contarActivos(r.valores);
+    }
+    const ok = persist();
+    if (!ok && isMockPersistenceAvailable()) {
+      v.estado = prevEstado;
+      v.version = prevVersion;
+      r.valoresActivos = prevActivos;
+      throw new Error("No se pudo dar de baja el valor. Vuelve a intentarlo.");
     }
     return {
       resultado: "exito",
@@ -376,9 +433,20 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
 
     if (operacion.estado === "pendiente") {
       operacion.estado = "confirmada";
+      const prevEstado = v.estado;
+      const prevVersion = v.version;
+      const prevActivos = r.valoresActivos;
       v.estado = "Inactivo";
       v.version += 1;
       r.valoresActivos = contarActivos(r.valores ?? []);
+      const ok = persist();
+      if (!ok && isMockPersistenceAvailable()) {
+        operacion.estado = "pendiente";
+        v.estado = prevEstado;
+        v.version = prevVersion;
+        r.valoresActivos = prevActivos;
+        throw new Error("No se pudo confirmar la baja del valor. Vuelve a intentarlo.");
+      }
       return {
         operacionId,
         estado: "confirmada",
@@ -402,7 +470,13 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
     signal?.throwIfAborted();
     const r = hallar(id);
     if (!r) return null;
+    const prevEstado = r.estado;
     r.estado = estado;
+    const ok = persist();
+    if (!ok && isMockPersistenceAvailable()) {
+      r.estado = prevEstado;
+      throw new Error("No se pudo cambiar el estado de la característica. Vuelve a intentarlo.");
+    }
     return aDetalle(r);
   },
 };

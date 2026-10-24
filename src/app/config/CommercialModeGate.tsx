@@ -21,11 +21,13 @@ export function CommercialModeGate({ children }: { children: ReactNode }) {
   const mockOnly = ["/cupones", "/promociones", "/recomendaciones"].some(
     (path) => pathname === path || pathname.startsWith(`${path}/`),
   );
-  if (mode === "api" && mockOnly && !api)
+  const pendingModule = ["/inventario", "/combos"].some(
+    (path) => pathname === path || pathname.startsWith(`${path}/`),
+  );
+  if (mode === "api" && (pendingModule || (mockOnly && !api)))
     return (
-      <FeedbackAlert semantic="error" title="Integración API no disponible">
-        Este módulo todavía utiliza un adapter de demostración. En modo API sus
-        operaciones permanecen deshabilitadas hasta configurar su provider.
+      <FeedbackAlert semantic="error" title="Función no disponible">
+        Esta función no está disponible en el modo actual.
       </FeedbackAlert>
     );
   if (mode === "api" && mockOnly && session && api)

@@ -29,7 +29,7 @@ function renderDomainStep(row: BulkImportRow, domain: BulkDomain) {
     );
   } else if (step?.status === "PROCESSING") {
     badge = (
-      <StatusBadge semantic="warning">
+      <StatusBadge semantic="info">
         <span style={{ whiteSpace: "nowrap" }}>En proceso</span>
       </StatusBadge>
     );
@@ -73,7 +73,7 @@ function renderRowStatus(status: BulkRowStatus) {
       break;
     case "PROCESSING":
       badge = (
-        <StatusBadge semantic="warning">
+        <StatusBadge semantic="info">
           <span style={{ whiteSpace: "nowrap" }}>En proceso</span>
         </StatusBadge>
       );
@@ -101,6 +101,8 @@ export function BatchRowsTable({
 }: BatchRowsTableProps) {
   const [page, setPage] = useState(1);
   const pageSize = 10;
+  const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
 
   const columns: TableColumn<BulkImportRow>[] = [
     {
@@ -192,8 +194,8 @@ export function BatchRowsTable({
   ];
 
   const paginatedRows = rows.slice(
-    (page - 1) * pageSize,
-    page * pageSize,
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize,
   );
 
   return (
@@ -207,12 +209,12 @@ export function BatchRowsTable({
       empty={{
         title: "Sin filas de detalle",
         description:
-          "El lote no incluye filas individuales en el reporte actual o aún no se ha generado el desglose.",
+          "No hay filas de detalle disponibles.",
       }}
       pagination={
         rows.length > pageSize
           ? {
-              page,
+              page: currentPage,
               pageSize,
               total: rows.length,
               onChange: setPage,

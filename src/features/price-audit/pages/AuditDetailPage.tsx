@@ -10,6 +10,7 @@ import { FeedbackAlert, SectionCard } from "../../../components/shared";
 import { useAuditRuntime } from "../services/AuditRuntimeContext";
 import {
   dateLabel,
+  displayAuditId,
   nextValue,
   operationLabel,
   originLabel,
@@ -116,7 +117,7 @@ export function AuditDetailPage() {
           <>
             <SectionCard title="Identificación">
               {field("SKU", state.result.sku)}
-              {field("Asiento", state.result.id)}
+              {field("Asiento", displayAuditId(state.result.id))}
               {field("Producto", state.result.productId)}
               {field("Fecha y hora", dateLabel(state.result.at))}
             </SectionCard>
@@ -136,7 +137,12 @@ export function AuditDetailPage() {
               {field("Lote", state.result.batchId ?? "Sin lote")}
             </SectionCard>
             <SectionCard title="Actor y datos informados">
-              {field("Usuario", state.result.actorId)}
+              {field(
+                "Usuario",
+                state.result.actorId === "demo-pricing"
+                  ? null
+                  : state.result.actorId,
+              )}
               {field("Correo", state.result.email)}
               {field("IP de origen", state.result.ip)}
             </SectionCard>

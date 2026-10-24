@@ -67,6 +67,7 @@ export function useScheduleForm(
   const reference = usePricingRead(
     `${targetId}:${draft.channel}:${start}:${update}`,
     read,
+    `${targetId}:${draft.channel}:${start}`,
   );
   const change = (next: ScheduleDraft) => {
     setDraft(next);
@@ -76,7 +77,7 @@ export function useScheduleForm(
     const price =
       reference.state.status === "success"
         ? (reference.state.result?.price ?? null)
-        : null;
+        : (reference.previous?.price ?? null);
     const next = validateSchedule(draft, clock.now(), price);
     if (
       start &&

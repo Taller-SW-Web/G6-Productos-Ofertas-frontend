@@ -16,7 +16,7 @@ interface TargetContext {
   productId: string;
 }
 export type PriceTarget =
-  | (TargetContext & { kind: "product"; referenceSku?: string })
+  | (TargetContext & { kind: "product"; referenceSku?: string; initialRegular?: string })
   | (TargetContext & { kind: "variant"; sku: string; productTargetId: string });
 export interface PriceView {
   id: string;
@@ -31,6 +31,7 @@ export interface PriceView {
   validFrom: string;
   validUntil: string | null;
   inherited: boolean;
+  validityId?: string;
 }
 export interface PriceQuery {
   targetId: string;
@@ -77,4 +78,5 @@ export interface PricingRepository {
   ): Promise<PrevalidationView>;
   readBatch(id: string, signal: AbortSignal): Promise<BatchView | null>;
   report(id: string, signal: AbortSignal): Promise<ReportFile>;
+  reconcileAudit?(): void;
 }

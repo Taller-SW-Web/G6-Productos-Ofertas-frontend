@@ -34,12 +34,49 @@ export const priceTargets: PriceTarget[] = [
     sku: "ZAP-TRL-42-BLK",
     productTargetId: "base",
   },
+  // Shared demo targets for the Combos feature (MK-002). They resolve the exact
+  // sellable SKUs of the shared Catalog so Combos and Pricing expose the same
+  // economic reference. Do not duplicate these values elsewhere.
+  {
+    id: "combo-casaca",
+    label: "Casaca Cortaviento Trail · Producto base",
+    productId: "PROD-CAS-001",
+    kind: "product",
+    referenceSku: "CAS-COR-001",
+  },
+  {
+    id: "combo-run-base",
+    label: "Camiseta Running Endurance · Producto base",
+    productId: "PROD-RUN-001",
+    kind: "product",
+    referenceSku: "CAM-RUN",
+  },
+  {
+    id: "combo-run-bla-m",
+    label: "Color principal: Blanco · Talla: M — CAM-RUN-BLA-M",
+    productId: "PROD-RUN-001",
+    kind: "variant",
+    sku: "CAM-RUN-BLA-M",
+    productTargetId: "combo-run-base",
+  },
+  {
+    id: "combo-run-azu-l",
+    label: "Color principal: Azul Índigo · Talla: L — CAM-RUN-AZU-L",
+    productId: "PROD-RUN-001",
+    kind: "variant",
+    sku: "CAM-RUN-AZU-L",
+    productTargetId: "combo-run-base",
+  },
 ];
 export const targetNames: Record<string, string> = {
   base: "Zapatilla Trail Inka Explorer",
   variant40: "Talla 40 · Negro",
   variant41: "Talla 41 · Negro",
   override42: "Talla 42 · Negro",
+  "combo-casaca": "Casaca Cortaviento Trail",
+  "combo-run-base": "Camiseta Running Endurance",
+  "combo-run-bla-m": "Color principal: Blanco · Talla: M",
+  "combo-run-azu-l": "Color principal: Azul Índigo · Talla: L",
 };
 export const priceRecords: PriceView[] = [
   {
@@ -89,6 +126,48 @@ export const priceRecords: PriceView[] = [
     offer: null,
     currency: "PEN",
     version: 6,
+    origin: "sku",
+    channel: "global",
+    validFrom: "2026-09-01T00:00:00Z",
+    validUntil: null,
+    inherited: false,
+  },
+  {
+    id: "combo-casaca",
+    name: targetNames["combo-casaca"]!,
+    regular: "179.00",
+    offer: "159.00",
+    currency: "PEN",
+    version: 1,
+    origin: "product",
+    channel: "global",
+    validFrom: "2026-09-01T00:00:00Z",
+    validUntil: null,
+    inherited: false,
+  },
+  {
+    // Base reference for PROD-RUN-001. The Blanco variant inherits this record.
+    id: "combo-run-base",
+    name: targetNames["combo-run-base"]!,
+    regular: "139.90",
+    offer: "129.90",
+    currency: "PEN",
+    version: 1,
+    origin: "product",
+    channel: "global",
+    validFrom: "2026-09-01T00:00:00Z",
+    validUntil: null,
+    inherited: false,
+  },
+  {
+    // Own override for the Azul variant; it does not inherit the base offer.
+    id: "combo-run-azu-l",
+    name: targetNames["combo-run-azu-l"]!,
+    sku: "CAM-RUN-AZU-L",
+    regular: "149.90",
+    offer: null,
+    currency: "PEN",
+    version: 1,
     origin: "sku",
     channel: "global",
     validFrom: "2026-09-01T00:00:00Z",
