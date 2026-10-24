@@ -3,6 +3,7 @@ import type {
   DispositionType,
   ReceiveTransferPayload,
 } from "./inventoryTypes";
+import type { TrasladoInventarioDto } from "./inventoryMappers";
 
 // Gestión inmutable de intentos de recepción de traslados (TAC-P0-01 / TAC-P0-02).
 //
@@ -10,7 +11,8 @@ import type {
 // pendiente se persiste en `sessionStorage` (por pestaña) además de mantenerse
 // en memoria como caché sincronizada. Esto evita perder la identidad de una
 // operación incierta al recargar el navegador, pero no garantiza conciliación
-// entre dispositivos ni tras borrar manualmente los datos del navegador.
+// entre dispositivos, entre pestañas ni tras borrar manualmente los datos del
+// navegador o cerrar la sesión.
 //
 // El backend (`traslados.service.ts`) calcula el fingerprint de idempotencia con:
 //   traslado_id, received_quantity, disposition, final_receipt, received_at,
@@ -26,7 +28,8 @@ import type {
 //      al cerrar/reabrir el modal o tras un `GET /inventario/traslados` genérico.
 //
 // Límite documentado: `sessionStorage` es por pestaña y se pierde al borrar los
-// datos del navegador o al cerrar la pestaña. No se implementa
+// datos del navegador o al cerrar la pestaña. No se garantiza conciliación entre
+// pestañas, dispositivos ni entre sesiones. No se implementa
 // `GET /inventario/operaciones/{operationId}`; ese contrato está reservado a
 // operaciones de Ventas/Postventa y no constituye conciliación autorizada de
 // recepciones humanas.
@@ -62,7 +65,7 @@ export interface TransferReceptionDraftInput {
 }
 
 const STORAGE_KEY = "inventory.transferReceptionAttempts.v1";
-const STORAGE_VERSION = 1;
+const STORAGE_VERSION = 2;
 
 const DISPOSITIONS: readonly string[] = [
   "REINGRESAR_DISPONIBLE",
@@ -70,11 +73,17 @@ const DISPOSITIONS: readonly string[] = [
   "CONFIRMAR_MERMA",
 ];
 
+export interface PersistedConfirmedReceptionWithDto {
+  payload: ReceiveTransferPayload;
+  dto: TrasladoInventarioDto;
+}
+
 interface PersistedTransferReceptionState {
   version: number;
   uncertain: unknown;
   inFlight: unknown;
   confirmedAwaiting: unknown;
+  confirmedAwaitingWithDto?: unknown;
 }
 
 // Registros compartidos en memoria (caché sincronizada con sessionStorage).
@@ -90,11 +99,17 @@ const confirmedReceptionsAwaitingRefreshByTransferId = new Map<
   string,
   Readonly<ReceiveTransferPayload>
 >();
+const confirmedReceptionsAwaitingRefreshWithDtoByTransferId = new Map<
+  string,
+  PersistedConfirmedReceptionWithDto
+>();
 
 // Traslados cuyo registro persistido está corrupto o no pudo validarse. Se
 // bloquean sin inventar una identidad de operación.
 const blockedTransferIds = new Set<string>();
 let storageCorruptedAll = false;
+let storageEphemeral = false;
+let lastGoodPersistedState: string | null = null;
 
 function createMemoryStorage(): Storage {
   const values = new Map<string, string>();
@@ -124,12 +139,20 @@ let fallbackStorage: Storage | null = null;
 
 function getSessionStorage(): Storage {
   try {
-    if (typeof sessionStorage !== "undefined" && sessionStorage) return sessionStorage;
+    if (typeof sessionStorage !== "undefined" && sessionStorage) {
+      storageEphemeral = false;
+      return sessionStorage;
+    }
   } catch {
     // Ignorar y usar almacenamiento en memoria fuera del navegador.
   }
+  storageEphemeral = true;
   if (!fallbackStorage) fallbackStorage = createMemoryStorage();
   return fallbackStorage;
+}
+
+export function isTransferReceptionStorageEphemeral(): boolean {
+  return storageEphemeral;
 }
 
 function isValidReceiveTransferPayload(value: unknown): value is ReceiveTransferPayload {
@@ -146,6 +169,33 @@ function isValidReceiveTransferPayload(value: unknown): value is ReceiveTransfer
     DISPOSITIONS.includes(payload.disposition) &&
     typeof payload.finalReceipt === "boolean" &&
     (payload.note === undefined || typeof payload.note === "string")
+  );
+}
+
+function isValidTrasladoDtoForPersistence(value: unknown): value is TrasladoInventarioDto {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const dto = value as Record<string, unknown>;
+  return (
+    typeof dto.traslado_id === "string" &&
+    typeof dto.sku === "string" &&
+    typeof dto.quantity_shipped === "number" &&
+    Number.isSafeInteger(dto.quantity_shipped) &&
+    dto.quantity_shipped >= 1 &&
+    typeof dto.quantity_received === "number" &&
+    Number.isSafeInteger(dto.quantity_received) &&
+    dto.quantity_received >= 0 &&
+    typeof dto.missing_quantity === "number" &&
+    Number.isSafeInteger(dto.missing_quantity) &&
+    dto.missing_quantity >= 0 &&
+    typeof dto.source_location_id === "string" &&
+    typeof dto.target_location_id === "string" &&
+    typeof dto.estado === "string" &&
+    ["EN_TRANSITO", "RECIBIDO_PARCIAL", "COMPLETADO", "COMPLETADO_CON_DISCREPANCIA"].includes(
+      dto.estado,
+    ) &&
+    typeof dto.created_at === "string" &&
+    typeof dto.updated_at === "string" &&
+    (dto.source_incident_id === undefined || dto.source_incident_id === null || typeof dto.source_incident_id === "string")
   );
 }
 
@@ -201,15 +251,37 @@ function persistState(): void {
       "No se pudo persistir el intento de recepción: almacenamiento no disponible.",
     );
   }
+  const confirmedAwaitingWithDto: PersistedConfirmedReceptionWithDto[] = [];
+  for (const [transferId, record] of confirmedReceptionsAwaitingRefreshWithDtoByTransferId.entries()) {
+    if (isValidReceiveTransferPayload(record.payload) && isValidTrasladoDtoForPersistence(record.dto)) {
+      confirmedAwaitingWithDto.push({
+        payload: freezeReceiveTransferPayload(record.payload),
+        dto: record.dto,
+      });
+    } else {
+      blockedTransferIds.add(transferId);
+    }
+  }
   const state: PersistedTransferReceptionState = {
     version: STORAGE_VERSION,
     uncertain: [...uncertainReceptionsByTransferId.values()],
     inFlight: [...inFlightReceptionsByTransferId.values()],
     confirmedAwaiting: [...confirmedReceptionsAwaitingRefreshByTransferId.values()],
+    confirmedAwaitingWithDto,
   };
+  const serialized = JSON.stringify(state);
   try {
-    storage.setItem(STORAGE_KEY, JSON.stringify(state));
+    storage.setItem(STORAGE_KEY, serialized);
+    lastGoodPersistedState = serialized;
   } catch {
+    if (lastGoodPersistedState !== null && typeof storage.getItem === "function") {
+      try {
+        storage.setItem(STORAGE_KEY, lastGoodPersistedState);
+        return;
+      } catch {
+        // Fall through to throw
+      }
+    }
     throw new InventoryError(
       "CONTRATO_BLOQUEADO",
       "No se pudo persistir el intento de recepción.",
@@ -220,11 +292,17 @@ function persistState(): void {
 function restoreFromStorage(): void {
   const storage = getSessionStorage();
   if (!storage) return;
-  const raw = storage.getItem(STORAGE_KEY);
-  if (!raw) return;
+  let rawToParse: string | null = null;
+  try {
+    rawToParse = storage.getItem(STORAGE_KEY);
+  } catch {
+    storageCorruptedAll = true;
+    return;
+  }
+  if (rawToParse === null) return;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(rawToParse);
   } catch {
     storageCorruptedAll = true;
     return;
@@ -262,9 +340,36 @@ function restoreFromStorage(): void {
     }
   }
 
+  if (Array.isArray(parsed.confirmedAwaitingWithDto)) {
+    for (const item of parsed.confirmedAwaitingWithDto as unknown[]) {
+      if (item !== null && typeof item === "object" && !Array.isArray(item)) {
+        const record = item as Record<string, unknown>;
+        if (
+          isValidReceiveTransferPayload(record.payload) &&
+          isValidTrasladoDtoForPersistence(record.dto)
+        ) {
+          const frozen = freezeReceiveTransferPayload(record.payload);
+          confirmedReceptionsAwaitingRefreshWithDtoByTransferId.set(frozen.transferId, {
+            payload: frozen,
+            dto: record.dto as TrasladoInventarioDto,
+          });
+          confirmedReceptionsAwaitingRefreshByTransferId.set(frozen.transferId, frozen);
+        } else {
+          markBlockedTransferId(record.payload);
+        }
+      } else {
+        storageCorruptedAll = true;
+      }
+    }
+  } else if ((parsed as PersistedTransferReceptionState).confirmedAwaitingWithDto !== undefined) {
+    storageCorruptedAll = true;
+  }
+
   // El estado IN_FLIGHT ya fue promovido a UNCERTAIN; no se conserva como tal.
   inFlightReceptionsByTransferId.clear();
   try {
+    const current = storage.getItem(STORAGE_KEY);
+    if (current !== null) lastGoodPersistedState = current;
     persistState();
   } catch {
     // La restauración no debe lanzar durante la carga del módulo.
@@ -373,6 +478,9 @@ export function resetUncertainTransferReceptions(): void {
   inFlightReceptionsByTransferId.clear();
   blockedTransferIds.clear();
   storageCorruptedAll = false;
+  storageEphemeral = false;
+  lastGoodPersistedState = null;
+  confirmedReceptionsAwaitingRefreshWithDtoByTransferId.clear();
   const storage = getSessionStorage();
   if (storage) {
     try {
@@ -386,6 +494,19 @@ export function resetUncertainTransferReceptions(): void {
 export function setInFlightTransferReception(
   payload: ReceiveTransferPayload,
 ): Readonly<ReceiveTransferPayload> {
+  if (typeof window !== "undefined") {
+    const storage = getSessionStorage();
+    try {
+      if (storage === fallbackStorage && storageEphemeral) {
+        throw new InventoryError(
+          "CONTRATO_BLOQUEADO",
+          "No se garantiza la persistencia de la recepción en este entorno. No se inicia el envío para evitar pérdida de identidad.",
+        );
+      }
+    } catch (error) {
+      if (error instanceof InventoryError) throw error;
+    }
+  }
   const frozen = freezeReceiveTransferPayload(payload);
   uncertainReceptionsByTransferId.delete(frozen.transferId);
   inFlightReceptionsByTransferId.set(frozen.transferId, frozen);
@@ -418,6 +539,24 @@ export function getConfirmedTransferReceptionAwaitingRefresh(
   return confirmedReceptionsAwaitingRefreshByTransferId.get(transferId) ?? null;
 }
 
+export function getConfirmedTransferReceptionAwaitingRefreshWithDto(
+  transferId: string,
+): PersistedConfirmedReceptionWithDto | null {
+  return confirmedReceptionsAwaitingRefreshWithDtoByTransferId.get(transferId) ?? null;
+}
+
+export function getAllUncertainTransferReceptions(): Array<Readonly<ReceiveTransferPayload>> {
+  return [...uncertainReceptionsByTransferId.values()];
+}
+
+export function getAllConfirmedTransferReceptionsAwaitingRefresh(): Array<Readonly<ReceiveTransferPayload>> {
+  return [...confirmedReceptionsAwaitingRefreshByTransferId.values()];
+}
+
+export function getAllConfirmedTransferReceptionsAwaitingRefreshWithDto(): Array<PersistedConfirmedReceptionWithDto> {
+  return [...confirmedReceptionsAwaitingRefreshWithDtoByTransferId.values()];
+}
+
 export function markTransferReceptionConfirmedAwaitingRefresh(
   payload: ReceiveTransferPayload,
 ): Readonly<ReceiveTransferPayload> {
@@ -429,10 +568,27 @@ export function markTransferReceptionConfirmedAwaitingRefresh(
   return frozen;
 }
 
+export function markTransferReceptionConfirmedAwaitingRefreshWithDto(
+  payload: ReceiveTransferPayload,
+  dto: TrasladoInventarioDto,
+): Readonly<ReceiveTransferPayload> {
+  const frozen = freezeReceiveTransferPayload(payload);
+  uncertainReceptionsByTransferId.delete(frozen.transferId);
+  inFlightReceptionsByTransferId.delete(frozen.transferId);
+  confirmedReceptionsAwaitingRefreshByTransferId.set(frozen.transferId, frozen);
+  confirmedReceptionsAwaitingRefreshWithDtoByTransferId.set(frozen.transferId, {
+    payload: frozen,
+    dto,
+  });
+  persistState();
+  return frozen;
+}
+
 export function clearConfirmedTransferReceptionAwaitingRefresh(
   transferId: string,
 ): void {
   confirmedReceptionsAwaitingRefreshByTransferId.delete(transferId);
+  confirmedReceptionsAwaitingRefreshWithDtoByTransferId.delete(transferId);
   try {
     persistState();
   } catch {
@@ -442,6 +598,7 @@ export function clearConfirmedTransferReceptionAwaitingRefresh(
 
 export function resetConfirmedTransferReceptionsAwaitingRefresh(): void {
   confirmedReceptionsAwaitingRefreshByTransferId.clear();
+  confirmedReceptionsAwaitingRefreshWithDtoByTransferId.clear();
   try {
     persistState();
   } catch {

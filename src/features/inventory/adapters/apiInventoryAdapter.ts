@@ -31,8 +31,12 @@ import {
   clearInFlightTransferReception,
   clearUncertainTransferReception,
   freezeReceiveTransferPayload,
+  getAllConfirmedTransferReceptionsAwaitingRefresh,
+  getAllConfirmedTransferReceptionsAwaitingRefreshWithDto,
+  getAllUncertainTransferReceptions,
   getConfirmedTransferReceptionAwaitingRefresh,
   isTransferReceptionStorageBlocked,
+  markTransferReceptionConfirmedAwaitingRefreshWithDto,
   setInFlightTransferReception,
   setUncertainTransferReception,
   type TransferReceptionPresentationRefresh,
@@ -202,6 +206,43 @@ export function createHttpInventoryRepository(
   // ubicaciones) falla después de que la mutación ya fue persistida, pero SOLO
   // para la misma intención exacta.
   const confirmedReceptions = new Map<string, ConfirmedReceptionRecord>();
+
+  // Hidratación desde almacenamiento persistido tras refresh/recreación del repositorio.
+  for (const payload of getAllUncertainTransferReceptions()) {
+    transferWrites.set(payload.transferId, {
+      state: "UNCERTAIN",
+      payload: freezeReceiveTransferPayload(payload),
+      reconciliation: "UNVERIFIABLE_BY_LIST_CONTRACT",
+      updatedAt: payload.receivedAt,
+    });
+  }
+  for (const record of getAllConfirmedTransferReceptionsAwaitingRefreshWithDto()) {
+    if (!confirmedReceptions.has(record.payload.operationId)) {
+      confirmedReceptions.set(record.payload.operationId, {
+        payload: freezeReceiveTransferPayload(record.payload),
+        dto: record.dto,
+      });
+    }
+    transferWrites.set(record.payload.transferId, {
+      state: "RECONCILED",
+      payload: freezeReceiveTransferPayload(record.payload),
+      reconciliation: "CONFIRMED_BY_IDEMPOTENT_RETRY",
+      updatedAt: record.dto.updated_at,
+      presentationRefresh: "AWAITING",
+    });
+  }
+  for (const payload of getAllConfirmedTransferReceptionsAwaitingRefresh()) {
+    if (getAllConfirmedTransferReceptionsAwaitingRefreshWithDto().some((r) => r.payload.transferId === payload.transferId)) {
+      continue;
+    }
+    transferWrites.set(payload.transferId, {
+      state: "RECONCILED",
+      payload: freezeReceiveTransferPayload(payload),
+      reconciliation: "CONFIRMED_BY_IDEMPOTENT_RETRY",
+      updatedAt: payload.receivedAt,
+      presentationRefresh: "AWAITING",
+    });
+  }
 
   function setPresentationRefresh(
     transferId: string,
@@ -469,7 +510,16 @@ export function createHttpInventoryRepository(
         dto.traslado_id,
       );
       if (!awaiting) continue;
-      const confirmed = confirmedReceptions.get(awaiting.operationId);
+      let confirmed = confirmedReceptions.get(awaiting.operationId);
+      if (!confirmed) {
+        const persistedWithDto = getAllConfirmedTransferReceptionsAwaitingRefreshWithDto().find(
+          (record) => record.payload.transferId === dto.traslado_id && record.payload.operationId === awaiting.operationId,
+        );
+        if (persistedWithDto) {
+          confirmed = { payload: persistedWithDto.payload, dto: persistedWithDto.dto };
+          confirmedReceptions.set(persistedWithDto.payload.operationId, confirmed);
+        }
+      }
       if (confirmed && sameTransferAggregate(confirmed.dto, dto)) {
         clearConfirmedTransferReceptionAwaitingRefresh(dto.traslado_id);
         setPresentationRefresh(dto.traslado_id, "REFRESHED");
@@ -590,6 +640,22 @@ export function createHttpInventoryRepository(
           );
         }
         return presentConfirmed(frozenPayload, confirmed.dto);
+      }
+
+      const confirmedAwaitingPayload = getConfirmedTransferReceptionAwaitingRefresh(key);
+      if (confirmedAwaitingPayload) {
+        if (confirmedAwaitingPayload.operationId !== frozenPayload.operationId) {
+          throw new InventoryError(
+            "PRESENTACION_FALLIDA",
+            "La recepción anterior ya fue confirmada por Inventory. Actualiza la bandeja para reflejar el saldo real del traslado antes de registrar otra recepción parcial.",
+          );
+        }
+        if (!areSameReceiveTransferPayloads(confirmedAwaitingPayload, frozenPayload)) {
+          throw new InventoryError(
+            "IDEMPOTENCY_CONFLICT",
+            "La identidad de esta recepción ya fue confirmada con otra intención (traslado, cantidad, disposición, cierre final, fecha o nota). No se devuelve un resultado ajeno a la solicitud.",
+          );
+        }
       }
 
       if (currentRecord?.state === "UNCERTAIN") {
@@ -723,6 +789,11 @@ export function createHttpInventoryRepository(
         reconciliation: "CONFIRMED_BY_IDEMPOTENT_RETRY",
         updatedAt: traslado.updated_at,
       });
+      try {
+        markTransferReceptionConfirmedAwaitingRefreshWithDto(frozenPayload, traslado);
+      } catch {
+        // Ignorar fallo de persistencia del DTO; el bloqueo se mantiene vía listado.
+      }
 
       // Fase D — enriquecimiento de presentación (no autoritativo). Si falla, la
       // mutación YA está confirmada y el estado permanece RECONCILED; el POST no

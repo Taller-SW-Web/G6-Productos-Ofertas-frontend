@@ -45,9 +45,12 @@ segunda auditoría de Marco:
 4. **`TAC-P1-07` — Matriz de transición ante errores:** estando en `UNCERTAIN`,
    ningún error (`400/401/403/404/409/422/5xx`, red o DTO inválido) libera el
    bloqueo; solo lo hace un `200` con DTO válido.
-5. **`TAC-P0-06` — Pérdida en refresh:** documentado y caracterizado por prueba;
-   la solución definitiva queda `BLOQUEADO_ESPECÍFICO` con propuesta a Marco
-   (ver sección dedicada).
+5. **`TAC-P0-06` — Pérdida en refresh:** persistencia implementada en
+   `sessionStorage` (por pestaña) para operaciones inciertas y confirmaciones con
+   refresco pendiente, con restauración conservadora de `IN_FLIGHT` como
+   `UNCERTAIN`, hidratación del adaptador tras recreación y persistencia del DTO
+   confirmado. Solo por pestaña; no garantiza conciliación entre pestañas,
+   dispositivos ni tras borrar manualmente/cerrar sesión. Ver sección dedicada.
 
 Corte **Hito 4 (2026-10-21, iteración 4)**: se resolvieron los dos P0 de la
 tercera auditoría de Marco:
@@ -111,7 +114,7 @@ tercera auditoría de Marco:
 |---|---|
 | `services/transferReceptionAttempt.ts` | Coordinador inmutable de intentos de recepción (`createTransferReceptionFormSession`, `freezeReceiveTransferPayload`, `areSameReceiveTransferPayloads`, `TransferReceptionWriteRecord`). Preserva `operationId`, `receivedAt` y `note` entre reintentos y a través de cierres/reaperturas del modal cuando el intento queda en `UNCERTAIN`. Mantiene `confirmedAwaitingRefresh` (`TAC-P0-08`/`TAC-P1-10`): una recepción confirmada cuya vista no pudo actualizarse bloquea nuevas intenciones hasta un listado completo y coherente. `recordSuccess()` ya no libera ese bloqueo; añade el diagnóstico `presentationRefresh` (`AWAITING`, `REFRESHED`, `UNVERIFIABLE_BY_AGGREGATE`). |
 | `components/ReceiveTransferModal.tsx` | Usa `createTransferReceptionFormSession(transfer.id)`. Reutiliza la solicitud inmutable en reintentos idénticos, genera nueva identidad si cambia cantidad/disposición/cierre/nota tras un `4xx`, y bloquea la edición mostrando aviso explícito cuando existe una operación `UNCERTAIN`. Tras `TAC-P0-08`, un fallo de presentación se muestra como "Recepción registrada — vista pendiente de actualizar" y bloquea el formulario sin repetir el POST. `TAC-P1-10` añade un guard en `handleSubmit` para que ni un `requestSubmit` programático reenvíe el formulario confirmado; `UNCERTAIN` conserva su reintento. |
-| `adapters/apiInventoryAdapter.ts` | Separa los estados `IN_FLIGHT`, `UNCERTAIN` y `RECONCILED` (`getTransferWriteRecord`). En `readTransfers()` registra `UNVERIFIABLE_BY_LIST_CONTRACT` para `UNCERTAIN` y, desde `TAC-P1-10`, solo libera `confirmedAwaitingRefresh` si el agregado del listado coincide exactamente con el DTO confirmado; en caso contrario registra `UNVERIFIABLE_BY_AGGREGATE`. Rechaza cualquier cambio de `operationId` o contenido mientras el traslado esté en `UNCERTAIN`. El caché de confirmaciones (`TAC-P0-09`) almacena `{ payload, dto }` y compara el fingerprint completo antes de devolverlo; el `200` debe traer el `operation_id` y `traslado_id` solicitados. Desde `TAC-P0-11`, un `AbortError` posterior a la invocación del transporte en un `POST` se clasifica como `RESULTADO_INCIERTO`; una señal ya abortada antes del despacho no crea `UNCERTAIN`. Desde `TAC-P0-12`, cualquier excepción tipada o de transporte posterior a la invocación del transporte en un `POST` se clasifica como `RESULTADO_INCIERTO`; las respuestas HTTP recibidas efectivamente conservan su rechazo definitivo. |
+| `adapters/apiInventoryAdapter.ts` | Separa los estados `IN_FLIGHT`, `UNCERTAIN` y `RECONCILED` (`getTransferWriteRecord`). Hidrata `transferWrites` y `confirmedReceptions` desde `sessionStorage` tras recreación. Rechaza nuevas intenciones si hay `CONFIRMED_AWAITING_REFRESH` sin coincidencia de identidad. En `readTransfers()` registra `UNVERIFIABLE_BY_LIST_CONTRACT` para `UNCERTAIN` y, desde `TAC-P1-10`, solo libera `confirmedAwaitingRefresh` si el agregado del listado coincide exactamente con el DTO confirmado; en caso contrario registra `UNVERIFIABLE_BY_AGGREGATE`. Rechaza cualquier cambio de `operationId` o contenido mientras el traslado esté en `UNCERTAIN`. El caché de confirmaciones (`TAC-P0-09`) almacena `{ payload, dto }` y compara el fingerprint completo antes de devolverlo; el `200` debe traer el `operation_id` y `traslado_id` solicitados. Desde `TAC-P0-11`, un `AbortError` posterior a la invocación del transporte en un `POST` se clasifica como `RESULTADO_INCIERTO`; una señal ya abortada antes del despacho no crea `UNCERTAIN`. Desde `TAC-P0-12`, cualquier excepción tipada o de transporte posterior a la invocación del transporte en un `POST` se clasifica como `RESULTADO_INCIERTO`; las respuestas HTTP recibidas efectivamente conservan su rechazo definitivo. |
 | `hooks/useTransfers.ts` | Distingue el fallo de presentación del fallo transaccional: expone `presentationError`, dispara `notifyInventoryChanged()` para refrescar la vista y nunca marca la recepción como fallida. |
 | `pages/TransfersPage.tsx` | Muestra el aviso de presentación (`FeedbackAlert` warning) y limpia el feedback al abrir el modal de otro traslado. |
 | `services/inventoryMappers.ts` | Validadores/mappers del contrato: `toThresholdConfig`, `toDashboardKpiSummary`, `toLocationDistributionList`, `validateTrasladoDto`, `validateTrasladoListDto`, `validateRecepcionResponse` (devuelve `operationId` para verificar identidad), `validateTransferPresentation`. |
@@ -251,35 +254,22 @@ Limitación contractual registrada (`TAC-P0-02`):
 - `GET /api/v1/inventario/operaciones/{operationId}` (`consultarOperacionInventario`, OpenAPI L20309) es de uso exclusivo M2M para `modulo-ventas` con `serviceBearer` y scope `inventario:operaciones:leer`, no para el navegador.
 - En consecuencia, la única conciliación concluyente disponible dentro del contrato vigente para el navegador es el **reintento idempotente con la misma solicitud inmutable** (`Idempotency-Key` y body idénticos), ante el cual `traslados.service.ts` devuelve el `result_payload` persistido en `inventory_operations` sin duplicar el movimiento.
 
-## Recuperación tras refresh/crash (`TAC-P0-06` — BLOQUEADO_ESPECÍFICO)
+## Recuperación tras refresh/crash (`TAC-P0-06`)
 
-`uncertainReceptionsByTransferId` es un `Map` en memoria. Protege el intento al
-cerrar/reabrir el modal, pero **se pierde con un refresh completo del navegador
-o al reiniciar la aplicación**. Tras una recarga, el intento `UNCERTAIN` ya no
-se restaura y podría generarse un nuevo `operationId` para una recepción que
-quizá ya fue confirmada. Este escenario está documentado en el módulo
-(`transferReceptionAttempt.ts`) y caracterizado por una prueba de reinicio de
-sesión; **la solución definitiva está pendiente de acuerdo con Marco.**
+`transferReceptionAttempt.ts` persiste `sessionStorage` (clave
+`inventory.transferReceptionAttempts.v1`, versión 2) por pestaña: `UNCERTAIN`,
+`IN_FLIGHT` (promovido conservadoramente a `UNCERTAIN`), `confirmedAwaiting`
+(payload) y `confirmedAwaitingWithDto` ({payload, dto}). `apiInventoryAdapter`
+hidrata `transferWrites` y `confirmedReceptions` al recrear la instancia tras un
+refresh. Si el almacenamiento cae a memoria (ephemeral) o falla la escritura,
+el envío inicial se bloquea con `CONTRATO_BLOQUEADO`. La restauración es
+conservadora: en caso de corrupción parcial solo se bloquean los traslados
+afectados.
 
-Propuesta de mecanismo (a elegir por Marco antes de implementar — no se aplica
-de forma unilateral):
-
-1. **Persistencia local del payload inmutable** (`localStorage`/`sessionStorage`)
-   del intento `UNCERTAIN` (solo `operationId`, `receivedAt`, `quantityReceived`,
-   `disposition`, `finalReceipt`, `note` y `transferId`). Al recargar, se hidrata
-   el modal bloqueado al reintento idéntico. *Modelo de seguridad:* no almacena
-   tokens, credenciales ni datos de negocio ajenos; la escritura real sigue
-   protegida por idempotencia del backend (`Idempotency-Key` + fingerprint).
-2. **Consulta de operación para el navegador** (`GET /inventario/operaciones/{operationId}`
-   ampliado a un consumidor con identidad de gestor), que devolvería el
-   `result_payload` persistido y permitiría reconciliar sin re-aplicar. Requiere
-   ampliación de contrato y scopes (no unilateral).
-3. **Aceptar la limitación** y exigir al usuario verificar el traslado en la
-   bandeja antes de una nueva recepción, con el riesgo documentado de doble
-   aplicación si se genera un nuevo `operationId` tras una recarga.
-
-No se agregan endpoints, persistencia en el navegador ni acceso a
-`inventory_operations` sin la decisión explícita de Marco.
+**Limitación:** solo por pestaña. No garantiza conciliación entre pestañas,
+dispositivos ni tras borrar manualmente los datos del navegador o cerrar la
+sesión. No se implementa `GET /inventario/operaciones/{operationId}`; ese
+contrato está reservado a Ventas/Postventa.
 
 ## Operaciones bloqueadas por contrato (`TAC-P0-04`)
 
