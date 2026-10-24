@@ -121,6 +121,53 @@ const apiFor = (
     getAccessToken: async () => token,
   });
 
+function retainedDto(url: URL, inactive: boolean) {
+  const state = url.searchParams.get("estado");
+  if (url.pathname === "/api/v1/productos")
+    return pageBody(state === "INACTIVO"
+      ? inactive ? [simple] : []
+      : inactive ? [variable] : [simple, variable]);
+  if (url.pathname.includes("/variantes"))
+    return pageBody(state === "INACTIVA"
+      ? inactive ? [{ ...variants[1], status: "INACTIVA" }] : []
+      : inactive ? [variants[0]] : variants, 1, 100, state === "INACTIVA" ? (inactive ? 1 : 0) : (inactive ? 1 : 2), true);
+  if (url.pathname === "/api/v1/categorias/administracion") return pageBody(categories, 1, 100, categories.length, true);
+  throw new Error("Unexpected retained fixture operation");
+}
+
+test("Catalog HTTP retain: products/SKUs deactivated after creation remain readable only as existing associations", async () => {
+  let inactive = false;
+  await fixture(url => ({ body: retainedDto(url, inactive) }), async (origin, requests) => {
+    const api = apiFor(origin), signal = new AbortController().signal;
+    expect((await api.catalog.products(signal)).every(row => row.active)).toBe(true);
+    inactive = true;
+    const result = await api.catalog.products(signal, { productIds: [simple.product_id], skus: [simple.sku_base, "SKU-L"] });
+    expect(result.find(row => row.id === simple.product_id)).toMatchObject({ name: simple.name, active: false, skus: [{ sku: simple.sku_base, active: false }] });
+    expect(result.find(row => row.id === variable.product_id)?.skus).toContainEqual({ sku: "SKU-L", label: "SKU-L", active: false });
+    expect(result.find(row => row.id === variable.product_id)?.skus).toContainEqual({ sku: "SKU-M", label: "SKU-M", active: true });
+    const choices = await api.catalog.products(signal);
+    expect(choices.map(row => row.id)).toEqual([variable.product_id]);
+    expect(choices[0]?.skus.map(row => row.sku)).toEqual(["SKU-M"]);
+    expect(requests.some(r => r.url.searchParams.get("estado") === "INACTIVO")).toBe(true);
+    expect(requests.some(r => r.url.searchParams.get("estado") === "INACTIVA")).toBe(true);
+    expect(requests.every(r => r.method === "GET")).toBe(true);
+  });
+});
+for (const retain of [{ productIds: ["missing-product"], skus: [] }, { productIds: [], skus: ["missing-sku"] }]) {
+  test(`Catalog HTTP: unresolved historical ${JSON.stringify(retain)} fails explicitly without fabricated references`, async () => {
+    await fixture(url => ({ body: retainedDto(url, true) }), async origin => {
+      await expect(apiFor(origin).catalog.products(new AbortController().signal, retain)).rejects.toMatchObject({ kind: "unavailable" });
+    });
+  });
+}
+for (const status of [401, 403, 503]) {
+  test(`Catalog HTTP retain: inactive lookup ${status} propagates without silently dropping associations`, async () => {
+    await fixture(url => url.searchParams.get("estado") === "INACTIVO" ? { status } : { body: retainedDto(url, true) }, async origin => {
+      await expect(apiFor(origin).catalog.products(new AbortController().signal, { productIds: [simple.product_id], skus: [] })).rejects.toMatchObject({ kind: status === 401 ? "session" : status === 403 ? "forbidden" : "unavailable" });
+    });
+  });
+}
+
 test("Catalog HTTP: all product/variant/category pages retain canonical IDs and sellable SKUs", async () => {
   await fixture(
     (url) => ({ body: dto(url, true) }),

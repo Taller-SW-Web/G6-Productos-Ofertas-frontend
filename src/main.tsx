@@ -30,15 +30,11 @@ async function start() {
     string | undefined;
   const securityApiBase = import.meta.env.VITE_G7_API_BASE as
     string | undefined;
-  if (mode === "api" && !!gatewayOrigin !== !!securityApiBase)
-    throw new Error(
-      "Configura las URLs de Gateway y Seguridad para iniciar sesión.",
-    );
   const promotions =
     mode === "api" && gatewayOrigin && securityApiBase
       ? (
           await import("./features/promotions/services/promotionSessionRuntime")
-        ).createPromotionSessionRuntime(gatewayOrigin, securityApiBase)
+        ).createOptionalPromotionSessionRuntime(gatewayOrigin, securityApiBase)
       : null;
   const combosRuntime = await createCombosRuntime(mode, runtime);
   root.render(

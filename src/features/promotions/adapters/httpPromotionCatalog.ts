@@ -4,7 +4,7 @@ import type {
   PromotionCatalogRepository,
 } from "../services/catalogRepository";
 
-// OpenAPI 0.6.0-rc.1, Docs 1ee0d9e: listarProductos (commercial DTO),
+// OpenAPI 0.6.0-rc.1, Docs e6a8ec2: listarProductos (commercial DTO),
 // listarVariantesProducto and listarCategoriasAdmin (administrative DTOs).
 // This is a backoffice USER session adapter, never an inter-service identity.
 export function createHttpPromotionCatalog(
@@ -46,13 +46,19 @@ export function createHttpPromotionCatalog(
   }
 
   return {
-    async products(signal) {
+    async products(signal, retain) {
       const bounded = AbortSignal.any([signal, AbortSignal.timeout(7500)]);
-      const rows = await pages("/productos?estado=ACTIVO", false, bounded);
+      const retainedIds = new Set(retain?.productIds ?? []);
+      const retainedSkus = new Set(retain?.skus ?? []);
+      // The commercial DTO omits status. The published backoffice estado
+      // filter identifies each set; no guessed SKU→product conversion or cache.
+      const groups = [{ state: "ACTIVO", rows: await pages("/productos?estado=ACTIVO", false, bounded) }];
+      if (retainedIds.size || retainedSkus.size)
+        groups.push({ state: "INACTIVO", rows: await pages("/productos?estado=INACTIVO", false, bounded) });
       const products: CatalogProductChoice[] = [];
       const ids = new Set<string>();
       const skus = new Set<string>();
-      for (const value of rows) {
+      for (const group of groups) for (const value of group.rows) {
         bounded.throwIfAborted();
         const row = object(value);
         const id = text(row.product_id);
@@ -65,11 +71,13 @@ export function createHttpPromotionCatalog(
         if (typeof row.tiene_variantes !== "boolean")
           throw new Error("INVALID_CATALOG_RESPONSE");
         // status is absent from ProductoResumenComercial. Activity follows the
-        // documented active-products query, not a guessed field/default.
+        // documented estado filter, not a guessed field/default.
         if (row.status !== undefined) {
           state(row.status, ["BORRADOR", "ACTIVO", "INACTIVO"]);
-          if (row.status !== "ACTIVO") continue;
+          if (row.status !== group.state) continue;
         }
+        const active = group.state === "ACTIVO";
+        if (!active && !retainedIds.has(id) && !retainedSkus.size) continue;
         const choices: CatalogProductChoice["skus"] = [];
         if (row.tiene_variantes) {
           const variants = await pages(
@@ -77,28 +85,38 @@ export function createHttpPromotionCatalog(
             true,
             bounded,
           );
+          if (retainedSkus.size)
+            variants.push(...await pages(
+              `/productos/${encodeURIComponent(id)}/variantes?estado=INACTIVA`,
+              true,
+              bounded,
+            ));
           const variantIds = new Set<string>();
           for (const value of variants) {
             const variant = object(value);
             unique(variantIds, text(variant.variant_id));
             const sku = text(variant.sku);
             state(variant.status, ["BORRADOR", "ACTIVA", "INACTIVA"]);
-            if (variant.status !== "ACTIVA") continue;
+            if (variant.status !== "ACTIVA" && !retainedSkus.has(sku)) continue;
             unique(skus, sku);
             // SKU is a published label; optional identifying attributes are
             // not required and no barcode/product_id is substituted for it.
-            choices.push({ sku, label: sku, active: true });
+            choices.push({ sku, label: sku, active: active && variant.status === "ACTIVA" });
           }
         } else {
           // sku_base is optional in the response schema. Without a confirmed
           // sellable SKU the selector fails visibly rather than inventing one.
           const sku = text(row.sku_base);
           unique(skus, sku);
-          choices.push({ sku, label: name, active: true });
+          choices.push({ sku, label: name, active });
         }
-        products.push({ id, name, categoryId, active: true, skus: choices });
+        if (active || retainedIds.has(id) || choices.some(choice => retainedSkus.has(choice.sku)))
+          products.push({ id, name, categoryId, active, skus: choices });
       }
       bounded.throwIfAborted();
+      if ([...retainedIds].some(id => !products.some(product => product.id === id)) ||
+          [...retainedSkus].some(sku => !products.some(product => product.skus.some(choice => choice.sku === sku))))
+        throw new Error("RETAINED_CATALOG_REFERENCE_UNAVAILABLE");
       return products;
     },
     async categories(signal) {

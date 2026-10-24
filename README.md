@@ -57,6 +57,8 @@ al CI queda como dependencia de Castilla; este PR no modifica workflows comparti
 
 `VITE_DATA_MODE` es el único selector de modo de datos (ver [.env.example](.env.example)). Se selecciona una vez y se distribuye mediante `DataModeContext`. En modo `api`, Promotions permite configurar juntas las URLs públicas `VITE_GATEWAY_ORIGIN` (solo origen) y `VITE_G7_API_BASE` (base publicada de Seguridad, por ejemplo `https://seguridad.example.org/api/v1`). No son credenciales. HTTPS es obligatorio fuera de loopback; no se configuran tokens ni secretos en Vite.
 
+Si alguna URL de Promotions falta o es inválida, sus rutas muestran indisponibilidad explícita y los módulos independientes siguen arrancando. La integración HTTP solo se inicializa con ambas URLs válidas; en modo API nunca se habilitan mocks como fallback.
+
 | Valor | Comportamiento |
 |---|---|
 | `mock` | Demostración con repositorios en memoria y fixtures. No requiere Backend, credenciales ni conexión de red. Las escrituras simuladas se conservan en `localStorage` de este navegador (ver «Persistencia de la demostración»). |

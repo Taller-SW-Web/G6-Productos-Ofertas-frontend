@@ -603,6 +603,8 @@ export function createHttpPromotionServices(
         const r = record(await request("/cupones?" + query(q), s)),
           meta = record(r.meta);
         const rows = array(r.items).map(coupon);
+        const total = integer(meta.total), current = integer(meta.pagina);
+        if (current < 1) throw new Error("INVALID_PAGE");
         // This cache and queue belong only to this list operation. Duplicate
         // IDs share the same promise, including its failure; nothing survives
         // a later read or another user's session.
@@ -631,13 +633,19 @@ export function createHttpPromotionServices(
         };
         return {
           items: await Promise.all(
-            rows.map(async (row) => ({
-              ...row,
-              promotion: await parentFor(row.promotionId),
-            })),
+            rows.map(async (row): Promise<CouponView> => {
+              try {
+                return { ...row, promotion: await parentFor(row.promotionId) };
+              } catch (error) {
+                s.throwIfAborted();
+                if (error instanceof CouponReadError && error.kind === "unavailable")
+                  return { ...row, relatedDataUnavailable: true };
+                throw error;
+              }
+            }),
           ),
-          total: integer(meta.total),
-          page: integer(meta.pagina),
+          total,
+          page: current,
         };
       }).then((r) => r!),
     read: (id, s) =>
@@ -692,8 +700,8 @@ export function createHttpPromotionServices(
     coupons,
     recommendations,
     catalog: options.catalog ?? {
-      products: (signal) =>
-        read(() => httpCatalog.products(signal)).then((r) => r!),
+      products: (signal, retain) =>
+        read(() => httpCatalog.products(signal, retain)).then((r) => r!),
       categories: (signal) =>
         read(() => httpCatalog.categories(signal)).then((r) => r!),
     },

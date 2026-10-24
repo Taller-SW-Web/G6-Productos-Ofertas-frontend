@@ -130,7 +130,7 @@ test("multiple promotions are read once each with at most four simultaneous GETs
     expect(calls).toHaveLength(13);
   });
 });
-for (const status of [401, 403, 404, 503]) {
+for (const status of [401, 403]) {
   test(`shared promotion GET ${status} rejects the entire list preserving error classification`, async () => {
     const rows = Array.from({ length: 100 }, (_, i) => ({ ...coupon, cuponId: `coupon-${i}` }));
     await fixture((request, response) => {
@@ -144,6 +144,65 @@ for (const status of [401, 403, 404, 503]) {
     });
   });
 }
+for (const invalid of ["coupon", "page"] as const) {
+  test(`invalid coupon list ${invalid} is rejected before any enrichment`, async () => {
+    await fixture((_request, response) => json(response, invalid === "coupon"
+      ? pageDto([{ cuponId: "coupon" }])
+      : { ...pageDto([coupon]), meta: { pagina: 0, total: 1 } }), async (api, calls) => {
+      await expect(api.coupons.list({ status: "all", page: 1, pageSize: 100 }, signal())).rejects.toMatchObject({ kind: "unavailable" });
+      expect(calls).toHaveLength(1);
+    });
+  });
+}
+for (const status of [404, 503, "timeout"] as const) {
+  test(`shared promotion GET ${status} preserves confirmed coupons with a warning and no cache`, async () => {
+    let fail = true;
+    const rows = Array.from({ length: 100 }, (_, i) => ({ ...coupon, cuponId: `coupon-${i}` }));
+    await fixture((request, response) => {
+      if (request.url?.startsWith("/api/v1/cupones?")) json(response, pageDto(rows));
+      else if (!fail) json(response, parent);
+      else if (status !== "timeout") json(response, {}, status);
+    }, async (api, calls) => {
+      const query = { status: "all", page: 1, pageSize: 100 } as const;
+      const result = await api.coupons.list(query, signal());
+      expect(result.total).toBe(100);
+      expect(result.items).toHaveLength(100);
+      expect(result.items.every(row => row.promotion === null && row.relatedDataUnavailable)).toBe(true);
+      expect(result.items[0]).toMatchObject({ code: "CODE", status: "inactive", consumedUses: 2 });
+      expect(calls).toHaveLength(2);
+      fail = false;
+      const current = await api.coupons.list(query, signal());
+      expect(current.items.every(row => row.promotion?.name === parent.nombre && !row.relatedDataUnavailable)).toBe(true);
+      expect(calls).toHaveLength(4);
+    });
+  });
+}
+test("mixed promotion reads keep successful enrichment and degrade only affected rows", async () => {
+  const rows = Array.from({ length: 100 }, (_, i) => ({ ...coupon, cuponId: `coupon-${i}`, promocionId: `parent-${i % 12}` }));
+  let active = 0, peak = 0;
+  await fixture((request, response) => {
+    if (request.url?.startsWith("/api/v1/cupones?")) return json(response, pageDto(rows));
+    const id = request.url!.split("/").at(-1)!;
+    peak = Math.max(peak, ++active);
+    setTimeout(() => { active--; json(response, id === "parent-3" ? {} : { ...parent, promotionId: id }, id === "parent-3" ? 503 : 200); }, 30);
+  }, async (api, calls) => {
+    const result = await api.coupons.list({ status: "all", page: 1, pageSize: 100 }, signal());
+    expect(peak).toBe(4);
+    expect(calls).toHaveLength(13);
+    expect(result.items.every(row => row.promotionId === "parent-3" ? row.relatedDataUnavailable && row.promotion === null : row.promotion?.name === parent.nombre)).toBe(true);
+  });
+});
+test("coupon list displays confirmed rows and a visible warning after related 503", async ({ page }) => {
+  const html = await (await page.request.get("/tests/harness/promotions-http.html")).text();
+  await page.addInitScript(() => { window.__promotionsHttpTest = { token: "synthetic-list-user" }; });
+  await page.route("**/cupones", route => route.request().resourceType() === "document" ? route.fulfill({ contentType: "text/html", body: html }) : route.fallback());
+  await page.route("**/api/v1/**", route => route.fulfill(new URL(route.request().url()).pathname === "/api/v1/cupones" ? { json: pageDto([coupon]) } : { status: 503, json: {} }));
+  await page.goto("/cupones");
+  await expect(page.getByText("Datos relacionados no disponibles", { exact: true })).toBeVisible();
+  await expect(page.getByRole("table")).toContainText("CODE");
+  await expect(page.getByRole("table")).toContainText("No disponible");
+  await expect(page.getByRole("link", { name: "Ver detalle de CODE", exact: true })).toBeVisible();
+});
 test("canceling a list aborts four active requests and never sends queued promotion GETs", async () => {
   const controller = new AbortController();
   let started = 0;

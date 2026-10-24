@@ -1,6 +1,19 @@
 import { G7Session, secureBase } from "../adapters/g7Session";
 import { createHttpPromotionServices } from "../adapters/httpPromotionServices";
 
+// Configuration failure belongs to this integration. The commercial gate
+// handles a null provider without preventing independent modules from mounting.
+export function createOptionalPromotionSessionRuntime(
+  gatewayOrigin: string,
+  securityApiBase: string,
+) {
+  try {
+    return createPromotionSessionRuntime(gatewayOrigin, securityApiBase);
+  } catch {
+    return null;
+  }
+}
+
 export function createPromotionSessionRuntime(
   gatewayOrigin: string,
   securityApiBase: string,

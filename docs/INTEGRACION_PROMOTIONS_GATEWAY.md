@@ -39,7 +39,7 @@ Estado: API_INTEGRATED en entorno local descartable para el recorrido probado; P
 
 Se conserva el único modo global VITE_DATA_MODE. En mock, la demostración existente no cambia. En api, las rutas de Promotions permanecen bloqueadas hasta recibir un PromotionApiContext.Provider con servicios explícitos.
 
-La factory createHttpPromotionServices recibe gatewayOrigin y getAccessToken(signal). La composición en main conecta esos servicios a G7Session cuando VITE_DATA_MODE=api y se configuran juntas VITE_GATEWAY_ORIGIN y VITE_G7_API_BASE. Sin ambas URLs conserva el gate anterior; con solo una falla al iniciar. No se obtiene un token de servicio ni se concede un rol desde la UI. HTTPS es obligatorio excepto loopback local.
+La factory createHttpPromotionServices recibe gatewayOrigin y getAccessToken(signal). La composición en main conecta esos servicios a G7Session cuando VITE_DATA_MODE=api y se configuran juntas y son válidas VITE_GATEWAY_ORIGIN y VITE_G7_API_BASE. Si falta alguna o es inválida, únicamente las rutas que necesitan Promotions muestran indisponibilidad; el arranque y los módulos independientes continúan. No hay fallback mock en modo API. No se obtiene un token de servicio ni se concede un rol desde la UI. HTTPS es obligatorio excepto loopback local.
 
 G7Session implementa el contrato G7 bf819dd216294f5e2d5d8d4d73b60554dc9d7b62, specs/contrato-api/openapi.yaml, kit-integracion, SPEC-06 y FRONT-00/H-11: POST /auth/login, /auth/otp/solicitar, /auth/otp/verificar, /auth/refresh y /auth/logout bajo la base publicada. Los pares de tokens, identidad y desafío se conservan solo en memoria; no se usan URL, localStorage, sessionStorage, cookies persistentes ni logs. Recarga requiere login. El formulario reutiliza SectionCard/FeedbackAlert/Mantine, protege las rutas existentes y solo monta las pantallas después de recibir SesionIniciada; MFA no equivale a sesión.
 
@@ -67,8 +67,11 @@ No se reenvían POST, PATCH ni cambios de estado automáticamente.
 Cada operación `coupons.list` mantiene su propio mapa de promesas por
 `promocionId` y una cola de hasta cuatro consultas relacionadas simultáneas.
 No reutiliza ese mapa en otra llamada ni sesión. Comparte tanto resultados
-como rechazos; conserva errores de sesión/permisos, falla el listado completo
-si falla una promoción y respeta la cancelación de consultas activas y en cola.
+como rechazos. Tras validar el listado de cupones, un GET complementario con
+404, 503 o timeout conserva las filas afectadas con `promotion: null` y
+`relatedDataUnavailable: true`; el listado muestra una advertencia visible.
+No se inventa nombre, vigencia ni estado. Los errores 401/403 mantienen su
+clasificación de acceso; la cancelación de consultas activas y en cola se propaga.
 Los datos se vuelven a consultar en cada listado, sin fallback a fixtures.
 
 Pruebas de regresión:
@@ -80,7 +83,7 @@ npx playwright test tests/promotions-coupon-http.spec.ts tests/promotions-http-c
 Cubren POST/PATCH/activar/desactivar seguidos de GET 503/timeout/404;
 escrituras no confirmadas; 100 cupones con una promoción; 100 cupones con 12
 promociones, límite de cuatro, actualización entre listados, propagación de
-401/403/404/503 y cancelación de consultas en cola; además de confirmación y
+401/403, degradación por 404/503/timeout y cancelación de consultas en cola; además de confirmación y
 advertencia visibles en crear/editar/activar a 1440 px. Son fixtures HTTP
 explícitos; no acreditan servicios compartidos.
 
@@ -121,6 +124,22 @@ createHttpPromotionServices configura por defecto createHttpPromotionCatalog con
 - SKU: producto simple usa su sku_base confirmado. Producto con variantes consulta GET /api/v1/productos/{productoId}/variantes?estado=ACTIVA&pagina=…&tamanio=100, PaginaVariantes con meta y status administrativo. Un ID de producto/variante o barcode no sustituye al SKU; sin SKU confirmado del simple, error visible.
 - Categorías: GET /api/v1/categorias/administracion?estado=ACTIVO&pagina=…&tamanio=100, PaginaCategoriasAdmin con meta, categoriaId/nombre/estado/version. No usa GET /categorias, que exige serviceBearer.
 - Paginación completa antes de entregar opciones; respuesta incompleta/incoherente o identidades repetidas falla sin devolver una lista parcial. Inactivos no se habilitan. Cada lectura completa de selector está acotada a 7,5 s, admite cancelación y no conserva resultados entre llamadas ni repite operaciones comerciales. Solo admite el único reintento GET por renovación descrito arriba. Límite técnico de 1.000 páginas por listado.
+
+`retain.productIds` y `retain.skus` conservan referencias de edición mediante
+los filtros publicados `/productos?estado=INACTIVO` y
+`/productos/{productoId}/variantes?estado=INACTIVA`, además de las consultas
+activas. Como no existe resolución publicada por SKU en este adapter, se
+recorren los productos y variantes paginados cuando es necesario resolverlo.
+Solo las referencias históricas solicitadas se agregan como inactivas; no se
+ofrecen para nuevas selecciones. Campañas permite quitarlas explícitamente;
+Recomendaciones conserva el origen inactivo y permite reemplazarlo o quitar
+candidatos. Ambos layouts ya reenvían sus asociaciones iniciales; el wrapper
+HTTP también reenvía `retain`. Una referencia no resoluble o un fallo de
+lectura muestra error y conserva el borrador, sin fabricar datos.
+
+Regresiones adicionales: `tests/promotions-startup.spec.ts`,
+`tests/promotions-catalog-http.spec.ts` y `tests/promotions-history-ui.spec.ts`.
+Usan respuestas HTTP sintéticas y no homologan G7 ni Catálogo compartidos.
 - 401/403, fallo de una página/variantes y DTO inválido producen el estado de error existente, conservando el borrador. No se completan referencias con datos de demostración ni se agregan precio/stock.
 
 OpenAPI sí define DTOs HTTP tipados: la explicación histórica de GenericData no corresponde a estas lecturas. La integración compartida necesita sesión real, permisos y handlers de los owners. El adaptador no autentica por sí mismo un usuario ni acredita su despliegue.
