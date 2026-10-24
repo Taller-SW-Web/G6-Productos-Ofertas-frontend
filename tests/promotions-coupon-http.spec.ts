@@ -182,7 +182,7 @@ async function browserFixture(page: Page) {
   return () => writes;
 }
 for (const action of ["create", "update", "activate"] as const) {
-  test(`coupon UI ${action}: confirmed success and related-data warning survive failed detail reload`, async ({ page }, info) => {
+  test(`coupon UI ${action}: confirmed result and warning remain in component memory after enrichment fails`, async ({ page }, info) => {
     const writes = await browserFixture(page);
     await page.goto(action === "create" ? "/cupones/nuevo" : action === "update" ? "/cupones/coupon/editar" : "/cupones/coupon");
     if (action === "create") {
@@ -206,6 +206,8 @@ for (const action of ["create", "update", "activate"] as const) {
     await expect(page.getByText(action === "activate" ? "Estado actualizado" : "Cupón guardado", { exact: true })).toBeVisible();
     await expect(page.getByText("Resultado sin confirmar", { exact: true })).toHaveCount(0);
     expect(writes()).toBe(1);
+    expect(await page.evaluate(() => JSON.stringify(history.state))).not.toContain('"cuponId"');
+    expect(await page.evaluate(() => JSON.stringify(history.state))).not.toContain('"confirmedCoupon"');
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1440);
     await page.screenshot({ path: info.outputPath(`confirmed-${action}-warning-1440.png`), fullPage: true });
   });

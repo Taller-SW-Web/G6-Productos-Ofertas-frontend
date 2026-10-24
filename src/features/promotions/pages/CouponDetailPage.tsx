@@ -42,11 +42,7 @@ export function CouponDetailPage({
   const navigate = useNavigate();
   const location = useLocation();
   const state = useCoupon(couponId, services.coupons, revision + queryRevision);
-  const [cachedCoupon, setCachedCoupon] = useState<CouponView | null>(() =>
-    location.state?.confirmedCoupon?.id === couponId
-      ? location.state.confirmedCoupon
-      : null,
-  );
+  const [cachedCoupon, setCachedCoupon] = useState<CouponView | null>(null);
   const [prevResult, setPrevResult] = useState<CouponView | null>(null);
   if (state.status === "success" && state.result !== prevResult) {
     setPrevResult(state.result);
@@ -108,7 +104,7 @@ export function CouponDetailPage({
             El nuevo estado fue confirmado. Los usos registrados se conservan.
           </FeedbackAlert>
         )}
-        {(location.state?.couponPromotionUnavailable || relatedDataUnavailable) && (
+        {relatedDataUnavailable && (
           <FeedbackAlert semantic="warning" title="Datos relacionados no disponibles">
             El backend confirmó el cambio del cupón. No se pudieron consultar
             los datos actuales de su promoción. Puedes volver a consultar el

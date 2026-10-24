@@ -57,8 +57,10 @@ nombre y las fechas de la promoción. Si solo falla ese GET (incluidos 404,
 503, timeout o cancelación), devuelve el cupón confirmado con
 `relatedDataUnavailable: true` y `promotion: null`. Es una advertencia del
 modelo de presentación, no un nuevo estado o campo del contrato HTTP.
-La UI conserva la confirmación y el registro recibido al navegar al detalle,
-incluso si la nueva lectura del detalle falla. Una respuesta inválida de la
+La UI conserva la confirmación y el registro recibido en estado React durante
+la advertencia, sin guardar el DTO en el historial ni en almacenamiento del
+navegador. Permite consultar el detalle mediante una nueva lectura explícita.
+Una respuesta inválida de la
 escritura o su fallo de transporte sigue siendo un resultado incierto.
 No se reenvían POST, PATCH ni cambios de estado automáticamente.
 

@@ -15,6 +15,7 @@ import {
   PageHeader,
 } from "../../../components/shared";
 import { CouponForm } from "../components/CouponForm";
+import { CouponSummary } from "../components/CouponSummary";
 import { UnsavedChangesDialog } from "../components/UnsavedChangesDialog";
 import { useCoupon } from "../hooks/useCoupons";
 import { useCouponForm } from "../hooks/useCouponForm";
@@ -99,15 +100,29 @@ function CouponFormContent({ initial }: { initial: CouponView | null }) {
     navigate(initial ? `/cupones/${initial.id}${suffix}` : `/cupones${suffix}`);
   if (form.confirmed) {
     const next = clearTransientParams(params);
+    if (form.confirmed.relatedDataUnavailable)
+      return (
+        <Stack gap="lg">
+          <PageHeader title={`Cupón — ${form.confirmed.code}`} />
+          <FeedbackAlert semantic="success" title="Cupón guardado">
+            La propuesta quedó guardada.
+          </FeedbackAlert>
+          <FeedbackAlert semantic="warning" title="Datos relacionados no disponibles">
+            El cambio del cupón fue confirmado. No se pudieron consultar los
+            datos actuales de su promoción. Puedes consultar el detalle sin
+            reenviar el cambio.
+          </FeedbackAlert>
+          <CouponSummary coupon={form.confirmed} />
+          <Button component={Link} to={`/cupones/${form.confirmed.id}?${next.toString()}`}>
+            Consultar detalle
+          </Button>
+        </Stack>
+      );
     return (
       <Navigate
         to={`/cupones/${form.confirmed.id}?${next.toString()}`}
         replace
-        state={{
-          couponSaved: true,
-          couponPromotionUnavailable: form.confirmed.relatedDataUnavailable,
-          confirmedCoupon: form.confirmed,
-        }}
+        state={{ couponSaved: true }}
       />
     );
   }
