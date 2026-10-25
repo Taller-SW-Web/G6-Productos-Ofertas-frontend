@@ -22,7 +22,7 @@
     "test:e2e:pricing": "playwright test --config src/features/pricing/testing/playwright.config.ts",
     "test:unit:bulk": "vitest run --config vitest.bulk.config.ts",
     "test:unit:combos": "vitest run --config vitest.config.ts",
-    "test:unit:inventory": "vitest run --config src/features/inventory/adapters/vitest.config.ts",
+    "test:unit:inventory": "vitest run --config src/features/inventory/adapters/vitest.config.ts && vitest run --config src/features/inventory/hooks/vitest.config.ts",
     "test:smoke:combos": "playwright test --config playwright.combos.config.ts"
   },
   "dependencies": {
@@ -38,6 +38,8 @@
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@playwright/test": "1.64.0",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
     "@types/node": "26.6.4",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
@@ -46,6 +48,7 @@
     "eslint-plugin-react-hooks": "7.1.1",
     "eslint-plugin-react-refresh": "0.5.7",
     "globals": "17.13.0",
+    "jsdom": "^26.1.0",
     "typescript": "6.0.3",
     "typescript-eslint": "8.71.1",
     "vite": "8.3.4",

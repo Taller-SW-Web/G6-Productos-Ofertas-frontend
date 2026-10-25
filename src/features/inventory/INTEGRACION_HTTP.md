@@ -603,4 +603,39 @@ pm test (54 + 51 + 55), **47/47** Playwright de inventario, builds
   - `tests/inventory*.spec.ts` (Playwright): **61/61 PASS**.
   - `npm run build` (`VITE_DATA_MODE=mock` y `VITE_DATA_MODE=api`): **PASS**.
 
+## Evidencia de la iteración 13 (auditoría PR #60 / MK-015 y MK-016 Hito 4)
+
+- Rama: `taco`.
+- Archivos involucrados:
+  - `src/features/inventory/hooks/useThresholds.ts`
+  - `src/features/inventory/pages/ThresholdsPage.tsx`
+  - `src/features/inventory/components/ThresholdConfigForm.tsx`
+  - `src/features/inventory/hooks/useThresholds.spec.ts` (nuevo)
+  - `src/features/inventory/hooks/vitest.config.ts` (nuevo)
+  - `src/features/inventory/adapters/thresholdReconciliation.spec.ts`
+  - `tests/inventory.spec.ts`
+  - `package.json` / `package-lock.json` (jsdom + Testing Library solo para pruebas)
+- Cambios realizados:
+  1. **[P1-01] Confirmación real del resultado de umbrales:**
+     - Se elimina la confirmación local duplicada de `ThresholdConfigForm` (`localFeedback`/"Cambio aplicado"). El mensaje de resultado proviene exclusivamente del hook mediante `feedback`.
+     - `CONFIRMED` se presenta como «Escritura confirmada»; `VERIFIED` como «Valor verificado, escritura no atribuida» (no atribuye el cambio al PUT); `RESULTADO_INCIERTO` como advertencia «Resultado no confirmado»; el resto de fallos como error.
+     - El feedback anterior se limpia al iniciar cada operación y se reemplaza cuando la operación falla.
+  2. **[P1-02] Una lectura posterior ya no invalida la escritura confirmada:**
+     - Se conserva el último `ThresholdConfig` acreditado en un `ref`; un fallo del `GET` disparado por `notifyInventoryChanged()` mantiene la configuración y el éxito, exponiendo solo `refreshWarning`. La notificación se conserva para el resto de vistas y las recargas por cambios externos siguen actualizando la pantalla.
+     - Si la recarga derivada de la propia mutación devuelve un valor que aún no refleja la escritura (consistencia eventual), tampoco se revierte el resultado confirmado.
+  3. **[P1-03] Validación semántica del DTO del PUT:**
+     - Antes de declarar `CONFIRMED` se exige `globalThreshold === val` o `skuOverrides[sku] === val`. Un `200` contradictorio se trata como resultado no acreditado: una única lectura autoritativa de conciliación; si confirma el valor se presenta como `VERIFIED`; si no, se propaga `RESULTADO_INCIERTO` sin reintentar la escritura.
+  4. **Pruebas:**
+     - `thresholdReconciliation.spec.ts`: presentación de los tres resultados, `VERIFIED` ante `200` contradictorio con lectura coincidente y no acreditación sin reintento cuando la lectura tampoco coincide (global y SKU).
+     - `useThresholds.spec.ts`: hook real montado con React + jsdom; `PUT 200` confirmado seguido de fallo del `GET` propio conserva umbrales, éxito y ausencia de error; recargas externas siguen actualizando; `RESULTADO_INCIERTO` + lectura coincidente se presenta como `VERIFIED`; recarga con dato atrasado no revierte lo confirmado.
+     - `tests/inventory.spec.ts`: MK-015-S02 verifica el mensaje real y la ausencia de la confirmación duplicada.
+- Resultados de validación:
+  - `npm run lint`: **PASS** (0 errores, 0 advertencias).
+  - `npm run typecheck`: **PASS** (0 errores).
+  - `test:unit:inventory`: **108/108 PASS** (104 adaptadores + 4 hooks).
+  - `npm test`: **370/370 PASS** (combos: 56, bulk: 51, inventory: 108, pricing: 155).
+  - `tests/inventory*.spec.ts` (Playwright): **61/61 PASS**.
+  - `npm run build` (`VITE_DATA_MODE=mock` y `VITE_DATA_MODE=api`): **PASS**.
+- Estado de integración: **`PARTIAL`** sin cambios. No se añadieron endpoints ni se modificó el cliente HTTP compartido; `configureInventoryApi()` sigue siendo el único punto de integración.
+
 

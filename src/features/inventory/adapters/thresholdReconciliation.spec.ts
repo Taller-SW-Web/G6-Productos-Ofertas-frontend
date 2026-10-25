@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  describeThresholdMutationError,
+  describeThresholdMutationSuccess,
   updateGlobalThresholdWithReconciliation,
   updateSkuThresholdWithReconciliation,
 } from "../hooks/useThresholds";
@@ -29,6 +31,65 @@ function createMockRepository(overrides: Partial<InventoryRepository> = {}): Inv
     ...overrides,
   };
 }
+
+describe("Presentación del resultado de mutación de umbrales (P1-01)", () => {
+  const configValida: ThresholdConfig = {
+    globalThreshold: 12,
+    skuOverrides: {},
+  };
+
+  it("CONFIRMED se presenta como escritura confirmada", () => {
+    expect(
+      describeThresholdMutationSuccess({
+        status: "CONFIRMED",
+        config: configValida,
+        message: "Umbral global actualizado correctamente.",
+      }),
+    ).toEqual({
+      semantic: "success",
+      title: "Escritura confirmada",
+      message: "Umbral global actualizado correctamente.",
+    });
+  });
+
+  it("VERIFIED se presenta como valor verificado sin atribuir la escritura", () => {
+    expect(
+      describeThresholdMutationSuccess({
+        status: "VERIFIED",
+        config: configValida,
+        message: "El valor deseado fue verificado en el servidor.",
+      }),
+    ).toEqual({
+      semantic: "warning",
+      title: "Valor verificado, escritura no atribuida",
+      message: "El valor deseado fue verificado en el servidor.",
+    });
+  });
+
+  it("un error se presenta como error de actualización", () => {
+    expect(
+      describeThresholdMutationError(
+        new Error("No se pudo contactar al servidor."),
+        "Error al actualizar umbral.",
+      ),
+    ).toEqual({
+      semantic: "error",
+      title: "Error al actualizar umbral",
+      message: "No se pudo contactar al servidor.",
+    });
+  });
+
+  it("un resultado incierto se presenta como advertencia, no como error definitivo", () => {
+    const feedback = describeThresholdMutationError(
+      new InventoryError("RESULTADO_INCIERTO", "El umbral podría haberse actualizado."),
+      "Error al actualizar umbral.",
+    );
+
+    expect(feedback.semantic).toBe("warning");
+    expect(feedback.title).toBe("Resultado no confirmado");
+    expect(feedback.message).toBe("El umbral podría haberse actualizado.");
+  });
+});
 
 describe("Conciliación de umbrales (P1 — useThresholds)", () => {
   describe("updateGlobalThresholdWithReconciliation (Umbral Global)", () => {
@@ -138,6 +199,57 @@ describe("Conciliación de umbrales (P1 — useThresholds)", () => {
     });
   });
 
+  describe("P1-03 — validación semántica del DTO devuelto por el PUT (umbral global)", () => {
+    it("5. PUT 200 con DTO contradictorio y lectura que confirma el valor: VERIFIED sin repetir el PUT", async () => {
+      const contradictorio: ThresholdConfig = {
+        globalThreshold: 99,
+        skuOverrides: {},
+      };
+      const autoritativo: ThresholdConfig = {
+        globalThreshold: 12,
+        skuOverrides: {},
+      };
+      const updateGlobalThreshold = vi.fn().mockResolvedValue(contradictorio);
+      const getThresholds = vi.fn().mockResolvedValue(autoritativo);
+
+      const repo = createMockRepository({
+        updateGlobalThreshold,
+        getThresholds,
+      });
+
+      const result = await updateGlobalThresholdWithReconciliation(12, repo);
+
+      expect(result.status).toBe("VERIFIED");
+      expect(result.config.globalThreshold).toBe(12);
+      expect(result.message).toBe(
+        "El valor deseado fue verificado en el servidor.",
+      );
+      expect(updateGlobalThreshold).toHaveBeenCalledTimes(1);
+      expect(getThresholds).toHaveBeenCalledTimes(1);
+    });
+
+    it("6. PUT 200 con DTO contradictorio y lectura no coincidente: resultado no acreditado sin reintento", async () => {
+      const contradictorio: ThresholdConfig = {
+        globalThreshold: 99,
+        skuOverrides: {},
+      };
+      const updateGlobalThreshold = vi.fn().mockResolvedValue(contradictorio);
+      const getThresholds = vi.fn().mockResolvedValue(contradictorio);
+
+      const repo = createMockRepository({
+        updateGlobalThreshold,
+        getThresholds,
+      });
+
+      await expect(
+        updateGlobalThresholdWithReconciliation(12, repo),
+      ).rejects.toMatchObject({ code: "RESULTADO_INCIERTO" });
+
+      expect(updateGlobalThreshold).toHaveBeenCalledTimes(1);
+      expect(getThresholds).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe("updateSkuThresholdWithReconciliation (Umbral por SKU)", () => {
     it("1. PUT 200 válido actualiza el estado directamente sin dependencia de un GET posterior", async () => {
       const configValida: ThresholdConfig = {
@@ -238,6 +350,58 @@ describe("Conciliación de umbrales (P1 — useThresholds)", () => {
       ).rejects.toMatchObject({
         code: "RESULTADO_INCIERTO",
       });
+
+      expect(updateSkuThreshold).toHaveBeenCalledTimes(1);
+      expect(getThresholds).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("P1-03 — validación semántica del DTO devuelto por el PUT (umbral por SKU)", () => {
+    it("5. PUT 200 con DTO contradictorio y lectura que confirma el valor: VERIFIED sin repetir el PUT", async () => {
+      const contradictorio: ThresholdConfig = {
+        globalThreshold: 10,
+        skuOverrides: { "SKU-ESPECIAL": 99 },
+      };
+      const autoritativo: ThresholdConfig = {
+        globalThreshold: 10,
+        skuOverrides: { "SKU-ESPECIAL": 7 },
+      };
+      const updateSkuThreshold = vi.fn().mockResolvedValue(contradictorio);
+      const getThresholds = vi.fn().mockResolvedValue(autoritativo);
+
+      const repo = createMockRepository({
+        updateSkuThreshold,
+        getThresholds,
+      });
+
+      const result = await updateSkuThresholdWithReconciliation(
+        "SKU-ESPECIAL",
+        7,
+        repo,
+      );
+
+      expect(result.status).toBe("VERIFIED");
+      expect(result.config.skuOverrides["SKU-ESPECIAL"]).toBe(7);
+      expect(updateSkuThreshold).toHaveBeenCalledTimes(1);
+      expect(getThresholds).toHaveBeenCalledTimes(1);
+    });
+
+    it("6. PUT 200 con DTO contradictorio y lectura no coincidente: resultado no acreditado sin reintento", async () => {
+      const contradictorio: ThresholdConfig = {
+        globalThreshold: 10,
+        skuOverrides: { "SKU-ESPECIAL": 99 },
+      };
+      const updateSkuThreshold = vi.fn().mockResolvedValue(contradictorio);
+      const getThresholds = vi.fn().mockResolvedValue(contradictorio);
+
+      const repo = createMockRepository({
+        updateSkuThreshold,
+        getThresholds,
+      });
+
+      await expect(
+        updateSkuThresholdWithReconciliation("SKU-ESPECIAL", 7, repo),
+      ).rejects.toMatchObject({ code: "RESULTADO_INCIERTO" });
 
       expect(updateSkuThreshold).toHaveBeenCalledTimes(1);
       expect(getThresholds).toHaveBeenCalledTimes(1);

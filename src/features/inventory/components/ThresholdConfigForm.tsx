@@ -10,10 +10,7 @@ import {
   Text,
 } from "@mantine/core";
 import { IconCheck, IconDeviceFloppy } from "@tabler/icons-react";
-import {
-  FeedbackAlert,
-  SectionCard,
-} from "../../../components/shared";
+import { SectionCard } from "../../../components/shared";
 import type { StockItem, ThresholdConfig } from "../services/inventoryTypes";
 
 interface ThresholdConfigFormProps {
@@ -22,6 +19,10 @@ interface ThresholdConfigFormProps {
   saving: boolean;
   onUpdateGlobal: (val: number) => Promise<boolean>;
   onUpdateSku: (sku: string, val: number) => Promise<boolean>;
+  // Limpia el feedback de la operación anterior al iniciar una nueva. El
+  // mensaje de resultado lo aporta exclusivamente el hook (CONFIRMED/VERIFIED/
+  // error); este formulario no genera confirmaciones propias.
+  onUpdateStart?: () => void;
 }
 
 export function ThresholdConfigForm({
@@ -30,6 +31,7 @@ export function ThresholdConfigForm({
   saving,
   onUpdateGlobal,
   onUpdateSku,
+  onUpdateStart,
 }: ThresholdConfigFormProps) {
   const [globalVal, setGlobalVal] = useState<number | string>(
     thresholds.globalThreshold,
@@ -40,16 +42,13 @@ export function ThresholdConfigForm({
   const [skuVal, setSkuVal] = useState<number | string>(
     selectedSku ? thresholds.skuOverrides[selectedSku] ?? thresholds.globalThreshold : 10,
   );
-  const [localFeedback, setLocalFeedback] = useState<string | null>(null);
 
   const handleGlobalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const val = Number(globalVal);
     if (!isNaN(val) && val >= 0) {
-      const ok = await onUpdateGlobal(val);
-      if (ok) {
-        setLocalFeedback("Umbral global guardado correctamente.");
-      }
+      onUpdateStart?.();
+      await onUpdateGlobal(val);
     }
   };
 
@@ -58,10 +57,8 @@ export function ThresholdConfigForm({
     if (!selectedSku) return;
     const val = Number(skuVal);
     if (!isNaN(val) && val >= 0) {
-      const ok = await onUpdateSku(selectedSku, val);
-      if (ok) {
-        setLocalFeedback(`Umbral para ${selectedSku} guardado correctamente.`);
-      }
+      onUpdateStart?.();
+      await onUpdateSku(selectedSku, val);
     }
   };
 
@@ -78,12 +75,6 @@ export function ThresholdConfigForm({
 
   return (
     <Stack gap="lg">
-      {localFeedback && (
-        <FeedbackAlert semantic="success" title="Cambio aplicado">
-          {localFeedback}
-        </FeedbackAlert>
-      )}
-
       <Grid gap="lg">
         <Grid.Col span={{ base: 12, md: 6 }}>
           <SectionCard
