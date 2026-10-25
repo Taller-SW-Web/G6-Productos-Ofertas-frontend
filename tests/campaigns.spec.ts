@@ -35,7 +35,7 @@ async function selectScope(page: Page) {
     })
     .check();
   await page
-    .getByRole("checkbox", { name: /SKU específico: CAM-RUN-BLA-M/ })
+    .getByRole("checkbox", { name: /SKU específico: CAS-COR-001/ })
     .check();
   await page
     .getByRole("button", { name: "Confirmar alcance", exact: true })
@@ -57,10 +57,10 @@ test("@smoke MK-006 S01/S05: typed filters and detail retain list context", asyn
   ).toBeVisible();
   await expect(
     page.getByRole("region", { name: "Alcance de productos y SKU" }),
-  ).toContainText("Running Essential");
+  ).toContainText("Camiseta Running Endurance");
   await expect(
     page.getByRole("region", { name: "Alcance de productos y SKU" }),
-  ).toContainText("RUN-PRO-42");
+  ).toContainText("CAS-COR-001");
   await page
     .getByRole("link", { name: "Volver al listado", exact: true })
     .click();
@@ -152,8 +152,8 @@ test("MK-006 S02/S04: validate discount/channels and preserve draft and typed sc
   await expect(savedScope).toContainText(
     "Producto completo: Camiseta Running Endurance",
   );
-  await expect(savedScope).not.toContainText("CAM-RUN-AZU-L");
-  await expect(savedScope).toContainText("SKU específico: CAM-RUN-BLA-M");
+  await expect(savedScope).not.toContainText("CAM-RUN-BLA-M");
+  await expect(savedScope).toContainText("SKU específico: CAS-COR-001");
 });
 test("MK-006 S03/S06: allowed modality is revalidated and activation history survives deactivation", async ({
   page,

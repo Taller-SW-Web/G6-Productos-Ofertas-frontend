@@ -1,6 +1,10 @@
-import { useContext, useState } from "react";
+import { PromotionApiContext } from "../../../app/config/PromotionApiContext";
+import { useContext, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { getPromotionRuntime } from "../services/promotionServices";
+import {
+  createPromotionRuntime,
+  getPromotionRuntime,
+} from "../services/promotionServices";
 import { DataModeContext } from "../../../app/config/DataModeContext";
 import { useMockStateRevision } from "../../shared/useMockStateRevision";
 
@@ -19,7 +23,15 @@ export function usePromotionServices() {
   const mode = useContext(DataModeContext);
   if (!mode)
     throw new Error("La aplicación requiere configurar su modo de datos.");
-  const context = getPromotionRuntime(mode).resolve(params);
+  const api = useContext(PromotionApiContext);
+  const runtime = useMemo(
+    () =>
+      mode === "api" && api
+        ? createPromotionRuntime(mode, { api: () => api })
+        : getPromotionRuntime(mode),
+    [mode, api],
+  );
+  const context = runtime.resolve(params);
   const retry = () => {
     setParams(context.clearTransientParams, { replace: true });
     setRevision((value) => value + 1);

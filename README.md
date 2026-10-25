@@ -4,7 +4,7 @@ Aplicación web de administración para el módulo Productos y Ofertas. Permite 
 
 ## Inicio rápido
 
-Requisitos: Node.js `>=22.12.0` (definido en `package.json`) y npm. El lockfile fija las dependencias; usa npm para instalarlas.
+Requisitos: Node.js `>=22.12.0 <23` (definido en `package.json`) y npm. El lockfile fija las dependencias; usa npm para instalarlas.
 
 ```sh
 npm ci
@@ -55,7 +55,9 @@ al CI queda como dependencia de Castilla; este PR no modifica workflows comparti
 
 ## Configuración de datos
 
-La única variable de entorno de la aplicación es `VITE_DATA_MODE` (ver [.env.example](.env.example)). Selecciona una vez el modo de datos global y se distribuye mediante `DataModeContext`.
+`VITE_DATA_MODE` es el único selector de modo de datos (ver [.env.example](.env.example)). Se selecciona una vez y se distribuye mediante `DataModeContext`. En modo `api`, Promotions permite configurar juntas las URLs públicas `VITE_GATEWAY_ORIGIN` (solo origen) y `VITE_G7_API_BASE` (base publicada de Seguridad, por ejemplo `https://seguridad.example.org/api/v1`). No son credenciales. HTTPS es obligatorio fuera de loopback; no se configuran tokens ni secretos en Vite.
+
+Si alguna URL de Promotions falta o es inválida, sus rutas muestran indisponibilidad explícita y los módulos independientes siguen arrancando. La integración HTTP solo se inicializa con ambas URLs válidas; en modo API nunca se habilitan mocks como fallback.
 
 | Valor | Comportamiento |
 |---|---|
@@ -66,7 +68,7 @@ La única variable de entorno de la aplicación es `VITE_DATA_MODE` (ver [.env.e
 
 En desarrollo, la aplicación usa `mock` si la variable no está definida. Para `npm run build` se requiere definir `VITE_DATA_MODE` expresamente como `mock` o `api`; un valor ausente o inválido detiene el build. Copiar `.env.example` a `.env.local` configura `mock`. Vite carga las variables al arrancar: reinicia el servidor o vuelve a construir tras cambiarlas.
 
-`api` no configura por sí solo una URL, autenticación ni servicios. En esta base no hay adapters HTTP de negocio conectados. Algunos módulos admiten inyectar implementaciones compatibles con sus puertos, lo que se prueba con dobles/harnesses; eso acredita sustituibilidad, no integración funcional con Backend.
+`api` no configura por sí solo una URL ni concede acceso. Con ambas URLs de integración, Promotions conecta su adaptador HTTP al cliente G7 de login/MFA/renovación/logout. Sin URLs conserva el bloqueo visible; una configuración incompleta falla al iniciar. Tokens, identidad y desafío permanecen solo en memoria: recargar exige login. El consumidor AMQP no se habilita desde el frontend. La sesión se prueba con fixtures HTTP explícitos; el recorrido por Gateway/PostgreSQL usa además un entorno descartable independiente. Ninguna de esas pruebas acredita G7 compartido, homologación ni despliegue. Detalles en [integración Promotions](docs/INTEGRACION_PROMOTIONS_GATEWAY.md).
 
 ### Persistencia de la demostración
 
@@ -84,7 +86,7 @@ La tabla resume lo que muestran el código y la configuración de esta rama; la 
 | Taxonomía (categorías, características, tipos, marcas y SEO) | Pantallas disponibles en mock. En `api`, `TaxonomyModeGate` bloquea estas rutas independientemente de los providers. Habilitar la integración requiere configurar los servicios/adapters y adaptar el gate; inyectar un provider por sí solo no desbloquea las pantallas. |
 | Precios y programaciones/importación | Flujos de demostración mock. El modo `api` requiere un adapter; la implementación predeterminada falla explícitamente, sin fallback. Las operaciones de archivo no acreditan procesamiento comercial de Backend. |
 | Auditoría de precios | Listado, detalle y exportación de demostración mock. Las ediciones confirmadas de Pricing incorporan asientos simulados por sesión de navegador; recargar conserva los asientos emitidos. El runtime permite inyección, pero no incluye provider API predeterminado. Los archivos disponibles son muestras. |
-| Cupones, promociones y recomendaciones | Flujos de demostración mock. En modo `api`, `CommercialModeGate` bloquea estas rutas incondicionalmente. Una integración futura requiere configurar el provider y adaptar el gate; inyectar el provider por sí solo no desbloquea la interfaz. Las recomendaciones no calculan un precio final ni garantizan stock; ambos datos figuran como no disponibles en la demostración. |
+| Cupones, promociones y recomendaciones | Flujos de demostración mock. En modo `api`, `CommercialModeGate` bloquea estas rutas si no reciben un proveedor explícito mediante `PromotionApiContext`. El adaptador HTTP administrativo está conectado al cliente G7 de sesión en memoria cuando se configuran ambas URLs; su recorrido por Gateway/PostgreSQL está probado en entorno descartable; los selectores disponen de adaptador HTTP tipado de Catálogo/Taxonomía. La sesión G7 compartida, la prueba contra sus servicios reales y la verificación autoritativa de referencias del backend siguen pendientes. Ver [integración Promotions](docs/INTEGRACION_PROMOTIONS_GATEWAY.md). Las recomendaciones no calculan un precio final ni garantizan stock; ambos datos figuran como no disponibles en la demostración. |
 | Carga masiva | Simulación mock tanto en `mock` como en `api` por la excepción descrita arriba. La revisión local de archivos no sustituye la validación comercial; XLSX y procesamiento/exportación reales requieren Backend. Ver [límites de carga masiva](docs/ESTADO_CARGA_MASIVA.md). |
 | Combos | Gestión de combos (MK-002) con puertos tipados y adapters mock; la disponibilidad es información de catálogo compartido, sin consultar ni reservar stock real. En `api` sin provider la integración se muestra cerrada, sin fallback a fixtures. |
 | Inventario (control de stock, umbrales, traslados y dashboard) | Flujos de demostración mock (`MK-015` y `MK-016`). En modo `api`, `CommercialModeGate` bloquea las rutas de `/inventario` y `ApiPendingRepository` rechaza operaciones sin fallback a mocks. Soporta inyección de repositorio alternativo (`tests/harness/inventory-adapter.html`). Ver [contrato de inventario](docs/CONTRATO_INVENTARIO_FRONTEND.md). |
@@ -101,6 +103,24 @@ Implementa S01–S04 como vistas administrativas con puertos tipados y adapters 
 La elegibilidad de componentes, las reglas económicas y la disponibilidad informativa consultan las identidades del Catálogo compartido (no un catálogo paralelo). La disponibilidad se calcula como `min(floor(stockDisponibleSKU / cantidadRequeridaSKU))` sobre un snapshot inyectable; si los datos no permiten verificar, se muestra información incompleta o no verificable en lugar de un cero inventado. Los precios vigentes de referencia provienen del puerto de Pricing y se distinguen del precio comercial guardado.
 
 No hay provider HTTP real ni persistencia comercial. En modo `api`, la integración permanece cerrada y no cae a fixtures. La referencia consultada es OpenAPI `0.6.0-rc.1`: las operaciones administrativas de Combos están marcadas `provisional-internal`; `combos:leer`, `catalogo:leer` y `precios:leer` siguen pendientes de registro de scopes. El component spec de MK-002 permanece **En revisión**: esta entrega no declara aprobación UX, homologación ni integración API.
+
+En la aplicación mock, Promociones y Recomendaciones consultan el mismo servicio
+de Catálogo que Productos/Variantes mediante
+`promotions/adapters/catalogPromotionRepository.ts`. Las ediciones, activaciones y
+desactivaciones se reflejan al abrir sus selectores durante la misma sesión; el
+guardado revalida productos y SKU activos. Los productos completos conservan su
+ID y los SKU específicos su código. No se calcula stock ni se obtiene un precio
+de referencia. Las reglas y campañas de muestra usan referencias explícitas al
+catálogo inicial; la lectura no sustituye referencias ausentes por otros productos.
+Los cupones consultan el nombre y la vigencia actuales de su promoción asociada,
+conservando sus límites y usos.
+
+`getPromotionRuntime("mock")` compone esta demostración integrada mediante
+`createCatalogMockPromotionServices(getCatalogServices("mock"))`. La factory
+`createMockPromotionServices` conserva la demostración aislada para pruebas con
+puertos/fixtures inyectados. No existe fallback desde el catálogo integrado al
+aislado ni desde API a mock. El [reporte de corrección #36](docs/CORRECCIONES_CUEVA_36.md)
+registra reproducción, pruebas y revisiones aún pendientes para #7/#8/#9.
 
 ## Arquitectura
 
