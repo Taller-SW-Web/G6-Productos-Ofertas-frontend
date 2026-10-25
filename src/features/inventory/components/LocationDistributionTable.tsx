@@ -11,6 +11,7 @@ interface LocationDistributionTableProps {
   distribution: LocationDistribution[];
   loading?: boolean;
   error?: string | null;
+  blockedReason?: string | null;
   onRetry?: () => void;
 }
 
@@ -18,8 +19,22 @@ export function LocationDistributionTable({
   distribution,
   loading,
   error,
+  blockedReason,
   onRetry,
 }: LocationDistributionTableProps) {
+  if (blockedReason) {
+    return (
+      <SectionCard title="Distribución de stock por ubicación física">
+        <FeedbackAlert
+          semantic="warning"
+          title="Distribución no verificable para el filtro actual"
+        >
+          {blockedReason}
+        </FeedbackAlert>
+      </SectionCard>
+    );
+  }
+
   if (error) {
     return (
       <SectionCard title="Distribución de stock por ubicación física">
@@ -62,7 +77,7 @@ export function LocationDistributionTable({
   return (
     <SectionCard
       title="Distribución de stock por ubicación física"
-      description="Consolidado de unidades físicas, reservas, bloqueos y disponibilidad por centro logístico."
+      description="Consolidado de unidades físicas, reservas y disponibilidad por centro logístico."
     >
       <Table highlightOnHover>
         <Table.Thead>
@@ -80,7 +95,7 @@ export function LocationDistributionTable({
             <Table.Tr key={dist.locationId}>
               <Table.Td>
                 <Text size="sm" fw={600}>
-                  {dist.locationName}
+                  {dist.locationName ?? "Ubicación sin nombre publicado"}
                 </Text>
                 <Text size="xs" c="dimmed">
                   Código: {dist.locationId}
@@ -93,7 +108,13 @@ export function LocationDistributionTable({
                 {dist.reservedTotal}
               </Table.Td>
               <Table.Td style={{ textAlign: "right" }}>
-                {dist.blockedTotal}
+                {dist.blockedTotal === null ? (
+                  <Text component="span" size="sm" c="dimmed" fw={600}>
+                    Sin datos
+                  </Text>
+                ) : (
+                  dist.blockedTotal
+                )}
               </Table.Td>
               <Table.Td style={{ textAlign: "right" }} fw={700}>
                 {dist.availableTotal}
@@ -119,6 +140,10 @@ export function LocationDistributionTable({
           ))}
         </Table.Tbody>
       </Table>
+      <Text size="xs" c="dimmed" mt="sm">
+        &quot;Sin datos&quot; indica que la operación del contrato no publica ese
+        valor para la ubicación; no equivale a cero.
+      </Text>
     </SectionCard>
   );
 }

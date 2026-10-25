@@ -54,6 +54,7 @@ export interface TransferItem {
   quantityShipped: number;
   quantityReceived: number;
   quantityPending: number;
+  missingQuantity?: number;
   status: TransferStatus;
   shippedAt: string;
   notes?: string;
@@ -71,10 +72,12 @@ export interface ReceiveTransferPayload {
 
 export interface LocationDistribution {
   locationId: string;
-  locationName: string;
+  // `null` cuando el contrato no publica el nombre de la ubicación.
+  locationName: string | null;
   onHandTotal: number;
   reservedTotal: number;
-  blockedTotal: number;
+  // `null` cuando el contrato no publica unidades bloqueadas por ubicación.
+  blockedTotal: number | null;
   availableTotal: number;
   skusAvailableCount: number;
   skusLowStockCount: number;
@@ -99,6 +102,8 @@ export interface InventoryKpiSummary {
   transfersInTransit: KpiMetricValue;
   transfersPartiallyReceived: KpiMetricValue;
   transfersWithDiscrepancy: KpiMetricValue;
+  // Fecha/hora de generación del snapshot según DashboardInventario (OpenAPI)
+  generatedAt?: string | null;
 }
 
 export interface InventoryAlert {
