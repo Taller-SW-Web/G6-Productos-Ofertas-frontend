@@ -26,6 +26,7 @@ import { ListaBloqueos } from "../components/ListaBloqueos";
 import { useCharacteristicDetail } from "../hooks/useCharacteristicDetail";
 import { characteristicConfigDefaults } from "../services/characteristicRepository";
 import { characteristicService } from "../services/characteristicService";
+import { getPendingCharacteristicValueOperation } from "../adapters/mockCharacteristicAdapter";
 import { estadoCaracteristicaSemantic } from "../services/estadoSemantic";
 import type { CharacteristicValue, ValorBajaResult } from "../types";
 
@@ -36,7 +37,7 @@ import type { CharacteristicValue, ValorBajaResult } from "../types";
 type BajaValorUi =
   | { status: "idle" }
   | { status: "verificando"; valor: CharacteristicValue }
-  | { status: "pendiente"; result: ValorBajaResult }
+  | { status: "pendiente"; result: ValorBajaResult; error?: string }
   | { status: "rechazada"; result: ValorBajaResult }
   | { status: "no-concluyente"; result: ValorBajaResult }
   | { status: "exito"; result: ValorBajaResult }
@@ -178,6 +179,21 @@ function CharacteristicValuesContent({
         if (controller.signal.aborted) return;
         if (res) {
           setValores(res);
+          const pending = getPendingCharacteristicValueOperation(idDetalle);
+          const value = pending
+            ? res.find((item) => item.valorId === pending.valorId)
+            : undefined;
+          if (pending && value)
+            setBaja({
+              status: "pendiente",
+              result: {
+                resultado: "pendiente",
+                valor: value,
+                mensaje: "La solicitud de baja se recuperó después de recargar.",
+                bloqueos: [],
+                operacionId: pending.operacionId,
+              },
+            });
         } else {
           setValores([]);
         }
@@ -415,8 +431,15 @@ function CharacteristicValuesContent({
       .catch((err) => {
         if (controller.signal.aborted) return;
         setBaja({
-          status: "error",
-          message:
+          status: "pendiente",
+          result: {
+            resultado: "pendiente",
+            valor: valorActual,
+            mensaje: "No se pudo consultar el estado; puedes reintentar sin reenviar la solicitud.",
+            bloqueos: [],
+            operacionId,
+          },
+          error:
             err instanceof Error
               ? err.message
               : "No se pudo consultar el estado de la baja.",
@@ -474,7 +497,9 @@ function CharacteristicValuesContent({
               : estadoCaracteristicaSemantic[item.estado]
           }
         >
-          {valorEnComprobacionId === item.valorId ? "Comprobando uso" : item.estado}
+          {valorEnComprobacionId === item.valorId
+            ? `Comprobando uso · ${item.estado}`
+            : item.estado}
         </StatusBadge>
       ),
     },
@@ -607,20 +632,29 @@ function CharacteristicValuesContent({
 
         {baja.status === "pendiente" && (
           <FeedbackAlert
-            semantic="warning"
-            title="Solicitud de baja admitida (202 Accepted)"
+            semantic={baja.error ? "error" : "warning"}
+            title={
+              baja.error
+                ? "No se pudo consultar el resultado"
+                : "Solicitud de baja admitida (202 Accepted)"
+            }
             actions={
               <Group gap="sm">
                 {baja.result.operacionId && (
                   <Button onClick={handleConsultarBaja}>
-                    Consultar estado
+                    {baja.error ? "Reintentar consulta" : "Consultar estado"}
+                  </Button>
+                )}
+                {baja.error && (
+                  <Button variant="outline" onClick={cancelarBaja}>
+                    Cerrar
                   </Button>
                 )}
               </Group>
             }
           >
             <Stack gap="sm">
-              <Text size="sm">{baja.result.mensaje}</Text>
+              <Text size="sm">{baja.error ?? baja.result.mensaje}</Text>
               <Text size="sm" c="dimmed">
                 El valor conserva su estado actual. La verificación de uso quedó
                 en curso y no confirma la desactivación con una sola respuesta.

@@ -154,7 +154,7 @@ const contarActivos = (valores: RegistroValor[]): number =>
 // BLOCKED_CONTRACT: no hay contrato OpenAPI confirmado para el sondeo del resultado
 // de una baja asíncrona de valor (202). Este registro mantiene las operaciones
 // pendientes en memoria para que la UI consulte su estado sin inventar un endpoint.
-interface OperacionBajaValor {
+export interface OperacionBajaValor {
   operacionId: string;
   caracteristicaId: string;
   valorId: string;
@@ -225,6 +225,16 @@ export function isCharacteristicValuePending(
     (operation) =>
       operation.caracteristicaId === caracteristicaId &&
       operation.valorId === valorId &&
+      operation.estado === "pendiente",
+  );
+}
+
+export function getPendingCharacteristicValueOperation(
+  caracteristicaId: string,
+): OperacionBajaValor | undefined {
+  return Array.from(operacionesBajaValor.values()).find(
+    (operation) =>
+      operation.caracteristicaId === caracteristicaId &&
       operation.estado === "pendiente",
   );
 }
