@@ -4,7 +4,10 @@ import {
   isMockPersistenceAvailable,
   loadMockArray,
   persistMockArray,
+  readMockState,
+  saveMockState,
   syncMockArrayOnExternalChange,
+  subscribeExternalMockChanges,
 } from "../../shared/mockState";
 import type {
   BloqueoDependencia,
@@ -91,7 +94,7 @@ const isCharacteristic = (value: unknown): value is RegistroCaracteristica => {
   return (
     typeof row.id === "string" &&
     typeof row.nombre === "string" &&
-    (row.tipo === "TEXTO" || row.tipo === "NUMERICO" || row.tipo === "LISTA") &&
+    (row.tipo === "TEXTO" || row.tipo === "NUMERO" || row.tipo === "LISTA") &&
     (row.estado === "Activo" || row.estado === "Inactivo")
   );
 };
@@ -152,13 +155,34 @@ const contarActivos = (valores: RegistroValor[]): number =>
 // BLOCKED_CONTRACT: no hay contrato OpenAPI confirmado para el sondeo del resultado
 // de una baja asíncrona de valor (202). Este registro mantiene las operaciones
 // pendientes en memoria para que la UI consulte su estado sin inventar un endpoint.
-interface OperacionBajaValor {
+export interface OperacionBajaValor {
+  operacionId: string;
   caracteristicaId: string;
   valorId: string;
-  estado: "pendiente" | "confirmada";
+  estado: "pendiente" | "confirmada" | "rechazada" | "no-concluyente";
 }
 
-const operacionesBajaValor = new Map<string, OperacionBajaValor>();
+const isOperacionBajaValor = (value: unknown): value is OperacionBajaValor => {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.operacionId === "string" && typeof row.caracteristicaId === "string" &&
+    typeof row.valorId === "string" &&
+    ["pendiente", "confirmada", "rechazada", "no-concluyente"].includes(String(row.estado));
+};
+
+const operacionesBajaValor = new Map<string, OperacionBajaValor>(
+  (readMockState<OperacionBajaValor[]>("taxonomy-characteristic-baja", (value): value is OperacionBajaValor[] => Array.isArray(value) && value.every(isOperacionBajaValor)) ?? [])
+    .map((operation) => [operation.operacionId, operation]),
+);
+const persistirOperaciones = () => saveMockState("taxonomy-characteristic-baja", Array.from(operacionesBajaValor.values()));
+subscribeExternalMockChanges("taxonomy-characteristic-baja", () => {
+  const stored = readMockState<OperacionBajaValor[]>("taxonomy-characteristic-baja", (value): value is OperacionBajaValor[] => Array.isArray(value) && value.every(isOperacionBajaValor));
+  if (!stored) return;
+  operacionesBajaValor.clear();
+  stored.forEach((operation) => operacionesBajaValor.set(operation.operacionId, operation));
+});
+export const getPendingCharacteristicValueOperation = (id: string) =>
+  Array.from(operacionesBajaValor.values()).find((operation) => operation.caracteristicaId === id && operation.estado === "pendiente");
 
 // Deterministic local states used only for review. The repository contract does not
 // accept scenarios; reviewers change these values to reproduce error or edge cases
@@ -373,11 +397,22 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
     // admite pero el valor conserva su estado hasta que se confirme.
     if (valorId === "negro") {
       const operacionId = `baja-valor-${valorId}`;
+      const existing = operacionesBajaValor.get(operacionId);
+      if (existing?.estado === "pendiente")
+        return {
+          resultado: "pendiente",
+          valor: actual,
+          mensaje: "La solicitud de baja ya está pendiente; no se reenvió la operación.",
+          bloqueos: [],
+          operacionId,
+        };
       operacionesBajaValor.set(operacionId, {
+        operacionId,
         caracteristicaId: id,
         valorId,
         estado: "pendiente",
       });
+      persistirOperaciones();
       return {
         resultado: "pendiente",
         valor: actual,
@@ -447,6 +482,7 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
         r.valoresActivos = prevActivos;
         throw new Error("No se pudo confirmar la baja del valor. Vuelve a intentarlo.");
       }
+      persistirOperaciones();
       return {
         operacionId,
         estado: "confirmada",
