@@ -1,4 +1,4 @@
-﻿import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { MockTaxonomyRepository } from "../src/features/catalog/adapters/mockTaxonomyRepository";
 import { __resetCharacteristicStore } from "../src/features/taxonomy/adapters/mockCharacteristicAdapter";
 import { characteristicService } from "../src/features/taxonomy/services/characteristicService";
@@ -46,7 +46,7 @@ async function reopenValues(page: Page): Promise<void> {
 test.describe("MK-009 mock funcional", () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
-  test("renombrar un valor conserva su ID y actualiza las opciones mock consultadas por Cat├ílogo", async () => {
+  test("renombrar un valor conserva su ID y actualiza las opciones mock consultadas por Catálogo", async () => {
     __resetCharacteristicStore();
     try {
       const antes = await characteristicService.listarValores("color");
@@ -69,7 +69,7 @@ test.describe("MK-009 mock funcional", () => {
     }
   });
 
-  test("captura evidencia de las ocho pantallas y variantes P0 a 1440 ├ù 900", async ({
+  test("captura evidencia de las ocho pantallas y variantes P0 a 1440 × 900", async ({
     page,
   }) => {
     test.setTimeout(60_000);
@@ -78,7 +78,7 @@ test.describe("MK-009 mock funcional", () => {
     await page.screenshot({ path: "docs/evidencias/mk-009-s01-1440.png" });
 
     await page.goto("/caracteristicas/nueva");
-    await expect(page.getByRole("heading", { name: "Crear caracter├¡stica" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Crear característica" })).toBeVisible();
     await page.screenshot({ path: "docs/evidencias/mk-009-s02-1440.png" });
 
     await page.goto("/caracteristicas/talla/editar");
@@ -115,30 +115,30 @@ test.describe("MK-009 mock funcional", () => {
   }) => {
     await page.goto("/caracteristicas", { waitUntil: "domcontentloaded" });
     await expect(
-      page.getByRole("status", { name: "Cargando listado de caracter├¡sticas" }),
+      page.getByRole("status", { name: "Cargando listado de características" }),
     ).toBeVisible();
     await expect(page.getByText("Talla", { exact: true })).toBeVisible();
   });
 
-  test("S01 distingue listado vac├¡o y error con reintento; busca por tipo", async ({
+  test("S01 distingue listado vacío y error con reintento; busca por tipo", async ({
     page,
   }) => {
     await page.goto("/caracteristicas");
-    const search = page.getByRole("textbox", { name: "Buscar caracter├¡stica" });
+    const search = page.getByRole("textbox", { name: "Buscar característica" });
     await search.fill("LISTA");
     await expect(page.getByText("Talla", { exact: true })).toBeVisible();
     await expect(page.getByText("Peso", { exact: true })).toHaveCount(0);
     await search.fill("");
 
     await setCharacteristicScenario(page, { lista: "empty" });
-    await page.getByRole("button", { name: "Crear caracter├¡stica" }).click();
+    await page.getByRole("button", { name: "Crear característica" }).click();
     await page.getByRole("button", { name: "Cancelar" }).click();
-    await expect(page.getByText("Sin caracter├¡sticas", { exact: true })).toBeVisible();
+    await expect(page.getByText("Sin características", { exact: true })).toBeVisible();
 
     await setCharacteristicScenario(page, { lista: "error" });
-    await page.getByRole("button", { name: "Crear caracter├¡stica" }).click();
+    await page.getByRole("button", { name: "Crear característica" }).click();
     await page.getByRole("button", { name: "Cancelar" }).click();
-    await expect(page.getByRole("alert")).toContainText("No se pudieron cargar las caracter├¡sticas");
+    await expect(page.getByRole("alert")).toContainText("No se pudieron cargar las características");
     await setCharacteristicScenario(page, { lista: "default" });
     await page.getByRole("button", { name: "Volver a intentar" }).click();
     await expect(page.getByText("Talla", { exact: true })).toBeVisible();
@@ -146,18 +146,18 @@ test.describe("MK-009 mock funcional", () => {
 
   test("S02 valida nombre y unidad NUMERO y crea usando el mock", async ({ page }) => {
     await page.goto("/caracteristicas/nueva");
-    await page.getByRole("button", { name: "Crear caracter├¡stica", exact: true }).click();
-    await expect(page.getByText("Ingresa el nombre de la caracter├¡stica.")).toBeVisible();
+    await page.getByRole("button", { name: "Crear característica", exact: true }).click();
+    await expect(page.getByText("Ingresa el nombre de la característica.")).toBeVisible();
 
-    await page.getByLabel("Nombre").fill("Peso de demostraci├│n");
+    await page.getByLabel("Nombre").fill("Peso de demostración");
     await page.getByRole("combobox", { name: "Tipo" }).click();
-    await page.getByRole("option", { name: "N├║mero" }).click();
-    await page.getByRole("button", { name: "Crear caracter├¡stica", exact: true }).click();
+    await page.getByRole("option", { name: "Número" }).click();
+    await page.getByRole("button", { name: "Crear característica", exact: true }).click();
     await expect(page.getByText("Ingresa la unidad (por ejemplo kg o cm).")).toBeVisible();
 
     await page.getByLabel("Unidad").fill("kg");
-    await page.getByRole("button", { name: "Crear caracter├¡stica", exact: true }).click();
-    await expect(page.getByRole("status", { name: "Caracter├¡stica creada" })).toContainText("Peso de demostraci├│n");
+    await page.getByRole("button", { name: "Crear característica", exact: true }).click();
+    await expect(page.getByRole("status", { name: "Característica creada" })).toContainText("Peso de demostración");
   });
 
   test("S03 mantiene el tipo inmutable y conserva entradas ante un error de guardado", async ({
@@ -173,7 +173,7 @@ test.describe("MK-009 mock funcional", () => {
     await expect(page.getByRole("textbox", { name: "Tipo" })).toHaveValue("Lista");
   });
 
-  test("S04 renombra por ID, aplica l├¡mite de valores e impide mutar una caracter├¡stica inactiva", async ({
+  test("S04 renombra por ID, aplica límite de valores e impide mutar una característica inactiva", async ({
     page,
   }) => {
     await page.goto("/caracteristicas/color/valores");
@@ -188,20 +188,20 @@ test.describe("MK-009 mock funcional", () => {
     await page.goto("/caracteristicas/talla/valores");
     await setCharacteristicScenario(page, { valores: "lista-limite" });
     await reopenValues(page);
-    await expect(page.getByText("Valores permitidos activos: 50 (m├íx. 50)")).toBeVisible();
+    await expect(page.getByText("Valores permitidos activos: 50 (máx. 50)")).toBeVisible();
     await page.getByLabel("Buscar valor").fill("Valor permitido 01");
     await expect(page.getByText("1 valores visibles")).toBeVisible();
-    await expect(page.getByText("Valores permitidos activos: 50 (m├íx. 50)")).toBeVisible();
+    await expect(page.getByText("Valores permitidos activos: 50 (máx. 50)")).toBeVisible();
     await expect(page.getByRole("button", { name: "Agregar valor" })).toBeDisabled();
 
     await page.goto("/caracteristicas/temporada/valores");
-    await expect(page.getByRole("status", { name: "Caracter├¡stica inactiva" })).toBeVisible();
+    await expect(page.getByRole("status", { name: "Característica inactiva" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Agregar valor" })).toBeDisabled();
     await expect(page.getByRole("button", { name: "Renombrar Invierno" })).toBeDisabled();
     await expect(page.getByRole("button", { name: "Solicitar baja de Invierno" })).toBeDisabled();
   });
 
-  test("S04 diferencia valores vac├¡os y error de lectura con reintento", async ({ page }) => {
+  test("S04 diferencia valores vacíos y error de lectura con reintento", async ({ page }) => {
     test.setTimeout(60_000);
     await page.goto("/caracteristicas/talla/valores");
     await setCharacteristicScenario(page, { valores: "empty" });
@@ -221,7 +221,7 @@ test.describe("MK-009 mock funcional", () => {
     await setCharacteristicScenario(page, { catalogo: "error" });
     await page.getByRole("button", { name: "Volver al listado" }).click();
     await page.getByRole("button", { name: "Ver detalle de Color" }).click();
-    await expect(page.getByRole("alert")).toContainText("No se pudo cargar la caracter├¡stica");
+    await expect(page.getByRole("alert")).toContainText("No se pudo cargar la característica");
 
     await setCharacteristicScenario(page, { catalogo: "default" });
     await page.getByRole("button", { name: "Reintentar consulta" }).click();
@@ -229,7 +229,7 @@ test.describe("MK-009 mock funcional", () => {
     await expect(page.getByText("negro", { exact: true })).toBeVisible();
   });
 
-  test("S04-P mantiene la admisi├│n, representa pending prolongado y no confirma una baja sin resultado", async ({
+  test("S04-P mantiene la admisión, representa pending prolongado y no confirma una baja sin resultado", async ({
     page,
   }) => {
     await page.goto("/caracteristicas/color/valores");
@@ -239,7 +239,7 @@ test.describe("MK-009 mock funcional", () => {
     await expect(pending).toContainText("Solicitud de baja admitida");
     await expect(page.locator("tbody tr", { hasText: "Negro" })).toContainText("Comprobando uso");
     await page.getByRole("button", { name: "Consultar estado" }).click();
-    await expect(pending).toContainText("La comprobaci├│n sigue pendiente");
+    await expect(pending).toContainText("La comprobación sigue pendiente");
     await expect(page.locator("tbody tr", { hasText: "Negro" })).toContainText("Comprobando uso");
   });
 
@@ -258,7 +258,7 @@ test.describe("MK-009 mock funcional", () => {
     await page.getByRole("button", { name: "Solicitar baja de Negro" }).click();
     await page.getByRole("button", { name: "Consultar estado" }).click();
     await expect(
-      page.getByRole("status", { name: "Verificaci├│n no concluyente" }),
+      page.getByRole("status", { name: "Verificación no concluyente" }),
     ).toContainText("No pudimos confirmar");
     await expect(page.locator("tbody tr", { hasText: "Negro" })).toContainText("Activo");
     await page.getByRole("button", { name: "Entendido" }).click();
@@ -274,14 +274,14 @@ test.describe("MK-009 mock funcional", () => {
     page,
   }) => {
     await page.goto("/caracteristicas/material/estado");
-    await page.getByRole("button", { name: "Desactivar caracter├¡stica" }).click();
+    await page.getByRole("button", { name: "Desactivar característica" }).click();
     await expect(page.getByRole("status", { name: "Estado actualizado" })).toContainText("Inactivo");
     await page.getByRole("button", { name: "Ver detalle" }).click();
     await expect(page.getByText("material", { exact: true })).toBeVisible();
     await expect(page.getByText("Inactivo", { exact: true })).toBeVisible();
 
     await page.getByRole("button", { name: "Cambiar estado" }).click();
-    await page.getByRole("button", { name: "Activar caracter├¡stica" }).click();
+    await page.getByRole("button", { name: "Activar característica" }).click();
     await expect(page.getByRole("status", { name: "Estado actualizado" })).toContainText("Activo");
     await page.getByRole("button", { name: "Ver detalle" }).click();
     await expect(page.getByText("material", { exact: true })).toBeVisible();
