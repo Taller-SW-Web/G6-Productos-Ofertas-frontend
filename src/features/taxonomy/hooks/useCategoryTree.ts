@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { categoryService } from "../services/categoryService";
 import type { CategoryNode } from "../types";
 import { useMockStateRevision } from "../../shared/useMockStateRevision";
@@ -8,9 +8,18 @@ export type CategoryTreeState =
   | { status: "success"; nodos: CategoryNode[] }
   | { status: "error"; message: string };
 
-export function useCategoryTree(): { state: CategoryTreeState } {
+export function useCategoryTree(): {
+  state: CategoryTreeState;
+  reload: () => void;
+} {
   const [state, setState] = useState<CategoryTreeState>({ status: "loading" });
   const revision = useMockStateRevision(["taxonomy", "taxonomy-categories"]);
+  const [requestVersion, setRequestVersion] = useState(0);
+
+  const reload = useCallback(() => {
+    setState({ status: "loading" });
+    setRequestVersion((current) => current + 1);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -31,7 +40,7 @@ export function useCategoryTree(): { state: CategoryTreeState } {
       },
     );
     return () => controller.abort();
-  }, [revision]);
+  }, [revision, requestVersion]);
 
-  return { state };
+  return { state, reload };
 }

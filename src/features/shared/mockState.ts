@@ -23,6 +23,7 @@ export type MockDomain =
   | "taxonomy-seo"
   | "taxonomy-brand-baja"
   | "taxonomy-category-baja"
+  | "taxonomy-characteristic-baja"
   | "pricing"
   | "price-audit"
   | "inventory"

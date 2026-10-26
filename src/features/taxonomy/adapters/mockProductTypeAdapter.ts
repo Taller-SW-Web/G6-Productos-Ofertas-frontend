@@ -173,6 +173,14 @@ interface OperacionTipoProducto {
   estado: "pendiente" | "confirmada";
 }
 
+// H-06: test isolation — snapshot/restore baseline store.
+const estadoInicialTipos: RegistroTipoProducto[] = store.map((item) => ({ ...item }));
+
+export const __resetProductTypeStore = (): void => {
+  store.length = 0;
+  store.push(...estadoInicialTipos.map((item) => ({ ...item })));
+};
+
 const operacionesTipoProducto = new Map<string, OperacionTipoProducto>();
 
 // Deterministic local states used only for review. The repository contract does not

@@ -1,9 +1,13 @@
-import { expect, test } from "@playwright/test";
+﻿import { expect, test } from "@playwright/test";
 import { brandService } from "../src/features/taxonomy/services/brandService";
 import { categoryService } from "../src/features/taxonomy/services/categoryService";
 import { characteristicService } from "../src/features/taxonomy/services/characteristicService";
 import { productTypeService } from "../src/features/taxonomy/services/productTypeService";
 import { seoService } from "../src/features/taxonomy/services/seoService";
+import { __resetBrandStore } from "../src/features/taxonomy/adapters/mockBrandAdapter";
+import { __resetCategoryStore } from "../src/features/taxonomy/adapters/mockCategoryAdapter";
+import { __resetCharacteristicStore } from "../src/features/taxonomy/adapters/mockCharacteristicAdapter";
+import { __resetProductTypeStore } from "../src/features/taxonomy/adapters/mockProductTypeAdapter";
 import {
   SeoConflictError,
   type SeoRepository,
@@ -19,6 +23,20 @@ type Equal<X, Y> = (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y
   ? true
   : false;
 type Assert<T extends true> = T;
+
+test.beforeEach(() => {
+  __resetBrandStore();
+  __resetCategoryStore();
+  __resetCharacteristicStore();
+  __resetProductTypeStore();
+});
+
+test.afterEach(() => {
+  __resetBrandStore();
+  __resetCategoryStore();
+  __resetCharacteristicStore();
+  __resetProductTypeStore();
+});
 
 test("crea un tipo de producto y permite consultar su detalle de inmediato", async () => {
   const creado = await productTypeService.crear({
@@ -235,3 +253,76 @@ test("los contratos de repositorio no aceptan parámetros de escenario mock", as
   expect(Array.isArray(marcas.items)).toBe(true);
   expect(Array.isArray(metadatos.items)).toBe(true);
 });
+
+// --- Regresión P0 (PR #41 / LOP-01 y LOP-04): alias de categorías -----------
+// Catálogo envía IDs externos (CAT-CALZADO) mientras Taxonomía usa `calzado`.
+// Toda relación padre/hija debe resolverse a un único ID interno para evitar
+// categorías invisibles y ciclos por autorreferencia.
+
+test("normaliza el padre por alias al crear y no deja la categoría invisible (LOP-04)", async () => {
+  const creada = await categoryService.crear({
+    nombre: "Alias QA",
+    slug: "alias-qa",
+    padreId: "CAT-CALZADO",
+  });
+
+  // The stored parent must be the canonical Taxonomy ID, not the alias.
+  const detalle = await categoryService.obtener(creada.id);
+  expect(detalle?.padreId).toBe("calzado");
+  expect(detalle?.padreNombre).toBe("Calzado");
+
+  // And it must be reachable in the tree under the canonical parent.
+  const { nodos } = await categoryService.list();
+  const calzado = nodos.find((nodo) => nodo.id === "calzado");
+  expect(calzado?.hijas?.some((hija) => hija.id === "alias-qa")).toBe(true);
+
+  // Resolving the alias must address the same entity, not a second one.
+  const porAlias = await categoryService.obtener("CAT-CALZADO");
+  expect(porAlias?.id).toBe("calzado");
+});
+
+test("rechaza mover una categoría sobre su propio alias (ciclo por autorreferencia)", async () => {
+  await expect(
+    categoryService.actualizar({
+      id: "calzado",
+      nombre: "Calzado",
+      slug: "calzado",
+      padreId: "CAT-CALZADO",
+      orden: 1,
+    }),
+  ).rejects.toThrow(/sí misma|subcategorías/i);
+});
+
+test("rechaza crear una categoría cuyo slug es un alias reservado", async () => {
+  await expect(
+    categoryService.crear({
+      nombre: "Alias reservado QA",
+      slug: "CAT-CALZADO",
+      padreId: "calzado",
+    }),
+  ).rejects.toThrow(/reservado/i);
+});
+
+test("rechaza crear una categoría de tercer nivel (máximo dos niveles)", async () => {
+  await expect(
+    categoryService.crear({
+      nombre: "Nieto QA",
+      slug: `nieto-qa-${Date.now()}`,
+      padreId: "running",
+    }),
+  ).rejects.toThrow(/dos niveles/i);
+});
+
+test("rechaza mover una categoría con subcategorías bajo otra categoría (superaría dos niveles)", async () => {
+  await expect(
+    categoryService.actualizar({
+      id: "calzado",
+      nombre: "Calzado",
+      slug: "calzado",
+      padreId: "ropa",
+      orden: 1,
+    }),
+  ).rejects.toThrow(/dos niveles|superarían|subcategorías/i);
+});
+
+

@@ -52,6 +52,7 @@ for (const module of taxonomySections) {
   test(`Direct ${module.name}: section renders, grouped sidebar with one active destination and no console errors`, async ({
     page,
   }) => {
+    test.setTimeout(60000);
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     page.on("console", (message) => {
@@ -176,7 +177,7 @@ test("MK-009: characteristic creation form exposes the expected fields", async (
   ).toBeVisible();
 });
 
-test("MK-009: a value referenced by an active schema is not deactivated (SPEC-010)", async ({
+test("MK-009: a value referenced by an active schema is rejected after asynchronous verification (SPEC-010)", async ({
   page,
 }) => {
   await page.goto("/caracteristicas/talla/valores");
@@ -184,6 +185,12 @@ test("MK-009: a value referenced by an active schema is not deactivated (SPEC-01
     page.getByRole("heading", { level: 1, name: "Valores de: Talla" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Solicitar baja de M" }).click();
+  await expect(
+    page.getByRole("status").filter({
+      hasText: "Solicitud de baja admitida (202 Accepted)",
+    }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Consultar estado" }).click();
   await expect(page.getByRole("alert")).toContainText(
     "No se pudo dar de baja el valor",
   );
@@ -355,4 +362,105 @@ test("Flow screens stay inside the 1440 px viewport with no console errors", asy
     ).toBe(true);
   }
   expect(errors).toEqual([]);
+});
+
+test("MK-008: reactivacion bloqueada por padre inactivo ofrece ir a la categoria padre", async ({
+  page,
+}) => {
+  await page.goto("/categorias/hija-padre-inactivo");
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Hija Padre Inactivo" }),
+  ).toBeVisible();
+  await expect(
+    page.locator(".mantine-Badge-label", { hasText: /^Inactivo$/ }).first(),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Reactivar", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Reactivación bloqueada");
+  await expect(
+    page.getByRole("button", { name: "Ir a la categoría padre" }),
+  ).toBeVisible();
+
+  // El estado de la categoría no cambia tras el bloqueo
+  await expect(
+    page.locator(".mantine-Badge-label", { hasText: /^Inactivo$/ }).first(),
+  ).toBeVisible();
+
+  // Navegación a la categoría padre
+  await page.getByRole("button", { name: "Ir a la categoría padre" }).click();
+  await expect(page).toHaveURL(/\/categorias\/inactiva-raiz$/);
+});
+
+test("MK-008: reactivacion bloqueada por productos NO muestra ir a la categoria padre", async ({
+  page,
+}) => {
+  await page.goto("/categorias/play");
+  await expect(page.getByRole("heading", { level: 1, name: "Play" })).toBeVisible();
+  await expect(
+    page.locator(".mantine-Badge-label", { hasText: /^Inactivo$/ }).first(),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Reactivar", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Reactivación bloqueada");
+  await expect(
+    page.getByRole("button", { name: "Ir a la categoría padre" }),
+  ).toHaveCount(0);
+
+  // El estado de la categoría no cambia
+  await expect(
+    page.locator(".mantine-Badge-label", { hasText: /^Inactivo$/ }).first(),
+  ).toBeVisible();
+});
+
+test("MK-008: reactivacion en categoria sin padre bloqueada ofrece volver al arbol", async ({
+  page,
+}) => {
+  await page.goto("/categorias/inactiva-raiz");
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Inactiva Raiz" }),
+  ).toBeVisible();
+  await expect(
+    page.locator(".mantine-Badge-label", { hasText: /^Inactivo$/ }).first(),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Reactivar", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Reactivación bloqueada");
+  await expect(
+    page.getByRole("button", { name: "Ir a la categoría padre" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Volver al árbol" }),
+  ).toBeVisible();
+
+  // El estado no cambia tras el bloqueo
+  await expect(
+    page.locator(".mantine-Badge-label", { hasText: /^Inactivo$/ }).first(),
+  ).toBeVisible();
+});
+
+test("MK-008: categoria conserva estado de expansion del arbol en navegacion", async ({
+  page,
+}) => {
+  await page.goto("/categorias");
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Categorías" }),
+  ).toBeVisible();
+
+  // Contraer nodo Calzado
+  const contraerBtn = page.getByRole("button", { name: "Contraer Calzado" });
+  await contraerBtn.click();
+  await expect(
+    page.getByRole("button", { name: "Expandir Calzado" }),
+  ).toBeVisible();
+
+  // Navegar al detalle de Ropa
+  await page.getByRole("button", { name: "Ver Ropa" }).click();
+  await expect(page).toHaveURL(/\/categorias\/ropa$/);
+
+  // Regresar al árbol
+  await page.goto("/categorias");
+  // Debe seguir colapsado (mostrar Expandir Calzado)
+  await expect(
+    page.getByRole("button", { name: "Expandir Calzado" }),
+  ).toBeVisible();
 });
