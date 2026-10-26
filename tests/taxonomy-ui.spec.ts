@@ -176,7 +176,7 @@ test("MK-009: characteristic creation form exposes the expected fields", async (
   ).toBeVisible();
 });
 
-test("MK-009: a value referenced by an active schema is not deactivated (SPEC-010)", async ({
+test("MK-009: a value referenced by an active schema is rejected after asynchronous verification (SPEC-010)", async ({
   page,
 }) => {
   await page.goto("/caracteristicas/talla/valores");
@@ -184,6 +184,12 @@ test("MK-009: a value referenced by an active schema is not deactivated (SPEC-01
     page.getByRole("heading", { level: 1, name: "Valores de: Talla" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Solicitar baja de M" }).click();
+  await expect(
+    page.getByRole("status").filter({
+      hasText: "Solicitud de baja admitida (202 Accepted)",
+    }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Consultar estado" }).click();
   await expect(page.getByRole("alert")).toContainText(
     "No se pudo dar de baja el valor",
   );

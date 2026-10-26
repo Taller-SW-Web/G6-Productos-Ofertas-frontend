@@ -62,7 +62,9 @@ export function CharacteristicListPage() {
       caracteristicas.filter(
         (item) =>
           termino === "" ||
-          item.nombre.toLocaleLowerCase("es").includes(termino),
+          item.nombre.toLocaleLowerCase("es").includes(termino) ||
+          item.tipo.toLocaleLowerCase("es").includes(termino) ||
+          etiquetaTipoCaracteristica[item.tipo].toLocaleLowerCase("es").includes(termino),
       ),
     [caracteristicas, termino],
   );
