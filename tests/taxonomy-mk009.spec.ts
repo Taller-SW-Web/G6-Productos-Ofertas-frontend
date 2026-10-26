@@ -1,7 +1,27 @@
 import { expect, test, type Page } from "@playwright/test";
-import { MockTaxonomyRepository } from "../src/features/catalog/adapters/mockTaxonomyRepository";
+import { getCatalogServices } from "../src/features/catalog/services/catalogServices";
 import { __resetCharacteristicStore } from "../src/features/taxonomy/adapters/mockCharacteristicAdapter";
 import { characteristicService } from "../src/features/taxonomy/services/characteristicService";
+
+type PersistedBajaOperation = {
+  operacionId: string;
+  caracteristicaId: string;
+  valorId: string;
+  estado: "pendiente" | "confirmada" | "rechazada" | "no-concluyente";
+};
+
+async function readBajaOperations(
+  page: Page,
+): Promise<PersistedBajaOperation[]> {
+  return page.evaluate(() => {
+    const raw = window.localStorage.getItem(
+      "g6-productos-ofertas:mock:v1:taxonomy-characteristic-baja",
+    );
+    if (!raw) return [];
+    return (JSON.parse(raw) as { data: PersistedBajaOperation[] }).data;
+  });
+}
+
 
 type CharacteristicMockScenarios = {
   lista?: "default" | "empty" | "error";
@@ -60,7 +80,7 @@ test.describe("MK-009 mock funcional", () => {
       );
       expect(renombrado.valorId).toBe("negro");
 
-      const esquema = await new MockTaxonomyRepository().getAttributeSchema("ropa");
+      const esquema = await getCatalogServices("mock").taxonomy.getAttributeSchema("ropa");
       const color = esquema.find((atributo) => atributo.caracteristicaId === "color");
       expect(color?.opciones).toContainEqual({ id: "negro", valor: "Negro grafito" });
       expect(color?.opciones).not.toContainEqual({ id: "negro", valor: "Negro" });
@@ -290,5 +310,145 @@ test.describe("MK-009 mock funcional", () => {
     await expect(page.getByText("color", { exact: true })).toBeVisible();
     await expect(page.getByText("negro", { exact: true })).toBeVisible();
     await expect(page.getByText("Negro", { exact: true })).toBeVisible();
+  });
+
+  test("Catálogo efectivo oculta un valor con baja pendiente y lo descarta al confirmar", async () => {
+    __resetCharacteristicStore();
+    try {
+      const taxonomia = getCatalogServices("mock").taxonomy;
+      const antes = await taxonomia.getAttributeSchema("ropa");
+      expect(
+        antes.find((atributo) => atributo.caracteristicaId === "color")?.opciones,
+      ).toContainEqual({ id: "negro", valor: "Negro" });
+
+      const solicitud = await characteristicService.solicitarBajaValor("color", "negro");
+      expect(solicitud.resultado).toBe("pendiente");
+
+      const durante = await taxonomia.getAttributeSchema("ropa");
+      const colorDurante = durante.find(
+        (atributo) => atributo.caracteristicaId === "color",
+      );
+      expect(colorDurante?.opciones).not.toContainEqual({ id: "negro", valor: "Negro" });
+      expect(colorDurante?.opciones).toContainEqual({ id: "blanco", valor: "Blanco" });
+
+      const seguimiento = await characteristicService.consultarEstadoOperacion(
+        solicitud.operacionId!,
+      );
+      expect(seguimiento.estado).toBe("confirmada");
+
+      const despues = await taxonomia.getAttributeSchema("ropa");
+      expect(
+        despues.find((atributo) => atributo.caracteristicaId === "color")?.opciones,
+      ).not.toContainEqual({ id: "negro", valor: "Negro" });
+    } finally {
+      __resetCharacteristicStore();
+    }
+  });
+
+  test("S04 rechaza etiquetas duplicadas normalizadas y conserva el valorId original", async () => {
+    __resetCharacteristicStore();
+    try {
+      await expect(
+        characteristicService.renombrarValor("color", "negro", "  BLANCO  "),
+      ).rejects.toThrow("Ya existe un valor con ese nombre en esta característica.");
+      const sinCambios = await characteristicService.listarValores("color");
+      expect(sinCambios?.find((valor) => valor.valorId === "negro")?.nombre).toBe("Negro");
+
+      const renombrado = await characteristicService.renombrarValor(
+        "color",
+        "negro",
+        "Negro Grafito",
+      );
+      expect(renombrado.valorId).toBe("negro");
+      expect(renombrado.nombre).toBe("Negro Grafito");
+    } finally {
+      __resetCharacteristicStore();
+    }
+  });
+
+  test("S04-R rechaza desde la interfaz un nombre duplicado y conserva el valorId", async ({
+    page,
+  }) => {
+    await page.goto("/caracteristicas/color/valores");
+    const fila = page.locator("tbody tr", { hasText: "Blanco" });
+    await fila.getByRole("button", { name: "Renombrar Blanco" }).click();
+    await page.getByLabel("Nuevo nombre de Blanco").fill("  negro  ");
+    await page.getByRole("button", { name: "Guardar nombre de Blanco" }).click();
+    await expect(
+      page.getByText("Ya existe un valor con ese nombre en esta característica."),
+    ).toBeVisible();
+    await expect(page.locator("tbody tr", { hasText: "Blanco" })).toContainText(
+      "blanco",
+    );
+    await expect(page.locator("tbody tr", { hasText: "Negro" })).toContainText(
+      "negro",
+    );
+  });
+
+  test("S04-R recupera una baja pendiente tras recargar sin reenviar la solicitud", async ({
+    page,
+  }) => {
+    await page.goto("/caracteristicas/color/valores");
+    await setCharacteristicScenario(page, { baja: "pendiente-prolongado" });
+    await page.getByRole("button", { name: "Solicitar baja de Negro" }).click();
+    await expect(
+      page.getByRole("status", { name: /Solicitud de baja admitida/ }),
+    ).toBeVisible();
+
+    const antes = await readBajaOperations(page);
+    expect(antes).toHaveLength(1);
+    expect(antes[0]!.estado).toBe("pendiente");
+
+    await page.reload();
+    await expect(
+      page.getByRole("status", { name: /Solicitud de baja admitida/ }),
+    ).toBeVisible();
+    await expect(page.locator("tbody tr", { hasText: "Negro" })).toContainText(
+      "Comprobando uso",
+    );
+
+    const despues = await readBajaOperations(page);
+    expect(despues).toHaveLength(1);
+    expect(despues[0]!.operacionId).toBe(antes[0]!.operacionId);
+  });
+
+  test("S04-R no reutiliza el operacionId tras recargar y conserva el historial resuelto", async ({
+    page,
+  }) => {
+    await page.goto("/caracteristicas/talla/valores");
+    await page.getByRole("button", { name: "Solicitar baja de M" }).click();
+    await page.getByRole("button", { name: "Consultar estado" }).click();
+    await expect(page.getByRole("alert")).toContainText("No se pudo dar de baja el valor");
+
+    const historial = await readBajaOperations(page);
+    expect(historial).toHaveLength(1);
+    const rechazada = historial[0]!;
+    expect(rechazada.estado).toBe("rechazada");
+
+    await page.reload();
+    await page.getByRole("button", { name: "Solicitar baja de M" }).click();
+    await expect(
+      page.getByRole("status", { name: /Solicitud de baja admitida/ }),
+    ).toBeVisible();
+
+    const actualizado = await readBajaOperations(page);
+    expect(actualizado).toHaveLength(2);
+    expect(
+      actualizado.find((operacion) => operacion.operacionId === rechazada.operacionId)
+        ?.estado,
+    ).toBe("rechazada");
+    const nueva = actualizado.find(
+      (operacion) => operacion.operacionId !== rechazada.operacionId,
+    );
+    expect(nueva?.estado).toBe("pendiente");
+    expect(nueva?.operacionId).not.toBe(rechazada.operacionId);
+
+    const consultaAnterior = await page.evaluate(async (operacionId) => {
+      const adapterPath =
+        "/src/features/taxonomy/adapters/mockCharacteristicAdapter.ts";
+      const adapter = await import(adapterPath);
+      return adapter.mockCharacteristicAdapter.consultarEstadoOperacion(operacionId);
+    }, rechazada.operacionId);
+    expect(consultaAnterior.estado).toBe("rechazada");
   });
 });

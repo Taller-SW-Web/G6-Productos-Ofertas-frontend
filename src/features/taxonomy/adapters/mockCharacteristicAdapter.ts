@@ -151,6 +151,15 @@ const generarId = (nombre: string): string => {
 const contarActivos = (valores: RegistroValor[]): number =>
   valores.filter((valor) => valor.estado === "Activo").length;
 
+// MK-009: labels are compared ignoring case, surrounding whitespace and accents so
+// "  BLANCO " cannot duplicate "Blanco" inside the same characteristic.
+const normalizarEtiqueta = (nombre: string): string =>
+  nombre
+    .trim()
+    .toLocaleLowerCase("es")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
 // BLOCKED_CONTRACT: no hay contrato OpenAPI confirmado para el sondeo del resultado
 // de una baja asíncrona de valor (202). Este registro mantiene las operaciones
 // pendientes en memoria para que la UI consulte su estado sin inventar un endpoint.
@@ -197,7 +206,18 @@ const operacionesBajaValor = new Map<string, OperacionBajaValor>(
     ) ?? []
   ).map((operation) => [operation.operacionId, operation]),
 );
-let secuenciaOperacionBaja = 0;
+// H-07: the sequence is restored from persisted operations so a reload cannot reuse
+// an identifier that already belongs to a resolved operation. Without this, a new
+// request after reload would overwrite the previous rejection/history.
+let secuenciaOperacionBaja = Array.from(operacionesBajaValor.keys()).reduce(
+  (maximo, operacionId) => {
+    const coincidencia = /-(\d+)$/.exec(operacionId);
+    return coincidencia
+      ? Math.max(maximo, Number(coincidencia[1]))
+      : maximo;
+  },
+  0,
+);
 
 const persistirOperacionesBaja = () =>
   saveMockState(
@@ -436,6 +456,18 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
       throw new Error("La característica está inactiva y sus valores son de solo lectura.");
     }
     if (!nombreLimpio) throw new Error("Ingresa el nombre del valor.");
+    const etiquetaNormalizada = normalizarEtiqueta(nombreLimpio);
+    if (
+      (r.valores ?? []).some(
+        (item) =>
+          item.valorId !== valorId &&
+          normalizarEtiqueta(item.nombre) === etiquetaNormalizada,
+      )
+    ) {
+      throw new Error(
+        "Ya existe un valor con ese nombre en esta característica.",
+      );
+    }
     if (MOCK.formulario === "error") {
       throw new Error("No se pudo renombrar el valor. Inténtalo de nuevo.");
     }
@@ -549,7 +581,10 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
         operacionId: existing.operacionId,
       };
     }
-    const operacionId = `${baseOperacionId}-${++secuenciaOperacionBaja}`;
+    let operacionId: string;
+    do {
+      operacionId = `${baseOperacionId}-${++secuenciaOperacionBaja}`;
+    } while (operacionesBajaValor.has(operacionId));
     operacionesBajaValor.set(operacionId, {
       operacionId,
       caracteristicaId: id,
@@ -639,14 +674,14 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
       v.version += 1;
       r.valoresActivos = contarActivos(r.valores ?? []);
       const ok = persist();
-        if (!ok && isMockPersistenceAvailable()) {
+      if (!ok && isMockPersistenceAvailable()) {
         operacion.estado = "pendiente";
         v.estado = prevEstado;
         v.version = prevVersion;
         r.valoresActivos = prevActivos;
-          throw new Error("No se pudo confirmar la baja del valor. Vuelve a intentarlo.");
-        }
-        persistirOperacionesBaja();
+        throw new Error("No se pudo confirmar la baja del valor. Vuelve a intentarlo.");
+      }
+      persistirOperacionesBaja();
       return {
         operacionId,
         estado: "confirmada",

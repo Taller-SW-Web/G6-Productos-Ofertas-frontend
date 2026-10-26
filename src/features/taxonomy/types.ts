@@ -7,8 +7,6 @@ export interface CategoryNode {
   orden?: number;
   descripcion?: string;
   hijas?: CategoryNode[];
-  imagen?: string;
-  imagenUrl?: string;
 }
 
 export interface CategoryTreeProps {
@@ -49,9 +47,6 @@ export interface CategoryCreateInput {
   slug: string;
   padreId?: string;
   descripcion?: string;
-  orden?: number;
-  imagen?: string;
-  imagenUrl?: string;
 }
 
 export interface SlugCheckResult {
@@ -78,8 +73,6 @@ export interface CategoryDetail {
   padreId?: string;
   padreNombre?: string;
   hijas: CategoryNode[];
-  imagen?: string;
-  imagenUrl?: string;
 }
 
 export interface CategoryUpdateInput {
@@ -89,8 +82,6 @@ export interface CategoryUpdateInput {
   padreId?: string;
   descripcion?: string;
   orden: number;
-  imagen?: string;
-  imagenUrl?: string;
 }
 
 // S04/S04-B/S05-R (Baja y reactivación) — presentation models. Simulated dependencies,
