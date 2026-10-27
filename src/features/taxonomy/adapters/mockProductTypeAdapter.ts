@@ -173,6 +173,19 @@ interface OperacionTipoProducto {
   estado: "pendiente" | "confirmada";
 }
 
+const copiarRegistroTipo = (item: RegistroTipoProducto): RegistroTipoProducto => ({
+  ...item,
+  asociadas: item.asociadas.map((asoc) => ({ ...asoc })),
+});
+
+const estadoInicialTipos: RegistroTipoProducto[] = storeFixtures.map(copiarRegistroTipo);
+
+export const __resetProductTypeStore = (): void => {
+  store.length = 0;
+  store.push(...estadoInicialTipos.map(copiarRegistroTipo));
+  operacionesTipoProducto.clear();
+};
+
 const operacionesTipoProducto = new Map<string, OperacionTipoProducto>();
 
 // Deterministic local states used only for review. The repository contract does not
