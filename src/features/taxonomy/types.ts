@@ -250,6 +250,15 @@ export interface ProductTypeAssociarInput {
   obligatoria: boolean;
 }
 
+// MK-010 — cambio de obligatoriedad de una asociación existente.
+// Contrato: PATCH /tipos-producto/{tipoProductoId}/caracteristicas/{caracteristicaId}.
+// Solo incrementa schemaVersion cuando la asociación cambia realmente.
+export interface ProductTypeObligatoriedadInput {
+  tipoProductoId: string;
+  caracteristicaId: string;
+  obligatoria: boolean;
+}
+
 export type OperationResultState = "exito" | "pendiente" | "rechazada";
 
 export interface ProductTypeDesasociarResult {
@@ -340,11 +349,9 @@ export interface HistorialSlugItem {
 }
 
 // MK-008/009/010 — Seguimiento de operaciones asíncronas (202 Accepted).
-// BLOCKED_CONTRACT: no existe un contrato OpenAPI confirmado para el sondeo del
-// resultado de una operación asíncrona de baja/desasociación/desactivación (la
-// documentación de contratos no está accesible en este entorno). Estos modelos solo
-// representan el estado devuelto por el servicio; no definen ni inventan un endpoint
-// HTTP propio.
+// Contrato: GET /taxonomia/operaciones/{operationId}. Estos modelos representan el
+// estado que consume la UI; el mock no inventa un endpoint propio ni afirma que el
+// sondeo HTTP esté integrado en este PR.
 export type OperationFollowUpStatus =
   | "pendiente"
   | "confirmada"

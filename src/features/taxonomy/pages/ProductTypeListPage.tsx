@@ -114,7 +114,17 @@ export function ProductTypeListPage() {
       ? {
           title: "Sin tipos de producto",
           description:
-            "Aún no hay tipos de producto registrados para definir esquemas de atributos.",
+            "Todavía no hay tipos de producto registrados para definir esquemas de atributos.",
+          action: (
+            <Button
+              leftSection={
+                <IconPlus size={16} stroke={2} aria-hidden="true" />
+              }
+              onClick={() => navigate("/tipos-producto/nuevo")}
+            >
+              Crear tipo de producto
+            </Button>
+          ),
         }
       : {
           title: "Sin resultados",

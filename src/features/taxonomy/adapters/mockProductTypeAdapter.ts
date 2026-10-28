@@ -2,9 +2,11 @@ import { mockCharacteristicAdapter } from "./mockCharacteristicAdapter";
 import type { ProductTypeRepository } from "../services/productTypeRepository";
 import { PRODUCT_TYPE_ATTRIBUTE_LIMIT } from "../services/productTypeRepository";
 import {
+  clearMockState,
   isMockPersistenceAvailable,
   loadMockArray,
   persistMockArray,
+  publishMockChange,
   syncMockArrayOnExternalChange,
 } from "../../shared/mockState";
 import type {
@@ -17,6 +19,7 @@ import type {
   ProductTypeDesactivarResult,
   ProductTypeDetail,
   ProductTypeListItem,
+  ProductTypeObligatoriedadInput,
   ProductTypeSeguimiento,
 } from "../types";
 
@@ -160,17 +163,25 @@ const generarId = (nombre: string): string => {
   return id;
 };
 
-// BLOCKED_CONTRACT: no hay contrato OpenAPI confirmado para el sondeo del resultado
-// de una operación asíncrona sobre tipo de producto (desasociación o desactivación,
-// 202). Este registro mantiene las operaciones pendientes en memoria para que la UI
-// consulte su estado sin inventar un endpoint.
+// Contrato de seguimiento: GET /taxonomia/operaciones/{operationId}. El mock mantiene
+// las operaciones en memoria y reproduce un resultado determinista sin afirmar que la
+// integración HTTP esté implementada.
 type TipoOperacionTipoProducto = "desasocio" | "desactivacion";
+
+// Valores internos de la verificación simulada. CLEAR y HAS_ACTIVE_PRODUCTS reflejan
+// el resultado publicado por OperacionMaestra; HAS_ACTIVE_PRODUCTS representa el uso
+// activo (IN_USE) y NO_CONCLUYENTE representa ausencia de confirmación fiable.
+type ResultadoVerificacion =
+  | "CLEAR"
+  | "HAS_ACTIVE_PRODUCTS"
+  | "NO_CONCLUYENTE";
 
 interface OperacionTipoProducto {
   tipoProductoId: string;
   tipo: TipoOperacionTipoProducto;
   caracteristicaId?: string;
-  estado: "pendiente" | "confirmada";
+  estado: "pendiente" | "confirmada" | "rechazada" | "no-concluyente";
+  resultadoVerificacion: ResultadoVerificacion;
 }
 
 const copiarRegistroTipo = (item: RegistroTipoProducto): RegistroTipoProducto => ({
@@ -180,21 +191,70 @@ const copiarRegistroTipo = (item: RegistroTipoProducto): RegistroTipoProducto =>
 
 const estadoInicialTipos: RegistroTipoProducto[] = storeFixtures.map(copiarRegistroTipo);
 
-export const __resetProductTypeStore = (): void => {
-  store.length = 0;
-  store.push(...estadoInicialTipos.map(copiarRegistroTipo));
-  operacionesTipoProducto.clear();
-};
-
-const operacionesTipoProducto = new Map<string, OperacionTipoProducto>();
-
 // Deterministic local states used only for review. The repository contract does not
 // accept scenarios; reviewers change these values to reproduce error or edge cases
 // without touching pages, hooks or the service contract.
 type EscenarioLista = "default" | "empty" | "error";
+export type EscenarioVerificacion =
+  | "default"
+  | "en-uso"
+  | "no-concluyente"
+  | "pendiente-prolongado"
+  | "error-consulta";
 
-const MOCK: { lista: EscenarioLista } = {
+export interface ProductTypeMockScenarios {
+  lista: EscenarioLista;
+  verificacion: EscenarioVerificacion;
+}
+
+const DEFAULT_MOCK_SCENARIOS: ProductTypeMockScenarios = {
   lista: "default",
+  verificacion: "default",
+};
+
+const MOCK: ProductTypeMockScenarios = { ...DEFAULT_MOCK_SCENARIOS };
+
+const operacionesTipoProducto = new Map<string, OperacionTipoProducto>();
+
+const resultadoVerificacionActual = (): ResultadoVerificacion => {
+  if (MOCK.verificacion === "en-uso") return "HAS_ACTIVE_PRODUCTS";
+  if (MOCK.verificacion === "no-concluyente") return "NO_CONCLUYENTE";
+  return "CLEAR";
+};
+
+const operacionPendiente = (
+  tipo: TipoOperacionTipoProducto,
+  tipoProductoId: string,
+  caracteristicaId?: string,
+): OperacionTipoProducto => ({
+  tipo,
+  tipoProductoId,
+  caracteristicaId,
+  estado: "pendiente",
+  resultadoVerificacion: resultadoVerificacionActual(),
+});
+
+// Adapter-only controls for reproducible UI review and tests. They do not form part
+// of ProductTypeRepository or select a data mode.
+export const __setProductTypeMockScenarios = (
+  scenarios: Partial<ProductTypeMockScenarios>,
+): void => {
+  Object.assign(MOCK, scenarios);
+};
+
+export const __resetProductTypeMockScenarios = (): void => {
+  Object.assign(MOCK, DEFAULT_MOCK_SCENARIOS);
+};
+
+export const __resetProductTypeStore = (): void => {
+  store.length = 0;
+  store.push(...estadoInicialTipos.map(copiarRegistroTipo));
+  operacionesTipoProducto.clear();
+  __resetProductTypeMockScenarios();
+  // Test isolation: also remove the persisted demo domain. Normal mock persistence
+  // remains untouched; the next confirmed write creates a fresh envelope again.
+  clearMockState("taxonomy-product-types");
+  publishMockChange("taxonomy-product-types");
 };
 
 export const mockProductTypeAdapter: ProductTypeRepository = {
@@ -258,7 +318,7 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
   ): Promise<ProductTypeAssociationCharacteristic[]> {
     signal?.throwIfAborted();
     const registro = encontrar(id);
-    if (!registro) return [];
+    if (!registro || registro.estado !== "Activo") return [];
     const catalogo = await cargarCatalogo(signal);
     return Array.from(catalogo.values())
       .filter(
@@ -310,6 +370,41 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
     return aDetalle(registro, catalogo);
   },
 
+  async actualizarObligatoriedad(
+    input: ProductTypeObligatoriedadInput,
+    signal,
+  ): Promise<ProductTypeDetail | null> {
+    signal?.throwIfAborted();
+    await esperar(400);
+    signal?.throwIfAborted();
+    const registro = encontrar(input.tipoProductoId);
+    if (!registro) throw new Error("TIPO_PRODUCTO_NO_ENCONTRADO");
+    if (registro.estado !== "Activo") throw new Error("TIPO_PRODUCTO_INVALIDO");
+    const asociacion = registro.asociadas.find(
+      (item) => item.caracteristicaId === input.caracteristicaId,
+    );
+    if (!asociacion) throw new Error("ASOCIACION_NO_ENCONTRADA");
+    // A confirmed change increments schemaVersion exactly once. Repeating the same
+    // condition is idempotent and must not bump the version.
+    if (asociacion.obligatoria !== input.obligatoria) {
+      const anterior = asociacion.obligatoria;
+      asociacion.obligatoria = input.obligatoria;
+      registro.schemaVersion += 1;
+      const ok = persist();
+      if (!ok && isMockPersistenceAvailable()) {
+        asociacion.obligatoria = anterior;
+        registro.schemaVersion -= 1;
+        throw new Error(
+          "No se pudo actualizar la condición. Vuelve a intentarlo.",
+        );
+      }
+    }
+    // No se toca el estado de productos: la nueva exigencia se aplica cuando Catálogo
+    // edite, guarde o reactive cada producto.
+    const catalogo = await cargarCatalogo(signal);
+    return aDetalle(registro, catalogo);
+  },
+
   async desasociarCaracteristica(
     id: string,
     caracteristicaId: string,
@@ -320,18 +415,17 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
     signal?.throwIfAborted();
     const registro = encontrar(id);
     if (!registro) throw new Error("TIPO_PRODUCTO_NO_ENCONTRADO");
+    if (registro.estado !== "Activo") throw new Error("TIPO_PRODUCTO_INVALIDO");
     const asociacion = registro.asociadas.find(
       (item) => item.caracteristicaId === caracteristicaId,
     );
     if (!asociacion) throw new Error("CARACTERISTICA_NO_ASOCIADA");
     if (asociacion.obligatoria) {
       const operacionId = `op-desasocio-${id}-${caracteristicaId}`;
-      operacionesTipoProducto.set(operacionId, {
-        tipoProductoId: id,
-        tipo: "desasocio",
-        caracteristicaId,
-        estado: "pendiente",
-      });
+      operacionesTipoProducto.set(
+        operacionId,
+        operacionPendiente("desasocio", id, caracteristicaId),
+      );
       return {
         resultado: "pendiente",
         mensaje:
@@ -375,34 +469,71 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
     }
 
     if (operacion.estado === "pendiente") {
-      operacion.estado = "confirmada";
-      const prevAsociadas = registro.asociadas;
-      const prevSchemaVersion = registro.schemaVersion;
-      const prevEstado = registro.estado;
-      if (operacion.tipo === "desasocio" && operacion.caracteristicaId) {
-        registro.asociadas = registro.asociadas.filter(
-          (item) => item.caracteristicaId !== operacion.caracteristicaId,
+      if (MOCK.verificacion === "error-consulta") {
+        throw new Error(
+          "No se pudo consultar la verificación. La asociación y la versión del esquema se conservan.",
         );
-        registro.schemaVersion += 1;
-      } else if (operacion.tipo === "desactivacion") {
-        registro.estado = "Inactivo";
       }
-      const ok = persist();
-      if (!ok && isMockPersistenceAvailable()) {
-        operacion.estado = "pendiente";
-        registro.asociadas = prevAsociadas;
-        registro.schemaVersion = prevSchemaVersion;
-        registro.estado = prevEstado;
-        throw new Error("No se pudo confirmar la operación del tipo de producto. Vuelve a intentarlo.");
+      if (MOCK.verificacion === "pendiente-prolongado") {
+        const catalogoPendiente = await cargarCatalogo(signal);
+        return {
+          operacionId,
+          estado: "pendiente",
+          mensaje: "La operación continúa en verificación con Catálogo.",
+          tipoProducto: aDetalle(registro, catalogoPendiente),
+        };
+      }
+
+      if (operacion.resultadoVerificacion === "HAS_ACTIVE_PRODUCTS") {
+        // Fail closed: no mutation, no schemaVersion bump.
+        operacion.estado = "rechazada";
+      } else if (operacion.resultadoVerificacion === "NO_CONCLUYENTE") {
+        // Fail closed: the UI must consult again; nothing is modified.
+        operacion.estado = "no-concluyente";
+      } else {
+        operacion.estado = "confirmada";
+        const prevAsociadas = registro.asociadas;
+        const prevSchemaVersion = registro.schemaVersion;
+        const prevEstado = registro.estado;
+        if (operacion.tipo === "desasocio" && operacion.caracteristicaId) {
+          registro.asociadas = registro.asociadas.filter(
+            (item) => item.caracteristicaId !== operacion.caracteristicaId,
+          );
+          registro.schemaVersion += 1;
+        } else if (operacion.tipo === "desactivacion") {
+          registro.estado = "Inactivo";
+        }
+        const ok = persist();
+        if (!ok && isMockPersistenceAvailable()) {
+          operacion.estado = "pendiente";
+          registro.asociadas = prevAsociadas;
+          registro.schemaVersion = prevSchemaVersion;
+          registro.estado = prevEstado;
+          throw new Error(
+            "No se pudo confirmar la operación del tipo de producto. Vuelve a intentarlo.",
+          );
+        }
       }
     }
 
-    const mensaje =
-      operacion.estado === "confirmada"
-        ? operacion.tipo === "desasocio"
+    const mensaje = (() => {
+      if (operacion.estado === "confirmada") {
+        return operacion.tipo === "desasocio"
           ? "Verificación concluida: la característica se desasoció del esquema y se incrementó la versión del esquema."
-          : "Verificación concluida: el tipo de producto quedó Inactivo."
-        : "La operación continúa en verificación con Catálogo.";
+          : "Verificación concluida: el tipo de producto quedó Inactivo.";
+      }
+      if (operacion.estado === "rechazada") {
+        return operacion.tipo === "desasocio"
+          ? "No se puede retirar esta característica porque todavía participa en productos o variantes activos. La asociación y la versión del esquema se conservan."
+          : "No se puede desactivar este tipo porque existen productos o variantes activos que dependen de él. El estado y la versión del esquema se conservan.";
+      }
+      if (operacion.estado === "no-concluyente") {
+        return operacion.tipo === "desasocio"
+          ? "No pudimos confirmar que el cambio sea seguro. No se realizó ninguna modificación; la asociación y la versión del esquema se conservan."
+          : "No pudimos confirmar que el cambio sea seguro. No se realizó ninguna modificación; el estado y la versión del esquema se conservan.";
+      }
+      return "La operación continúa en verificación con Catálogo.";
+    })();
     const catalogo = await cargarCatalogo(signal);
     return {
       operacionId,
@@ -431,11 +562,10 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
     }
     if (registro.tipoProductoId === "ropa") {
       const operacionId = `op-desactivacion-${id}`;
-      operacionesTipoProducto.set(operacionId, {
-        tipoProductoId: id,
-        tipo: "desactivacion",
-        estado: "pendiente",
-      });
+      operacionesTipoProducto.set(
+        operacionId,
+        operacionPendiente("desactivacion", id),
+      );
       return {
         resultado: "pendiente",
         mensaje:
@@ -454,5 +584,25 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
       resultado: "exito",
       mensaje: "El tipo de producto se desactivó correctamente.",
     };
+  },
+
+  async reactivar(id: string, signal): Promise<ProductTypeDetail | null> {
+    signal?.throwIfAborted();
+    await esperar(400);
+    signal?.throwIfAborted();
+    const registro = encontrar(id);
+    if (!registro) throw new Error("TIPO_PRODUCTO_NO_ENCONTRADO");
+    if (registro.estado !== "Inactivo") throw new Error("TIPO_PRODUCTO_INVALIDO");
+    const prevEstado = registro.estado;
+    // La reactivación reutiliza el mismo registro: tipoProductoId, asociaciones y
+    // schemaVersion se conservan. No se crea un tipo nuevo ni se reescribe historial.
+    registro.estado = "Activo";
+    const ok = persist();
+    if (!ok && isMockPersistenceAvailable()) {
+      registro.estado = prevEstado;
+      throw new Error("No se pudo reactivar el tipo de producto. Vuelve a intentarlo.");
+    }
+    const catalogo = await cargarCatalogo(signal);
+    return aDetalle(registro, catalogo);
   },
 };
