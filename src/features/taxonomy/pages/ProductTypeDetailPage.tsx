@@ -475,7 +475,7 @@ function ProductTypeDetailContent({ id }: { id: string }) {
             La condición de {caracteristicaActualizada ?? "la característica"}{" "}
             ahora es{" "}
             {obligatoriedadSuccess.obligatoria ? "Obligatoria" : "Opcional"}.
-            Schema version actualizada a v
+            Versión del esquema actualizada a v
             {obligatoriedadSuccess.detalle.schemaVersion}. No se desactivan
             productos existentes: la exigencia se aplica al editar, guardar o
             reactivar cada producto.
@@ -620,7 +620,7 @@ function ProductTypeDetailContent({ id }: { id: string }) {
               <CampoDato etiqueta="Estado">
                 <StatusBadge semantic="neutral">{detalle.estado}</StatusBadge>
               </CampoDato>
-              <CampoDato etiqueta="Schema version">
+              <CampoDato etiqueta="Versión del esquema">
                 {detalle.schemaVersion}
               </CampoDato>
               <CampoDato etiqueta="Características asignadas">
@@ -660,8 +660,8 @@ function ProductTypeDetailContent({ id }: { id: string }) {
             <Text size="sm">
               Antes de retirar esta característica debemos comprobar que el
               cambio no deje productos o variantes activos en un estado
-              incompatible. Las asociaciones obligatorias requieren verificación
-              con Catálogo antes de confirmarse.
+              incompatible. Toda desasociación, sea obligatoria u opcional,
+              requiere verificación con Catálogo antes de confirmarse.
             </Text>
           </Stack>
         </ConfirmDialog>

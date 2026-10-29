@@ -69,7 +69,7 @@ export function ProductTypeListPage() {
     },
     {
       key: "schemaVersion",
-      header: "Schema version",
+      header: "Versión del esquema",
       width: 140,
       align: "right",
       render: (item) => <Text size="sm">{item.schemaVersion}</Text>,

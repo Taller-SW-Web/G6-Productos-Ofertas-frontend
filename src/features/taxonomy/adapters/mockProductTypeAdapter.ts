@@ -182,6 +182,10 @@ interface OperacionTipoProducto {
   caracteristicaId?: string;
   estado: "pendiente" | "confirmada" | "rechazada" | "no-concluyente";
   resultadoVerificacion: ResultadoVerificacion;
+  // Versión del esquema con la que se admitió la operación. La confirmación solo
+  // puede aplicarse si el esquema sigue en esa versión.
+  schemaVersionAdmitida: number;
+  versionObsoleta?: boolean;
 }
 
 const copiarRegistroTipo = (item: RegistroTipoProducto): RegistroTipoProducto => ({
@@ -197,6 +201,7 @@ const estadoInicialTipos: RegistroTipoProducto[] = storeFixtures.map(copiarRegis
 type EscenarioLista = "default" | "empty" | "error";
 export type EscenarioVerificacion =
   | "default"
+  | "clear"
   | "en-uso"
   | "no-concluyente"
   | "pendiente-prolongado"
@@ -216,22 +221,39 @@ const MOCK: ProductTypeMockScenarios = { ...DEFAULT_MOCK_SCENARIOS };
 
 const operacionesTipoProducto = new Map<string, OperacionTipoProducto>();
 
-const resultadoVerificacionActual = (): ResultadoVerificacion => {
+// Los tipos de los fixtures representan tipos ya existentes en Catálogo y, por
+// tanto, pueden tener productos activos. Un tipo recién creado en la sesión no
+// tiene productos todavía. El escenario "clear" permite forzar de forma
+// determinista una verificación segura para las pruebas y la revisión visual.
+const TIPOS_CON_PRODUCTOS_ACTIVOS_EN_MOCK = new Set([
+  "calzado",
+  "ropa",
+  "accesorios",
+]);
+
+const resultadoVerificacionActual = (
+  tipoProductoId: string,
+): ResultadoVerificacion => {
   if (MOCK.verificacion === "en-uso") return "HAS_ACTIVE_PRODUCTS";
   if (MOCK.verificacion === "no-concluyente") return "NO_CONCLUYENTE";
-  return "CLEAR";
+  if (MOCK.verificacion === "clear") return "CLEAR";
+  return TIPOS_CON_PRODUCTOS_ACTIVOS_EN_MOCK.has(tipoProductoId)
+    ? "HAS_ACTIVE_PRODUCTS"
+    : "CLEAR";
 };
 
 const operacionPendiente = (
   tipo: TipoOperacionTipoProducto,
   tipoProductoId: string,
+  schemaVersionAdmitida: number,
   caracteristicaId?: string,
 ): OperacionTipoProducto => ({
   tipo,
   tipoProductoId,
   caracteristicaId,
   estado: "pendiente",
-  resultadoVerificacion: resultadoVerificacionActual(),
+  resultadoVerificacion: resultadoVerificacionActual(tipoProductoId),
+  schemaVersionAdmitida,
 });
 
 // Adapter-only controls for reproducible UI review and tests. They do not form part
@@ -420,34 +442,24 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
       (item) => item.caracteristicaId === caracteristicaId,
     );
     if (!asociacion) throw new Error("CARACTERISTICA_NO_ASOCIADA");
-    if (asociacion.obligatoria) {
-      const operacionId = `op-desasocio-${id}-${caracteristicaId}`;
-      operacionesTipoProducto.set(
-        operacionId,
-        operacionPendiente("desasocio", id, caracteristicaId),
-      );
-      return {
-        resultado: "pendiente",
-        mensaje:
-          "La solicitud de desasociación se admitió (202) y quedó en verificación con Catálogo. El esquema aún no se modificó.",
-        operacionId,
-      };
-    }
-    const prevAsociadas = [...registro.asociadas];
-    registro.asociadas = registro.asociadas.filter(
-      (item) => item.caracteristicaId !== caracteristicaId,
+
+    // Toda desasociación, sea obligatoria u opcional, se admite como operación
+    // pendiente: el mock no puede confirmar que sea segura sin verificar Catálogo.
+    const operacionId = `op-desasocio-${id}-${caracteristicaId}`;
+    operacionesTipoProducto.set(
+      operacionId,
+      operacionPendiente(
+        "desasocio",
+        id,
+        registro.schemaVersion,
+        caracteristicaId,
+      ),
     );
-    registro.schemaVersion += 1;
-    const ok = persist();
-    if (!ok && isMockPersistenceAvailable()) {
-      registro.asociadas = prevAsociadas;
-      registro.schemaVersion -= 1;
-      throw new Error("No se pudo desasociar la característica. Vuelve a intentarlo.");
-    }
     return {
-      resultado: "exito",
+      resultado: "pendiente",
       mensaje:
-        "La característica se desasoció del esquema y se incrementó la versión del esquema.",
+        "La solicitud de desasociación se admitió (202) y quedó en verificación con Catálogo. El esquema aún no se modificó.",
+      operacionId,
     };
   },
 
@@ -484,7 +496,12 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
         };
       }
 
-      if (operacion.resultadoVerificacion === "HAS_ACTIVE_PRODUCTS") {
+      if (registro.schemaVersion !== operacion.schemaVersionAdmitida) {
+        // La admisión se hizo sobre una versión que ya no está vigente. Aunque la
+        // verificación fuera CLEAR, no se aplica la baja sobre información obsoleta.
+        operacion.estado = "rechazada";
+        operacion.versionObsoleta = true;
+      } else if (operacion.resultadoVerificacion === "HAS_ACTIVE_PRODUCTS") {
         // Fail closed: no mutation, no schemaVersion bump.
         operacion.estado = "rechazada";
       } else if (operacion.resultadoVerificacion === "NO_CONCLUYENTE") {
@@ -523,6 +540,13 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
           : "Verificación concluida: el tipo de producto quedó Inactivo.";
       }
       if (operacion.estado === "rechazada") {
+        if (operacion.versionObsoleta) {
+          const alcance =
+            operacion.tipo === "desasocio"
+              ? "La asociación y la versión del esquema se conservan."
+              : "El estado, las asociaciones y la versión del esquema se conservan.";
+          return `No se aplicó la baja porque el esquema cambió durante la verificación: la operación se admitió con v${operacion.schemaVersionAdmitida} y la versión vigente es v${registro.schemaVersion}. ${alcance} Vuelve a intentarlo con el esquema vigente.`;
+        }
         return operacion.tipo === "desasocio"
           ? "No se puede retirar esta característica porque todavía participa en productos o variantes activos. La asociación y la versión del esquema se conservan."
           : "No se puede desactivar este tipo porque existen productos o variantes activos que dependen de él. El estado y la versión del esquema se conservan.";
@@ -553,36 +577,20 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
     const registro = encontrar(id);
     if (!registro) throw new Error("TIPO_PRODUCTO_NO_ENCONTRADO");
     if (registro.estado !== "Activo") throw new Error("TIPO_PRODUCTO_INVALIDO");
-    if (registro.tipoProductoId === "calzado") {
-      return {
-        resultado: "rechazada",
-        mensaje:
-          "Este tipo todavía tiene productos activos asociados. No se realizó la desactivación.",
-      };
-    }
-    if (registro.tipoProductoId === "ropa") {
-      const operacionId = `op-desactivacion-${id}`;
-      operacionesTipoProducto.set(
-        operacionId,
-        operacionPendiente("desactivacion", id),
-      );
-      return {
-        resultado: "pendiente",
-        mensaje:
-          "La solicitud de desactivación se admitió (202). El tipo conserva su estado Activo hasta que Catálogo confirme la verificación.",
-        operacionId,
-      };
-    }
-    const prevEstado = registro.estado;
-    registro.estado = "Inactivo";
-    const ok = persist();
-    if (!ok && isMockPersistenceAvailable()) {
-      registro.estado = prevEstado;
-      throw new Error("No se pudo desactivar el tipo de producto. Vuelve a intentarlo.");
-    }
+
+    // Toda desactivación se admite como operación pendiente y solo se confirma
+    // con un resultado CLEAR vigente. Un rechazo en la admisión no sustituye la
+    // verificación segura exigida por SPEC-010.
+    const operacionId = `op-desactivacion-${id}`;
+    operacionesTipoProducto.set(
+      operacionId,
+      operacionPendiente("desactivacion", id, registro.schemaVersion),
+    );
     return {
-      resultado: "exito",
-      mensaje: "El tipo de producto se desactivó correctamente.",
+      resultado: "pendiente",
+      mensaje:
+        "La solicitud de desactivación se admitió (202). El tipo conserva su estado Activo hasta que Catálogo confirme la verificación.",
+      operacionId,
     };
   },
 

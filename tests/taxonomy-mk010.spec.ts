@@ -11,6 +11,7 @@ type ProductTypeScenario = {
   lista?: "default" | "empty" | "error";
   verificacion?:
     | "default"
+    | "clear"
     | "en-uso"
     | "no-concluyente"
     | "pendiente-prolongado"
@@ -336,7 +337,7 @@ test.describe("MK-010 Tipos de producto y esquemas de caracteristicas", () => {
     expect(noConcluyente.tipoProducto?.estado).toBe("Activo");
     expect(noConcluyente.tipoProducto?.schemaVersion).toBe(3);
 
-    __setProductTypeMockScenarios({ verificacion: "default" });
+    __setProductTypeMockScenarios({ verificacion: "clear" });
     const pendiente = await productTypeService.desactivar("ropa");
     expect(pendiente.resultado).toBe("pendiente");
     const confirmada = await productTypeService.consultarEstadoOperacion(
@@ -391,7 +392,14 @@ test.describe("MK-010 Tipos de producto y esquemas de caracteristicas", () => {
     const desactivado = await productTypeService.desactivar(
       tipo.tipoProductoId,
     );
-    expect(desactivado.resultado).toBe("exito");
+    expect(desactivado.resultado).toBe("pendiente");
+    expect(desactivado.operacionId).toBeTruthy();
+    const desactivacionConfirmada =
+      await productTypeService.consultarEstadoOperacion(
+        desactivado.operacionId!,
+      );
+    expect(desactivacionConfirmada.estado).toBe("confirmada");
+    expect(desactivacionConfirmada.tipoProducto?.estado).toBe("Inactivo");
 
     await expect(
       productTypeService.asociarCaracteristica({
@@ -420,6 +428,98 @@ test.describe("MK-010 Tipos de producto y esquemas de caracteristicas", () => {
     expect(reactivado?.estado).toBe("Activo");
     expect(reactivado?.schemaVersion).toBe(1);
     expect(reactivado?.caracteristicasAsignadas).toBe(1);
+  });
+
+  test("CA-08: rechaza la desasociación si schema_version cambió durante la verificación", async () => {
+    test.setTimeout(40000);
+    const tipo = await productTypeService.crear({
+      nombre: "Tipo Version Obsoleta QA",
+    });
+    await productTypeService.asociarCaracteristica({
+      tipoProductoId: tipo.tipoProductoId,
+      caracteristicaId: "material",
+      obligatoria: false,
+    });
+    await productTypeService.asociarCaracteristica({
+      tipoProductoId: tipo.tipoProductoId,
+      caracteristicaId: "color",
+      obligatoria: true,
+    });
+
+    const pendiente = await productTypeService.desasociarCaracteristica(
+      tipo.tipoProductoId,
+      "material",
+    );
+    expect(pendiente.resultado).toBe("pendiente");
+
+    // El esquema cambia mientras la baja sigue en verificación. La operación se
+    // admitió con v2 y ya no puede aplicarse sobre la versión v3.
+    const actualizado = await productTypeService.actualizarObligatoriedad({
+      tipoProductoId: tipo.tipoProductoId,
+      caracteristicaId: "color",
+      obligatoria: false,
+    });
+    expect(actualizado?.schemaVersion).toBe(3);
+
+    const rechazada = await productTypeService.consultarEstadoOperacion(
+      pendiente.operacionId!,
+    );
+    expect(rechazada.estado).toBe("rechazada");
+    expect(rechazada.mensaje).toContain("v2");
+    expect(rechazada.mensaje).toContain("v3");
+    expect(rechazada.mensaje).toContain("se conservan");
+    expect(rechazada.tipoProducto?.schemaVersion).toBe(3);
+    expect(rechazada.tipoProducto?.caracteristicasAsignadas).toBe(2);
+    expect(
+      rechazada.tipoProducto?.asociadas.map((asoc) => asoc.caracteristicaId),
+    ).toEqual(["material", "color"]);
+
+    // Reintentar con la versión vigente sí permite confirmar la baja.
+    const reintento = await productTypeService.desasociarCaracteristica(
+      tipo.tipoProductoId,
+      "material",
+    );
+    const confirmada = await productTypeService.consultarEstadoOperacion(
+      reintento.operacionId!,
+    );
+    expect(confirmada.estado).toBe("confirmada");
+    expect(confirmada.tipoProducto?.schemaVersion).toBe(4);
+    expect(confirmada.tipoProducto?.caracteristicasAsignadas).toBe(1);
+  });
+
+  test("CA-11: rechaza la desactivación si schema_version cambió durante la verificación", async () => {
+    test.setTimeout(30000);
+    const tipo = await productTypeService.crear({
+      nombre: "Tipo Desactiva Version Obsoleta QA",
+    });
+    await productTypeService.asociarCaracteristica({
+      tipoProductoId: tipo.tipoProductoId,
+      caracteristicaId: "talla",
+      obligatoria: true,
+    });
+
+    const pendiente = await productTypeService.desactivar(
+      tipo.tipoProductoId,
+    );
+    expect(pendiente.resultado).toBe("pendiente");
+
+    const actualizado = await productTypeService.actualizarObligatoriedad({
+      tipoProductoId: tipo.tipoProductoId,
+      caracteristicaId: "talla",
+      obligatoria: false,
+    });
+    expect(actualizado?.schemaVersion).toBe(2);
+
+    const rechazada = await productTypeService.consultarEstadoOperacion(
+      pendiente.operacionId!,
+    );
+    expect(rechazada.estado).toBe("rechazada");
+    expect(rechazada.mensaje).toContain("v1");
+    expect(rechazada.mensaje).toContain("v2");
+    expect(rechazada.tipoProducto?.estado).toBe("Activo");
+    expect(rechazada.tipoProducto?.schemaVersion).toBe(2);
+    expect(rechazada.tipoProducto?.caracteristicasAsignadas).toBe(1);
+    expect(rechazada.tipoProducto?.asociadas[0]?.caracteristicaId).toBe("talla");
   });
 
   test("S01-E: distingue listado vacio y error, permite crear el primero y reintentar", async ({
@@ -549,6 +649,9 @@ test.describe("MK-010 Tipos de producto y esquemas de caracteristicas", () => {
     await page.goto("/tipos-producto/calzado");
     await expect(page.getByText("v4", { exact: true })).toBeVisible();
 
+    // Para confirmar una baja segura se fuerza el escenario CLEAR; el escenario
+    // por defecto trata los fixtures como tipos con productos activos.
+    await setProductTypeScenario(page, { verificacion: "clear" });
     const colorRow = page.locator("tbody tr", { hasText: "Color" }).first();
     await colorRow.getByRole("button", { name: "Desasociar" }).click();
     await page.getByRole("button", { name: "Continuar" }).click();
@@ -609,6 +712,7 @@ test.describe("MK-010 Tipos de producto y esquemas de caracteristicas", () => {
     ).toBeVisible();
     await expect(page.getByText("v3", { exact: true })).toBeVisible();
 
+    await setProductTypeScenario(page, { verificacion: "clear" });
     await page.getByRole("button", { name: "Desactivar tipo" }).click();
     await page.getByRole("button", { name: "Continuar" }).click();
     await expect(
@@ -736,6 +840,7 @@ test.describe("MK-010 Tipos de producto y esquemas de caracteristicas", () => {
     await page.screenshot({ path: "docs/evidencias/mk-010-s04-1440.png" });
 
     // S02-P: Operacion en verificacion (202 admitida)
+    await setProductTypeScenario(page, { verificacion: "clear" });
     await page.getByRole("button", { name: "Continuar" }).click();
     await expect(page.getByRole("status").filter({ hasText: /Desasociaci.n admitida/i })).toBeVisible();
     await page.screenshot({ path: "docs/evidencias/mk-010-s02-p-1440.png" });
@@ -752,9 +857,16 @@ test.describe("MK-010 Tipos de producto y esquemas de caracteristicas", () => {
 
     // S02-R: Rechazo de desactivacion por uso activo (ej. calzado)
     await page.goto("/tipos-producto/calzado");
+    await setProductTypeScenario(page, { verificacion: "default" });
     await page.getByRole("button", { name: "Desactivar tipo" }).click();
     await page.getByRole("button", { name: "Continuar" }).click();
-    await expect(page.getByRole("alert")).toContainText(/No se realiz. la desactivaci.n/i);
+    await expect(
+      page.getByRole("status").filter({ hasText: /Solicitud de desactivaci.n admitida/i }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Consultar estado" }).click();
+    await expect(
+      page.getByRole("alert").filter({ hasText: /Desactivaci.n rechazada/i }),
+    ).toContainText(/productos o variantes activos/i);
     await page.screenshot({ path: "docs/evidencias/mk-010-s02-r-1440.png" });
   });
 });
