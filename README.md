@@ -76,6 +76,8 @@ En modo `mock` y con un navegador real, las escrituras confirmadas de la demostr
 
 Esta persistencia es **local a este navegador**: no sincroniza entre dispositivos y no sustituye a Backend. Las pestañas del mismo navegador se sincronizan mediante eventos `storage`: al escribir otra pestaña el dominio afectado, la pestaña receptora vuelve a hidratarlo y notifica a sus consumidores. Solo se guarda estado confirmado; banderas transitorias (carga, hover, modales, errores de UI) nunca se persisten. La persistencia queda deshabilitada en modo `api` y en ejecuciones de pruebas (Node/Vitest/Playwright), que mantienen su almacenamiento aislado en memoria. No hay todavía una acción de fábrica visible para borrar el estado guardado; `clearMockState(dominio)` existe para las acciones de reinicio de la demostración.
 
+**Limitación de seguimiento en MK-010:** las operaciones pendientes de desasociación y desactivación de tipos de producto viven solo en memoria en el adapter mock. Al recargar se conservan el tipo, sus asociaciones y su versión confirmada, pero se pierde el `operationId` pendiente. El contrato disponible permite consultar el seguimiento por `operationId`, no listar operaciones, así que la demo debe reiniciar la solicitud. Una integración HTTP real deberá recuperar el seguimiento desde su backend.
+
 ## Funcionalidades y estado de datos
 
 La tabla resume lo que muestran el código y la configuración de esta rama; la demostración no equivale a persistencia o API integrada.

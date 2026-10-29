@@ -186,6 +186,7 @@ interface OperacionTipoProducto {
   // puede aplicarse si el esquema sigue en esa versión.
   schemaVersionAdmitida: number;
   versionObsoleta?: boolean;
+  tipoInactivo?: boolean;
 }
 
 const copiarRegistroTipo = (item: RegistroTipoProducto): RegistroTipoProducto => ({
@@ -220,6 +221,28 @@ const DEFAULT_MOCK_SCENARIOS: ProductTypeMockScenarios = {
 const MOCK: ProductTypeMockScenarios = { ...DEFAULT_MOCK_SCENARIOS };
 
 const operacionesTipoProducto = new Map<string, OperacionTipoProducto>();
+let secuenciaOperacionTipoProducto = 0;
+
+// Limitación conocida del mock: estas operaciones viven en memoria y no se
+// persisten. Al recargar se conserva el tipo y sus cambios confirmados, pero se
+// pierde el operationId pendiente. El contrato solo ofrece seguimiento por
+// operationId y no un listado de operaciones, por lo que la demo debe reiniciar
+// la solicitud. La integración HTTP real deberá recuperar el seguimiento desde
+// su backend. Esta limitación está documentada en README.md.
+const siguienteOperacionId = (
+  prefijo: "desasocio" | "desactivacion",
+  tipoProductoId: string,
+  caracteristicaId?: string,
+): string => {
+  secuenciaOperacionTipoProducto += 1;
+  const partes = [
+    `op-${prefijo}`,
+    tipoProductoId,
+    ...(caracteristicaId ? [caracteristicaId] : []),
+    String(secuenciaOperacionTipoProducto),
+  ];
+  return partes.join("-");
+};
 
 // Los tipos de los fixtures representan tipos ya existentes en Catálogo y, por
 // tanto, pueden tener productos activos. Un tipo recién creado en la sesión no
@@ -272,6 +295,7 @@ export const __resetProductTypeStore = (): void => {
   store.length = 0;
   store.push(...estadoInicialTipos.map(copiarRegistroTipo));
   operacionesTipoProducto.clear();
+  secuenciaOperacionTipoProducto = 0;
   __resetProductTypeMockScenarios();
   // Test isolation: also remove the persisted demo domain. Normal mock persistence
   // remains untouched; the next confirmed write creates a fresh envelope again.
@@ -445,7 +469,11 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
 
     // Toda desasociación, sea obligatoria u opcional, se admite como operación
     // pendiente: el mock no puede confirmar que sea segura sin verificar Catálogo.
-    const operacionId = `op-desasocio-${id}-${caracteristicaId}`;
+    const operacionId = siguienteOperacionId(
+      "desasocio",
+      id,
+      caracteristicaId,
+    );
     operacionesTipoProducto.set(
       operacionId,
       operacionPendiente(
@@ -481,12 +509,21 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
     }
 
     if (operacion.estado === "pendiente") {
-      if (MOCK.verificacion === "error-consulta") {
+      if (registro.estado !== "Activo") {
+        // Otra operación pudo desactivar el tipo después de admitir esta baja.
+        // Ninguna modificación es válida sobre un tipo Inactivo.
+        operacion.estado = "rechazada";
+        operacion.tipoInactivo = true;
+      } else if (registro.schemaVersion !== operacion.schemaVersionAdmitida) {
+        // La admisión se hizo sobre una versión que ya no está vigente. Aunque la
+        // verificación fuera CLEAR, no se aplica la baja sobre información obsoleta.
+        operacion.estado = "rechazada";
+        operacion.versionObsoleta = true;
+      } else if (MOCK.verificacion === "error-consulta") {
         throw new Error(
           "No se pudo consultar la verificación. La asociación y la versión del esquema se conservan.",
         );
-      }
-      if (MOCK.verificacion === "pendiente-prolongado") {
+      } else if (MOCK.verificacion === "pendiente-prolongado") {
         const catalogoPendiente = await cargarCatalogo(signal);
         return {
           operacionId,
@@ -494,13 +531,6 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
           mensaje: "La operación continúa en verificación con Catálogo.",
           tipoProducto: aDetalle(registro, catalogoPendiente),
         };
-      }
-
-      if (registro.schemaVersion !== operacion.schemaVersionAdmitida) {
-        // La admisión se hizo sobre una versión que ya no está vigente. Aunque la
-        // verificación fuera CLEAR, no se aplica la baja sobre información obsoleta.
-        operacion.estado = "rechazada";
-        operacion.versionObsoleta = true;
       } else if (operacion.resultadoVerificacion === "HAS_ACTIVE_PRODUCTS") {
         // Fail closed: no mutation, no schemaVersion bump.
         operacion.estado = "rechazada";
@@ -540,6 +570,11 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
           : "Verificación concluida: el tipo de producto quedó Inactivo.";
       }
       if (operacion.estado === "rechazada") {
+        if (operacion.tipoInactivo) {
+          return operacion.tipo === "desasocio"
+            ? "No se aplicó la desasociación porque el tipo de producto está Inactivo. La asociación y la versión del esquema se conservan."
+            : "No se aplicó la desactivación porque el tipo de producto ya está Inactivo. El estado, las asociaciones y la versión del esquema se conservan.";
+        }
         if (operacion.versionObsoleta) {
           const alcance =
             operacion.tipo === "desasocio"
@@ -581,7 +616,7 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
     // Toda desactivación se admite como operación pendiente y solo se confirma
     // con un resultado CLEAR vigente. Un rechazo en la admisión no sustituye la
     // verificación segura exigida por SPEC-010.
-    const operacionId = `op-desactivacion-${id}`;
+    const operacionId = siguienteOperacionId("desactivacion", id);
     operacionesTipoProducto.set(
       operacionId,
       operacionPendiente("desactivacion", id, registro.schemaVersion),
