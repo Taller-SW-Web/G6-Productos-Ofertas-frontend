@@ -35,6 +35,11 @@ interface RegistroTipoProducto {
   schemaVersion: number;
   limiteCaracteristicas: number;
   asociadas: RegistroAsociacion[];
+  // Revisión interna del ciclo de vida. No representa un DTO ni se expone en la
+  // UI: cambia al confirmar una desactivación o reactivación para invalidar
+  // operaciones pendientes admitidas antes de esa transición. Es opcional para
+  // seguir leyendo estados persistidos por versiones anteriores del mock.
+  revisionCicloVida?: number;
 }
 
 const storeFixtures: RegistroTipoProducto[] = [
@@ -80,6 +85,10 @@ const isProductType = (value: unknown): value is RegistroTipoProducto => {
     typeof row.nombre === "string" &&
     (row.estado === "Activo" || row.estado === "Inactivo") &&
     typeof row.schemaVersion === "number" &&
+    (row.revisionCicloVida === undefined ||
+      (typeof row.revisionCicloVida === "number" &&
+        Number.isInteger(row.revisionCicloVida) &&
+        row.revisionCicloVida >= 0)) &&
     Array.isArray(row.asociadas)
   );
 };
@@ -145,6 +154,9 @@ const aItem = (registro: RegistroTipoProducto): ProductTypeListItem => ({
 const encontrar = (id: string): RegistroTipoProducto | undefined =>
   store.find((registro) => registro.tipoProductoId === id);
 
+const revisionCicloVidaActual = (registro: RegistroTipoProducto): number =>
+  registro.revisionCicloVida ?? 0;
+
 const generarId = (nombre: string): string => {
   const base =
     nombre
@@ -185,8 +197,13 @@ interface OperacionTipoProducto {
   // Versión del esquema con la que se admitió la operación. La confirmación solo
   // puede aplicarse si el esquema sigue en esa versión.
   schemaVersionAdmitida: number;
+  // Revisión del ciclo de vida con la que se admitió la operación. Una
+  // desactivación o reactivación posterior invalida la operación aunque
+  // schemaVersion no cambie.
+  revisionCicloVidaAdmitida: number;
   versionObsoleta?: boolean;
   tipoInactivo?: boolean;
+  cicloVidaObsoleto?: boolean;
 }
 
 const copiarRegistroTipo = (item: RegistroTipoProducto): RegistroTipoProducto => ({
@@ -269,6 +286,7 @@ const operacionPendiente = (
   tipo: TipoOperacionTipoProducto,
   tipoProductoId: string,
   schemaVersionAdmitida: number,
+  revisionCicloVidaAdmitida: number,
   caracteristicaId?: string,
 ): OperacionTipoProducto => ({
   tipo,
@@ -277,6 +295,7 @@ const operacionPendiente = (
   estado: "pendiente",
   resultadoVerificacion: resultadoVerificacionActual(tipoProductoId),
   schemaVersionAdmitida,
+  revisionCicloVidaAdmitida,
 });
 
 // Adapter-only controls for reproducible UI review and tests. They do not form part
@@ -480,6 +499,7 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
         "desasocio",
         id,
         registro.schemaVersion,
+        revisionCicloVidaActual(registro),
         caracteristicaId,
       ),
     );
@@ -514,6 +534,14 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
         // Ninguna modificación es válida sobre un tipo Inactivo.
         operacion.estado = "rechazada";
         operacion.tipoInactivo = true;
+      } else if (
+        revisionCicloVidaActual(registro) !==
+        operacion.revisionCicloVidaAdmitida
+      ) {
+        // El tipo pudo desactivarse y reactivarse: schemaVersion se conserva,
+        // pero la operación admitida antes de esa transición ya no es válida.
+        operacion.estado = "rechazada";
+        operacion.cicloVidaObsoleto = true;
       } else if (registro.schemaVersion !== operacion.schemaVersionAdmitida) {
         // La admisión se hizo sobre una versión que ya no está vigente. Aunque la
         // verificación fuera CLEAR, no se aplica la baja sobre información obsoleta.
@@ -542,6 +570,7 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
         const prevAsociadas = registro.asociadas;
         const prevSchemaVersion = registro.schemaVersion;
         const prevEstado = registro.estado;
+        const prevRevisionCicloVida = registro.revisionCicloVida;
         if (operacion.tipo === "desasocio" && operacion.caracteristicaId) {
           registro.asociadas = registro.asociadas.filter(
             (item) => item.caracteristicaId !== operacion.caracteristicaId,
@@ -549,6 +578,7 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
           registro.schemaVersion += 1;
         } else if (operacion.tipo === "desactivacion") {
           registro.estado = "Inactivo";
+          registro.revisionCicloVida = revisionCicloVidaActual(registro) + 1;
         }
         const ok = persist();
         if (!ok && isMockPersistenceAvailable()) {
@@ -556,6 +586,7 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
           registro.asociadas = prevAsociadas;
           registro.schemaVersion = prevSchemaVersion;
           registro.estado = prevEstado;
+          registro.revisionCicloVida = prevRevisionCicloVida;
           throw new Error(
             "No se pudo confirmar la operación del tipo de producto. Vuelve a intentarlo.",
           );
@@ -574,6 +605,13 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
           return operacion.tipo === "desasocio"
             ? "No se aplicó la desasociación porque el tipo de producto está Inactivo. La asociación y la versión del esquema se conservan."
             : "No se aplicó la desactivación porque el tipo de producto ya está Inactivo. El estado, las asociaciones y la versión del esquema se conservan.";
+        }
+        if (operacion.cicloVidaObsoleto) {
+          const alcance =
+            operacion.tipo === "desasocio"
+              ? "La asociación y la versión del esquema se conservan."
+              : "El estado, las asociaciones y la versión del esquema se conservan.";
+          return `No se aplicó la ${operacion.tipo === "desasocio" ? "desasociación" : "desactivación"} porque el estado del tipo de producto cambió durante la verificación (desactivación o reactivación). ${alcance} Vuelve a intentarlo con el estado vigente.`;
         }
         if (operacion.versionObsoleta) {
           const alcance =
@@ -619,7 +657,12 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
     const operacionId = siguienteOperacionId("desactivacion", id);
     operacionesTipoProducto.set(
       operacionId,
-      operacionPendiente("desactivacion", id, registro.schemaVersion),
+      operacionPendiente(
+        "desactivacion",
+        id,
+        registro.schemaVersion,
+        revisionCicloVidaActual(registro),
+      ),
     );
     return {
       resultado: "pendiente",
@@ -637,12 +680,15 @@ export const mockProductTypeAdapter: ProductTypeRepository = {
     if (!registro) throw new Error("TIPO_PRODUCTO_NO_ENCONTRADO");
     if (registro.estado !== "Inactivo") throw new Error("TIPO_PRODUCTO_INVALIDO");
     const prevEstado = registro.estado;
+    const prevRevisionCicloVida = registro.revisionCicloVida;
     // La reactivación reutiliza el mismo registro: tipoProductoId, asociaciones y
     // schemaVersion se conservan. No se crea un tipo nuevo ni se reescribe historial.
     registro.estado = "Activo";
+    registro.revisionCicloVida = revisionCicloVidaActual(registro) + 1;
     const ok = persist();
     if (!ok && isMockPersistenceAvailable()) {
       registro.estado = prevEstado;
+      registro.revisionCicloVida = prevRevisionCicloVida;
       throw new Error("No se pudo reactivar el tipo de producto. Vuelve a intentarlo.");
     }
     const catalogo = await cargarCatalogo(signal);

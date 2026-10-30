@@ -638,6 +638,102 @@ test.describe("MK-010 Tipos de producto y esquemas de caracteristicas", () => {
     expect(desactivacionRechazada.tipoProducto?.estado).toBe("Inactivo");
   });
 
+  test("CA-11: invalida una desactivación pendiente tras desactivar y reactivar", async () => {
+    test.setTimeout(40000);
+    const tipo = await productTypeService.crear({
+      nombre: "Tipo Ciclo Vida Desactivacion QA",
+    });
+    const primera = await productTypeService.desactivar(tipo.tipoProductoId);
+    const segunda = await productTypeService.desactivar(tipo.tipoProductoId);
+    expect(primera.resultado).toBe("pendiente");
+    expect(segunda.resultado).toBe("pendiente");
+    expect(segunda.operacionId).not.toBe(primera.operacionId);
+
+    const primeraConfirmada = await productTypeService.consultarEstadoOperacion(
+      primera.operacionId!,
+    );
+    expect(primeraConfirmada.estado).toBe("confirmada");
+    expect(primeraConfirmada.tipoProducto?.estado).toBe("Inactivo");
+
+    const reactivado = await productTypeService.reactivar(tipo.tipoProductoId);
+    expect(reactivado?.estado).toBe("Activo");
+    expect(reactivado?.schemaVersion).toBe(0);
+
+    // La segunda desactivación se admitió antes del ciclo desactivar/reactivar.
+    // Aunque schemaVersion sigue en v0, ya no puede volver a desactivar el tipo.
+    const segundaConsultada = await productTypeService.consultarEstadoOperacion(
+      segunda.operacionId!,
+    );
+    expect(segundaConsultada.estado).toBe("rechazada");
+    expect(segundaConsultada.mensaje).toContain(
+      "estado del tipo de producto cambió",
+    );
+    expect(segundaConsultada.tipoProducto?.estado).toBe("Activo");
+    expect(segundaConsultada.tipoProducto?.schemaVersion).toBe(0);
+  });
+
+  test("CA-08 y CA-11: invalida una desasociación pendiente tras desactivar y reactivar", async () => {
+    test.setTimeout(45000);
+    const tipo = await productTypeService.crear({
+      nombre: "Tipo Ciclo Vida Desasociacion QA",
+    });
+    await productTypeService.asociarCaracteristica({
+      tipoProductoId: tipo.tipoProductoId,
+      caracteristicaId: "talla",
+      obligatoria: true,
+    });
+
+    const desasocio = await productTypeService.desasociarCaracteristica(
+      tipo.tipoProductoId,
+      "talla",
+    );
+    const desactivacion = await productTypeService.desactivar(
+      tipo.tipoProductoId,
+    );
+    expect(desasocio.resultado).toBe("pendiente");
+    expect(desactivacion.resultado).toBe("pendiente");
+
+    const desactivacionConfirmada =
+      await productTypeService.consultarEstadoOperacion(
+        desactivacion.operacionId!,
+      );
+    expect(desactivacionConfirmada.estado).toBe("confirmada");
+    expect(desactivacionConfirmada.tipoProducto?.estado).toBe("Inactivo");
+
+    const reactivado = await productTypeService.reactivar(tipo.tipoProductoId);
+    expect(reactivado?.estado).toBe("Activo");
+    expect(reactivado?.schemaVersion).toBe(1);
+
+    const desasocioConsultado =
+      await productTypeService.consultarEstadoOperacion(desasocio.operacionId!);
+    expect(desasocioConsultado.estado).toBe("rechazada");
+    expect(desasocioConsultado.mensaje).toContain(
+      "estado del tipo de producto cambió",
+    );
+    expect(desasocioConsultado.mensaje).toContain(
+      "La asociación y la versión del esquema se conservan.",
+    );
+    expect(desasocioConsultado.tipoProducto?.estado).toBe("Activo");
+    expect(desasocioConsultado.tipoProducto?.schemaVersion).toBe(1);
+    expect(desasocioConsultado.tipoProducto?.caracteristicasAsignadas).toBe(1);
+    expect(
+      desasocioConsultado.tipoProducto?.asociadas[0]?.caracteristicaId,
+    ).toBe("talla");
+
+    // Una operación admitida después de la reactivación sí puede confirmarse.
+    const nuevaDesasociacion =
+      await productTypeService.desasociarCaracteristica(
+        tipo.tipoProductoId,
+        "talla",
+      );
+    const nuevaConfirmada = await productTypeService.consultarEstadoOperacion(
+      nuevaDesasociacion.operacionId!,
+    );
+    expect(nuevaConfirmada.estado).toBe("confirmada");
+    expect(nuevaConfirmada.tipoProducto?.schemaVersion).toBe(2);
+    expect(nuevaConfirmada.tipoProducto?.caracteristicasAsignadas).toBe(0);
+  });
+
   test("S01-E: distingue listado vacio y error, permite crear el primero y reintentar", async ({
     page,
   }) => {
