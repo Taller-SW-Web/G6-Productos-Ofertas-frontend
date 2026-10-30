@@ -1,4 +1,24 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
+
+type ProductTypeVerificationScenario =
+  | "default"
+  | "clear"
+  | "en-uso"
+  | "no-concluyente"
+  | "pendiente-prolongado"
+  | "error-consulta";
+
+async function setProductTypeVerification(
+  page: Page,
+  verificacion: ProductTypeVerificationScenario,
+): Promise<void> {
+  await page.evaluate(async (value) => {
+    const adapterPath =
+      "/src/features/taxonomy/adapters/mockProductTypeAdapter.ts";
+    const adapter = await import(adapterPath);
+    adapter.__setProductTypeMockScenarios({ verificacion: value });
+  }, verificacion);
+}
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -245,11 +265,13 @@ test("MK-010: product type creation and association forms load", async ({
   await expect(page.getByRole("button", { name: "Asociar", exact: true })).toBeVisible();
 });
 
-test("MK-010: required disassociation polls 202 and confirms on consult", async ({
+test("MK-010: required disassociation verifies use and confirms only with CLEAR", async ({
   page,
 }) => {
   await page.goto("/tipos-producto/calzado");
   const tallaRow = page.locator("tbody tr", { hasText: "Talla" }).first();
+
+  // Escenario por defecto: los fixtures representan tipos con productos activos.
   await tallaRow.getByRole("button", { name: "Desasociar" }).click();
   await expect(
     page.getByRole("dialog", { name: "Desasociar característica" }),
@@ -259,10 +281,30 @@ test("MK-010: required disassociation polls 202 and confirms on consult", async 
     page.getByRole("status").filter({ hasText: "Desasociación admitida" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Consultar estado" }).click();
+  const rechazo = page
+    .getByRole("alert")
+    .filter({ hasText: "Desasociación rechazada" });
+  await expect(rechazo).toBeVisible();
+  await expect(rechazo).toContainText("productos o variantes activos");
+  await expect(
+    page.locator("tbody tr", { hasText: "Talla" }).first(),
+  ).toBeVisible();
+  await expect(page.getByText("v4", { exact: true })).toBeVisible();
+  await rechazo.getByRole("button", { name: "Entendido" }).click();
+
+  // Solo un resultado CLEAR vigente permite retirar la asociación.
+  await setProductTypeVerification(page, "clear");
+  await tallaRow.getByRole("button", { name: "Desasociar" }).click();
+  await page.getByRole("button", { name: "Continuar" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Desasociación admitida" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Consultar estado" }).click();
   await expect(
     page.getByRole("status").filter({ hasText: "Desasociación confirmada" }),
   ).toBeVisible();
   await expect(page.locator("tbody tr", { hasText: "Talla" })).toHaveCount(0);
+  await expect(page.getByText("v5", { exact: true })).toBeVisible();
 });
 
 test("MK-010: deactivation is rejected for types still referenced by active products", async ({
@@ -271,18 +313,28 @@ test("MK-010: deactivation is rejected for types still referenced by active prod
   await page.goto("/tipos-producto/calzado");
   await page.getByRole("button", { name: "Desactivar tipo" }).click();
   await page.getByRole("button", { name: "Continuar" }).click();
-  await expect(page.getByRole("alert")).toContainText(
-    "No se realizó la desactivación",
-  );
+  await expect(
+    page.getByRole("status").filter({
+      hasText: "Solicitud de desactivación admitida",
+    }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Consultar estado" }).click();
+  const rechazo = page
+    .getByRole("alert")
+    .filter({ hasText: "Desactivación rechazada" });
+  await expect(rechazo).toBeVisible();
+  await expect(rechazo).toContainText("productos o variantes activos");
   await expect(
     page.getByRole("button", { name: "Desactivar tipo" }),
   ).toBeVisible();
+  await expect(page.getByText("v4", { exact: true })).toBeVisible();
 });
 
 test("MK-010: deactivation accepts 202 and completes on poll", async ({
   page,
 }) => {
   await page.goto("/tipos-producto/ropa");
+  await setProductTypeVerification(page, "clear");
   await page.getByRole("button", { name: "Desactivar tipo" }).click();
   await page.getByRole("button", { name: "Continuar" }).click();
   await expect(

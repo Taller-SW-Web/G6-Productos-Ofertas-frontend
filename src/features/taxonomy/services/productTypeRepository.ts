@@ -7,6 +7,7 @@ import type {
   ProductTypeDetail,
   ProductTypeListItem,
   ProductTypeAssociationCharacteristic,
+  ProductTypeObligatoriedadInput,
   ProductTypeSeguimiento,
 } from "../types";
 
@@ -34,6 +35,12 @@ export interface ProductTypeRepository {
     input: ProductTypeAssociarInput,
     signal?: AbortSignal,
   ): Promise<ProductTypeDetail | null>;
+  // Contrato: PATCH /tipos-producto/{tipoProductoId}/caracteristicas/{caracteristicaId}.
+  // El incremento de schemaVersion ocurre solo cuando la condición cambia.
+  actualizarObligatoriedad(
+    input: ProductTypeObligatoriedadInput,
+    signal?: AbortSignal,
+  ): Promise<ProductTypeDetail | null>;
   desasociarCaracteristica(
     id: string,
     caracteristicaId: string,
@@ -43,9 +50,12 @@ export interface ProductTypeRepository {
     id: string,
     signal?: AbortSignal,
   ): Promise<ProductTypeDesactivarResult>;
-  // BLOCKED_CONTRACT: sondeo del resultado de una operación asíncrona sobre tipo de
-  // producto (desasociación o desactivación, 202). No hay endpoint OpenAPI confirmado
-  // para ninguna de las dos; la simulación determinista vive en el adapter mock.
+  // Contrato: POST /tipos-producto/{tipoProductoId}/reactivar. Conserva el
+  // tipoProductoId, sus asociaciones y su schemaVersion; no crea otro tipo.
+  reactivar(id: string, signal?: AbortSignal): Promise<ProductTypeDetail | null>;
+  // Contrato: GET /taxonomia/operaciones/{operationId}. El mock reproduce de forma
+  // determinista el resultado (CLEAR / uso activo / no concluyente); este PR no
+  // implementa la integración HTTP real.
   consultarEstadoOperacion(
     operacionId: string,
     signal?: AbortSignal,
