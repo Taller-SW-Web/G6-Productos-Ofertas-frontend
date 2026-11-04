@@ -38,11 +38,12 @@ const unavailable = new Proxy(
 export function createTaxonomyServices(mode: DataMode): TaxonomyServices {
   if (mode === "api") {
     const gateway = getTaxonomyGateway();
-    if (!gateway) throw new Error(TAXONOMY_API_UNAVAILABLE_MESSAGE);
     return {
       category: unavailable as CategoryRepository,
       brand: unavailable as BrandRepository,
-      productType: createHttpProductTypeAdapter(gateway),
+      productType: gateway
+        ? createHttpProductTypeAdapter(gateway)
+        : (unavailable as ProductTypeRepository),
       seo: unavailable as SeoRepository,
       characteristic: unavailable as CharacteristicRepository,
     };

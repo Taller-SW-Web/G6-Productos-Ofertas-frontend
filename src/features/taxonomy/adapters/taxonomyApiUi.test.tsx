@@ -23,24 +23,28 @@ Object.defineProperty(window, "matchMedia", {
     dispatchEvent: () => false,
   }),
 });
-afterEach(cleanup);
-it("muestra 403 en la interfaz sin sustituir la respuesta por fixtures", async () => {
-  const request = vi
-    .fn()
-    .mockResolvedValue(new Response(null, { status: 403 }));
-  configureTaxonomyGateway({ request });
-  render(
-    <MantineProvider>
-      <DataModeContext.Provider value="api">
-        <MemoryRouter>
-          <ProductTypeListPage />
-        </MemoryRouter>
-      </DataModeContext.Provider>
-    </MantineProvider>,
-  );
-  expect(await screen.findByText(/HTTP 403/)).toBeTruthy();
-  expect(request).toHaveBeenCalledTimes(1);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
 });
+it.each([401, 403, 500, 503])(
+  "muestra HTTP %s en la interfaz sin sustituir la respuesta por fixtures",
+  async (status) => {
+    const request = vi.fn().mockResolvedValue(new Response(null, { status }));
+    configureTaxonomyGateway({ request });
+    render(
+      <MantineProvider>
+        <DataModeContext.Provider value="api">
+          <MemoryRouter>
+            <ProductTypeListPage />
+          </MemoryRouter>
+        </DataModeContext.Provider>
+      </MantineProvider>,
+    );
+    expect(await screen.findByText(new RegExp(`HTTP ${status}`))).toBeTruthy();
+    expect(request).toHaveBeenCalledTimes(1);
+  },
+);
 
 it("el gate abre solo la pantalla con adaptador HTTP y mantiene las demás bloqueadas", () => {
   configureTaxonomyGateway({ request: vi.fn() });
@@ -74,6 +78,8 @@ it("el gate abre solo la pantalla con adaptador HTTP y mantiene las demás bloqu
 });
 
 it("identifica el mock de Taxonomía como datos simulados", () => {
+  const request = vi.fn();
+  configureTaxonomyGateway({ request });
   render(
     <MantineProvider>
       <DataModeContext.Provider value="mock">
@@ -87,4 +93,39 @@ it("identifica el mock de Taxonomía como datos simulados", () => {
   );
   expect(screen.getByText("Datos simulados")).toBeTruthy();
   expect(screen.getByText("contenido mock")).toBeTruthy();
+});
+
+it("no requiere sesión HTTP ni consulta Gateway en modo mock", async () => {
+  const request = vi.fn();
+  configureTaxonomyGateway({ request });
+  render(
+    <MantineProvider>
+      <DataModeContext.Provider value="mock">
+        <MemoryRouter>
+          <ProductTypeListPage />
+        </MemoryRouter>
+      </DataModeContext.Provider>
+    </MantineProvider>,
+  );
+  expect(await screen.findByText("Calzado deportivo")).toBeTruthy();
+  expect(request).not.toHaveBeenCalled();
+});
+
+it("muestra la falta de sesión en modo API y no recurre a fixtures", async () => {
+  const request = vi.fn(async () => {
+    throw new Error("Inicia sesión en Promociones y vuelve a intentar la consulta de Taxonomía.");
+  });
+  configureTaxonomyGateway({ request });
+  render(
+    <MantineProvider>
+      <DataModeContext.Provider value="api">
+        <MemoryRouter>
+          <ProductTypeListPage />
+        </MemoryRouter>
+      </DataModeContext.Provider>
+    </MantineProvider>,
+  );
+  expect(await screen.findByText(/Inicia sesión en Promociones/)).toBeTruthy();
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText("Calzado deportivo")).toBeNull();
 });
