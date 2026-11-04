@@ -29,13 +29,14 @@ npx playwright install chromium
 Después, ejecuta las validaciones:
 
 ```sh
-npm test                  # pruebas unitarias de Combos, Bulk y Pricing con Vitest
+npm test                  # pruebas unitarias de Combos, Bulk, Inventory, Pricing y Taxonomy
 npm run test:e2e          # suite E2E completa de Playwright
 npm run test:ci           # agregado local: unitarias + E2E + harness HTTP simulado
 npm run test:unit:combos  # solo unitarias de Combos
 npm run test:unit:bulk    # solo unitarias de Bulk
 npm run test:e2e:bulk:api # interfaz Bulk contra servidor HTTP aislado
 npm run test:unit:pricing # adaptador HTTP de Pricing; transporte simulado
+npm run test:unit:taxonomy # adaptador y UI de Taxonomy; transporte simulado
 npm run test:e2e:pricing  # harness HTTP de Pricing a 1440 × 900; respuestas simuladas
 ```
 
@@ -105,7 +106,7 @@ La tabla resume lo que muestran el código y la configuración de esta rama; la 
 | Área | Estado en el frontend |
 |---|---|
 | Productos y variantes/SKU | Mock explícito o adaptadores HTTP por Gateway configurado. Integración administrativa parcial por campos/lecturas contractuales ausentes; errores visibles y sin fallback. Pruebas reales de fase 1 pendientes. |
-| Taxonomía (categorías, características, tipos, marcas y SEO) | Pantallas disponibles en mock. En `api`, `TaxonomyModeGate` bloquea estas rutas independientemente de los providers. Habilitar la integración requiere configurar los servicios/adapters y adaptar el gate; inyectar un provider por sí solo no desbloquea las pantallas. |
+| Taxonomía (categorías, características, tipos, marcas y SEO) | En `mock` se muestra un aviso de datos simulados. En `api`, solo el listado de tipos de producto tiene adaptador Gateway y gate habilitado cuando se configura la sesión; las demás pantallas siguen bloqueadas. Errores HTTP y de red se muestran sin fallback. La sesión G7 existente se inicia desde Promociones; el cliente transversal #109 y la prueba Gateway real siguen pendientes. Ver [inventario de Taxonomía](docs/INVENTARIO_TAXONOMIA_GATEWAY_41.md). |
 | Precios y programaciones/importación | Flujos de demostración mock. El modo `api` requiere un adapter; la implementación predeterminada falla explícitamente, sin fallback. Las operaciones de archivo no acreditan procesamiento comercial de Backend. |
 | Auditoría de precios | Listado, detalle y exportación de demostración mock. Las ediciones confirmadas de Pricing incorporan asientos simulados por sesión de navegador; recargar conserva los asientos emitidos. El runtime permite inyección, pero no incluye provider API predeterminado. Los archivos disponibles son muestras. |
 | Cupones, promociones y recomendaciones | Flujos de demostración mock. En modo `api`, `CommercialModeGate` bloquea estas rutas si no reciben un proveedor explícito mediante `PromotionApiContext`. El adaptador HTTP administrativo está conectado al cliente G7 de sesión en memoria cuando se configuran ambas URLs; su recorrido por Gateway/PostgreSQL está probado en entorno descartable; los selectores disponen de adaptador HTTP tipado de Catálogo/Taxonomía. La sesión G7 compartida, la prueba contra sus servicios reales y la verificación autoritativa de referencias del backend siguen pendientes. Ver [integración Promotions](docs/INTEGRACION_PROMOTIONS_GATEWAY.md). Las recomendaciones no calculan un precio final ni garantizan stock; ambos datos figuran como no disponibles en la demostración. |

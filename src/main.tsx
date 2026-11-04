@@ -10,6 +10,10 @@ import "@fontsource/oswald/latin-700.css";
 import { theme, cssVariablesResolver } from "./theme/theme";
 import "./theme/global.css";
 import { App } from "./app/App";
+import {
+  configureTaxonomyGateway,
+  TaxonomySessionRequiredError,
+} from "./features/taxonomy/services/taxonomyGatewayRuntime";
 import { createPricingRuntime } from "./features/pricing/services/pricingService";
 import { PricingProvider } from "./features/pricing/components/PricingProvider";
 import { resolveDataMode } from "./app/config/dataMode";
@@ -41,6 +45,36 @@ async function start() {
           await import("./features/promotions/services/promotionSessionRuntime")
         ).createOptionalPromotionSessionRuntime(gatewayOrigin, securityApiBase)
       : null;
+  if (mode === "api" && gatewayOrigin && promotions) {
+    const { secureBase } = await import(
+      "./features/promotions/adapters/g7Session"
+    );
+    const origin = secureBase(gatewayOrigin, true);
+    configureTaxonomyGateway({
+      request: async (path, signal, correlationId) => {
+        const token = await promotions.session.getAccessToken(signal);
+        if (!token) throw new TaxonomySessionRequiredError();
+        try {
+          return await fetch(origin + path, {
+            method: "GET",
+            signal,
+            credentials: "omit",
+            redirect: "error",
+            cache: "no-store",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "X-Correlation-Id": correlationId,
+            },
+          });
+        } catch (error: unknown) {
+          if (signal.aborted) throw error;
+          throw new Error("No se pudo conectar con el servicio de Taxonomía.", {
+            cause: error,
+          });
+        }
+      },
+    });
+  }
   const combosRuntime = await createCombosRuntime(mode, runtime);
   const catalogServices = (mode === "api" ? createOptionalCatalogHttpServices(gatewayOrigin) : null) ?? getCatalogServices(mode);
   const bulkRepository = mode === "api" && gatewayOrigin && promotions?.session
