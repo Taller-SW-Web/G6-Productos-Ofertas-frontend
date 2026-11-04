@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
-import { productTypeService } from "../services/productTypeService";
+import { useContext, useEffect, useState } from "react";
+import { DataModeContext } from "../../../app/config/DataModeContext";
+import { getTaxonomyGateway } from "../services/taxonomyGatewayRuntime";
+import { createHttpProductTypeAdapter } from "../adapters/httpProductTypeAdapter";
 import type { ProductTypeListResult } from "../services/productTypeRepository";
 
 export type ProductTypeListState =
@@ -7,10 +9,11 @@ export type ProductTypeListState =
   | { status: "success"; result: ProductTypeListResult }
   | { status: "error"; message: string };
 
-export function useProductTypeList(
-  revision: number,
-): { state: ProductTypeListState } {
-  const requestKey = JSON.stringify([revision]);
+export function useProductTypeList(revision: number): {
+  state: ProductTypeListState;
+} {
+  const mode = useContext(DataModeContext);
+  const requestKey = JSON.stringify([revision, mode]);
   const [response, setResponse] = useState<{
     requestKey: string;
     state: ProductTypeListState;
@@ -18,7 +21,16 @@ export function useProductTypeList(
 
   useEffect(() => {
     const controller = new AbortController();
-    void productTypeService.list(controller.signal).then(
+    const list = async () => {
+      if (mode === "mock")
+        return (
+          await import("../services/productTypeService")
+        ).productTypeService.list(controller.signal);
+      const gateway = getTaxonomyGateway();
+      if (!gateway) throw new Error("Integración de Taxonomía no configurada.");
+      return createHttpProductTypeAdapter(gateway).list(controller.signal);
+    };
+    void list().then(
       (result) => {
         if (controller.signal.aborted) return;
         setResponse({ requestKey, state: { status: "success", result } });
@@ -38,7 +50,7 @@ export function useProductTypeList(
       },
     );
     return () => controller.abort();
-  }, [requestKey]);
+  }, [requestKey, mode]);
 
   const state =
     response?.requestKey === requestKey

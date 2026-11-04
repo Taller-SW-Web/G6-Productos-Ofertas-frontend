@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useContext, useMemo, useState } from "react";
+import { DataModeContext } from "../../../app/config/DataModeContext";
 import { useNavigate } from "react-router-dom";
 import { ActionIcon, Box, Button, Stack, Text } from "@mantine/core";
 import { IconEye, IconPlus } from "@tabler/icons-react";
@@ -12,14 +13,18 @@ import {
   type TableState,
 } from "../../../components/shared";
 import { useProductTypeList } from "../hooks/useProductTypeList";
-import { estadoCaracteristicaSemantic } from "../services/estadoSemantic";
+import { estadoSemantic } from "../services/estadoSemantic";
 import type { ProductTypeListItem } from "../types";
 import { useMockStateRevision } from "../../shared/useMockStateRevision";
 
 export function ProductTypeListPage() {
   const navigate = useNavigate();
+  const mode = useContext(DataModeContext);
   const [revision, setRevision] = useState(0);
-  const mockRevision = useMockStateRevision(["taxonomy", "taxonomy-product-types"]);
+  const mockRevision = useMockStateRevision([
+    "taxonomy",
+    "taxonomy-product-types",
+  ]);
   const [busqueda, setBusqueda] = useState("");
   const { state } = useProductTypeList(revision + mockRevision);
 
@@ -52,7 +57,7 @@ export function ProductTypeListPage() {
       header: "Estado",
       width: 140,
       render: (item) => (
-        <StatusBadge semantic={estadoCaracteristicaSemantic[item.estado]}>
+        <StatusBadge semantic={estadoSemantic[item.estado]}>
           {item.estado}
         </StatusBadge>
       ),
@@ -63,7 +68,10 @@ export function ProductTypeListPage() {
       width: 160,
       render: (item) => (
         <Text size="sm">
-          {item.caracteristicasAsignadas} de {item.limiteCaracteristicas}
+          {item.caracteristicasAsignadas === null ||
+          item.limiteCaracteristicas === null
+            ? "No disponible"
+            : `${item.caracteristicasAsignadas} de ${item.limiteCaracteristicas}`}
         </Text>
       ),
     },
@@ -79,15 +87,16 @@ export function ProductTypeListPage() {
       header: "Acciones",
       width: 80,
       align: "right",
-      render: (item) => (
-        <ActionIcon
-          aria-label={`Ver detalle de ${item.nombre}`}
-          title="Ver detalle"
-          onClick={() => navigate(`/tipos-producto/${item.tipoProductoId}`)}
-        >
-          <IconEye size={16} stroke={2} aria-hidden="true" />
-        </ActionIcon>
-      ),
+      render: (item) =>
+        mode === "api" ? null : (
+          <ActionIcon
+            aria-label={`Ver detalle de ${item.nombre}`}
+            title="Ver detalle"
+            onClick={() => navigate(`/tipos-producto/${item.tipoProductoId}`)}
+          >
+            <IconEye size={16} stroke={2} aria-hidden="true" />
+          </ActionIcon>
+        ),
     },
   ];
 
@@ -115,16 +124,17 @@ export function ProductTypeListPage() {
           title: "Sin tipos de producto",
           description:
             "Todavía no hay tipos de producto registrados para definir esquemas de atributos.",
-          action: (
-            <Button
-              leftSection={
-                <IconPlus size={16} stroke={2} aria-hidden="true" />
-              }
-              onClick={() => navigate("/tipos-producto/nuevo")}
-            >
-              Crear tipo de producto
-            </Button>
-          ),
+          action:
+            mode === "api" ? undefined : (
+              <Button
+                leftSection={
+                  <IconPlus size={16} stroke={2} aria-hidden="true" />
+                }
+                onClick={() => navigate("/tipos-producto/nuevo")}
+              >
+                Crear tipo de producto
+              </Button>
+            ),
         }
       : {
           title: "Sin resultados",
@@ -139,12 +149,14 @@ export function ProductTypeListPage() {
         description="Define el esquema de atributos de cada tipo de producto."
         breadcrumbs={[{ label: "Catálogo" }, { label: "Tipos de producto" }]}
         actions={
-          <Button
-            leftSection={<IconPlus size={16} stroke={2} aria-hidden="true" />}
-            onClick={() => navigate("/tipos-producto/nuevo")}
-          >
-            Nuevo tipo de producto
-          </Button>
+          mode === "api" ? undefined : (
+            <Button
+              leftSection={<IconPlus size={16} stroke={2} aria-hidden="true" />}
+              onClick={() => navigate("/tipos-producto/nuevo")}
+            >
+              Nuevo tipo de producto
+            </Button>
+          )
         }
       />
       <Stack gap="lg">

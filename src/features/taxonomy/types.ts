@@ -200,10 +200,10 @@ export type ProductTypeStatus = EntityStatus;
 export interface ProductTypeListItem {
   tipoProductoId: string;
   nombre: string;
-  estado: ProductTypeStatus;
+  estado: ProductTypeStatus | "Verificando baja";
   schemaVersion: number;
-  caracteristicasAsignadas: number;
-  limiteCaracteristicas: number;
+  caracteristicasAsignadas: number | null;
+  limiteCaracteristicas: number | null;
 }
 
 export interface ProductTypeCreateInput {
