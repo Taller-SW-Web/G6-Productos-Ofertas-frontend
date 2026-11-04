@@ -91,7 +91,7 @@ La revisión instaló dependencias con `npm ci` y Node `22.23.4`, dentro de `>=2
 | Playwright focalizado `tests/promotions-visual.spec.ts`, prueba global API | `PASS` | 1 prueba; reprodujo el fallo en `05c4b57`, pasa con el import dinámico. El test no se modificó. |
 | `npm ci` | `PASS` | Instaló lockfile con Node `22.23.4`. npm reportó 13 advisories (12 moderados, 1 alto); dependencias no cambiadas ni remediadas dentro de este alcance. |
 
-El job `quick` ya ejecuta `npm test`, de modo que Taxonomy entra en CI por el script agregado. No se modificó workflow `.github` ni el trabajo de atomización #63. La CI completa de PR #67 se espera para el nuevo HEAD tras push.
+El job `quick` ya ejecuta `npm test`, de modo que Taxonomy entra en CI por el script agregado. No se modificó workflow `.github` ni el trabajo de atomización #63. Para el SHA funcional `9a2bedcfbe6f15543e31d8bdc44931f9449d6f9b`, Frontend CI [41787727392](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/41787727392) terminó con los siete jobs PASS: `quick`, `smoke`, `e2e (1)`, `e2e (2)`, `e2e (3)`, `modes` y `validate`. La edición documental posterior tendrá su propio run en el HEAD actualizado de la PR.
 
 La secuencia de integración frontend real requiere Gateway, `taxonomy-svc`, PostgreSQL desechable y credencial de usuario válida. Docker está instalado pero no había contenedores locales activos; no se levantó el stack ni se dispuso de una sesión Gateway/G7. No se ha usado Supabase remoto. La prueba reproducible deberá cubrir GET/paginación, lista vacía, estado persistido, correlación, 401 sin JWT, 403 de usuario no autorizado, upstream fallido y ausencia de fallback mock. El JWT real G7 sigue `PENDIENTE` hasta disponer de credencial/grant legítimo; ningún token de test se presentará como tal.
 
@@ -102,4 +102,4 @@ La secuencia de integración frontend real requiere Gateway, `taxonomy-svc`, Pos
 3. **Frontend / Backend #45/#109:** incorporar Taxonomy al cliente compartido sin duplicar sesión ni DTO. Desbloqueo: interfaz compartida aprobada y tests del consumidor.
 4. **Integración operativa:** demostrar el recorrido contra Gateway y PostgreSQL desechable, y por separado JWT G7 y E2E desplegado. Backend CI con tests de servicio no sustituye esta evidencia.
 
-La PR sucesora permanece en borrador hasta que el CI final tenga sus siete jobs en PASS y se revise la homologación contractual. No se cierra Backend #41 ni se declara lista para despliegue.
+La PR sucesora permanece en borrador aunque la CI del SHA funcional esté en PASS: faltan homologación contractual, autorización M2M alineada y evidencia de integración desplegada. El run del HEAD documental actualizado se verifica por separado en PR #67. No se cierra Backend #41 ni se declara lista para despliegue.
