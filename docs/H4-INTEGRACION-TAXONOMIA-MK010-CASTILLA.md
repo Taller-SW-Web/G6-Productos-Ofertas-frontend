@@ -50,19 +50,19 @@ La ruta del contrato exige `userBearer`; no se probó JWT G7 real. El recorrido 
 
 | Capa | Resultado | Evidencia / causa |
 | --- | --- | --- |
-| Unit/UI Taxonomy | `NO EJECUTADO` | El intento `npx vitest run --config src/features/taxonomy/adapters/vitest.config.ts` falló antes de cargar pruebas porque no había `vitest` instalado. `npm ci` quedó sin progreso en dos esperas; cancelado. Node disponible `v24.3.0` no satisface `>=22.12.0 <23`. |
-| Typecheck, lint, build mock/API | `NO EJECUTADO` | Dependencias locales no instaladas; falta Node de versión soportada. |
-| Smoke/Playwright MK-010 | `NO EJECUTADO` | Mismo bloqueo de runtime/dependencias y Chromium no verificado. |
+| Unit/UI Taxonomy (CI, SHA `78c58d3`) | `PASS` | Workflow Frontend Foundation #197 / run `41780688903` instaló dependencias con Node `22.23.4`; el job `quick` ejecutó `npm test`, lint y build sin error. La ejecución local sigue sin realizarse por Node `v24.3.0` y los intentos de `npm ci` sin progreso. |
+| Typecheck, lint, build mock/API (CI, SHA `78c58d3`) | `PASS` | `quick` PASS; `modes` PASS compilando ambos modos y verificando preview mock y API sin fallback a mocks. `smoke` PASS. |
+| Playwright E2E (CI, SHA `78c58d3`) | `FAIL` | Shards 1 y 2 PASS. Shard 3: 182 passed, 6 skipped y 2 fallidos. Falló `tests/promotions-visual.spec.ts:106` porque se observó una URL `features/promotions/` o `/mocks/` durante una prueba global de Promotions en modo API; falló también `tests/vera-integration.spec.ts:133` en Pricing. No se atribuyen estos fallos a Taxonomy sin evidencia; permanecen como fallos CI del SHA. |
 | React → Gateway → taxonomy-svc → PostgreSQL local | `PENDIENTE` | No se levantaron servicios ni PostgreSQL desechable; además #37 no acredita controlador de listado en el SHA revisado. |
 | JWT autenticado emitido por G7 | `PENDIENTE` | Sin token/grant verificable; pruebas de adapter usan solo respuestas locales simuladas. |
-| E2E desplegado | `PENDIENTE` | No se hizo despliegue ni llamada a entorno compartido. |
+| E2E desplegado | `PENDIENTE` | No se hizo despliegue ni llamada a entorno compartido. La ejecución CI de Playwright no prueba despliegue, y conserva los dos fallos descritos arriba. |
 
 ## Errores corregidos en esta revisión
 
 - `tamanio=200` excedía el máximo 100 de OpenAPI; se cambia a 100.
 - La validación del DTO ahora exige metadatos completos y coherentes, tamaños/página/total estables, páginas sin saltos, filas completas y ausencia de IDs repetidos; errores JSON/DTO se convierten a mensajes genéricos.
 - La composición Taxonomy en modo API sin Gateway ya no lanza durante la evaluación de servicios importados estáticamente; devuelve adapters cerrados y muestra bloqueo, para que la aplicación pueda iniciar.
-- Se añadieron pruebas para multi-página, lista vacía, estados, DTO/meta inválidos, JSON ilegible, 401/403/500/503, red, cancelación, falta de sesión y mock explícito. Su ejecución sigue pendiente por el entorno indicado.
+- Se añadieron pruebas para multi-página, lista vacía, estados, DTO/meta inválidos, JSON ilegible, 401/403/500/503, red, cancelación, falta de sesión y mock explícito. `npm test` pasó en CI con Node 22.23.4; no se ejecutó localmente.
 
 ## Alcance fuera de este incremento
 
