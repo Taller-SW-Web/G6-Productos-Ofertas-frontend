@@ -10,7 +10,7 @@ Fecha de auditoría: 2026-11-04. Estado: consumer frontend parcial; PR sucesora 
 | Frontend PR #65 | `715ae909b1fc8cf45598c863f787b284dd2367ec` | Commit original recuperado; no se usa como evidencia de integración Backend. |
 | Recuperación original | `fddc6cb` | `cherry-pick -x`; conserva autoría y referencia al commit fuente. |
 | Frontend PR #66 | `05c4b57a201a977231cac3d32db451c10f7710e7`; cerrada con enlace a #67 | Su rama remota `mrcastilla8/h4-taxonomy-41-integration` se conserva como respaldo. |
-| Frontend sucesora | `feat/taxonomy-gateway`; registra su HEAD final al cerrar esta revisión | PR #67, título `feat(taxonomy): integrar listado MK-010 vía Gateway`, abierta en borrador. |
+| Frontend sucesora | `feat/taxonomy-gateway`; HEAD vigente enlazado en la PR | PR #67, título `feat(taxonomy): integrar listado MK-010 vía Gateway`, abierta en borrador. |
 | Backend `master` auditado | `5abfffc9b86306df87d19695817aa678588e0341` | Controlador, servicio SQL, guard, rutas Gateway, tests y migraciones leídos directamente en ese SHA. |
 | Docs `master` vigente | `80f208978c2c703e2b2d62064112365e7b9e1677` | OpenAPI y acuerdo G1–G6 consultados en ese SHA. |
 
