@@ -15,7 +15,7 @@ export const PRODUCT_TYPE_ATTRIBUTE_LIMIT = 20;
 
 export interface ProductTypeListResult {
   items: ProductTypeListItem[];
-  limite: number;
+  limite: number | null;
 }
 
 // Contract shaped like a real HTTP API: no simulation parameters. The mock adapter
