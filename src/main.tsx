@@ -66,7 +66,9 @@ async function start() {
           });
         } catch (error: unknown) {
           if (signal.aborted) throw error;
-          throw new Error("No se pudo conectar con el servicio de Taxonomía.");
+          throw new Error("No se pudo conectar con el servicio de Taxonomía.", {
+            cause: error,
+          });
         }
       },
     });

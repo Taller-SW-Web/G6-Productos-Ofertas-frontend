@@ -48,9 +48,12 @@ describe("listado HTTP de tipos de producto", () => {
       "/api/v1/tipos-producto?pagina=1&tamanio=100",
       "/api/v1/tipos-producto?pagina=2&tamanio=100",
     ]);
-    expect(calls[0][1]).toBeInstanceOf(AbortSignal);
-    expect(calls[0][2]).toMatch(/^[0-9a-f-]{36}$/i);
-    expect(calls[1][2]).toBe(calls[0][2]);
+    const [firstCall, secondCall] = calls;
+    if (!firstCall || !secondCall)
+      throw new Error("La prueba requiere las dos peticiones paginadas.");
+    expect(firstCall[1]).toBeInstanceOf(AbortSignal);
+    expect(firstCall[2]).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(secondCall[2]).toBe(firstCall[2]);
     expect(result.items).toHaveLength(101);
     expect(result.items.at(-1)?.tipoProductoId).toBe("dos");
     expect(result.limite).toBeNull();
@@ -75,7 +78,7 @@ describe("listado HTTP de tipos de producto", () => {
       request: async () => response([row("estado", input)], 1, 1, 1),
     });
     const result = await adapter.list();
-    expect(result.items[0].estado).toBe(expected);
+    expect(result.items[0]?.estado).toBe(expected);
   });
 
   it("rechaza PENDING_DEACTIVATION porque no pertenece a TipoProductoAdmin.estado", async () => {

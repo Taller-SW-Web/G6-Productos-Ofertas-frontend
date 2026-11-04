@@ -57,8 +57,11 @@ export function createHttpProductTypeAdapter(
           )
             throw new Error(
               "La consulta de tipos de producto excedió el tiempo de espera.",
+              { cause: error },
             );
-          throw new Error("No se pudo conectar con el servicio de Taxonomía.");
+          throw new Error("No se pudo conectar con el servicio de Taxonomía.", {
+            cause: error,
+          });
         }
         if (!response.ok)
           throw new Error(
@@ -75,14 +78,15 @@ export function createHttpProductTypeAdapter(
           )
             throw new Error(
               "La consulta de tipos de producto excedió el tiempo de espera.",
+              { cause: error },
             );
-          throw new Error("Respuesta de Taxonomía inválida.");
+          throw new Error("Respuesta de Taxonomía inválida.", { cause: error });
         }
         let meta: Record<string, unknown>;
         try {
           meta = object(dto.meta);
-        } catch {
-          throw new Error("Respuesta de Taxonomía inválida.");
+        } catch (error: unknown) {
+          throw new Error("Respuesta de Taxonomía inválida.", { cause: error });
         }
         const currentTotal = meta.total;
         const currentTotalPages = meta.totalPaginas;
