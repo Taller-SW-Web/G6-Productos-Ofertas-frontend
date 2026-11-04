@@ -77,7 +77,7 @@ it("el gate abre solo la pantalla con adaptador HTTP y mantiene las demás bloqu
   expect(screen.getByText("contenido habilitado")).toBeTruthy();
 });
 
-it("identifica el mock de Taxonomía como datos simulados", () => {
+it("identifica los datos locales de referencia en modo mock", () => {
   const request = vi.fn();
   configureTaxonomyGateway({ request });
   render(
@@ -91,7 +91,7 @@ it("identifica el mock de Taxonomía como datos simulados", () => {
       </DataModeContext.Provider>
     </MantineProvider>,
   );
-  expect(screen.getByText("Datos simulados")).toBeTruthy();
+  expect(screen.getByText("Datos de ejemplo")).toBeTruthy();
   expect(screen.getByText("contenido mock")).toBeTruthy();
 });
 

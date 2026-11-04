@@ -27,8 +27,8 @@ export function TaxonomyModeGate({ children }: { children: ReactNode }) {
   if (mode === "mock")
     return (
       <>
-        <FeedbackAlert semantic="info" title="Datos simulados">
-          Esta pantalla utiliza datos de demostración locales.
+        <FeedbackAlert semantic="info" title="Datos de ejemplo">
+          Esta pantalla utiliza datos locales de referencia.
         </FeedbackAlert>
         {children}
       </>
