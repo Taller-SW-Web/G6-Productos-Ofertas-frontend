@@ -10,8 +10,10 @@ import "@fontsource/oswald/latin-700.css";
 import { theme, cssVariablesResolver } from "./theme/theme";
 import "./theme/global.css";
 import { App } from "./app/App";
-import { configureTaxonomyGateway } from "./features/taxonomy/services/taxonomyGatewayRuntime";
-import { secureBase } from "./features/promotions/adapters/g7Session";
+import {
+  configureTaxonomyGateway,
+  TaxonomySessionRequiredError,
+} from "./features/taxonomy/services/taxonomyGatewayRuntime";
 import { createPricingRuntime } from "./features/pricing/services/pricingService";
 import { PricingProvider } from "./features/pricing/components/PricingProvider";
 import { resolveDataMode } from "./app/config/dataMode";
@@ -44,14 +46,14 @@ async function start() {
         ).createOptionalPromotionSessionRuntime(gatewayOrigin, securityApiBase)
       : null;
   if (mode === "api" && gatewayOrigin && promotions) {
+    const { secureBase } = await import(
+      "./features/promotions/adapters/g7Session"
+    );
     const origin = secureBase(gatewayOrigin, true);
     configureTaxonomyGateway({
       request: async (path, signal, correlationId) => {
         const token = await promotions.session.getAccessToken(signal);
-        if (!token)
-          throw new Error(
-            "Inicia sesión en Promociones y vuelve a intentar la consulta de Taxonomía.",
-          );
+        if (!token) throw new TaxonomySessionRequiredError();
         try {
           return await fetch(origin + path, {
             method: "GET",

@@ -1,4 +1,5 @@
 import type { ProductTypeRepository } from "../services/productTypeRepository";
+import { TaxonomySessionRequiredError } from "../services/taxonomyGatewayRuntime";
 import type { ProductTypeListItem } from "../types";
 
 /** Frontera para el cliente Gateway compartido; no proporciona credenciales propias. */
@@ -51,6 +52,7 @@ export function createHttpProductTypeAdapter(
           );
         } catch (error: unknown) {
           if (requestSignal.aborted) throw error;
+          if (error instanceof TaxonomySessionRequiredError) throw error;
           if (
             boundedSignal.reason instanceof DOMException &&
             boundedSignal.reason.name === "TimeoutError"

@@ -4,7 +4,10 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { MantineProvider } from "@mantine/core";
 import { DataModeContext } from "../../../app/config/DataModeContext";
-import { configureTaxonomyGateway } from "../services/taxonomyGatewayRuntime";
+import {
+  configureTaxonomyGateway,
+  TaxonomySessionRequiredError,
+} from "../services/taxonomyGatewayRuntime";
 import { ProductTypeListPage } from "../pages/ProductTypeListPage";
 import { TaxonomyModeGate } from "../../../app/config/TaxonomyModeGate";
 vi.mock("../../shared/useMockStateRevision", () => ({
@@ -113,7 +116,7 @@ it("no requiere sesión HTTP ni consulta Gateway en modo mock", async () => {
 
 it("muestra la falta de sesión en modo API y no recurre a fixtures", async () => {
   const request = vi.fn(async () => {
-    throw new Error("Inicia sesión en Promociones y vuelve a intentar la consulta de Taxonomía.");
+    throw new TaxonomySessionRequiredError();
   });
   configureTaxonomyGateway({ request });
   render(

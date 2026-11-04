@@ -29,13 +29,14 @@ npx playwright install chromium
 Después, ejecuta las validaciones:
 
 ```sh
-npm test                  # pruebas unitarias de Combos, Bulk y Pricing con Vitest
+npm test                  # pruebas unitarias de Combos, Bulk, Inventory, Pricing y Taxonomy
 npm run test:e2e          # suite E2E completa de Playwright
 npm run test:ci           # agregado local: unitarias + E2E + harness HTTP simulado
 npm run test:unit:combos  # solo unitarias de Combos
 npm run test:unit:bulk    # solo unitarias de Bulk
 npm run test:e2e:bulk:api # interfaz Bulk contra servidor HTTP aislado
 npm run test:unit:pricing # adaptador HTTP de Pricing; transporte simulado
+npm run test:unit:taxonomy # adaptador y UI de Taxonomy; transporte simulado
 npm run test:e2e:pricing  # harness HTTP de Pricing a 1440 × 900; respuestas simuladas
 ```
 

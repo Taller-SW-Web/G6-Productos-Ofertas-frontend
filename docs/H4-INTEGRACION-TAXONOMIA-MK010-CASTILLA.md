@@ -1,78 +1,105 @@
 # H4 — Integración Taxonomía MK-010 (Backend #41)
 
-Fecha de revisión: 2026-11-04. Estado: integración frontend parcial; PR en borrador pendiente de publicar.
+Fecha de auditoría: 2026-11-04. Estado: consumer frontend parcial; PR sucesora #67 abierta en borrador. No se afirma E2E desplegado.
 
-## SHA y recuperación
+## Trazabilidad y fuentes vigentes
 
-| Repositorio / referencia | SHA / estado |
-| --- | --- |
-| Frontend `origin/master` actualizado usado como base | `095a591a3e096614e76b4d99e623ecbba43f6c1f` |
-| Frontend PR #65, HEAD recuperado | `715ae909b1fc8cf45598c863f787b284dd2367ec` |
-| Frontend commit recuperado con `cherry-pick -x` | `fddc6cb` (incluye `(cherry picked from commit 715ae90…)`; autor original conservado) |
-| Docs oficial consultado | `cb7eec179f812d38929e20c5ab6f7a77139c4090` |
-| Backend PR #131 / checkout local de solo lectura | `ca166aa7a00b6c42286a94ccad0410f11384d03e`; el PR solo declara persistencia, sin endpoints ni lógica de negocio |
-| Backend de referencia histórica citado por PR #65 | `606e36ce668b46b01a8681ea6028d93e0b02f7e5`; no se considera evidencia vigente de implementación |
-
-`origin/master` tenía tres commits posteriores al ancestro común `4fc3642aadde7723e35044d1a03f7512499c375d` de PR #65. Se aplicó únicamente el commit de López sobre el `master` actualizado. El estado `mergeable=false` reportado por GitHub se manifestó como conflicto local en `README.md`; no se integraron ramas compartidas ni se modificó el HEAD de López.
-
-La consulta GitHub del HEAD recuperado no devolvió status checks ni workflow runs para `715ae90…`. Los resultados `8/8`, `18/18`, typecheck/lint/build y viewport que PR #65 enumera en su descripción no se pudieron asociar a una ejecución CI del SHA actual y quedan como afirmaciones históricas sin verificar.
-
-## Conflictos y preservación de `master`
-
-- `README.md`: conflicto entre el inventario histórico del master y la nueva descripción MK-010. Se preservó el estado reciente de Productos/SKU de master y se incorporó la descripción acotada de Taxonomía, manteniendo los avisos de #109 y la prueba real pendiente.
-- `src/main.tsx`: Git lo fusionó automáticamente. Se mantuvieron los runtimes/provider existentes de Pricing, Catalog, Bulk, Combos y Promociones; el delta añade el transporte de listado Taxonomy sobre la sesión G7 ya creada por Promociones. No se creó una segunda sesión.
-- Sin otros conflictos de cherry-pick. Se registraron en total 2 archivos con resolución/auto fusión.
-
-## Operación contractual
-
-| `operationId` | Método y ruta | Request / respuesta | Seguridad y estado |
-| --- | --- | --- | --- |
-| `listarTiposProducto` | `GET /api/v1/tipos-producto` | Query `pagina` (mínimo 1), `tamanio` (1–100, default 20); respuesta `{ items, meta }`, `meta` incluye `pagina`, `tamanio`, `total`, `totalPaginas`. Cada fila `TipoProductoAdmin` expone `tipoProductoId`, `nombre`, `estado`, `schemaVersion`. | `userBearer`; 401 `TOKEN_INVALIDO`, 403 `SCOPE_INSUFICIENTE`, 500 `ERROR_INTERNO`, 503 `SERVICIO_NO_DISPONIBLE`. OpenAPI 0.6.0-rc.2 la marca `provisional-internal`. |
-
-El adapter solicita `tamanio=100` (máximo contractual), respeta `items/meta` y verifica consistencia de páginas y estados `ACTIVO` e `INACTIVO`. Hay una discrepancia normativa pendiente para `PENDING_DEACTIVATION`: el DTO `TipoProductoAdmin.estado` refiere `EstadoEntidad`, cuyo enum solo contiene `ACTIVO`/`INACTIVO`; `PENDING_DEACTIVATION` existe en OpenAPI como estado de seguimiento de una operación asíncrona. El adapter rechaza ese valor en el DTO de listado hasta que el owner del contrato publique una revisión que lo permita. No agrega conteos de características ni límite del esquema, que no están publicados en este DTO. La lista vacía válida es `items: []`, `total: 0`, `totalPaginas: 0`.
-
-## Configuración y seguridad
-
-- Selección única: `VITE_DATA_MODE=api`; el modo `mock` conserva sus fixtures cuando se elige expresamente.
-- `VITE_GATEWAY_ORIGIN` se valida mediante `secureBase`: HTTPS obligatorio excepto loopback local; sin usuario, contraseña, query, fragmento o ruta.
-- `VITE_G7_API_BASE` configura la sesión existente de Promociones. El adapter Taxonomy reutiliza `promotions.session.getAccessToken`; no contiene credenciales ni token propio. Sin token, la consulta muestra un mensaje de inicio de sesión.
-- El request GET usa `credentials: omit`, `redirect: error`, `cache: no-store`, conserva el `AbortSignal`, aplica timeout de 15 s y envía un `X-Correlation-Id` estable durante la paginación.
-- 401/403/5xx se muestran como estado HTTP sin leer cuerpos de error sensibles; fallos de red se reducen a un mensaje genérico. Modo API no vuelve a fixtures. Las demás operaciones Taxonomy siguen bloqueadas.
-- El cliente compartido sigue pendiente en Frontend #45 / Backend #109; la frontera Taxonomy es provisional hasta su composición.
-
-## Implementación vs disponibilidad real
-
-El commit Frontend integra el consumer y la ruta está en el catálogo de rutas de Gateway del checkout Backend #131. Sin embargo, Backend #37 sigue reportado como pendiente de implementación de consultas; #144 describe que en master Taxonomy conserva GET de categorías y marcas, y PR #131 declara no añadir endpoints. No se encontró evidencia de un controlador de `listarTiposProducto`, despliegue, grant o Gateway→Taxonomy→PostgreSQL en ejecución. Por tanto, esta PR **no declara** la operación integrada end-to-end ni recomienda habilitarla contra un entorno compartido hasta recibir esa evidencia.
-
-La ruta del contrato exige `userBearer`; no se probó JWT G7 real. El recorrido demo sin JWT no se probó y no se modificaron guards ni se introdujo bypass. Para desbloquear la operación real se requiere que el owner de Taxonomy (López) publique implementación del provider y pruebas del operationId; Marco/Gateway debe verificar su ruta y autorización efectiva. Luego se podrá probar la petición por Gateway con PostgreSQL descartable y, por separado, con un JWT legítimo de G7/grant concedido.
-
-## Pruebas y resultados
-
-| Capa | Resultado | Evidencia / causa |
+| Referencia | SHA / estado | Evidencia |
 | --- | --- | --- |
-| Unit/UI Taxonomy (CI, SHA `78c58d3`) | `PASS` | Workflow Frontend Foundation #197 / run `41780688903` instaló dependencias con Node `22.23.4`; el job `quick` ejecutó `npm test`, lint y build sin error. La ejecución local sigue sin realizarse por Node `v24.3.0` y los intentos de `npm ci` sin progreso. |
-| Typecheck, lint, build mock/API (CI, SHA `78c58d3`) | `PASS` | `quick` PASS; `modes` PASS compilando ambos modos y verificando preview mock y API sin fallback a mocks. `smoke` PASS. |
-| Playwright E2E (CI, SHA `78c58d3`) | `FAIL` | Shards 1 y 2 PASS. Shard 3: 182 passed, 6 skipped y 2 fallidos. Falló `tests/promotions-visual.spec.ts:106` porque se observó una URL `features/promotions/` o `/mocks/` durante una prueba global de Promotions en modo API; falló también `tests/vera-integration.spec.ts:133` en Pricing. No se atribuyen estos fallos a Taxonomy sin evidencia; permanecen como fallos CI del SHA. |
-| React → Gateway → taxonomy-svc → PostgreSQL local | `PENDIENTE` | No se levantaron servicios ni PostgreSQL desechable; además #37 no acredita controlador de listado en el SHA revisado. |
-| JWT autenticado emitido por G7 | `PENDIENTE` | Sin token/grant verificable; pruebas de adapter usan solo respuestas locales simuladas. |
-| E2E desplegado | `PENDIENTE` | No se hizo despliegue ni llamada a entorno compartido. La ejecución CI de Playwright no prueba despliegue, y conserva los dos fallos descritos arriba. |
+| Frontend base `master` | `095a591a3e096614e76b4d99e623ecbba43f6c1f` | Base sobre la que se recuperó el commit de López. |
+| Frontend PR #65 | `715ae909b1fc8cf45598c863f787b284dd2367ec` | Commit original recuperado; no se usa como evidencia de integración Backend. |
+| Recuperación original | `fddc6cb` | `cherry-pick -x`; conserva autoría y referencia al commit fuente. |
+| Frontend PR #66 | `05c4b57a201a977231cac3d32db451c10f7710e7`; cerrada con enlace a #67 | Su rama remota `mrcastilla8/h4-taxonomy-41-integration` se conserva como respaldo. |
+| Frontend sucesora | `feat/taxonomy-gateway`; registra su HEAD final al cerrar esta revisión | PR #67, título `feat(taxonomy): integrar listado MK-010 vía Gateway`, abierta en borrador. |
+| Backend `master` auditado | `5abfffc9b86306df87d19695817aa678588e0341` | Controlador, servicio SQL, guard, rutas Gateway, tests y migraciones leídos directamente en ese SHA. |
+| Docs `master` vigente | `80f208978c2c703e2b2d62064112365e7b9e1677` | OpenAPI y acuerdo G1–G6 consultados en ese SHA. |
 
-## Errores corregidos en esta revisión
+PR #66 y #67 comparten inicialmente el mismo HEAD `05c4b57`; la sucesora conserva todos los commits y el cherry-pick original sin reescribirlos. PR #65 es el origen del cambio de López y sigue referenciada como fuente histórica. No se hizo merge ni se cerró Backend #41.
 
-- `tamanio=200` excedía el máximo 100 de OpenAPI; se cambia a 100.
-- La validación del DTO ahora exige metadatos completos y coherentes, tamaños/página/total estables, páginas sin saltos, filas completas y ausencia de IDs repetidos; errores JSON/DTO se convierten a mensajes genéricos.
-- La composición Taxonomy en modo API sin Gateway ya no lanza durante la evaluación de servicios importados estáticamente; devuelve adapters cerrados y muestra bloqueo, para que la aplicación pueda iniciar.
-- Se añadieron pruebas para multi-página, lista vacía, estados, DTO/meta inválidos, JSON ilegible, 401/403/500/503, red, cancelación, falta de sesión y mock explícito. `npm test` pasó en CI con Node 22.23.4; no se ejecutó localmente.
+## Implementación presente y disponibilidad
 
-## Alcance fuera de este incremento
+La auditoría anterior erró al afirmar que faltaba el controlador de listado. En Backend `master` `5abfffc9…` existen:
 
-MK-008 categorías, MK-009 características, MK-011 marcas y MK-012 SEO no se conectan por API. En MK-010 no se habilitan detalle, creación, esquema, asociaciones, baja, reactivación ni seguimiento de operaciones. Permanecen fuera de alcance y bloqueadas en modo API hasta adapters, contratos aplicables y pruebas específicas.
+- `apps/taxonomy-svc/src/taxonomy-masters.controller.ts`: `GET /api/v1/tipos-producto`, `listarTiposProducto`, paginación y filtro de estado.
+- `apps/taxonomy-svc/src/domain/product-type.service.ts`: consulta count + filas paginadas en una transacción de lectura PostgreSQL; mapea `tipoProductoId`, `nombre`, `estado` y `schemaVersion`.
+- `apps/taxonomy-svc/src/taxonomy-auth.ts`: la ruta declara lectura por usuario y `AllowTaxonomyServiceRead` para principals de servicio; el flujo de servicio valida subject `modulo-productos` y scope `catalogo:leer`.
+- `apps/api-gateway/src/routing/contract-routes.ts`: contiene la ruta GET hacia `taxonomy-svc`, con seguridad de Gateway `userBearer` solamente.
+- Pruebas presentes: `taxonomy-masters.controller.spec.ts` y `test/persistencia-drizzle.e2e-spec.ts`; esquema/migraciones permiten el estado `PENDING_DEACTIVATION`.
 
-## Pendientes concretos para Backend #41
+El CI de Backend en ese SHA terminó PASS: run [41770302057](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs/41770302057), incluyendo los jobs `Probar E2E aislado Taxonomy y Catalog` y `Probar integración de Taxonomy con PostgreSQL desechable`. Esto acredita código y pruebas del provider en CI con PostgreSQL descartable. No acredita que el Gateway desplegado enrute esta operación, que un JWT real de G7 tenga grant, ni que el frontend haya recorrido el entorno.
 
-1. López: implementar y probar `listarTiposProducto` conforme a OpenAPI 0.6.0-rc.2, incluyendo DTO, paginación, autorización y persistencia.
-2. Marco/Gateway: verificar route mapping, propagación de autorización/correlation, 401/403/5xx y conectividad al upstream real.
-3. Contrato owner: resolver el estado `PENDING_DEACTIVATION` para `TipoProductoAdmin.estado` (actualmente enum incompatible); publicar OpenAPI revisado si corresponde.
-4. Ejecutar Gateway + Taxonomy + PostgreSQL de prueba con evidencia asociada a cada SHA; separar esa integración del test de adapter.
-5. Probar token/grant real G7 y permisos; mantener el resultado `PENDIENTE` hasta que exista evidencia auténtica.
-6. Incorporar Taxonomy al cliente HTTP compartido #109/#45 y repetir validaciones con Node 22 y CI del SHA remoto.
+| Capa | Estado comprobado | Límite |
+| --- | --- | --- |
+| Controlador y servicio Backend | `PRESENTE` en Backend master `5abfffc9…` | Revisión estática de archivos; el SHA no debe confundirse con disponibilidad de runtime. |
+| Pruebas Backend aisladas | `PRESENTES`; CI de Backend PASS en SHA `5abfffc9…` | El e2e de provider y PostgreSQL no prueba la cadena frontend → Gateway desplegado. |
+| Catálogo/routing Gateway | `PRESENTE`, ruta registrada en Backend master | No se verificó gateway activo ni proxy HTTP real contra Taxonomy en un entorno desplegado. La ruta del catálogo no prueba operación. |
+| PostgreSQL desechable | `PASS EN CI BACKEND` según el job específico del run citado | No ejecutado localmente durante esta revisión. La auditoría no accedió a Supabase remoto. |
+| JWT real emitido por G7 | `PENDIENTE` | Los tests backend firman tokens de prueba/JWKS simulado; no equivalen a credencial o grant real G7. |
+| E2E desplegado desde Frontend | `PENDIENTE` | No se hizo despliegue ni llamada de navegador al Gateway compartido. |
+
+## Contrato HTTP y estado del tipo
+
+Docs `master` `80f208978c2c703e2b2d62064112365e7b9e1677`, `contratos/http/openapi.yaml`, define `listarTiposProducto` como `GET /api/v1/tipos-producto`, con `userBearer` y `serviceBearer`, `x-required-scope: catalogo:leer`, `x-service-audience: api-productos`, `x-allowed-client-ids: [modulo-productos]` y `x-scope-registration-status: pending-security-registration`. El DTO `TipoProductoAdmin.estado` refiere a `EstadoEntidad`, cuyo enum admite únicamente `ACTIVO` e `INACTIVO`.
+
+Backend `5abfffc9…` sí acepta y persiste `PENDING_DEACTIVATION`: `ProductTypeService` lo mapea en el GET; `deactivation-intent.service.ts` transiciona el tipo `ACTIVO → PENDING_DEACTIVATION` al aceptar la baja y posteriormente a `INACTIVO` o de vuelta a `ACTIVO`; la enum PostgreSQL y pruebas del servicio incluyen ese valor. No son solo estados de seguimiento de una operación: existe como estado de la entidad.
+
+El adapter frontend aún rechaza `PENDING_DEACTIVATION` conforme al OpenAPI vigente. Si una fila listada llega en ese estado, el adapter rechaza la respuesta completa; la lista puede quedar inutilizable durante una baja activa. Esta es una incompatibilidad contrato/implementación confirmada, no una regla que el frontend deba resolver unilateralmente.
+
+**Propuesta mínima para homologación de López y Docs:** crear `EstadoTipoProductoAdmin` específico con `ACTIVO`, `INACTIVO` y `PENDING_DEACTIVATION`, usarlo solo en `TipoProductoAdmin.estado` y documentar que el valor significa baja asíncrona en curso. Añadir ejemplo/respuesta del GET y prueba que compruebe estado pendiente y resultado final. Mantener `EstadoEntidad` sin cambio para evitar ampliar el enum compartido de otras entidades. Hasta aprobación/publicación de esa modificación, el adapter conserva validación estricta y la operación se clasifica `BLOQUEADO_CONTRATO_ESTADO` para datos que contengan el estado pendiente.
+
+## Autorización M2M
+
+Hay una segunda discrepancia en la misma operación:
+
+| Fuente | Operación / archivo / SHA | Seguridad observada |
+| --- | --- | --- |
+| Docs OpenAPI | `GET /api/v1/tipos-producto`, `contratos/http/openapi.yaml`, `80f208978…` | `userBearer` **y** `serviceBearer`; scope `catalogo:leer`, audience `api-productos`, allowlist `modulo-productos`; registro del scope marcado pendiente. |
+| Backend Gateway | `apps/api-gateway/src/routing/contract-routes.ts`, `5abfffc9…` | Solo `userBearer` en la ruta catalogada; el proxy no ofrece la alternativa M2M que declara el OpenAPI. |
+| Taxonomy provider | `taxonomy-masters.controller.ts` y `taxonomy-auth.ts`, `5abfffc9…` | Controlador habilita lectura de servicio; guard exige principal service, audience configurada, subject `modulo-productos` y `catalogo:leer`. Tests comprueban denegaciones y aceptación con tokens de prueba. |
+
+**Propuesta mínima a Seguridad/Marco/Gateway y Docs:** homologar si el acceso aprobado por Gateway debe ser usuario solamente o incluir serviceBearer. Si se conserva M2M, registrar formalmente scope/cliente/audience en Seguridad, alinear el catálogo Gateway con el allowlist exacto y probar 401/403/200 con tokens válidos y negativos; si no se autoriza, corregir el contrato para retirar `serviceBearer`. No ampliar allowlists, no habilitar ruta anónima y no cambiar guards en este PR. El frontend usa la sesión de usuario existente de G7 y no fabrica ni transporta token de servicio.
+
+## Transporte Frontend y protección de modos
+
+- La única operación HTTP conectada aquí es `listarTiposProducto`. El tamaño de página es 100 (máximo contractual anterior), se valida `items/meta`, continuidad y consistencia de páginas, y se envía un `X-Correlation-Id` estable durante la paginación.
+- El transporte reutiliza la sesión de usuario G7 existente de Promociones. `secureBase` se carga de forma diferida únicamente cuando hay modo API, Gateway y runtime de sesión; mantiene HTTPS fuera de loopback, y no carga módulos de Promociones en la ruta API bloqueada sin configuración.
+- Usa `credentials: omit`, `redirect: error`, `cache: no-store`, timeout de 15 s y cancelación. Los fallos de red se sanitizan; la falta de sesión usa un error tipado con mensaje seguro. API no vuelve a fixtures.
+- El selector global es `VITE_DATA_MODE`; las demás operaciones de Taxonomía siguen sin adapter API. La frontera HTTP local aún no usa el cliente compartido #45 / Backend #109; su composición sigue pendiente y no se duplica la sesión.
+
+## Pruebas Frontend y fallo E2E auditado
+
+En el SHA `05c4b57`, el run Frontend [41782659898](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/41782659898) tuvo: `quick PASS`, `modes PASS`, `smoke PASS`, `e2e (1) PASS`, `e2e (2) PASS`, `e2e (3) FAIL`, `validate FAIL`. Shard 3 reportó **182 passed, 6 skipped y 1 failed**. La única prueba fallida fue `tests/promotions-visual.spec.ts:106`: en modo API sin configuración encontró una URL de recurso `features/promotions/` o `/mocks/`.
+
+La causa se reprodujo localmente con Node `22.23.4`: el import estático de `secureBase` en `src/main.tsx` descargaba el módulo de Promociones aun cuando no existían Gateway/sesión. La solución quita ese import estático y carga `secureBase` dentro de la rama configurada. La misma prueba Playwright focalizada pasa con la importación diferida; el test no se modificó.
+
+El texto `Fallo en la notificación onUpdated…` de `tests/vera-integration.spec.ts:133` es la excepción intencional que la prueba captura para verificar la tolerancia al callback; no es una segunda prueba fallida ni se debe contabilizar como tal.
+
+`npm test` no incluía el config `src/features/taxonomy/adapters/vitest.config.ts`. Se añadió el script `test:unit:taxonomy` y se encadenó a `npm test`, que ya es el comando del job `quick`; no se modificó `.github/workflows/frontend.yml` ni la atomización #63. El script ejecuta adapter y UI (`httpProductTypeAdapter.test.ts`, `taxonomyApiUi.test.tsx`).
+
+## Ejecución local e integración pendiente
+
+La revisión instaló dependencias con `npm ci` y Node `22.23.4`, dentro de `>=22.12.0 <23`; no se amplió el rango ni se editó lockfile. Resultados locales de la corrección:
+
+| Comando / validación | Resultado | Detalle |
+| --- | --- | --- |
+| `npm run test:unit:taxonomy` | `PASS` | 2 archivos, 25 tests (adapter y UI). |
+| `npm test` | `PASS` | 6 configs: 405 tests totales; incluye 25 tests Taxonomy. |
+| `npm run lint` | `PASS` | Node `22.23.4`. |
+| `npm run typecheck` | `PASS` | Node `22.23.4`. |
+| `VITE_DATA_MODE=mock npm run build` | `PASS` | Build de producción completado. |
+| `VITE_DATA_MODE=api npm run build` | `PASS` | Build de producción completado. |
+| Playwright focalizado `tests/promotions-visual.spec.ts`, prueba global API | `PASS` | 1 prueba; reprodujo el fallo en `05c4b57`, pasa con el import dinámico. El test no se modificó. |
+| `npm ci` | `PASS` | Instaló lockfile con Node `22.23.4`. npm reportó 13 advisories (12 moderados, 1 alto); dependencias no cambiadas ni remediadas dentro de este alcance. |
+
+El job `quick` ya ejecuta `npm test`, de modo que Taxonomy entra en CI por el script agregado. No se modificó workflow `.github` ni el trabajo de atomización #63. La CI completa de PR #67 se espera para el nuevo HEAD tras push.
+
+La secuencia de integración frontend real requiere Gateway, `taxonomy-svc`, PostgreSQL desechable y credencial de usuario válida. Docker está instalado pero no había contenedores locales activos; no se levantó el stack ni se dispuso de una sesión Gateway/G7. No se ha usado Supabase remoto. La prueba reproducible deberá cubrir GET/paginación, lista vacía, estado persistido, correlación, 401 sin JWT, 403 de usuario no autorizado, upstream fallido y ausencia de fallback mock. El JWT real G7 sigue `PENDIENTE` hasta disponer de credencial/grant legítimo; ningún token de test se presentará como tal.
+
+## Pendientes concretos y owners
+
+1. **López / Docs:** homologar el estado real `PENDING_DEACTIVATION` en `TipoProductoAdmin.estado`, publicar el contrato y su ejemplo/prueba. Desbloqueo verificable: OpenAPI de Docs con enum específico actualizado y prueba de listado aceptando el estado.
+2. **Seguridad / Marco / Gateway:** resolver `serviceBearer` vs `userBearer` y la allowlist M2M para `listarTiposProducto`. Desbloqueo: contrato y catálogo Gateway alineados, registro de scope en G7 y prueba de autorización con tokens de prueba; el JWT real G7 se valida aparte.
+3. **Frontend / Backend #45/#109:** incorporar Taxonomy al cliente compartido sin duplicar sesión ni DTO. Desbloqueo: interfaz compartida aprobada y tests del consumidor.
+4. **Integración operativa:** demostrar el recorrido contra Gateway y PostgreSQL desechable, y por separado JWT G7 y E2E desplegado. Backend CI con tests de servicio no sustituye esta evidencia.
+
+La PR sucesora permanece en borrador hasta que el CI final tenga sus siete jobs en PASS y se revise la homologación contractual. No se cierra Backend #41 ni se declara lista para despliegue.
