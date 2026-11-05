@@ -401,3 +401,11 @@ ESTADO FINAL:
 ---
 
 **Mandato final:** no improvisar contratos ni decisiones de negocio. Usa fuentes verificadas, adapta código a la arquitectura real, entrega cambios pequeños comprobables y declara con precisión qué quedó implementado, simulado, bloqueado o sin probar.
+
+## Referencia G1 Marketplace H4
+
+Frontend G6 es una aplicación administrativa para operadores G6. El canal comercial Marketplace es propiedad de G1: su frontend llama al BFF G1 y el BFF llama al Gateway G6 desde servidor. No crear otro BFF Marketplace dentro de este repositorio.
+
+Para tareas de compatibilidad con capacidades G6, leer el [Acuerdo normativo H4](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/docs/g1-marketplace-homologacion-lote03/integraciones/ACUERDO_G1_G6_H4_2026-10-20.md) y el paquete operativo Backend [`integraciones/g1-marketplace/README.md`](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/castilla/integraciones/g1-marketplace/README.md). G6 aceptó y comunicó M-01–M-09; esto habilita avanzar en el ownership G6 sin declarar grants G7 ni trabajo G1 homologado.
+
+Los mocks de esta aplicación validan únicamente su comportamiento administrativo. No prueban la integración externa G1→Gateway→servicio. Los mocks de modo demo deben identificarse; errores/timeout/esquemas inválidos de API no pueden convertirse silenciosamente en datos ficticios. Disponibilidad administrativa detallada (saldos/ubicaciones) y disponibilidad comercial de Marketplace (cuatro estados sin cantidades internas) son representaciones distintas.

@@ -391,12 +391,12 @@ No confundir esos estados locales con estados backend (`CREADO`, `PAGADO`, `RESE
 
 ## 8. Contratos P0: límites de lo que puede decidir Frontend
 
-Hasta que se cierre cada discrepancia aplicable, la UI puede construirse con mocks **pero la integración real queda bloqueada**.
+G6 aceptó y comunicó M-01–M-09. La UI administrativa puede avanzar y cada integración G6 se implementa dentro de su owner. Una discrepancia bloquea únicamente la operación o frontera dependiente; los mocks no acreditan integración real.
 
 | Contexto | No asumir ni hardcodear | Comportamiento seguro de Frontend |
 |---|---|---|
 | Checkout/pago | `CREADO` = listo para pagar. | Usar una condición de presentación `paymentReady` alimentada por adapter confirmado o mock marcado. |
-| Inventario | `DISPONIBLE` asegura cualquier cantidad solicitada. | Consultar la capacidad cuantitativa **solo cuando esté publicada**; mientras tanto mock. |
+| Inventario | `DISPONIBLE` asegura cualquier cantidad solicitada. | Usar la operación contractual `verificarCantidadComercial` si está implementada en el ambiente integrado; es no vinculante y no reserva. Un mock se etiqueta como tal. |
 | Cupón | Validación = consumo/aseguramiento definitivo. | Separar validación visual del resultado transaccional. |
 | Pago rechazado | Un intento fallido = anulación terminal. | Presentar intentos/errores según contrato definitivo. |
 | Identificación | `barcode === sku`, `productId === sku`. | Mantener tipos y campos conceptualmente distintos. |
@@ -797,3 +797,6 @@ Para Foundation, **reemplazar** la frase “implementa MK-0XX” por “implemen
 El objetivo no es “copiar todos los HTML a React”, sino **construir un frontend consistente, demostrable y desacoplado**, usando el Design System ya existente, permitiendo avance paralelo a la corrección de mockups y a los acuerdos intermodulares.
 
 **Estado de cualquier entrega = lo que fue comprobado, nunca lo que el agente supone.**
+> **Compatibilidad Marketplace H4:** esta guía gobierna el frontend administrativo G6. El frontend G1 es el canal comercial externo; su navegador llama al BFF G1, y ese BFF integra con el Gateway G6. Consultar el [acuerdo H4](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/docs/g1-marketplace-homologacion-lote03/integraciones/ACUERDO_G1_G6_H4_2026-10-20.md) y [paquete operativo Backend](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/castilla/integraciones/g1-marketplace/README.md). G6 aceptó/comunicó M-01–M-09; los desarrolladores G6 pueden avanzar en reglas propias. Un bloqueo externo se limita a la operación dependiente.
+
+Los mocks de este frontend validan únicamente UI/admin G6. No acreditan BFF G1, token G7 ni E2E externo. Cuando una llamada real falla, representar error/reintento explícito; no usar silenciosamente fixtures como respuesta. Disponibilidad administrativa detallada (saldo/ubicación) no debe exponerse ni confundirse con la disponibilidad comercial G1 (cuatro estados, sin saldos).
