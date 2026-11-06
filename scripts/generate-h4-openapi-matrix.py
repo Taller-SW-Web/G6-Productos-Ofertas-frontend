@@ -20,10 +20,18 @@ def service_for(path,tags):
 def git(root,*args):
  return subprocess.run(["git","-C",str(root),*args],check=True,capture_output=True,text=True,encoding="utf-8").stdout.strip()
 def evidence(root,ref,paths,needle):
+ # A Git tree path is a directory, not a blob. Resolve it at the pinned commit,
+ # then inspect files there. A matching operationId alone is never proof that
+ # the frontend calls a route or that a provider implements it.
  for path in paths:
-  try: content=git(root,"show",f"{ref}:{path}")
-  except subprocess.CalledProcessError: continue
-  if needle and needle in content: return path
+  try:
+   listing=git(root,"ls-tree","-r","--name-only",ref,"--",path).splitlines()
+  except subprocess.CalledProcessError:
+   continue
+  for file in listing:
+   try: content=git(root,"show",f"{ref}:{file}")
+   except subprocess.CalledProcessError: continue
+   if needle and needle in content: return file
  return "NOT_VERIFIED"
 def security(op):
  return ";".join(",".join(sorted(x)) for x in op.get("security",[])) or "none"
@@ -39,7 +47,7 @@ def main():
    if method.lower() not in METHODS or not isinstance(op,dict): continue
    oid=str(op.get("operationId","")); svc=service_for(route,op.get("tags",[])); app=APP[svc]
    gw="apps/api-gateway/src/routing/contract-routes.ts"; controller=f"apps/{app}/src"
-   rows.append(dict(docs_sha=ds,backend_sha=bs,frontend_head_before_matrix_generation=head,operationId=oid,method=method.upper(),route=route,service=svc,contract_status=str(op.get("x-status","stable")),security=security(op),required_role=str(op.get("x-required-role","")),required_scope=str(op.get("x-required-scope","")),contract_route="PUBLISHED",gateway_route=evidence(args.backend,args.backend_ref,[gw],oid),controller_provider=evidence(args.backend,args.backend_ref,[f"{controller}/",],oid),web_security="REQUIRES_RUNTIME_REVIEW",frontend_adapter="REQUIRES_CALL_PATH_REVIEW",runtime_composition="REQUIRES_COMPOSITION_REVIEW",unit_test="NOT_EXECUTED",http_test="NOT_EXECUTED",e2e="NOT_EXECUTED",external_blocker="NOT_INFERRED"))
+   rows.append(dict(docs_sha=ds,backend_sha=bs,frontend_head_before_matrix_generation=head,operationId=oid,method=method.upper(),route=route,service=svc,contract_status=str(op.get("x-status","stable")),security=security(op),required_role=str(op.get("x-required-role","")),required_scope=str(op.get("x-required-scope","")),contract_route="PUBLISHED",gateway_route="NOT_VERIFIED_BY_STATIC_GENERATOR",controller_provider="NOT_VERIFIED_BY_STATIC_GENERATOR",web_security="NOT_VERIFIED_BY_GENERATOR",frontend_adapter="NOT_VERIFIED_BY_GENERATOR",runtime_composition="NOT_VERIFIED_BY_GENERATOR",unit_test="NOT_EXECUTED",http_test="NOT_EXECUTED",e2e="NOT_EXECUTED",external_blocker="NOT_INFERRED"))
  with out.open("w",encoding="utf-8-sig",newline="") as f: w=csv.DictWriter(f,fieldnames=fields); w.writeheader(); w.writerows(rows)
  print(f"{len(rows)} filas; Docs {ds}; Backend {bs}; Frontend HEAD {head}; clasificaciones no inferidas")
 if __name__=="__main__": main()

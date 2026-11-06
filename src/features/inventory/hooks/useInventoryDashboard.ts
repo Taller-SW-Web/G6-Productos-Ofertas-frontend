@@ -90,7 +90,7 @@ export function useInventoryDashboard(filters: DashboardFiltersQuery) {
     let cancelled = false;
 
     // Filtros contractuales admitidos por obtenerDashboardInventario (agregado)
-    const aggregateFilters: DashboardFiltersQuery = { category, brand, locationId };
+    const aggregateFilters: DashboardFiltersQuery = { locationId };
     // Filtros de tabla y búsqueda detallada por SKU
     const tableFilters: DashboardFiltersQuery = {
       search,

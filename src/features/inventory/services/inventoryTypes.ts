@@ -31,10 +31,10 @@ export interface StockItem {
   reserved: number;
   blocked: number;
   available: number;
-  threshold: number;
+  threshold: number | null;
   status: StockStatus;
-  stockVersion: number;
-  updatedAt: string;
+  stockVersion: number | null;
+  updatedAt: string | null;
 }
 
 export interface ThresholdConfig {

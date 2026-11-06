@@ -170,7 +170,7 @@ export function StockDetailDrawer({
                 Umbral de stock bajo resuelto:
               </Text>
               <Text size="sm" fw={600}>
-                {item.threshold} unidades
+                {item.threshold === null ? "No publicado" : `${item.threshold} unidades`}
               </Text>
             </Grid.Col>
             <Grid.Col span={6}>
@@ -178,7 +178,7 @@ export function StockDetailDrawer({
                 Versión de stock:
               </Text>
               <Text size="sm" fw={600}>
-                v{item.stockVersion}
+                {item.stockVersion === null ? "No publicada" : `v${item.stockVersion}`}
               </Text>
             </Grid.Col>
           </Grid>

@@ -75,8 +75,13 @@ export interface InventoryHttpTransport {
   request(path: string, request: InventoryHttpRequest): Promise<Response>;
 }
 
+export interface InventoryCatalogSku { sku: string; productName: string; categoryId: string; categoryName: string; brandId: string; brandName: string; }
+
 export interface HttpInventoryRepositoryDependencies {
   transport: InventoryHttpTransport;
+  listCatalogSkus?: (signal?: AbortSignal) => Promise<InventoryCatalogSku[]>;
+  getCategories?: () => Promise<{ id: string; name: string; active: boolean }[]>;
+  getBrands?: () => Promise<{ id: string; name: string; active: boolean }[]>;
   // Aporta código legible, nombre de producto y nombres de ubicación desde su
   // owner autoritativo (Catálogo/ubicaciones). Si falta, los métodos de
   // traslados fallan con CONTRATO_BLOQUEADO en lugar de simular datos.
@@ -158,6 +163,15 @@ export function contractFilterValue(
   return normalized;
 }
 
+function stockObject(value: unknown): Record<string, unknown> { if (!value || typeof value !== "object" || Array.isArray(value)) throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario devolvió un saldo incompatible."); return value as Record<string, unknown>; }
+function stockText(value: unknown): string { if (typeof value !== "string" || !value.trim()) throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario omitió la identidad del SKU o ubicación."); return value; }
+function stockInt(value: unknown): number { if (!Number.isSafeInteger(value) || Number(value) < 0) throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario devolvió una cantidad inválida."); return Number(value); }
+function toStockItem(value: unknown, meta: InventoryCatalogSku, locationId: string): StockItem {
+ const dto=stockObject(value); const sku=stockText(dto.sku); if(sku!==meta.sku || (dto.location_id!==null && dto.location_id!==undefined && dto.location_id!==locationId)) throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario devolvió un saldo distinto al solicitado.");
+ if(dto.status!=="DISPONIBLE"&&dto.status!=="STOCK_BAJO"&&dto.status!=="AGOTADO") throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario devolvió un estado desconocido.");
+ const onHand=stockInt(dto.on_hand),reserved=stockInt(dto.reserved),blockedUnits=stockInt(dto.blocked),available=stockInt(dto.available); if(available!==Math.max(0,onHand-reserved-blockedUnits)) throw new InventoryError("RESPUESTA_INCOMPATIBLE", "El saldo disponible no coincide con las magnitudes publicadas.");
+ return {sku,productName:meta.productName,categoryName:meta.categoryName,brandName:meta.brandName,locationId,locationName:`ID ${locationId}`,onHand,reserved,blocked:blockedUnits,available,threshold:typeof dto.threshold==="number"?stockInt(dto.threshold):null,status:dto.status,stockVersion:null,updatedAt:null};
+}
 function isAbort(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
@@ -536,11 +550,7 @@ export function createHttpInventoryRepository(
   function dashboardPath(filters: DashboardFiltersQuery | undefined): string {
     const params = new URLSearchParams();
     const locationId = contractFilterValue(filters?.locationId);
-    const categoriaId = contractFilterValue(filters?.category);
-    const marcaId = contractFilterValue(filters?.brand);
     if (locationId) params.set("locationId", locationId);
-    if (categoriaId) params.set("categoriaId", categoriaId);
-    if (marcaId) params.set("marcaId", marcaId);
     const query = params.toString();
     return query
       ? `/api/v1/inventario/dashboard?${query}`
@@ -557,7 +567,9 @@ export function createHttpInventoryRepository(
     // como si correspondieran a la selección.
     const search = contractFilterValue(filters?.search);
     const status = contractFilterValue(filters?.status);
-    if (search || status)
+    const category = contractFilterValue(filters?.category);
+    const brand = contractFilterValue(filters?.brand);
+    if (search || status || category || brand)
       throw blocked(operation, BLOCKED_DETAILS.getDashboardKpisFilter);
   }
 
@@ -814,16 +826,32 @@ export function createHttpInventoryRepository(
       return presentConfirmed(frozenPayload, traslado);
     },
 
-    getStockItems(): Promise<StockItem[]> {
-      return Promise.reject(
-        blocked("getStockItems", BLOCKED_DETAILS.getStockItems),
-      );
+    async getStockItems(filters?: import("../services/inventoryTypes").StockFiltersQuery): Promise<StockItem[]> {
+      if (!dependencies.listCatalogSkus) throw blocked("getStockItems", "Catálogo no proporcionó el universo paginado de SKU activos");
+      const catalog = await dependencies.listCatalogSkus();
+      const search = contractFilterValue(filters?.search)?.toLocaleLowerCase();
+      const selected = catalog.filter(item => (!search || item.sku.toLocaleLowerCase().includes(search) || item.productName.toLocaleLowerCase().includes(search)) && (!contractFilterValue(filters?.category) || item.categoryId === filters?.category) && (!contractFilterValue(filters?.brand) || item.brandId === filters?.brand));
+      const locationId = contractFilterValue(filters?.locationId);
+      const locations = locationId ? [{ locationId }] : (await this.getLocationDistribution()).map(item => ({ locationId: item.locationId }));
+      if (!selected.length || !locations.length) return [];
+      const bySku = new Map(selected.map(item => [item.sku, item])); const output: StockItem[] = [];
+      for (const location of locations) for (let offset = 0; offset < selected.length; offset += 100) {
+        const batch = selected.slice(offset, offset + 100); const params = new URLSearchParams({ skus: batch.map(item => item.sku).join(","), location_id: location.locationId });
+        const response = stockObject(await json(`/api/v1/inventario/disponibilidad?${params}`, { method: "GET" }, false));
+        if (!Array.isArray(response.items)) throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario no devolvió saldos por SKU.");
+        for (const raw of response.items) { const dto = stockObject(raw); const sku = stockText(dto.sku); const meta = bySku.get(sku); if (!meta) throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario devolvió un SKU que no pertenece al lote solicitado."); const item = toStockItem(dto, meta, location.locationId); if (!contractFilterValue(filters?.status) || item.status === filters?.status) output.push(item); }
+      }
+      return output;
     },
 
-    getStockDetail(): Promise<StockItem | null> {
-      return Promise.reject(
-        blocked("getStockDetail", BLOCKED_DETAILS.getStockDetail),
-      );
+    async getStockDetail(sku: string, locationId: string): Promise<StockItem | null> {
+      if (!sku.trim() || !locationId.trim()) throw new InventoryError("VALIDACION", "Indica un SKU y el identificador de ubicación.");
+      if (!dependencies.listCatalogSkus) throw blocked("getStockDetail", "Catálogo no proporcionó identidades de SKU");
+      const meta: InventoryCatalogSku = (await dependencies.listCatalogSkus()).find(item => item.sku === sku) ?? { sku, productName: `SKU ${sku} (nombre no disponible en Catálogo)`, categoryId: "", categoryName: "No disponible", brandId: "", brandName: "No disponible" };
+      const params = new URLSearchParams({ skus: sku, location_id: locationId }); const response = stockObject(await json(`/api/v1/inventario/disponibilidad?${params}`, { method: "GET" }, false));
+      if (!Array.isArray(response.items)) throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario no devolvió saldos por SKU.");
+      const found = response.items.find(value => { const dto = stockObject(value); return dto.sku === sku && dto.location_id === locationId; });
+      return found === undefined ? null : toStockItem(found, meta, locationId);
     },
 
     async getDashboardKpis(
@@ -853,18 +881,10 @@ export function createHttpInventoryRepository(
       );
     },
 
-    getCategories() {
-      return Promise.reject(
-        blocked("getCategories", BLOCKED_DETAILS.getCategories),
-      );
-    },
+    async getCategories() { if (!dependencies.getCategories) throw blocked("getCategories", "Catálogo no proporcionó categorías administrativas"); return dependencies.getCategories(); },
 
-    getBrands() {
-      return Promise.reject(blocked("getBrands", BLOCKED_DETAILS.getBrands));
-    },
+    async getBrands() { if (!dependencies.getBrands) throw blocked("getBrands", "Catálogo no proporcionó marcas administrativas"); return dependencies.getBrands(); },
 
-    getLocations() {
-      return Promise.reject(blocked("getLocations", BLOCKED_DETAILS.getLocations));
-    },
+    async getLocations() { return (await this.getLocationDistribution()).map(item => ({ id: item.locationId, name: `ID ${item.locationId}`, active: true })); },
   };
 }

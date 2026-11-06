@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Button,
+  FileInput,
   Group,
   Loader,
   Select,
@@ -16,7 +17,6 @@ import {
   SectionCard,
 } from "../../../components/shared";
 import { brandService } from "../services/brandService";
-import type { BrandDetail } from "../types";
 
 const PAISES = [
   { value: "US", label: "Estados Unidos (US)" },
@@ -41,8 +41,8 @@ export function BrandFormPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const esEdicion = Boolean(id);
-  const [detalle, setDetalle] = useState<BrandDetail | null>(null);
   const [nombre, setNombre] = useState("");
+  const [logoFile, setLogoFile] = useState<File | null>(null);
   const [descripcion, setDescripcion] = useState<string>("");
   const [paisOrigenIso, setPaisOrigenIso] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
@@ -62,7 +62,6 @@ export function BrandFormPage() {
           setFase({ status: "no-encontrada" });
           return;
         }
-        setDetalle(res);
         setNombre(res.nombre);
         setDescripcion(res.descripcion ?? "");
         setPaisOrigenIso(res.paisOrigenIso ?? null);
@@ -96,6 +95,7 @@ export function BrandFormPage() {
           {
             marcaId: id,
             nombre: limpio,
+            logoFile,
             descripcion: descripcion.trim() || null,
             paisOrigenIso: paisOrigenIso,
           },
@@ -113,6 +113,7 @@ export function BrandFormPage() {
         const creado = await brandService.crear(
           {
             nombre: limpio,
+            logoFile,
             descripcion: descripcion.trim() || null,
             paisOrigenIso: paisOrigenIso,
           },
@@ -234,10 +235,14 @@ export function BrandFormPage() {
                   onChange={(v) => setPaisOrigenIso(v)}
                   disabled={guardando}
                 />
-                <TextInput
-                  label="Logo (URL, opcional)"
-                  value={detalle?.logoUrl ?? ""}
-                  disabled
+                <FileInput
+                  label="Logo (PNG, JPEG o WebP; máximo 5 MB)"
+                  placeholder="Selecciona un archivo"
+                  accept="image/png,image/jpeg,image/webp"
+                  value={logoFile}
+                  onChange={setLogoFile}
+                  disabled={guardando}
+                  clearable
                 />
                 <Group justify="flex-end" gap="sm">
                   <Button

@@ -185,6 +185,7 @@ export interface CharacteristicDetail {
   estado: CharacteristicStatus;
   unidad?: string;
   valoresActivos: number;
+  version?: number;
   valores?: CharacteristicValue[];
 }
 
@@ -231,7 +232,7 @@ export interface ProductTypeAssociation {
   obligatoria: boolean;
   estado: CharacteristicStatus;
   schemaVersion: number;
-  caracteristica: ProductTypeAssociationCharacteristic;
+  caracteristica: ProductTypeAssociationCharacteristic | null;
 }
 
 export interface ProductTypeDetail {
@@ -239,7 +240,7 @@ export interface ProductTypeDetail {
   nombre: string;
   estado: ProductTypeStatus;
   schemaVersion: number;
-  limiteCaracteristicas: number;
+  limiteCaracteristicas: number | null;
   caracteristicasAsignadas: number;
   asociadas: ProductTypeAssociation[];
 }
@@ -298,12 +299,14 @@ export interface BrandDetail {
 
 export interface BrandCreateInput {
   nombre: string;
+  logoFile?: File | null;
   descripcion?: string | null;
   paisOrigenIso?: string | null;
 }
 
 export interface BrandUpdateInput {
   marcaId: string;
+  logoFile?: File | null;
   nombre: string;
   descripcion?: string | null;
   paisOrigenIso?: string | null;

@@ -102,6 +102,7 @@ async function start() {
   if (mode === "api" && gatewayOrigin && promotions) {
     if (gatewayClient) {
       configureTaxonomyGateway({
+        requestWithInit: (path, init) => gatewayClient.request(path, init),
         request: (path, signal, correlationId) =>
           gatewayClient.request(path, {
             method: "GET",
@@ -112,7 +113,60 @@ async function start() {
           }),
       });
       configureInventoryApi(() =>
-        createHttpInventoryRepository({ transport: gatewayClient }),
+        createHttpInventoryRepository({
+          transport: gatewayClient,
+          listCatalogSkus: async signal => {
+            const [categories, brands] = await Promise.all([
+              catalogServices.taxonomy.getCategories(signal),
+              catalogServices.taxonomy.getBrands(signal),
+            ]);
+            const categoryNames = new Map(categories.map(item => [item.id, item.nombre]));
+            const brandNames = new Map(brands.map(item => [item.id, item.nombre]));
+            const output: import("./features/inventory/adapters/apiInventoryAdapter").InventoryCatalogSku[] = [];
+            let page = 1;
+            let totalPages = 1;
+            do {
+              const result = await catalogServices.catalog.list({ page, pageSize: 100, status: "all" }, undefined, signal);
+              if (result.page !== page || result.pageSize !== 100) throw new Error("Paginación de Catálogo incompatible para Inventario.");
+              totalPages = Math.ceil(result.total / 100);
+              for (const product of result.items) {
+                if (product.status !== "ACTIVO") continue;
+                const meta = { productName: product.name, categoryId: product.categoryId, categoryName: categoryNames.get(product.categoryId) ?? `ID ${product.categoryId}`, brandId: product.brandId, brandName: brandNames.get(product.brandId) ?? `ID ${product.brandId}` };
+                if (!product.hasVariants && product.skuBase) output.push({ sku: product.skuBase, ...meta });
+                if (product.hasVariants) {
+                  let variantPage = 1;
+                  let variantPages = 1;
+                  do {
+                    const variants = await catalogServices.catalog.listVariants(product.id, { page: variantPage, pageSize: 100, status: "all" }, undefined, signal);
+                    if (variants.page !== variantPage || variants.pageSize !== 100) throw new Error("Paginación de variantes incompatible para Inventario.");
+                    variantPages = Math.ceil(variants.total / 100);
+                    for (const variant of variants.items) if (variant.status === "ACTIVA") output.push({ sku: variant.sku, ...meta });
+                    variantPage++;
+                  } while (variantPage <= variantPages);
+                }
+              }
+              page++;
+            } while (page <= totalPages);
+            return output;
+          },
+          getCategories: async () => (await catalogServices.taxonomy.getCategories()).map(item => ({ id: item.id, name: item.nombre, active: item.activo })),
+          getBrands: async () => (await catalogServices.taxonomy.getBrands()).map(item => ({ id: item.id, name: item.nombre, active: item.activo })),
+          resolveTransferPresentation: async dto => {
+            const skus = await catalogServices.catalog.list({ page: 1, pageSize: 100, status: "all" });
+            let productName = `SKU ${dto.sku} (nombre no disponible en Catálogo)`;
+            for (let page = 1; page <= Math.max(1, Math.ceil(skus.total / 100)); page++) {
+              const products = page === 1 ? skus : await catalogServices.catalog.list({ page, pageSize: 100, status: "all" });
+              const match = products.items.find(item => item.skuBase === dto.sku);
+              if (match) { productName = match.name; break; }
+              for (const product of products.items.filter(item => item.hasVariants)) {
+                const variants = await catalogServices.catalog.listVariants(product.id, { page: 1, pageSize: 100, status: "all" });
+                if (variants.items.some(variant => variant.sku === dto.sku)) { productName = product.name; break; }
+              }
+              if (productName !== `SKU ${dto.sku} (nombre no disponible en Catálogo)`) break;
+            }
+            return { transferCode: `ID ${dto.traslado_id}`, productName, sourceLocationName: `ID ${dto.source_location_id}`, targetLocationName: `ID ${dto.target_location_id}` };
+          },
+        }),
       );
     }
   }
