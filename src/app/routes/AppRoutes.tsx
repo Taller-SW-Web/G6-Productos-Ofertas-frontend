@@ -17,7 +17,7 @@ const router = createBrowserRouter([
   {
     element: <ApplicationShell />,
     children: [
-      { path: "/", element: <Navigate to="/precios" replace /> },
+      { path: "/", element: <Navigate to="/productos" replace /> },
       ...productRoutes,
       ...(import.meta.env.DEV ? demoRoutes : []),
       { path: "*", element: <NotFoundPage /> },

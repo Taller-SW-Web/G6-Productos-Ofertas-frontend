@@ -10,9 +10,9 @@ import "@fontsource/oswald/latin-700.css";
 import { theme, cssVariablesResolver } from "./theme/theme";
 import "./theme/global.css";
 import { App } from "./app/App";
+import { GlobalSessionGate } from "./app/config/GlobalSessionGate";
 import {
   configureTaxonomyGateway,
-  createAuthenticatedTaxonomyGateway,
 } from "./features/taxonomy/services/taxonomyGatewayRuntime";
 import { createPricingRuntime } from "./features/pricing/services/pricingService";
 import { PricingProvider } from "./features/pricing/components/PricingProvider";
@@ -27,6 +27,10 @@ import { createCombosRuntime } from "./features/combos/services/combosService";
 import { CombosProvider } from "./features/combos/components/CombosProvider";
 import { BulkRepositoryContext } from "./features/bulk/services/BulkRepositoryContext";
 import { createBulkFetchTransport, createHttpBulkRepository } from "./features/bulk/adapters/httpBulkRepository";
+import { createAuthenticatedGatewayClient } from "./app/config/authenticatedGatewayClient";
+import { createHttpPricingRepository } from "./features/pricing/adapters/httpPricingRepository";
+import { configureInventoryApi } from "./features/inventory/services/inventoryProvider";
+import { createHttpInventoryRepository } from "./features/inventory/adapters/apiInventoryAdapter";
 
 const root = createRoot(document.getElementById("root")!);
 async function start() {
@@ -34,7 +38,6 @@ async function start() {
     import.meta.env.VITE_DATA_MODE,
     import.meta.env.DEV,
   );
-  const runtime = await createPricingRuntime(mode);
   const gatewayOrigin = import.meta.env.VITE_GATEWAY_ORIGIN as
     string | undefined;
   const securityApiBase = import.meta.env.VITE_G7_API_BASE as
@@ -45,13 +48,40 @@ async function start() {
           await import("./features/promotions/services/promotionSessionRuntime")
         ).createOptionalPromotionSessionRuntime(gatewayOrigin, securityApiBase)
       : null;
+  const gatewayClient = gatewayOrigin && promotions?.session
+    ? createAuthenticatedGatewayClient(gatewayOrigin, promotions.session)
+    : null;
+  const runtime = await createPricingRuntime(mode, {
+    ...(mode === "api" && gatewayClient
+      ? {
+          api: async () =>
+            createHttpPricingRepository({
+              transport: gatewayClient,
+              canManagePricing: () =>
+                promotions?.session.snapshot().user?.roles.includes("GESTOR_COMERCIAL") === true,
+            }),
+        }
+      : {}),
+  });
   if (mode === "api" && gatewayOrigin && promotions) {
-    configureTaxonomyGateway(
-      createAuthenticatedTaxonomyGateway(gatewayOrigin, promotions.session),
-    );
+    if (gatewayClient) {
+      configureTaxonomyGateway({
+        request: (path, signal, correlationId) =>
+          gatewayClient.request(path, {
+            method: "GET",
+            signal,
+            headers: correlationId
+              ? { "X-Correlation-Id": correlationId }
+              : {},
+          }),
+      });
+      configureInventoryApi(() =>
+        createHttpInventoryRepository({ transport: gatewayClient }),
+      );
+    }
   }
   const combosRuntime = await createCombosRuntime(mode, runtime);
-  const catalogServices = (mode === "api" ? createOptionalCatalogHttpServices(gatewayOrigin) : null) ?? getCatalogServices(mode);
+  const catalogServices = (mode === "api" ? createOptionalCatalogHttpServices(gatewayOrigin, promotions?.session ?? null, gatewayClient ?? undefined) : null) ?? getCatalogServices(mode);
   const bulkRepository = mode === "api" && gatewayOrigin && promotions?.session
     ? createHttpBulkRepository(createBulkFetchTransport(gatewayOrigin), promotions.session)
     : null;
@@ -73,7 +103,9 @@ async function start() {
                   value={promotions?.services ?? null}
                 >
                   <CombosProvider mode={mode} runtime={combosRuntime}>
-                    <App />
+                    <GlobalSessionGate>
+                      <App />
+                    </GlobalSessionGate>
                   </CombosProvider>
                 </PromotionApiContext.Provider>
               </PromotionSessionContext.Provider>

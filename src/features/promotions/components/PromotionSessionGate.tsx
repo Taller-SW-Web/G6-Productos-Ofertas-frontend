@@ -41,7 +41,7 @@ export function PromotionSessionGate({
   return (
     <SectionCard
       title="Iniciar sesión"
-      description="Identifícate para administrar promociones, cupones y recomendaciones."
+      description="Identifícate con tu cuenta humana de G7 para acceder a las funciones administrativas autorizadas."
     >
       <form
         onSubmit={(event) => {

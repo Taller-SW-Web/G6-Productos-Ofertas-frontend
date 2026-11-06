@@ -42,6 +42,7 @@ export interface PricingHttpTransport {
 export interface HttpPricingRepositoryDependencies {
   transport: PricingHttpTransport;
   listCatalogTargets?: (signal: AbortSignal) => Promise<PriceTarget[]>;
+  canManagePricing?: () => boolean;
   channelIds?: PricingChannelIds;
   onUpdated?: (
     target: PriceTarget,
@@ -340,6 +341,8 @@ export function createHttpPricingRepository(
     },
 
     async update(change: PriceChange, signal) {
+      if (dependencies.canManagePricing && !dependencies.canManagePricing())
+        throw new PricingFailure("forbidden", "Tu cuenta no tiene el rol GESTOR_COMERCIAL requerido para modificar precios.");
       const target = await targetById(change.target.targetId, signal);
       const key = scopeKey(target, change.target.channel);
       if (uncertainUpdates.has(key)) {
@@ -477,6 +480,8 @@ export function createHttpPricingRepository(
       draft: ScheduleDraft,
       signal,
     ): Promise<ScheduleView> {
+      if (dependencies.canManagePricing && !dependencies.canManagePricing())
+        throw new PricingFailure("forbidden", "Tu cuenta no tiene el rol GESTOR_COMERCIAL requerido para programar precios.");
       const target = await targetById(targetId, signal);
       const validFrom = localInstant(draft.start);
       const validUntil = draft.end ? localInstant(draft.end) : null;
