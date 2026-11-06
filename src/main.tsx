@@ -31,6 +31,9 @@ import { createAuthenticatedGatewayClient } from "./app/config/authenticatedGate
 import { createHttpPricingRepository } from "./features/pricing/adapters/httpPricingRepository";
 import { configureInventoryApi } from "./features/inventory/services/inventoryProvider";
 import { createHttpInventoryRepository } from "./features/inventory/adapters/apiInventoryAdapter";
+import { AuditRuntimeContext } from "./features/price-audit/services/AuditRuntimeContext";
+import { createAuditRuntime } from "./features/price-audit/services/auditService";
+import { createHttpAuditRepository } from "./features/price-audit/adapters/httpAuditRepository";
 
 const root = createRoot(document.getElementById("root")!);
 async function start() {
@@ -61,6 +64,11 @@ async function start() {
                 promotions?.session.snapshot().user?.roles.includes("GESTOR_COMERCIAL") === true,
             }),
         }
+      : {}),
+  });
+  const auditRuntime = await createAuditRuntime(mode, {
+    ...(mode === "api" && gatewayClient
+      ? { api: async () => createHttpAuditRepository(gatewayClient) }
       : {}),
   });
   if (mode === "api" && gatewayOrigin && promotions) {
@@ -96,6 +104,7 @@ async function start() {
           <BulkRepositoryContext.Provider value={bulkRepository}>
           <CatalogServicesContext.Provider value={catalogServices}>
             <PricingProvider runtime={runtime}>
+              <AuditRuntimeContext.Provider value={auditRuntime}>
               <PromotionSessionContext.Provider
                 value={promotions?.session ?? null}
               >
@@ -109,6 +118,7 @@ async function start() {
                   </CombosProvider>
                 </PromotionApiContext.Provider>
               </PromotionSessionContext.Provider>
+              </AuditRuntimeContext.Provider>
             </PricingProvider>
           </CatalogServicesContext.Provider>
           </BulkRepositoryContext.Provider>
