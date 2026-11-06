@@ -2,7 +2,7 @@ import { CatalogError, type CatalogRepository, type ProductCreatePayload, type P
 import { array, blockedCatalog, choice, createCatalogHttp, encoded, integer, object, string, type CatalogHttpTransport } from "./catalogHttp";
 import { mapPreparation, mapProduct, mapVariant, requestAttributes, requestPhysical, type CatalogAttributeMetadata } from "./httpCatalogMapper";
 
-/** Revalidado con OpenAPI 0.6.0-rc.2, Docs 5124eea. Commercial GETs cannot become admin DTOs. */
+/** El listado comercial contiene solo productos publicables; no se usa para gestionar borradores. */
 export function createHttpCatalogRepository(transport: CatalogHttpTransport): CatalogRepository {
   const request = createCatalogHttp(transport);
   const productPath = (id: string) => `/productos/${encoded(id)}`;
@@ -67,8 +67,17 @@ export function createHttpCatalogRepository(transport: CatalogHttpTransport): Ca
       const dto = object(await request(`/productos?${params}`, "GET", undefined, signal));
       const items = array(dto.items); const total = integer(dto.total);
       const page = integer(dto.pagina, 1); const pageSize = integer(dto.tamanio, 1);
-      if (items.length || total !== 0) return blockedCatalog("La consulta comercial no incluye estado ni versión administrativos. La gestión del catálogo requiere una lectura administrativa aprobada.");
-      return { items: [], total, page, pageSize };
+      const mapped = await Promise.all(items.map(async value => {
+        const row = object(value);
+        const id = string(row.product_id);
+        if (!id.trim()) return blockedCatalog("Catálogo devolvió un producto sin identidad.");
+        const [prep, schemas] = await Promise.all([preparation(id, signal), productSchemas(row, signal)]);
+        const detail = mapProduct(row, prep, schemas);
+        if (detail.status !== "ACTIVO") return blockedCatalog("El listado comercial devolvió un producto fuera del estado publicable.");
+        return detail;
+      }));
+      return { items: mapped.map(({ description: _description, images: _images, attributes: _attributes,
+        physicalProfile: _physicalProfile, preparation: _preparation, variants: _variants, ...item }) => item), total, page, pageSize };
     },
     async getById(id, _scenario, signal) {
       // Preserve HTTP 401/403/404/503. A commercial 404 does not prove a draft absent.

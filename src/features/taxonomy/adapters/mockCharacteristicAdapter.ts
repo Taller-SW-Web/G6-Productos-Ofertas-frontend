@@ -160,7 +160,7 @@ const normalizarEtiqueta = (nombre: string): string =>
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 
-// BLOCKED_CONTRACT: no hay contrato OpenAPI confirmado para el sondeo del resultado
+// El mock reproduce el seguimiento publicado en GET /api/v1/taxonomia/operaciones/{operationId}
 // de una baja asíncrona de valor (202). Este registro mantiene las operaciones
 // pendientes en memoria para que la UI consulte su estado sin inventar un endpoint.
 export interface OperacionBajaValor {

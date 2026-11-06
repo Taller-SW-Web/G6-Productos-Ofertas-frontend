@@ -6,6 +6,11 @@ import {
   type AuditJob,
 } from "../services/auditRepository";
 
+const uncertaintyKey = (format: string, filters: string) => `g6:audit-export:uncertain:${format}:${encodeURIComponent(filters)}`;
+const hasUncertainOutcome = (key: string) => { try { return sessionStorage.getItem(key) === "1"; } catch { return false; } };
+const setUncertainOutcome = (key: string) => { try { sessionStorage.setItem(key, "1"); } catch { /* the hook latch still protects this mount */ } };
+const clearUncertainOutcome = (key: string) => { try { sessionStorage.removeItem(key); } catch { /* storage can be unavailable in restricted browsers */ } };
+
 const failure = (error: unknown) =>
   error instanceof AuditFailure
     ? error
@@ -105,11 +110,13 @@ export function useAuditExport(
     return () => clearTimeout(timer);
   }, [id, job, readError, revision]);
   async function submit() {
-    if (request.current || id || job || requestError?.kind === "unknown")
+    const pendingKey = uncertaintyKey(input.format, filters);
+    if (request.current || id || job || requestError?.kind === "unknown" || hasUncertainOutcome(pendingKey))
       return;
     const controller = new AbortController();
     request.current = controller;
     let repeatable = false;
+    setUncertainOutcome(pendingKey);
     update({ submitting: true, requestError: undefined });
     try {
       const result = await repository.requestExport(input, controller.signal);
@@ -119,6 +126,7 @@ export function useAuditExport(
             "unknown",
             "No pudimos confirmar la referencia de la solicitud. No la hemos repetido.",
           );
+        clearUncertainOutcome(pendingKey);
         onAccepted(result.id);
       }
     } catch (error: unknown) {
@@ -136,6 +144,7 @@ export function useAuditExport(
     } finally {
       // Keep the latch until the accepted reference is committed to navigation.
       // Unknown outcomes also stay latched, even before React paints the error.
+      if (repeatable) clearUncertainOutcome(pendingKey);
       if (repeatable && request.current === controller) request.current = null;
       if (!controller.signal.aborted) update({ submitting: false });
     }
@@ -177,6 +186,7 @@ export function useAuditExport(
     job,
     requestError,
     readError,
+    exportOutcomeUncertain: !id && hasUncertainOutcome(uncertaintyKey(input.format, filters)),
     downloadError: state.downloadError,
     submitting: !!state.submitting,
     downloading: !!state.downloading,

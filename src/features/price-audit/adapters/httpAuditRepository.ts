@@ -36,7 +36,7 @@ function nullableMoney(source: Record<string, unknown>, key: string): string | n
     throw new AuditFailure("unknown", "La respuesta de Auditoría está incompleta.");
   const value = source[key];
   if (value === null) return null;
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || !/^\d{1,12}(?:\.\d{1,2})?$/.test(value.toString()))
     throw new AuditFailure("unknown", "La respuesta de Auditoría contiene un importe inválido.");
   return value.toString();
 }
@@ -92,7 +92,7 @@ function mapJob(value: unknown): AuditJob {
     throw new AuditFailure("unknown", "Auditoría devolvió un estado de exportación desconocido.");
   if (format !== "CSV" && format !== "PDF")
     throw new AuditFailure("unknown", "Auditoría devolvió un formato de exportación no solicitado.");
-  const downloadUrl = nullableText(dto, "download_url");
+  nullableText(dto, "download_url");
   return {
     id: requiredText(dto, "export_id"),
     format,
@@ -103,7 +103,9 @@ function mapJob(value: unknown): AuditJob {
       : dto.completed_at === undefined
         ? null
         : validDate(requiredText(dto, "completed_at")),
-    fileAvailable: status === "COMPLETED" && downloadUrl !== null,
+    // The provider deliberately leaves download_url null; the authenticated
+    // /archivo route is the only supported download capability.
+    fileAvailable: status === "COMPLETED",
   };
 }
 
@@ -151,9 +153,15 @@ export function createHttpAuditRepository(client: AuthenticatedGatewayClient): A
       });
     } catch (error) {
       if (init.signal.aborted) throw error;
-      throw new AuditFailure("unavailable", "No se pudo conectar con Auditoría de precios.");
+      throw init.method === "POST"
+        ? new AuditFailure("unknown", "No se pudo confirmar si Auditoría aceptó la exportación. No la vuelvas a enviar; actualiza el historial para reconciliar el trabajo antes de intentarlo nuevamente.")
+        : new AuditFailure("unavailable", "No se pudo conectar con Auditoría de precios.");
     }
-    if (!response.ok) throw failure(response.status);
+    if (!response.ok) {
+      if (init.method === "POST" && response.status >= 500)
+        throw new AuditFailure("unknown", `Auditoría devolvió HTTP ${response.status}; el resultado de la exportación puede ser incierto. No la reenvíes; consulta el historial antes de una nueva solicitud.`);
+      throw failure(response.status);
+    }
     if (!response.headers.get("content-type")?.toLowerCase().includes("application/json"))
       throw new AuditFailure("unknown", "Auditoría devolvió un tipo de respuesta incompatible.");
     try { return await response.json(); }

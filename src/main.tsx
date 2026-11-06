@@ -54,14 +54,42 @@ async function start() {
   const gatewayClient = gatewayOrigin && promotions?.session
     ? createAuthenticatedGatewayClient(gatewayOrigin, promotions.session)
     : null;
+  const catalogServices = (mode === "api" ? createOptionalCatalogHttpServices(gatewayOrigin, promotions?.session ?? null, gatewayClient ?? undefined) : null) ?? getCatalogServices(mode);
   const runtime = await createPricingRuntime(mode, {
     ...(mode === "api" && gatewayClient
       ? {
           api: async () =>
             createHttpPricingRepository({
               transport: gatewayClient,
-              canManagePricing: () =>
-                promotions?.session.snapshot().user?.roles.includes("GESTOR_COMERCIAL") === true,
+              canManagePricing: () => promotions?.session.snapshot().user?.roles.includes("GESTOR_COMERCIAL") === true,
+              listCatalogTargets: async signal => {
+                const targets = [];
+                const pageSize = 100;
+                let page = 1;
+                let totalPages = 1;
+                do {
+                  const result = await catalogServices.catalog.list({ page, pageSize, status: "all" }, undefined, signal);
+                  if (result.page !== page || result.pageSize !== pageSize || result.items.length > result.total) throw new Error("Paginación de Catálogo incompatible.");
+                  totalPages = Math.ceil(result.total / pageSize);
+                  for (const product of result.items) {
+                    const productTargetId = product.id;
+                    targets.push({ id: productTargetId, label: product.name, productId: product.id, kind: "product" as const, ...(product.skuBase ? { referenceSku: product.skuBase } : {}) });
+                    if (product.hasVariants) {
+                      let variantPage = 1;
+                      let variantPages = 1;
+                      do {
+                        const variants = await catalogServices.catalog.listVariants(product.id, { page: variantPage, pageSize }, undefined, signal);
+                        if (variants.page !== variantPage || variants.pageSize !== pageSize || variants.items.length > variants.total) throw new Error("Paginación de variantes incompatible.");
+                        variantPages = Math.ceil(variants.total / pageSize);
+                        for (const variant of variants.items) if (variant.status === "ACTIVA") targets.push({ id: `sku:${variant.sku}`, label: `${product.name} · ${variant.sku}`, productId: product.id, kind: "variant" as const, sku: variant.sku, productTargetId });
+                        variantPage++;
+                      } while (variantPage <= variantPages);
+                    }
+                  }
+                  page++;
+                } while (page <= totalPages);
+                return targets;
+              },
             }),
         }
       : {}),
@@ -88,8 +116,10 @@ async function start() {
       );
     }
   }
-  const combosRuntime = await createCombosRuntime(mode, runtime);
-  const catalogServices = (mode === "api" ? createOptionalCatalogHttpServices(gatewayOrigin, promotions?.session ?? null, gatewayClient ?? undefined) : null) ?? getCatalogServices(mode);
+  const combosRuntime = await createCombosRuntime(mode, runtime, {
+    gateway: gatewayClient ?? undefined,
+    catalog: catalogServices.catalog,
+  });
   const bulkRepository = mode === "api" && gatewayOrigin && promotions?.session
     ? createHttpBulkRepository(createBulkFetchTransport(gatewayOrigin), promotions.session)
     : null;

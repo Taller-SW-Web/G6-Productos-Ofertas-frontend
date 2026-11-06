@@ -13,10 +13,7 @@ export function CommercialModeGate({ children }: { children: ReactNode }) {
   const mockOnly = ["/cupones", "/promociones", "/recomendaciones"].some(
     (path) => pathname === path || pathname.startsWith(`${path}/`),
   );
-  const pendingModule = ["/combos"].some(
-    (path) => pathname === path || pathname.startsWith(`${path}/`),
-  );
-  if (mode === "api" && (pendingModule || (mockOnly && !api)))
+  if (mode === "api" && mockOnly && !api)
     return (
       <FeedbackAlert semantic="error" title="Función no disponible">
         Esta función no está disponible en el modo actual.

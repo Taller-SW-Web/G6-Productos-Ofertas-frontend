@@ -6,15 +6,15 @@ export function createHttpTaxonomyRepository(transport: CatalogHttpTransport): T
   const request = createCatalogHttp(transport);
   return {
     async getCategories(signal) {
-      const dto = object(await request("/categorias", "GET", undefined, signal));
-      return array(dto.categories).map(value => { const row = object(value); return {
-        id: string(row.categoria_id), nombre: string(row.name), activo: choice(row.status, ["ACTIVA", "INACTIVA"] as const) === "ACTIVA" };
+      const dto = object(await request("/categorias/administracion", "GET", undefined, signal));
+      return array(dto.items ?? dto.categorias ?? dto.categories).map(value => { const row = object(value); return {
+        id: string(row.categoriaId ?? row.categoria_id), nombre: string(row.nombre ?? row.name), activo: ["ACTIVO", "ACTIVA"].includes(String(row.estado ?? row.status)) };
       });
     },
     async getBrands(signal) {
-      const dto = object(await request("/marcas", "GET", undefined, signal));
-      return array(dto.brands).map(value => { const row = object(value); return {
-        id: string(row.marca_id), nombre: string(row.name), activo: choice(row.status, ["ACTIVA", "INACTIVA"] as const) === "ACTIVA" };
+      const dto = object(await request("/marcas/administracion", "GET", undefined, signal));
+      return array(dto.items ?? dto.marcas ?? dto.brands).map(value => { const row = object(value); return {
+        id: string(row.marcaId ?? row.marca_id), nombre: string(row.nombre ?? row.name), activo: ["ACTIVO", "ACTIVA"].includes(String(row.estado ?? row.status)) };
       });
     },
     async getProductTypes(signal) {

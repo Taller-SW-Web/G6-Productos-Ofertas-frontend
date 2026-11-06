@@ -1,5 +1,7 @@
 import type { DataMode } from "../../../app/config/dataMode";
 import type { PricingRuntime } from "../../pricing/services/pricingRuntime";
+import type { AuthenticatedGatewayClient } from "../../../app/config/authenticatedGatewayClient";
+import type { CatalogRepository } from "../../catalog/services/catalogRepository";
 import type {
   CombosAvailabilityPort,
   CombosCatalogPort,
@@ -7,6 +9,9 @@ import type {
   CombosRepository,
 } from "../types/combos";
 import { createUnavailableCombosAdapters } from "../adapters/unavailableCombosAdapters";
+import { createHttpCombosRepository } from "../adapters/httpCombosRepository";
+import { CatalogCombosAdapter } from "../adapters/catalogCombosAdapter";
+import { PricingCombosAdapter } from "../adapters/pricingCombosAdapter";
 
 export interface CombosRuntime {
   combos: CombosRepository;
@@ -18,8 +23,29 @@ export interface CombosRuntime {
   now: () => number;
 }
 
-export async function createCombosRuntime(mode: DataMode, pricing: PricingRuntime): Promise<CombosRuntime> {
-  if (mode === "api") return createUnavailableCombosAdapters();
+export async function createCombosRuntime(
+  mode: DataMode,
+  pricing: PricingRuntime,
+  dependencies: { gateway?: AuthenticatedGatewayClient; catalog?: CatalogRepository } = {},
+): Promise<CombosRuntime> {
+  if (mode === "api") {
+    if (!dependencies.gateway || !dependencies.catalog) return createUnavailableCombosAdapters();
+    const catalog = new CatalogCombosAdapter({ catalog: dependencies.catalog });
+    const comboRepository = createHttpCombosRepository(dependencies.gateway, catalog);
+    const availability: CombosAvailabilityPort = {
+      async readStocks(skus, signal) {
+        signal?.throwIfAborted();
+        return skus.map((sku) => ({ sku, stock: null, stale: true, locationsCompatible: false }));
+      },
+    };
+    return {
+      combos: comboRepository,
+      catalog,
+      pricing: new PricingCombosAdapter({ pricing: pricing.service }),
+      availability,
+      now: () => Date.now(),
+    };
+  }
   const { createMockCombosRuntime } = await import("../mocks/createMockCombosRuntime");
   return createMockCombosRuntime(pricing);
 }

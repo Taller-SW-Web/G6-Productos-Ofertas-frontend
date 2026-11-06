@@ -35,8 +35,7 @@ export interface CategoryRepository {
     signal?: AbortSignal,
   ): Promise<BajaSolicitudResult>;
   reactivar(id: string, signal?: AbortSignal): Promise<ReactivacionResult>;
-  // BLOCKED_CONTRACT: sondeo del resultado de la operación asíncrona de baja (202).
-  // No hay endpoint OpenAPI confirmado; la simulación vive en el adapter mock.
+  // La operación de seguimiento está publicada en GET /api/v1/taxonomia/operaciones/{operationId}.
   consultarEstadoOperacion(
     operacionId: string,
     signal?: AbortSignal,
