@@ -167,6 +167,7 @@ async function start() {
   if (mode === "api" && gatewayOrigin && promotions) {
     if (gatewayClient) {
       configureTaxonomyGateway({
+        scopeId: () => promotions.session.snapshot().user?.id ?? null,
         requestWithInit: (path, init) => gatewayClient.request(path, init),
         request: (path, signal, correlationId) =>
           gatewayClient.request(path, {

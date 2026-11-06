@@ -7,6 +7,7 @@ import {
   SectionCard,
 } from "../../../components/shared";
 import { productTypeService } from "../services/productTypeService";
+import { isUncertainTaxonomyMutation } from "../adapters/taxonomyHttp";
 
 export function ProductTypeCreatePage() {
   const navigate = useNavigate();
@@ -14,6 +15,16 @@ export function ProductTypeCreatePage() {
   const [error, setError] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [creado, setCreado] = useState(false);
+  const [uncertainName, setUncertainName] = useState<string | null>(null);
+
+  const reconciliarTipo = async () => {
+    try {
+      const result = await productTypeService.list();
+      const matches = result.items.filter(item => item.nombre === nombre.trim());
+      if (matches.length === 1 && matches[0]) navigate(`/tipos-producto/${matches[0].tipoProductoId}`);
+      else setError(matches.length > 1 ? "Hay varios tipos con ese nombre; revisa el listado. No se reenviará esta intención." : "El listado no confirma el tipo. El resultado sigue incierto y no se reenviará.");
+    } catch (err) { setError(err instanceof Error ? err.message : "No se pudo reconciliar el tipo de producto."); }
+  };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -22,6 +33,7 @@ export function ProductTypeCreatePage() {
       setError("Ingresa el nombre del tipo de producto.");
       return;
     }
+    if (uncertainName === limpio) { setError("Esta misma intención ya se envió. Consulta el listado antes de modificar o crear otra solicitud."); return; }
     setError(null);
     setGuardando(true);
     try {
@@ -32,6 +44,7 @@ export function ProductTypeCreatePage() {
       setCreado(true);
       navigate(`/tipos-producto/${resultado.tipoProductoId}`);
     } catch (err) {
+      if (isUncertainTaxonomyMutation(err)) setUncertainName(limpio);
       setError(
         err instanceof Error
           ? err.message
@@ -54,7 +67,7 @@ export function ProductTypeCreatePage() {
       />
       <Stack gap="lg">
         {error && (
-          <FeedbackAlert semantic="error" title="No se pudo crear el tipo de producto">
+          <FeedbackAlert semantic="error" title={uncertainName ? "Resultado incierto" : "No se pudo crear el tipo de producto"} actions={uncertainName ? <Button variant="outline" onClick={() => void reconciliarTipo()}>Consultar tipos</Button> : undefined}>
             {error}
           </FeedbackAlert>
         )}

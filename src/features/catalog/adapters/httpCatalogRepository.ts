@@ -1,6 +1,7 @@
 import { CatalogError, type CatalogRepository, type ProductCreatePayload, type ProductUpdatePayload } from "../services/catalogRepository";
 import { array, blockedCatalog, choice, createCatalogHttp, encoded, integer, object, string, type CatalogHttpTransport } from "./catalogHttp";
 import { mapCommercialAttributes, mapPreparation, mapProduct, mapVariant, requestAttributes, requestPhysical, type CatalogAttributeMetadata } from "./httpCatalogMapper";
+import { formatAttributeValue } from "../services/catalogPresentation";
 
 /** El listado comercial contiene solo productos publicables; no se usa para gestionar borradores. */
 export function createHttpCatalogRepository(transport: CatalogHttpTransport): CatalogRepository {
@@ -127,7 +128,7 @@ export function createHttpCatalogRepository(transport: CatalogHttpTransport): Ca
       const attributes = dto.attributes === undefined ? [] : array(dto.attributes);
       return { ...summary, description: typeof dto.description === "string" ? string(dto.description) : null, images: images.map(url => ({ url })),
         attributes: mapCommercialAttributes(attributes, schemas), physicalProfile: undefined, preparation: prep,
-        variants: adminVariants.items.map(v => ({ variantId: v.variantId, sku: v.sku, attributesSummary: v.identifyingAttributes.map(a => a.valorDisponible === false || a.valor === null ? "Valor no disponible" : String(a.valor)).join(" / "), status: v.status, preparationStatus: v.inventoryPreparationStatus, manualRetryAllowed: v.inventoryManualRetryAllowed })),
+        variants: adminVariants.items.map(v => ({ variantId: v.variantId, sku: v.sku, attributesSummary: v.identifyingAttributes.map(formatAttributeValue).join(" / "), status: v.status, preparationStatus: v.inventoryPreparationStatus, manualRetryAllowed: v.inventoryManualRetryAllowed })),
         preparationSummary, publishedCommercially: true };
     },
     create: (p, _sc, sig) => write("/productos", "POST", productBody(p), sig, value => productResult(value, sig), 201),

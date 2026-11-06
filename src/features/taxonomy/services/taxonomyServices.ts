@@ -18,6 +18,7 @@ import type { SeoRepository } from "./seoRepository";
 export const TAXONOMY_API_UNAVAILABLE_MESSAGE = "La sesión G7 o el Gateway autenticado de Taxonomía no están disponibles.";
 export interface TaxonomyServices { category: CategoryRepository; brand: BrandRepository; productType: ProductTypeRepository; seo: SeoRepository; characteristic: CharacteristicRepository; }
 const lazyGateway: TaxonomyGatewayTransport = {
+  scopeId() { return getTaxonomyGateway()?.scopeId?.() ?? null; },
   request(path, signal, correlationId) {
     const gateway = getTaxonomyGateway(); if (!gateway) return Promise.reject(new Error(TAXONOMY_API_UNAVAILABLE_MESSAGE));
     return gateway.request(path, signal, correlationId);

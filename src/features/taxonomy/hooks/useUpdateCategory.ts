@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { categoryService } from "../services/categoryService";
 import { generarSlug } from "../services/slug";
+import { isUncertainTaxonomyMutation } from "../adapters/taxonomyHttp";
 import type {
   CategoryDetail,
   CategoryUpdateInput,
@@ -20,7 +21,7 @@ export function useUpdateCategory() {
   const [slug, setSlug] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [resultado, setResultado] = useState<CategoryDetail | null>(null);
-  const [writeOutcomeUnknown, setWriteOutcomeUnknown] = useState(false);
+  const [unknownIntent, setUnknownIntent] = useState<string | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => () => controllerRef.current?.abort(), []);
@@ -53,7 +54,8 @@ export function useUpdateCategory() {
   };
 
   const actualizar = (input: CategoryUpdateInput) => {
-    if (writeOutcomeUnknown) return;
+    const intent = JSON.stringify(input);
+    if (unknownIntent === intent) return;
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -67,8 +69,7 @@ export function useUpdateCategory() {
       },
       (err: unknown) => {
         if (controller.signal.aborted) return;
-        const message = err instanceof Error ? err.message : "";
-        if (/resultado de escritura incierto|pudo completarse|confirma el estado/i.test(message)) setWriteOutcomeUnknown(true);
+        if (isUncertainTaxonomyMutation(err)) setUnknownIntent(intent);
         setError(
           err instanceof Error
             ? err.message
@@ -77,6 +78,17 @@ export function useUpdateCategory() {
         setPhase("confirmando");
       },
     );
+  };
+
+  const reconciliar = async (input: CategoryUpdateInput) => {
+    try {
+      const current = await categoryService.obtener(input.id);
+      if (current && current.nombre === input.nombre && current.padreId === input.padreId && (current.descripcion ?? "") === (input.descripcion ?? "") && current.orden === input.orden) {
+        setResultado(current); setError(null); setPhase("actualizado"); return true;
+      }
+      setError("La lectura actual no confirma todos los campos enviados. Conservamos el bloqueo de esta intención; revisa el detalle antes de continuar.");
+    } catch (err) { setError(err instanceof Error ? err.message : "No se pudo reconciliar la categoría."); }
+    return false;
   };
 
   const cerrar = () => {
@@ -92,10 +104,11 @@ export function useUpdateCategory() {
     slug,
     error,
     resultado,
-    writeOutcomeUnknown,
+    isUnknownIntent: (input: CategoryUpdateInput) => unknownIntent === JSON.stringify(input),
     setSlug,
     comprobar,
     actualizar,
+    reconciliar,
     cerrar,
   };
 }

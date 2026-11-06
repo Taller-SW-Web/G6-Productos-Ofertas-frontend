@@ -1,6 +1,6 @@
 import type { PhysicalProfile, ProductAttributeValue, ProductDetailView, ProductPreparationView, VariantDetailView } from "../services/catalogRepository";
 import type { AttributeSchema } from "../services/taxonomyRepository";
-import { getPhysicalDimensions, type RawPhysicalProfileLike } from "../services/catalogPresentation";
+import { formatAttributeValue, getPhysicalDimensions, type RawPhysicalProfileLike } from "../services/catalogPresentation";
 import { array, blockedCatalog, boolean, choice, integer, object, string } from "./catalogHttp";
 
 export function mapPreparation(value: unknown): ProductPreparationView {
@@ -96,6 +96,6 @@ export function mapProduct(value: unknown, preparation: ProductPreparationView, 
     imageUrl: images[0], images: images.map(url => ({ url })), attributes: mapCommercialAttributes(dto.attributes, schemas),
     physicalProfile: physical(dto.perfil_fisico), preparation,
     variants: variants.map(v => ({ variantId: v.variantId, sku: v.sku,
-      attributesSummary: v.identifyingAttributes.map(a => a.valorDisponible === false || a.valor === null ? "Valor no disponible" : String(a.valor)).join(" / "), status: v.status,
+      attributesSummary: v.identifyingAttributes.map(formatAttributeValue).join(" / "), status: v.status,
       preparationStatus: v.inventoryPreparationStatus, manualRetryAllowed: v.inventoryManualRetryAllowed })) };
 }

@@ -1,10 +1,13 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useContext } from "react";
 import type { ProductDetailView, ProductAttributeValue, VariantCreatePayload, VariantDetailView, VariantUpdatePayload } from "../services/catalogRepository";
 import { CatalogError } from "../services/catalogRepository";
 import { useCatalogServices } from "./useCatalogServices";
 import { normalizePhysicalProfile, calculateVolumeCm3 } from "../services/catalogPresentation";
 import { validateVariantAttributes } from "../services/variantAttributeValidation";
 import type { AttributeSchema } from "../services/taxonomyRepository";
+import { runCatalogCreateIntent, hasCatalogCreateIntent } from "../services/catalogCreateIntent";
+import { DataModeContext } from "../../../app/config/DataModeContext";
+import { PromotionSessionContext } from "../../../app/config/PromotionSessionContext";
 
 export interface FormAttributeEntry {
   key: string;
@@ -34,6 +37,8 @@ export interface UseVariantFormOptions {
 export function useVariantForm({ parentProduct, initialVariant, scenario, onSuccess }: UseVariantFormOptions) {
   const isEdit = Boolean(initialVariant);
   const { catalog, taxonomy } = useCatalogServices();
+  const mode = useContext(DataModeContext);
+  const promotionSession = useContext(PromotionSessionContext);
   const [schemaResult, setSchemaResult] = useState<{ typeId: string; repository: typeof taxonomy; schemas: AttributeSchema[]; error: string | null }>();
   const schemaCurrent = schemaResult?.typeId === parentProduct?.typeId && schemaResult?.repository === taxonomy;
   const attributeSchemas = schemaCurrent ? schemaResult.schemas : [];
@@ -58,6 +63,28 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
   const [submitting, setSubmitting] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [writeOutcomeUnknown, setWriteOutcomeUnknown] = useState(false);
+  const reconcileCreateBySku = async () => {
+    if (isEdit || mode !== "api" || !parentProduct || !formData.sku.trim()) return null;
+    try {
+      const matches: VariantDetailView[] = []; let page = 1; let pages = 1;
+      do {
+        const result = await catalog.listVariants(parentProduct.id, { page, pageSize: 100, status: "all" });
+        if (result.page !== page || result.pageSize !== 100 || result.items.some(item => item.productId !== parentProduct.id)) throw new Error("La paginación o identidad de variantes no permitió reconciliar el SKU.");
+        pages = Math.ceil(result.total / 100);
+        matches.push(...result.items.filter(item => item.sku === formData.sku.trim()));
+        page++;
+      } while (page <= pages && page <= 10_000);
+      if (matches.length === 1) return matches[0]!;
+      setGeneralError(matches.length > 1 ? "La consulta encontró más de una variante con este SKU; la creación sigue bloqueada." : "Catálogo no muestra todavía esta variante. El resultado anterior sigue incierto y no se reenviará.");
+    } catch (error) { setGeneralError(error instanceof Error ? error.message : "No se pudo reconciliar la variante en Catálogo."); }
+    return null;
+  };
+  useEffect(() => {
+    let active = true;
+    if (isEdit || mode !== "api" || !parentProduct?.id || !formData.sku.trim()) { setWriteOutcomeUnknown(false); return; }
+    void hasCatalogCreateIntent(promotionSession?.snapshot().user?.id, `variant:${parentProduct.id}:${formData.sku.trim()}`).then(pending => { if (active) setWriteOutcomeUnknown(pending); });
+    return () => { active = false; };
+  }, [isEdit, mode, parentProduct?.id, formData.sku, promotionSession]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -190,7 +217,9 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
         const payload: VariantCreatePayload = { sku: formData.sku.trim(),
           identifyingAttributes: formData.identifyingAttributes.filter(a => a.valor.trim()).map(toAttribute),
           nonIdentifyingAttributes, imageUrl: formData.imageUrl.trim() || undefined, physicalProfile };
-        result = await catalog.createVariant(parentProduct.id, payload, scenario);
+        result = mode === "api"
+          ? await runCatalogCreateIntent(promotionSession?.snapshot().user?.id, `variant:${parentProduct.id}:${payload.sku.trim()}`, () => catalog.createVariant(parentProduct.id, payload, scenario))
+          : await catalog.createVariant(parentProduct.id, payload, scenario);
       }
       setIsDirty(false);
       onSuccess?.(result);
@@ -208,5 +237,5 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
     updateIdentifyingAttribute: (index: number, key: "valor" | "caracteristicaId", value: string) => updateAttribute(true, index, key, value),
     updateNonIdentifyingAttribute: (index: number, key: "valor" | "caracteristicaId", value: string) => updateAttribute(false, index, key, value),
     derivedVolumeCm3: calculateVolumeCm3(formData.largoCm, formData.anchoCm, formData.altoCm),
-    errors, generalError, submitting, isDirty, writeOutcomeUnknown, handleSubmit, isEdit };
+    errors, generalError, submitting, isDirty, writeOutcomeUnknown, reconcileCreateBySku, handleSubmit, isEdit };
 }

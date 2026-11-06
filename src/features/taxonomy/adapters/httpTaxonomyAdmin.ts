@@ -4,6 +4,7 @@ import type { CharacteristicRepository } from "../services/characteristicReposit
 import type { BrandRepository } from "../services/brandRepository";
 import type { SeoRepository } from "../services/seoRepository";
 import type { CategoryNode, CategoryDetail, CategoryCreateInput, CategoryCreateResult, CategoryUpdateInput, SlugCheckResult, BajaSolicitudResult, ReactivacionResult, CharacteristicListItem, CharacteristicDetail, CharacteristicValue, BrandDetail, SeoCategory, HistorialSlugItem, OperationFollowUpResult } from "../types";
+import { taxonomySend, TaxonomyHttpError, taxonomyHttpStatus, taxonomyHttpCode } from "./taxonomyHttp";
 
 const invalid = () => new Error("Respuesta administrativa de Taxonomía inválida.");
 type Row = Record<string, unknown>;
@@ -95,29 +96,33 @@ export function createHttpCategoryRepository(transport: TaxonomyGatewayTransport
     },
     async obtener(id, signal) { try { return await getCategoryDetail(id, signal); } catch (error) { if (httpStatus(error) === 404) return null; throw error; } },
     async comprobarSlug(slug, signal): Promise<SlugCheckResult> {
-      const dto = row(await send(transport, "/api/v1/seo/categorias/slug/resolver", "POST", { nombre: slug }, signal, 200));
+      const dto = row(await send(transport, "/api/v1/seo/categorias/slug/resolver", "POST", { nombre: slug }, signal, 200, undefined, true));
       const resolved = str(dto.slug); const colisionResuelta = dto.colisionResuelta === true;
       if (typeof dto.colisionResuelta !== "boolean") throw invalid();
       return { slug: resolved, disponible: true, ...(colisionResuelta && resolved !== slug ? { alternativo: resolved } : {}) };
     },
     async crear(input: CategoryCreateInput, signal): Promise<CategoryCreateResult> {
-      const dto = row(await send(transport, "/api/v1/categorias", "POST", { nombre: input.nombre, slugConfirmado: input.slug, categoriaPadreId: input.padreId ?? null, descripcion: input.descripcion ?? null }, signal, 201));
-      return { id: str(dto.categoriaId), nombre: str(dto.nombre), slug: typeof dto.slug === "string" ? dto.slug : input.slug };
+      return send(transport, "/api/v1/categorias", "POST", { nombre: input.nombre, slugConfirmado: input.slug, categoriaPadreId: input.padreId ?? null, descripcion: input.descripcion ?? null }, signal, 201, value => { const dto = row(value); return { id: str(dto.categoriaId), nombre: str(dto.nombre), slug: typeof dto.slug === "string" ? dto.slug : input.slug }; });
     },
     async actualizar(input: CategoryUpdateInput, signal) {
       const current = await this.obtener(input.id, signal); if (!current) throw httpError(404, "CATEGORIA_NO_ENCONTRADA");
-      await send(transport, `/api/v1/categorias/${encodeURIComponent(input.id)}`, "PATCH", { nombre: input.nombre, categoriaPadreId: input.padreId ?? null, descripcion: input.descripcion ?? null, orden: input.orden, version: current.version }, signal, 200);
-      const detail = await getCategoryDetail(input.id, signal); return detail;
+      const patched = await send(transport, `/api/v1/categorias/${encodeURIComponent(input.id)}`, "PATCH", { nombre: input.nombre, categoriaPadreId: input.padreId ?? null, descripcion: input.descripcion ?? null, orden: input.orden, version: current.version }, signal, 200, value => {
+        const receipt = row(value);
+        if (typeof receipt.categoriaId === "string" && receipt.categoriaId !== input.id) throw invalid();
+        return { ...current, nombre: input.nombre, ...(input.padreId ? { padreId: input.padreId } : { padreId: undefined }), descripcion: input.descripcion, orden: input.orden, actualizadaSinLectura: true };
+      });
+      try { return await getCategoryDetail(input.id, signal); }
+      catch { return { ...patched, nombre: input.nombre, ...(input.padreId ? { padreId: input.padreId } : {}), descripcion: input.descripcion, orden: input.orden, actualizadaSinLectura: true }; }
     },
     async solicitarBaja(id, signal): Promise<BajaSolicitudResult> {
       const before = await this.obtener(id, signal); if (!before) throw httpError(404, "CATEGORIA_NO_ENCONTRADA");
-      const operation = row(await send(transport, `/api/v1/categorias/${encodeURIComponent(id)}/desactivar`, "POST", undefined, signal, 202));
-      return { resultado: "verificando", categoria: { ...before, estado: "Verificando baja" }, bloqueos: [], mensaje: "Solicitud recibida; consulta el estado de la operación.", operacionId: str(operation.operation_id) };
+      const operacionId = await send(transport, `/api/v1/categorias/${encodeURIComponent(id)}/desactivar`, "POST", undefined, signal, 202, value => str(row(value).operation_id));
+      return { resultado: "verificando", categoria: { ...before, estado: "Verificando baja" }, bloqueos: [], mensaje: "Solicitud recibida; consulta el estado de la operación.", operacionId };
     },
     async reactivar(id, signal): Promise<ReactivacionResult> {
-      await send(transport, `/api/v1/categorias/${encodeURIComponent(id)}/reactivar`, "POST", undefined, signal, 200);
-      const result = await getCategoryDetail(id, signal);
-      return { resultado: "reactivada", categoria: result, bloqueos: [], mensaje: "Categoría reactivada." };
+      const confirmed = await send(transport, `/api/v1/categorias/${encodeURIComponent(id)}/reactivar`, "POST", undefined, signal, 200, categoryDetail);
+      try { return { resultado: "reactivada", categoria: await getCategoryDetail(id, signal), bloqueos: [], mensaje: "Categoría reactivada." }; }
+      catch { return { resultado: "reactivada", categoria: { ...confirmed, estado: "Activo", actualizadaSinLectura: true }, bloqueos: [], mensaje: "La reactivación fue confirmada, pero no se pudo refrescar el detalle. Consulta la categoría antes de otra modificación." }; }
     },
     async consultarEstadoOperacion(operacionId, signal) {
       const dto = row(await get(`/api/v1/taxonomia/operaciones/${encodeURIComponent(operacionId)}`, signal));
@@ -137,13 +142,13 @@ export function createHttpCharacteristicRepository(transport: TaxonomyGatewayTra
       return { caracteristicas: items, config: { maxTexto: null, maxValoresLista: null } };
     },
     async obtener(id, signal) { try { return characteristicDetail(await get(`/api/v1/caracteristicas/${encodeURIComponent(id)}`, signal)); } catch (error) { if (httpStatus(error) === 404) return null; throw error; } },
-    async crear(input, signal) { const d = characteristicDetail(await send(transport, "/api/v1/caracteristicas", "POST", { nombre: input.nombre, tipo: input.tipo, unidadMedida: input.unidad ?? null }, signal, 201)); return { id: d.id, nombre: d.nombre, tipo: d.tipo, estado: d.estado, unidad: d.unidad }; },
-    async actualizar(input, signal) { try { const current = await this.obtener(input.id, signal); if (!current) return null; if (current.version === undefined) throw invalid(); return characteristicDetail(await send(transport, `/api/v1/caracteristicas/${encodeURIComponent(input.id)}`, "PATCH", { nombre: input.nombre, unidadMedida: input.unidad ?? null, version: current.version }, signal, 200)); } catch (error) { if (httpStatus(error) === 404) return null; throw error; } },
+    async crear(input, signal) { return send(transport, "/api/v1/caracteristicas", "POST", { nombre: input.nombre, tipo: input.tipo, unidadMedida: input.unidad ?? null }, signal, 201, value => { const d = characteristicDetail(value); return { id: d.id, nombre: d.nombre, tipo: d.tipo, estado: d.estado, unidad: d.unidad }; }); },
+    async actualizar(input, signal) { try { const current = await this.obtener(input.id, signal); if (!current) return null; if (current.version === undefined) throw invalid(); return send(transport, `/api/v1/caracteristicas/${encodeURIComponent(input.id)}`, "PATCH", { nombre: input.nombre, unidadMedida: input.unidad ?? null, version: current.version }, signal, 200, characteristicDetail); } catch (error) { if (httpStatus(error) === 404) return null; throw error; } },
     async listarValores(id, signal) { try { const values = await get(`/api/v1/caracteristicas/${encodeURIComponent(id)}/valores`, signal); if (!Array.isArray(values)) throw invalid(); return values.map(characteristicValue); } catch (error) { if (httpStatus(error) === 404) return null; throw error; } },
-    async renombrarValor(id, valorId, nombre, signal) { const values = await this.listarValores(id, signal); const current = values?.find(value => value.valorId === valorId); if (!current) throw httpError(404, "VALOR_NO_ENCONTRADO"); return characteristicValue(await send(transport, `/api/v1/caracteristicas/${encodeURIComponent(id)}/valores/${encodeURIComponent(valorId)}`, "PATCH", { nombre, version: current.version }, signal, 200)); },
-    async agregarValor(id, nombre, signal) { return characteristicValue(await send(transport, `/api/v1/caracteristicas/${encodeURIComponent(id)}/valores`, "POST", { nombre }, signal, 201)); },
-    async solicitarBajaValor(id, valorId, signal) { const values = await this.listarValores(id, signal); const value = values?.find(item => item.valorId === valorId); if (!value) throw httpError(404, "VALOR_NO_ENCONTRADO"); const operation = row(await send(transport, `/api/v1/caracteristicas/${encodeURIComponent(id)}/valores/${encodeURIComponent(valorId)}/desactivar`, "POST", undefined, signal, 202)); const operacionId = str(operation.operation_id); valueOperationParents.set(operacionId,{caracteristicaId:id,valorId}); return { resultado: "pendiente", valor: value, mensaje: "Baja recibida; consulta el seguimiento de operación.", bloqueos: [], operacionId }; },
-    async cambiarEstado(id, next, signal) { try { return characteristicDetail(await send(transport, `/api/v1/caracteristicas/${encodeURIComponent(id)}/${next === "Activo" ? "reactivar" : "desactivar"}`, "POST", undefined, signal, 200)); } catch (error) { if (httpStatus(error) === 404) return null; throw error; } },
+    async renombrarValor(id, valorId, nombre, signal) { const values = await this.listarValores(id, signal); const current = values?.find(value => value.valorId === valorId); if (!current) throw httpError(404, "VALOR_NO_ENCONTRADO"); return send(transport, `/api/v1/caracteristicas/${encodeURIComponent(id)}/valores/${encodeURIComponent(valorId)}`, "PATCH", { nombre, version: current.version }, signal, 200, characteristicValue); },
+    async agregarValor(id, nombre, signal) { return send(transport, `/api/v1/caracteristicas/${encodeURIComponent(id)}/valores`, "POST", { nombre }, signal, 201, characteristicValue); },
+    async solicitarBajaValor(id, valorId, signal) { const values = await this.listarValores(id, signal); const value = values?.find(item => item.valorId === valorId); if (!value) throw httpError(404, "VALOR_NO_ENCONTRADO"); const operacionId = await send(transport, `/api/v1/caracteristicas/${encodeURIComponent(id)}/valores/${encodeURIComponent(valorId)}/desactivar`, "POST", undefined, signal, 202, value => str(row(value).operation_id)); valueOperationParents.set(operacionId,{caracteristicaId:id,valorId}); return { resultado: "pendiente", valor: value, mensaje: "Baja recibida; consulta el seguimiento de operación.", bloqueos: [], operacionId }; },
+    async cambiarEstado(id, next, signal) { try { return await send(transport, `/api/v1/caracteristicas/${encodeURIComponent(id)}/${next === "Activo" ? "reactivar" : "desactivar"}`, "POST", undefined, signal, 200, characteristicDetail); } catch (error) { if (httpStatus(error) === 404) return null; throw error; } },
     async consultarEstadoOperacion(operacionId, signal) {
       const dto = row(await get(`/api/v1/taxonomia/operaciones/${encodeURIComponent(operacionId)}`, signal));
       const result = followup(dto);
@@ -176,10 +181,10 @@ export function createHttpBrandRepository(transport: TaxonomyGatewayTransport): 
   return {
     async list(signal) { const rows = await listAll(transport, "/api/v1/marcas/administracion", "marcaId", signal); const items: BrandDetail[] = rows.map(brandDetail); return { items: items.map(({ marcaId, nombre, estado, logoUrl, paisOrigenIso }) => ({ marcaId, nombre, estado, logoUrl, paisOrigenIso })) }; },
     async obtener(id, signal) { try { return brandDetail(await get(`/api/v1/marcas/${encodeURIComponent(id)}`, signal)); } catch (error) { if (httpStatus(error) === 404) return null; throw error; } },
-    async crear(input, signal) { return brandDetail(await send(transport, "/api/v1/marcas", "POST", form(input), signal, 201)); },
-    async actualizar(input, signal) { try { const current = await this.obtener(input.marcaId, signal); if (!current) return null; return brandDetail(await send(transport, `/api/v1/marcas/${encodeURIComponent(input.marcaId)}`, "PATCH", form({ ...input, version: current.version }), signal, 200)); } catch (error) { if (httpStatus(error) === 404) return null; throw error; } },
-    async solicitarBaja(id, signal) { const operation = row(await send(transport, `/api/v1/marcas/${encodeURIComponent(id)}/desactivar`, "POST", undefined, signal, 202)); return { resultado: "pendiente", mensaje: "Baja recibida; consulta su operación.", operacionId: str(operation.operation_id) }; },
-    async reactivar(id, signal) { try { return brandDetail(await send(transport, `/api/v1/marcas/${encodeURIComponent(id)}/reactivar`, "POST", undefined, signal, 200)); } catch (error) { if (httpStatus(error) === 404) return null; throw error; } },
+    async crear(input, signal) { return send(transport, "/api/v1/marcas", "POST", form(input), signal, 201, brandDetail); },
+    async actualizar(input, signal) { try { const current = await this.obtener(input.marcaId, signal); if (!current) return null; return send(transport, `/api/v1/marcas/${encodeURIComponent(input.marcaId)}`, "PATCH", form({ ...input, version: current.version }), signal, 200, brandDetail); } catch (error) { if (httpStatus(error) === 404) return null; throw error; } },
+    async solicitarBaja(id, signal) { const operacionId = await send(transport, `/api/v1/marcas/${encodeURIComponent(id)}/desactivar`, "POST", undefined, signal, 202, value => str(row(value).operation_id)); return { resultado: "pendiente", mensaje: "Baja recibida; consulta su operación.", operacionId }; },
+    async reactivar(id, signal) { try { return await send(transport, `/api/v1/marcas/${encodeURIComponent(id)}/reactivar`, "POST", undefined, signal, 200, brandDetail); } catch (error) { if (httpStatus(error) === 404) return null; throw error; } },
     async consultarResultadoBaja(operacionId, signal) { const dto = row(await get(`/api/v1/taxonomia/operaciones/${encodeURIComponent(operacionId)}`, signal)); const result = followup(dto); return { resultado: result.estado === "confirmada" ? "exito" : result.estado === "pendiente" ? "pendiente" : result.estado === "rechazada" ? "rechazada" : "no-concluyente", mensaje: result.mensaje, operacionId }; },
   };
 }
@@ -190,25 +195,15 @@ export function createHttpSeoRepository(transport: TaxonomyGatewayTransport): Se
   return {
     async list(signal) { const categories=await listAll(transport,"/api/v1/categorias/administracion","categoriaId",signal); const items:SeoCategory[]=[]; for(const category of categories){ try { items.push(map(await get(`/api/v1/categorias/${encodeURIComponent(str(category.categoriaId))}/seo`,signal),str(category.nombre))); } catch(error){ if(httpStatus(error)!==404) throw error; } } return {items}; },
     async obtener(id, signal) { try { const [seo,category]=await Promise.all([get(`/api/v1/categorias/${encodeURIComponent(id)}/seo`,signal),get(`/api/v1/categorias/${encodeURIComponent(id)}`,signal)]); return map(seo,str(row(category).nombre)); } catch (error) { if (httpStatus(error) === 404) return null; throw error; } },
-    async proponerSlug(nombre, signal) { const dto = row(await send(transport, "/api/v1/seo/categorias/slug/resolver", "POST", { nombre }, signal, 200)); return { slug: str(dto.slug), colisionResuelta: dto.colisionResuelta === true }; },
-    async guardar(input, signal) { try { const category=await get(`/api/v1/categorias/${encodeURIComponent(input.id)}`,signal); const dto=await send(transport, `/api/v1/categorias/${encodeURIComponent(input.id)}/seo`, "PATCH", { slug: input.slug, metaTitulo: input.metaTitulo, metaDescripcion: input.metaDescripcion }, signal, 200); return map(dto,str(row(category).nombre)); } catch (error) { if (httpStatus(error) === 404) return null; if (httpCode(error) === "SLUG_DUPLICADO") { const { SeoConflictError } = await import("../services/seoRepository"); throw new SeoConflictError(input.slug); } throw error; } },
+    async proponerSlug(nombre, signal) { const dto = row(await send(transport, "/api/v1/seo/categorias/slug/resolver", "POST", { nombre }, signal, 200, undefined, true)); return { slug: str(dto.slug), colisionResuelta: dto.colisionResuelta === true }; },
+    async guardar(input, signal) { try { const category=await get(`/api/v1/categorias/${encodeURIComponent(input.id)}`,signal); return await send(transport, `/api/v1/categorias/${encodeURIComponent(input.id)}/seo`, "PATCH", { slug: input.slug, metaTitulo: input.metaTitulo, metaDescripcion: input.metaDescripcion }, signal, 200, value => map(value,str(row(category).nombre))); } catch (error) { if (httpStatus(error) === 404) return null; if (httpCode(error) === "SLUG_DUPLICADO") { const { SeoConflictError } = await import("../services/seoRepository"); throw new SeoConflictError(input.slug); } throw error; } },
     async historial(id, signal) { const values = await get(`/api/v1/categorias/${encodeURIComponent(id)}/seo/historial`, signal); if (!Array.isArray(values)) throw invalid(); return values.map(value => { const dto = row(value); return { slugAnterior: str(dto.oldSlug), slugActual: str(dto.newSlug), fecha: str(dto.changedAt) } satisfies HistorialSlugItem; }); },
   };
 }
 
-class TaxonomyHttpError extends Error { constructor(readonly status: number, readonly code?: string, message?: string) { super(message ?? `Taxonomía respondió HTTP ${status}${code ? ` (${code})` : ""}.`); } }
-function httpStatus(error: unknown): number | undefined { return error instanceof TaxonomyHttpError ? error.status : undefined; }
-function httpCode(error: unknown): string | undefined { return error instanceof TaxonomyHttpError ? error.code : undefined; }
+function httpStatus(error: unknown): number | undefined { return taxonomyHttpStatus(error); }
+function httpCode(error: unknown): string | undefined { return taxonomyHttpCode(error); }
 function httpError(status: number, code: string): Error { return new TaxonomyHttpError(status, code); }
-async function send(transport: TaxonomyGatewayTransport, path: string, method: "GET" | "POST" | "PATCH", body: unknown, signal: AbortSignal | undefined, expected: number): Promise<unknown> {
-  signal?.throwIfAborted();
-  if (!transport.requestWithInit) throw new Error("El cliente autenticado de Taxonomía no admite esta operación.");
-  const init = body instanceof FormData ? { method, signal, body } : body === undefined ? { method, signal } : { method, signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
-  let response: Response;
-  try { response = await transport.requestWithInit(path, init); } catch (error) { if (signal?.aborted) throw error; if (method !== "GET") throw new Error("Resultado de escritura de Taxonomía incierto. Consulta el recurso antes de reintentar.", { cause: error }); throw error; }
-  if (!response.ok) { let code: string | undefined; try { const data = row(await response.clone().json()); if (typeof data.code === "string") code = data.code; } catch { /* retain HTTP status */ } if (method !== "GET" && (response.status === 408 || response.status >= 500)) throw new Error(`Resultado de escritura incierto (HTTP ${response.status}); consulta Taxonomía antes de reintentar.`); throw new TaxonomyHttpError(response.status, code); }
-  if (response.status !== expected) { if (method !== "GET") throw new Error(`Taxonomía respondió HTTP ${response.status}; confirma el estado antes de reintentar.`); throw new TaxonomyHttpError(response.status); }
-  if (response.status === 204) return null;
-  const type = response.headers.get("content-type")?.toLowerCase() ?? ""; if (!type.includes("application/json")) throw new Error("Taxonomía devolvió un MIME incompatible.");
-  try { return await response.json(); } catch (error) { if (method !== "GET") throw new Error("La escritura pudo completarse, pero su respuesta es ilegible; no la repitas sin reconciliar.", { cause: error }); throw invalid(); }
+function send<T = unknown>(transport: TaxonomyGatewayTransport, path: string, method: "GET" | "POST" | "PATCH", body: unknown, signal: AbortSignal | undefined, expected: number, map?: (value: unknown) => T, semanticQuery = false, options?: { retainConfirmed?: boolean; resourcePath?: string }): Promise<T> {
+  return taxonomySend(transport, path, method, signal, body, expected, map, semanticQuery, options);
 }

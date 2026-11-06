@@ -87,8 +87,9 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
     phase,
     error,
     resultado,
-    writeOutcomeUnknown,
+    isUnknownIntent,
     actualizar,
+    reconciliar,
   } = useUpdateCategory();
 
   const [nombre, setNombre] = useState(detalle.nombre);
@@ -151,7 +152,9 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
             </Group>
           }
         >
-          {`Se actualizaron los datos de «${resultado.nombre}». El slug se administra por separado en SEO.`}
+          {resultado.actualizadaSinLectura
+            ? `Se confirmó el cambio de «${resultado.nombre}», pero no se pudo actualizar la lectura. Refresca o abre el detalle para reconciliarlo antes de otra modificación. El slug se administra por separado en SEO.`
+            : `Se actualizaron los datos de «${resultado.nombre}». El slug se administra por separado en SEO.`}
         </FeedbackAlert>
       ) : (
         <>
@@ -159,7 +162,7 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
             title="Datos de la categoría"
             description="Actualiza nombre, categoría padre, descripción y orden. El slug se administra por separado en SEO."
           >
-            {error && <FeedbackAlert semantic="error" title="No se pudo guardar">{error}</FeedbackAlert>}
+            {error && <FeedbackAlert semantic={isUnknownIntent({ id: detalle.id, nombre: nombre.trim(), slug: detalle.slug ?? "", padreId: padreId ?? undefined, descripcion: descripcion.trim() || undefined, orden: orden ?? detalle.orden ?? 0 }) ? "warning" : "error"} title={isUnknownIntent({ id: detalle.id, nombre: nombre.trim(), slug: detalle.slug ?? "", padreId: padreId ?? undefined, descripcion: descripcion.trim() || undefined, orden: orden ?? detalle.orden ?? 0 }) ? "Resultado incierto" : "No se pudo guardar"} actions={orden !== null && isUnknownIntent({ id: detalle.id, nombre: nombre.trim(), slug: detalle.slug ?? "", padreId: padreId ?? undefined, descripcion: descripcion.trim() || undefined, orden }) ? <Button variant="outline" onClick={() => void reconciliar({ id: detalle.id, nombre: nombre.trim(), slug: detalle.slug ?? "", padreId: padreId ?? undefined, descripcion: descripcion.trim() || undefined, orden })}>Consultar categoría</Button> : undefined}>{error}</FeedbackAlert>}
             <form onSubmit={handleSubmit} noValidate>
               <Stack gap="md">
                 <TextInput
@@ -202,7 +205,7 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
                   >
                     Cancelar
                   </Button>
-                  <Button type="submit" loading={phase === "guardando"} disabled={writeOutcomeUnknown}>
+                  <Button type="submit" loading={phase === "guardando"} disabled={orden !== null && isUnknownIntent({ id: detalle.id, nombre: nombre.trim(), slug: detalle.slug ?? "", padreId: padreId ?? undefined, descripcion: descripcion.trim() || undefined, orden })}>
                     Guardar cambios
                   </Button>
                 </Group>

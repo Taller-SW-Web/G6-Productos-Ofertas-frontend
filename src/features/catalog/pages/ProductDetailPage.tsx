@@ -32,6 +32,7 @@ import { useProductDetail } from "../hooks/useProductDetail";
 import { CatalogReadError } from "../components/CatalogReadError";
 import {
   calculateVolumeCm3,
+  formatAttributeValue,
   productStatusLabel,
   readCatalogScenario,
 } from "../services/catalogPresentation";
@@ -404,7 +405,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
                         {attr.nombre}
                       </Text>
                       <Text size="sm" fw={600}>
-                        {attr.valorDisponible === false || attr.valor === null ? "Valor no disponible" : attr.valor} {attr.unidad ? `(${attr.unidad})` : ""}
+                        {formatAttributeValue(attr)} {attr.unidad ? `(${attr.unidad})` : ""}
                       </Text>
                     </div>
                   ))}

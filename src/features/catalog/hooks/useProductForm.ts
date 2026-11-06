@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useContext } from "react";
 import type {
   ProductAttributeValue,
   ProductCreatePayload,
@@ -14,6 +14,9 @@ import type {
   TaxonomyProductType,
 } from "../services/taxonomyRepository";
 import { useCatalogServices } from "./useCatalogServices";
+import { runCatalogCreateIntent, hasCatalogCreateIntent } from "../services/catalogCreateIntent";
+import { DataModeContext } from "../../../app/config/DataModeContext";
+import { PromotionSessionContext } from "../../../app/config/PromotionSessionContext";
 
 export interface ProductFormData {
   nombre: string;
@@ -45,6 +48,8 @@ export function useProductForm({
 }: UseProductFormOptions) {
   const isEdit = Boolean(initialProduct);
   const { catalog: catalogService, taxonomy: taxonomyService } = useCatalogServices();
+  const mode = useContext(DataModeContext);
+  const promotionSession = useContext(PromotionSessionContext);
 
   const [categories, setCategories] = useState<TaxonomyCategory[]>([]);
   const [brands, setBrands] = useState<TaxonomyBrand[]>([]);
@@ -107,6 +112,32 @@ export function useProductForm({
   const [submitting, setSubmitting] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [writeOutcomeUnknown, setWriteOutcomeUnknown] = useState(false);
+  const [reconciledProductId, setReconciledProductId] = useState<string | null>(null);
+  const reconcileCreateBySku = async () => {
+    if (isEdit || mode !== "api" || !formData.skuBase.trim()) return null;
+    try {
+      let page = 1; let pages = 1; const matches: string[] = [];
+      do {
+        const result = await catalogService.list({ page, pageSize: 100, status: "all" });
+        if (result.page !== page || result.pageSize !== 100) throw new Error("La paginación de Catálogo no permitió reconciliar el SKU.");
+        pages = Math.ceil(result.total / 100);
+        matches.push(...result.items.filter(item => item.skuBase === formData.skuBase.trim()).map(item => item.id));
+        page++;
+      } while (page <= pages && page <= 10_000);
+      if (matches.length === 1) { setReconciledProductId(matches[0]!); return matches[0]!; }
+      setGeneralError(matches.length > 1 ? "La consulta encontró más de un producto con este SKU; la creación sigue bloqueada." : "Catálogo no muestra todavía este SKU. El resultado anterior sigue incierto y la creación no se reenviará.");
+    } catch (error) {
+      setGeneralError(error instanceof Error ? error.message : "No se pudo reconciliar el SKU en Catálogo.");
+    }
+    return null;
+  };
+
+  useEffect(() => {
+    let active = true;
+    if (isEdit || mode !== "api" || !formData.skuBase.trim()) { setWriteOutcomeUnknown(false); return; }
+    void hasCatalogCreateIntent(promotionSession?.snapshot().user?.id, `product:${formData.skuBase.trim()}`).then(pending => { if (active) setWriteOutcomeUnknown(pending); });
+    return () => { active = false; };
+  }, [isEdit, mode, promotionSession, formData.skuBase]);
 
   // Load masters on mount
   useEffect(() => {
@@ -367,7 +398,9 @@ export function useProductForm({
           imagenes: images,
           perfilFisico: physicalProfile,
         };
-        const created = await catalogService.create(payload, scenario);
+        const created = mode === "api"
+          ? await runCatalogCreateIntent(promotionSession?.snapshot().user?.id, `product:${payload.skuBase.trim()}`, () => catalogService.create(payload, scenario))
+          : await catalogService.create(payload, scenario);
         setIsDirty(false);
         onSuccess?.(created);
       }
@@ -409,6 +442,8 @@ export function useProductForm({
     submitting,
     isDirty,
     writeOutcomeUnknown,
+    reconciledProductId,
+    reconcileCreateBySku,
     categories,
     brands,
     productTypes,

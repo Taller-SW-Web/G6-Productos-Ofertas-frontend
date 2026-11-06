@@ -18,6 +18,7 @@ import {
 } from "../../../components/shared";
 import { brandService } from "../services/brandService";
 import { DataModeContext } from "../../../app/config/DataModeContext";
+import { isUncertainTaxonomyMutation } from "../adapters/taxonomyHttp";
 
 const PAISES = [
   { value: "US", label: "Estados Unidos (US)" },
@@ -53,6 +54,21 @@ export function BrandFormPage() {
     esEdicion ? { status: "cargando" } : { status: "listo" },
   );
   const [reloadToken, setReloadToken] = useState(0);
+  const [uncertainIntent, setUncertainIntent] = useState<string | null>(null);
+
+  const intentFingerprint = async () => {
+    const logoDigest = logoFile ? [...new Uint8Array(await crypto.subtle.digest("SHA-256", await logoFile.arrayBuffer()))].map(value => value.toString(16).padStart(2, "0")).join("") : "existing-logo";
+    return JSON.stringify({ id: id ?? "create", nombre: nombre.trim(), descripcion: descripcion.trim() || null, paisOrigenIso, logoDigest });
+  };
+
+  const reconciliarMarca = async () => {
+    try {
+      const list = await brandService.list();
+      const matches = list.items.filter(item => item.nombre === nombre.trim());
+      if (matches.length === 1 && matches[0]) navigate(`/marcas/${matches[0].marcaId}`);
+      else setError(matches.length > 1 ? "Hay varias marcas con ese nombre; revisa el listado manualmente. No se reenviará esta intención." : "El listado no confirma una marca con ese nombre. El resultado sigue incierto y no se reenviará.");
+    } catch (err) { setError(err instanceof Error ? err.message : "No se pudo reconciliar la marca."); }
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -89,6 +105,8 @@ export function BrandFormPage() {
       setError("Ingresa el nombre de la marca.");
       return;
     }
+    const submissionFingerprint = await intentFingerprint();
+    if (uncertainIntent === submissionFingerprint) { setError("Esta misma intención ya se envió y requiere reconciliación. Modifica la solicitud o consulta el listado; no se reenviará."); return; }
     if (mode === "api") {
       if (!esEdicion && !logoFile) { setError("Selecciona el logo obligatorio para crear una marca."); return; }
       if (logoFile && !["image/png", "image/jpeg", "image/webp"].includes(logoFile.type)) { setError("El logo debe ser PNG, JPEG o WebP."); return; }
@@ -136,6 +154,7 @@ export function BrandFormPage() {
         navigate(`/marcas/${creado.marcaId}`);
       }
     } catch (err) {
+      if (isUncertainTaxonomyMutation(err)) setUncertainIntent(submissionFingerprint);
       setError(
         err instanceof Error ? err.message : "No se pudo guardar la marca.",
       );
@@ -209,7 +228,7 @@ export function BrandFormPage() {
         )}
 
         {error && (
-          <FeedbackAlert semantic="error" title="No se pudo guardar la marca">
+          <FeedbackAlert semantic="error" title={uncertainIntent ? "Resultado incierto" : "No se pudo guardar la marca"} actions={uncertainIntent ? <Button variant="outline" onClick={() => void reconciliarMarca()}>Consultar marcas</Button> : undefined}>
             {error}
           </FeedbackAlert>
         )}

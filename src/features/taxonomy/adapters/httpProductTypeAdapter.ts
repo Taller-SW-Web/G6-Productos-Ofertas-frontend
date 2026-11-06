@@ -3,6 +3,8 @@ import type { ProductTypeListItem } from "../types";
 
 /** Frontera para el cliente Gateway compartido; no proporciona credenciales propias. */
 export interface TaxonomyGatewayTransport {
+  /** Stable non-secret identity for session-scoped write reconciliation. */
+  scopeId?(): string | null;
   requestWithInit?(path: string, init: { method: "GET" | "POST" | "PATCH"; signal?: AbortSignal; headers?: Readonly<Record<string, string>>; body?: BodyInit }): Promise<Response>;
   request(
     path: string,

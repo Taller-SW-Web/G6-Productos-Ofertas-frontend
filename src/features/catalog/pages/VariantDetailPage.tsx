@@ -30,6 +30,7 @@ import {
   StatusBadge,
 } from "../../../components/shared";
 import { useVariantDetail } from "../hooks/useVariantDetail";
+import { formatAttributeValue } from "../services/catalogPresentation";
 import { VariantDeactivationDialog } from "../components/VariantDeactivationDialog";
 import { VariantReactivationDialog } from "../components/VariantReactivationDialog";
 import { VariantActivationDialog } from "../components/VariantActivationDialog";
@@ -225,7 +226,7 @@ export function VariantDetailPage() {
                     <Group gap="xs">
                       {variant.identifyingAttributes.map((attr, idx) => (
                         <Badge key={idx} size="md" variant="filled" color="dark">
-                          {attr.nombre}: {attr.valorDisponible === false || attr.valor === null ? "Valor no disponible" : attr.valor}
+                          {attr.nombre}: {formatAttributeValue(attr)}
                         </Badge>
                       ))}
                     </Group>
@@ -243,7 +244,7 @@ export function VariantDetailPage() {
                               {attr.nombre}
                             </Text>
                             <Text size="sm" fw={500}>
-                              {attr.valorDisponible === false || attr.valor === null ? "Valor no disponible" : attr.valor}
+                              {formatAttributeValue(attr)}
                             </Text>
                           </Paper>
                         ))}

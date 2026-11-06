@@ -138,6 +138,7 @@ function VariantCreateForProduct({ productId }: { productId?: string }) {
             </FeedbackAlert>
           </Box>
         )}
+        {form.writeOutcomeUnknown && <Button type="button" variant="outline" mb="md" onClick={async () => { const variant = await form.reconcileCreateBySku(); if (variant) navigate(`/productos/${productId}/variantes/${variant.variantId}`); }}>Consultar Catálogo por SKU</Button>}
 
         <Stack gap="lg" mt="md">
           <VariantFormFields form={form} parentProduct={parentProduct} />

@@ -74,6 +74,7 @@ export interface CategoryDetail {
   padreId?: string;
   padreNombre?: string;
   hijas: CategoryNode[];
+  actualizadaSinLectura?: boolean;
 }
 
 export interface CategoryUpdateInput {
