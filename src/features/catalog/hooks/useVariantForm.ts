@@ -41,7 +41,7 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
   const schemaError = schemaCurrent ? schemaResult.error : null;
   const fromAttribute = (a: ProductAttributeValue): FormAttributeEntry => ({
     key: a.caracteristicaId, caracteristicaId: a.caracteristicaId,
-    nombre: a.nombre, tipo: a.tipo, valor: a.valorId ?? String(a.valor), unidad: a.unidad,
+    nombre: a.nombre, tipo: a.tipo, valor: a.valorDisponible === false || a.valor === null ? "" : a.valorId ?? String(a.valor), unidad: a.unidad,
   });
   const [formData, setFormData] = useState<VariantFormData>(() => ({
     sku: initialVariant?.sku ?? "",
@@ -57,6 +57,7 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
+  const [writeOutcomeUnknown, setWriteOutcomeUnknown] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -146,6 +147,9 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
   };
   const validate = () => {
     const next: Record<string, string> = {};
+    if (isEdit && [...(initialVariant?.identifyingAttributes ?? []), ...(initialVariant?.nonIdentifyingAttributes ?? [])].some(attribute => attribute.valorDisponible === false || attribute.valor === null)) {
+      next.attributes = "La variante contiene valores comerciales no disponibles. No se enviará una edición que pueda sobrescribirlos.";
+    }
     if (!isEdit && !formData.sku.trim()) next.sku = "El SKU es obligatorio; ingrese un código único.";
     if (schemaLoading || schemaError || !parentProduct) {
       next.attributes = "No se puede guardar sin un esquema de Taxonomía válido.";
@@ -171,7 +175,7 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
   };
   const handleSubmit = async (event?: React.FormEvent) => {
     event?.preventDefault();
-    if (submitting || !parentProduct || !validate()) return;
+    if (submitting || writeOutcomeUnknown || !parentProduct || !validate()) return;
     setSubmitting(true);
     setGeneralError(null);
     const physicalProfile = normalizePhysicalProfile(formData);
@@ -191,6 +195,7 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
       setIsDirty(false);
       onSuccess?.(result);
     } catch (err) {
+      if (err instanceof CatalogError && err.kind === "write_unknown") setWriteOutcomeUnknown(true);
       if (err instanceof CatalogError && err.kind === "duplicate_sku") setErrors(prev => ({ ...prev, sku: err.message }));
       else setGeneralError(err instanceof Error ? err.message : "Error inesperado al procesar la solicitud.");
     } finally { setSubmitting(false); }
@@ -203,5 +208,5 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
     updateIdentifyingAttribute: (index: number, key: "valor" | "caracteristicaId", value: string) => updateAttribute(true, index, key, value),
     updateNonIdentifyingAttribute: (index: number, key: "valor" | "caracteristicaId", value: string) => updateAttribute(false, index, key, value),
     derivedVolumeCm3: calculateVolumeCm3(formData.largoCm, formData.anchoCm, formData.altoCm),
-    errors, generalError, submitting, isDirty, handleSubmit, isEdit };
+    errors, generalError, submitting, isDirty, writeOutcomeUnknown, handleSubmit, isEdit };
 }

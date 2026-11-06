@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useContext, useEffect, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Button,
@@ -17,6 +17,7 @@ import {
   SectionCard,
 } from "../../../components/shared";
 import { brandService } from "../services/brandService";
+import { DataModeContext } from "../../../app/config/DataModeContext";
 
 const PAISES = [
   { value: "US", label: "Estados Unidos (US)" },
@@ -40,6 +41,7 @@ type FaseCarga =
 export function BrandFormPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const mode = useContext(DataModeContext);
   const esEdicion = Boolean(id);
   const [nombre, setNombre] = useState("");
   const [logoFile, setLogoFile] = useState<File | null>(null);
@@ -86,6 +88,11 @@ export function BrandFormPage() {
     if (!limpio) {
       setError("Ingresa el nombre de la marca.");
       return;
+    }
+    if (mode === "api") {
+      if (!esEdicion && !logoFile) { setError("Selecciona el logo obligatorio para crear una marca."); return; }
+      if (logoFile && !["image/png", "image/jpeg", "image/webp"].includes(logoFile.type)) { setError("El logo debe ser PNG, JPEG o WebP."); return; }
+      if (logoFile && logoFile.size > 5 * 1024 * 1024) { setError("El logo no puede superar 5 MB."); return; }
     }
     setError(null);
     setGuardando(true);

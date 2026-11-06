@@ -20,7 +20,12 @@ export function createHttpCatalogRepository(transport: CatalogHttpTransport): Ca
       const dto = object(await request(`/caracteristicas/${encoded(id)}`, "GET", undefined, signal));
       if (dto.caracteristicaId !== id) return blockedCatalog("La característica recibida no coincide con la solicitada.");
       return { caracteristicaId: id, tipo: choice(dto.tipo, ["TEXTO", "NUMERO", "LISTA"] as const),
-        unidad: dto.unidadMedida == null ? undefined : string(dto.unidadMedida) };
+        unidad: dto.unidadMedida == null ? undefined : string(dto.unidadMedida),
+        opciones: Array.isArray(dto.valores) ? dto.valores.flatMap(value => {
+          const option = object(value);
+          return typeof option.valorId === "string" && typeof option.nombre === "string" && option.estado === "ACTIVO"
+            ? [{ id: option.valorId, valor: option.nombre }] : [];
+        }) : undefined };
     }));
   };
   const variantAttributes = (dto: Record<string, unknown>) => [...array(dto.identifying_attributes), ...array(dto.non_identifying_attributes)];
@@ -122,7 +127,7 @@ export function createHttpCatalogRepository(transport: CatalogHttpTransport): Ca
       const attributes = dto.attributes === undefined ? [] : array(dto.attributes);
       return { ...summary, description: typeof dto.description === "string" ? string(dto.description) : null, images: images.map(url => ({ url })),
         attributes: mapCommercialAttributes(attributes, schemas), physicalProfile: undefined, preparation: prep,
-        variants: adminVariants.items.map(v => ({ variantId: v.variantId, sku: v.sku, attributesSummary: v.identifyingAttributes.map(a => String(a.valor)).join(" / "), status: v.status, preparationStatus: v.inventoryPreparationStatus, manualRetryAllowed: v.inventoryManualRetryAllowed })),
+        variants: adminVariants.items.map(v => ({ variantId: v.variantId, sku: v.sku, attributesSummary: v.identifyingAttributes.map(a => a.valorDisponible === false || a.valor === null ? "Valor no disponible" : String(a.valor)).join(" / "), status: v.status, preparationStatus: v.inventoryPreparationStatus, manualRetryAllowed: v.inventoryManualRetryAllowed })),
         preparationSummary, publishedCommercially: true };
     },
     create: (p, _sc, sig) => write("/productos", "POST", productBody(p), sig, value => productResult(value, sig), 201),

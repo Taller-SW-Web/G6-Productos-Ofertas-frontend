@@ -122,7 +122,7 @@ function VariantCreateForProduct({ productId }: { productId?: string }) {
               <Button
                 type="submit"
                 loading={form.submitting}
-                disabled={form.schemaLoading || Boolean(form.schemaError)}
+                disabled={form.schemaLoading || Boolean(form.schemaError) || form.writeOutcomeUnknown}
                 leftSection={<IconCheck size={16} />}
               >
                 Guardar Variante

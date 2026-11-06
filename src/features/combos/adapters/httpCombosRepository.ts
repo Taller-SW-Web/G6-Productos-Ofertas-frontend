@@ -129,22 +129,37 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
   async function write(key: string, work: () => Promise<unknown>): Promise<unknown> {
     if (key.startsWith("create:") && confirmedCreates.has(key.slice("create:".length))) throw new Error(`Esta creación ya recibió confirmación HTTP para ${confirmedCreates.get(key.slice("create:".length))}. Abre ese recurso y reconcilia su presentación antes de iniciar otra creación idéntica.`);
     if (uncertain.has(key)) throw new Error("Esta intención de Combos requiere reconciliación. Consulta el listado por nombre, componentes y precio antes de repetirla; no se reenvió la mutación. Puedes continuar con otra intención distinta.");
+    const createFingerprint = key.startsWith("create:") ? key.slice("create:".length) : null;
+    // Persist the intent before dispatch. If storage is unavailable, fail closed
+    // rather than risk an un-reconcilable duplicate after a reload.
+    if (createFingerprint) {
+      try {
+        if (typeof sessionStorage === "undefined") throw new Error("sessionStorage unavailable");
+        sessionStorage.setItem(`${uncertaintyPrefix}${createFingerprint}`, "1");
+      } catch {
+        throw new Error("No se pudo proteger esta creación frente a un resultado incierto; no se envió la solicitud.");
+      }
+      uncertain.add(key);
+    }
     try {
       const result = await work();
       uncertain.delete(key);
-      if (key.startsWith("create:")) { try { if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(`${uncertaintyPrefix}${key.slice("create:".length)}`); } catch { /* the confirmed runtime latch is already cleared */ } }
+      if (createFingerprint) { try { sessionStorage.removeItem(`${uncertaintyPrefix}${createFingerprint}`); } catch { /* in-memory latch remains authoritative */ } }
       return result;
     }
     catch (error) {
       if (error instanceof UnconfirmedComboWrite) {
         uncertain.add(key);
-        if (key.startsWith("create:")) { try { if (typeof sessionStorage !== "undefined") sessionStorage.setItem(`${uncertaintyPrefix}${key.slice("create:".length)}`, "1"); } catch { /* the in-memory latch remains active */ } }
-      } else if (error instanceof ConfirmedComboWrite && key.startsWith("create:")) {
+        if (createFingerprint) { try { sessionStorage.setItem(`${uncertaintyPrefix}${createFingerprint}`, "1"); } catch { /* marker was written before dispatch */ } }
+      } else if (error instanceof ConfirmedComboWrite && createFingerprint) {
         // A 201 was received but its DTO cannot supply the new ID. It is a
         // confirmed write that cannot be safely repeated; retain the same
         // per-intent reconciliation latch across reloads.
         uncertain.add(key);
-        try { if (typeof sessionStorage !== "undefined") sessionStorage.setItem(`${uncertaintyPrefix}${key.slice("create:".length)}`, "1"); } catch { /* the in-memory latch remains active */ }
+        try { sessionStorage.setItem(`${uncertaintyPrefix}${createFingerprint}`, "1"); } catch { /* marker was written before dispatch */ }
+      } else if (createFingerprint) {
+        uncertain.delete(key);
+        try { sessionStorage.removeItem(`${uncertaintyPrefix}${createFingerprint}`); } catch { /* definitive 4xx; marker is only a guard */ }
       }
       throw error;
     }
@@ -162,7 +177,9 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
     catch (error) { throw new Error(`La escritura de Combos quedó confirmada para ${comboId}, pero falló el enriquecimiento o la disponibilidad. Consulta ese combo antes de cualquier otra acción. ${error instanceof Error ? error.message : "Error de presentación."}`, { cause: error }); }
   }
   async function presentConfirmedCreate(value: unknown, key: string): Promise<Combo> {
-    const id = text(object(value).combo_id); const fingerprint = key.slice("create:".length);
+    const rawId = object(value).combo_id;
+    if (typeof rawId !== "string" || !rawId.trim()) throw new ConfirmedComboWrite("Combos confirmó HTTP 201, pero el DTO no contiene un combo_id válido. La intención queda protegida para reconciliación; no la repitas.");
+    const id = rawId; const fingerprint = key.slice("create:".length);
     confirmedCreates.set(fingerprint, id);
     try { if (typeof sessionStorage !== "undefined") sessionStorage.setItem(`${confirmedPrefix}${fingerprint}`, id); } catch { /* runtime latch retains the confirmed resource id */ }
     const result = await presentConfirmed(value);
@@ -187,7 +204,21 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
       catch (error) { if (error instanceof Error && error.message.includes("HTTP 404")) return null; throw error; }
       return mapCombo(dto, signal);
     },
-    async create(payload) { const key = `create:${await createFingerprint(payload)}`; const confirmed = await write(key, () => request("/api/v1/combos", "POST", undefined, toPayload(payload), 201)); return presentConfirmedCreate(confirmed, key); },
+    async create(payload) {
+      const key = `create:${await createFingerprint(payload)}`;
+      const confirmed = await write(key, async () => {
+        const dto = await request("/api/v1/combos", "POST", undefined, toPayload(payload), 201);
+        let id: unknown;
+        try { id = object(dto).combo_id; } catch { throw new ConfirmedComboWrite("Combos confirmó HTTP 201, pero el DTO no contiene una identidad reconciliable."); }
+        if (typeof id !== "string" || !id.trim()) throw new ConfirmedComboWrite("Combos confirmó HTTP 201, pero el DTO no contiene un combo_id válido.");
+        const fingerprint = key.slice("create:".length);
+        confirmedCreates.set(fingerprint, id);
+        try { sessionStorage.setItem(`${confirmedPrefix}${fingerprint}`, id); }
+        catch { throw new ConfirmedComboWrite("Combos confirmó HTTP 201, pero no se pudo guardar la referencia de reconciliación."); }
+        return dto;
+      });
+      return presentConfirmedCreate(confirmed, key);
+    },
     async update(id, payload) { const key = `update:${id}`; const confirmed = await write(key, () => request(`/api/v1/combos/${encodeURIComponent(id)}`, "PATCH", undefined, toPayload(payload))); return presentConfirmed(confirmed); },
     async deactivate(id) { const key = `deactivate:${id}`; const confirmed = await write(key, () => request(`/api/v1/combos/${encodeURIComponent(id)}/desactivar`, "POST", undefined, {}, 200)); return presentConfirmed(confirmed); },
   };

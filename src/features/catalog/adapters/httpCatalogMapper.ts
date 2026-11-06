@@ -22,6 +22,8 @@ export function mapPreparation(value: unknown): ProductPreparationView {
 }
 
 export function requestAttributes(attributes?: ProductAttributeValue[]) {
+  if (attributes?.some(a => a.valorDisponible === false || a.valor === null || typeof a.valor === "boolean"))
+    return blockedCatalog("No se puede guardar un atributo cuyo valor comercial no está disponible o no tiene una representación editable confirmada.");
   return attributes?.map(a => ({ caracteristica_id: a.caracteristicaId, nombre: a.nombre,
     valor: a.valor, ...(a.valorId === undefined ? {} : { valor_id: a.valorId }) }));
 }
@@ -40,16 +42,28 @@ function physical(value: unknown): Partial<PhysicalProfile> | null {
   };
   return { pesoKg: measure(dto.pesoKg), largoCm: measure(dims.largo), anchoCm: measure(dims.ancho), altoCm: measure(dims.alto) };
 }
-export type CatalogAttributeMetadata = Pick<AttributeSchema, "caracteristicaId" | "tipo" | "unidad">;
+export type CatalogAttributeMetadata = Pick<AttributeSchema, "caracteristicaId" | "tipo" | "unidad" | "opciones">;
 export function mapCommercialAttributes(value: unknown, schemas: CatalogAttributeMetadata[]): ProductAttributeValue[] {
   return array(value).map(value => {
     const dto = object(value); const id = string(dto.caracteristica_id);
     const schema = schemas.find(s => s.caracteristicaId === id);
     if (!schema) return blockedCatalog("No se puede interpretar la característica sin su esquema autoritativo de Taxonomía.");
-    if (typeof dto.valor !== "string" && (typeof dto.valor !== "number" || !Number.isFinite(dto.valor)))
-      return blockedCatalog("El valor recibido para la característica no es válido.");
-    return { caracteristicaId: id, nombre: string(dto.nombre), tipo: schema.tipo, valor: dto.valor,
-      valorId: dto.valor_id == null ? undefined : string(dto.valor_id), unidad: schema.unidad };
+    const referenceId = typeof dto.valor_id === "string" ? dto.valor_id : (() => {
+      if (!dto.valor || typeof dto.valor !== "object" || Array.isArray(dto.valor)) return undefined;
+      const reference = dto.valor as Record<string, unknown>;
+      const candidate = reference.valor_id ?? reference.valorId ?? reference.id;
+      return typeof candidate === "string" && candidate.length > 0 ? candidate : undefined;
+    })();
+    const option = referenceId ? schema.opciones?.find(item => item.id === referenceId) : undefined;
+    let readable: string | number | boolean | null;
+    let available = true;
+    if (option) readable = option.valor;
+    else if (referenceId && schema.tipo === "LISTA") { readable = null; available = false; }
+    else if (typeof dto.valor === "string" || typeof dto.valor === "boolean" || (typeof dto.valor === "number" && Number.isFinite(dto.valor))) readable = dto.valor;
+    else { readable = null; available = false; }
+    return { caracteristicaId: id, nombre: string(dto.nombre), tipo: schema.tipo, valor: readable,
+      valorDisponible: available, ...(referenceId ? { valorReferenciaId: referenceId } : {}),
+      ...(referenceId && option ? { valorId: referenceId } : typeof dto.valor_id === "string" ? { valorId: dto.valor_id } : {}), unidad: schema.unidad };
   });
 }
 export function mapVariant(value: unknown, productId: string, preparation: ProductPreparationView, schemas: CatalogAttributeMetadata[]): VariantDetailView {
@@ -82,6 +96,6 @@ export function mapProduct(value: unknown, preparation: ProductPreparationView, 
     imageUrl: images[0], images: images.map(url => ({ url })), attributes: mapCommercialAttributes(dto.attributes, schemas),
     physicalProfile: physical(dto.perfil_fisico), preparation,
     variants: variants.map(v => ({ variantId: v.variantId, sku: v.sku,
-      attributesSummary: v.identifyingAttributes.map(a => String(a.valor)).join(" / "), status: v.status,
+      attributesSummary: v.identifyingAttributes.map(a => a.valorDisponible === false || a.valor === null ? "Valor no disponible" : String(a.valor)).join(" / "), status: v.status,
       preparationStatus: v.inventoryPreparationStatus, manualRetryAllowed: v.inventoryManualRetryAllowed })) };
 }

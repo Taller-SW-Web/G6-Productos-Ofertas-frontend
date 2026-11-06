@@ -63,7 +63,9 @@ export function useProductForm({
     if (initialProduct) {
       const attrs: Record<string, string | number> = {};
       initialProduct.attributes.forEach((a) => {
-        attrs[a.caracteristicaId] = a.tipo === "LISTA" ? a.valorId ?? "" : a.valor;
+        attrs[a.caracteristicaId] = a.valorDisponible === false || a.valor === null
+          ? ""
+          : a.tipo === "LISTA" ? a.valorId ?? "" : typeof a.valor === "boolean" ? String(a.valor) : a.valor;
       });
       return {
         nombre: initialProduct.name,
@@ -104,6 +106,7 @@ export function useProductForm({
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
+  const [writeOutcomeUnknown, setWriteOutcomeUnknown] = useState(false);
 
   // Load masters on mount
   useEffect(() => {
@@ -213,6 +216,10 @@ export function useProductForm({
 
   const validate = (): boolean => {
     const newErrors: Record<string, string> = {};
+    if (isEdit && initialProduct?.attributes.some(attribute => attribute.valorDisponible === false || attribute.valor === null)) {
+      setGeneralError("El producto contiene valores comerciales no disponibles. No se enviará una edición que pueda sobrescribirlos.");
+      return false;
+    }
 
     if (!formData.nombre.trim()) {
       newErrors.nombre = "El nombre es obligatorio.";
@@ -269,7 +276,7 @@ export function useProductForm({
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (submitting) return;
+    if (submitting || writeOutcomeUnknown) return;
     if (!schemaConfirmed || loadingMasters) {
       setGeneralError(schemaError ?? "Espera a que se confirme el esquema de Taxonomía antes de guardar.");
       return;
@@ -366,6 +373,7 @@ export function useProductForm({
       }
     } catch (err) {
       if (err instanceof CatalogError) {
+        if (err.kind === "write_unknown") setWriteOutcomeUnknown(true);
         if (err.kind === "duplicate_sku") {
           setErrors((prev) => ({
             ...prev,
@@ -400,6 +408,7 @@ export function useProductForm({
     generalError,
     submitting,
     isDirty,
+    writeOutcomeUnknown,
     categories,
     brands,
     productTypes,

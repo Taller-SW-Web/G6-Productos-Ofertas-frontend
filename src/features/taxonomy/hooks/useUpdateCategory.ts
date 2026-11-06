@@ -20,6 +20,7 @@ export function useUpdateCategory() {
   const [slug, setSlug] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [resultado, setResultado] = useState<CategoryDetail | null>(null);
+  const [writeOutcomeUnknown, setWriteOutcomeUnknown] = useState(false);
   const controllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => () => controllerRef.current?.abort(), []);
@@ -52,6 +53,7 @@ export function useUpdateCategory() {
   };
 
   const actualizar = (input: CategoryUpdateInput) => {
+    if (writeOutcomeUnknown) return;
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -65,6 +67,8 @@ export function useUpdateCategory() {
       },
       (err: unknown) => {
         if (controller.signal.aborted) return;
+        const message = err instanceof Error ? err.message : "";
+        if (/resultado de escritura incierto|pudo completarse|confirma el estado/i.test(message)) setWriteOutcomeUnknown(true);
         setError(
           err instanceof Error
             ? err.message
@@ -88,6 +92,7 @@ export function useUpdateCategory() {
     slug,
     error,
     resultado,
+    writeOutcomeUnknown,
     setSlug,
     comprobar,
     actualizar,

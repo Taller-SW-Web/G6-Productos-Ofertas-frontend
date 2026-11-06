@@ -25,6 +25,7 @@ export function ProductCreatePage() {
     generalError,
     submitting,
     isDirty,
+    writeOutcomeUnknown,
     categories,
     brands,
     productTypes,
@@ -93,7 +94,7 @@ export function ProductCreatePage() {
             <Button
               type="submit"
               loading={submitting}
-              disabled={!schemaConfirmed || loadingMasters}
+              disabled={!schemaConfirmed || loadingMasters || writeOutcomeUnknown}
               leftSection={<IconDeviceFloppy size={16} />}
             >
               Guardar borrador

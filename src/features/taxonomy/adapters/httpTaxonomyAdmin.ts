@@ -74,13 +74,20 @@ export function createHttpCategoryRepository(transport: TaxonomyGatewayTransport
   const get = async (path: string, signal?: AbortSignal) => send(transport, path, "GET", undefined, signal, 200);
   const getCategoryDetail = async (id: string, signal?: AbortSignal) => {
     const dto = row(await get(`/api/v1/categorias/${encodeURIComponent(id)}`, signal));
+    if (dto.categoriaId !== id) throw invalid();
     const tree = await get("/api/v1/categorias/arbol", signal);
     if (!Array.isArray(tree)) throw invalid();
-    const findLevel = (nodes: unknown[], level: number): number | null => {
-      for (const item of nodes) { const node = row(item); const category = row(node.categoria ?? node); if (category.categoriaId === id) return level; if (Array.isArray(node.hijos)) { const found = findLevel(node.hijos, level + 1); if (found !== null) return found; } }
-      return null;
+    const matches: { raw: unknown; level: number; parent?: Row }[] = [];
+    const visit = (nodes: unknown[], level: number, parent?: Row) => {
+      for (const item of nodes) { const node = row(item); const category = row(node.categoria ?? node); if (category.categoriaId === id) matches.push({ raw: node, level, parent: parent ? row(parent.categoria ?? parent) : undefined }); if (node.hijos !== undefined && !Array.isArray(node.hijos)) throw invalid(); if (Array.isArray(node.hijos)) visit(node.hijos, level + 1, node); }
     };
-    return { ...categoryDetail(dto), nivel: findLevel(tree, 0) };
+    visit(tree, 0);
+    if (matches.length !== 1) throw invalid();
+    const match = matches[0]; if (!match) throw invalid();
+    const node = row(match.raw); const children = node.hijos === undefined ? [] : (node.hijos as unknown[]).map(child => treeNode(child, match.level + 1));
+    const parentId = typeof match.parent?.categoriaId === "string" ? match.parent.categoriaId : undefined;
+    if ((typeof dto.categoriaPadreId === "string" ? dto.categoriaPadreId : undefined) !== parentId) throw invalid();
+    return { ...categoryDetail(dto), nivel: match.level, hijas: children, ...(match.parent ? { padreNombre: str(match.parent.nombre) } : {}) };
   };
   return {
     async list(signal): Promise<CategoryListResult> {

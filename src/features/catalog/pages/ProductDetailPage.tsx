@@ -404,7 +404,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
                         {attr.nombre}
                       </Text>
                       <Text size="sm" fw={600}>
-                        {attr.valor} {attr.unidad ? `(${attr.unidad})` : ""}
+                        {attr.valorDisponible === false || attr.valor === null ? "Valor no disponible" : attr.valor} {attr.unidad ? `(${attr.unidad})` : ""}
                       </Text>
                     </div>
                   ))}

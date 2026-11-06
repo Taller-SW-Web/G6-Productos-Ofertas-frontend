@@ -225,7 +225,7 @@ export function VariantDetailPage() {
                     <Group gap="xs">
                       {variant.identifyingAttributes.map((attr, idx) => (
                         <Badge key={idx} size="md" variant="filled" color="dark">
-                          {attr.nombre}: {attr.valor}
+                          {attr.nombre}: {attr.valorDisponible === false || attr.valor === null ? "Valor no disponible" : attr.valor}
                         </Badge>
                       ))}
                     </Group>
@@ -243,7 +243,7 @@ export function VariantDetailPage() {
                               {attr.nombre}
                             </Text>
                             <Text size="sm" fw={500}>
-                              {attr.valor}
+                              {attr.valorDisponible === false || attr.valor === null ? "Valor no disponible" : attr.valor}
                             </Text>
                           </Paper>
                         ))}

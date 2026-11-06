@@ -202,5 +202,5 @@ export function formatIdentifyingAttributes(
   attrs: ProductAttributeValue[],
 ): string {
   if (!attrs || attrs.length === 0) return "Sin atributos";
-  return attrs.map((a) => String(a.valor)).join(" / ");
+  return attrs.map((a) => a.valorDisponible === false || a.valor === null ? "Valor no disponible" : String(a.valor)).join(" / ");
 }

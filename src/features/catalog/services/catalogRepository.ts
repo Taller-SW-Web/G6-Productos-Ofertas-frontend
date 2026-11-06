@@ -17,7 +17,10 @@ export interface ProductAttributeValue {
   caracteristicaId: string;
   nombre: string;
   tipo: "TEXTO" | "NUMERO" | "LISTA";
-  valor: string | number;
+  valor: string | number | boolean | null;
+  /** False when an open-contract value could not be safely interpreted. */
+  valorDisponible?: boolean;
+  valorReferenciaId?: string;
   valorId?: string;
   unidad?: string;
 }
