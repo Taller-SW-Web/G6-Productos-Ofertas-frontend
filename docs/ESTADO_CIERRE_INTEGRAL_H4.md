@@ -1,9 +1,9 @@
 # Cierre integral H4 — estado para auditoría estática
 
-**Frontend branch:** `fix/frontend-h4-cierre-integral`  
-**Base:** Frontend `origin/master` `4d1b85969816f2879a6f6f17b3553cccba0ab764`  
-**Docs consultado:** `origin/master` `a7778ec1a22811c1213a94ef096ab905911342cc`  
-**Backend consultado:** `origin/master` `61171913510daddc5baedc9532b236de1953fac5`  
+**Frontend branch:** `fix/frontend-h4-cierre-integral`
+**Base:** Frontend `origin/master` `4d1b85969816f2879a6f6f17b3553cccba0ab764`
+**Docs consultado:** `origin/master` `a7778ec1a22811c1213a94ef096ab905911342cc`
+**Backend consultado:** `origin/master` `61171913510daddc5baedc9532b236de1953fac5`
 **Fecha:** 2026-11-06
 
 Este informe distingue código frontend, fuentes contractuales, disponibilidad externa y validaciones. La tabla de OpenAPI es un inventario estático generado; la coincidencia textual de una ruta/operación no demuestra que un servicio esté desplegado ni que G7 haya concedido un grant.
