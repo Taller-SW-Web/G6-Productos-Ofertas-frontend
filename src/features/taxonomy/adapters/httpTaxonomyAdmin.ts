@@ -86,8 +86,8 @@ export function createHttpCategoryRepository(transport: TaxonomyGatewayTransport
     const match = matches[0]; if (!match) throw invalid();
     const node = row(match.raw); const children = node.hijos === undefined ? [] : (node.hijos as unknown[]).map(child => treeNode(child, match.level + 1));
     const parentId = typeof match.parent?.categoriaId === "string" ? match.parent.categoriaId : undefined;
-    if ((typeof dto.categoriaPadreId === "string" ? dto.categoriaPadreId : undefined) !== parentId) throw invalid();
-    return { ...categoryDetail(dto), nivel: match.level, hijas: children, ...(match.parent ? { padreNombre: str(match.parent.nombre) } : {}) };
+    if (Object.hasOwn(dto, "categoriaPadreId") && (typeof dto.categoriaPadreId === "string" ? dto.categoriaPadreId : undefined) !== parentId) throw invalid();
+    return { ...categoryDetail(dto), nivel: match.level, hijas: children, ...(parentId ? { padreId: parentId } : {}), ...(match.parent ? { padreNombre: str(match.parent.nombre) } : {}) };
   };
   return {
     async list(signal): Promise<CategoryListResult> {
