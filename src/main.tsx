@@ -66,7 +66,7 @@ async function start() {
                 const targets = [];
                 const pageSize = 100;
                 let page = 1;
-                let totalPages = 1;
+                let totalPages: number;
                 do {
                   const result = await catalogServices.catalog.list({ page, pageSize, status: "all" }, undefined, signal);
                   if (result.page !== page || result.pageSize !== pageSize || result.items.length > result.total) throw new Error("Paginación de Catálogo incompatible.");
@@ -76,7 +76,7 @@ async function start() {
                     targets.push({ id: productTargetId, label: product.name, productId: product.id, kind: "product" as const, ...(product.skuBase ? { referenceSku: product.skuBase } : {}) });
                     if (product.hasVariants) {
                       let variantPage = 1;
-                      let variantPages = 1;
+                      let variantPages: number;
                       do {
                         const variants = await catalogServices.catalog.listVariants(product.id, { page: variantPage, pageSize }, undefined, signal);
                         if (variants.page !== variantPage || variants.pageSize !== pageSize || variants.items.length > variants.total) throw new Error("Paginación de variantes incompatible.");
@@ -124,7 +124,7 @@ async function start() {
             const brandNames = new Map(brands.map(item => [item.id, item.nombre]));
             const output: import("./features/inventory/adapters/apiInventoryAdapter").InventoryCatalogSku[] = [];
             let page = 1;
-            let totalPages = 1;
+            let totalPages: number;
             do {
               const result = await catalogServices.catalog.list({ page, pageSize: 100, status: "all" }, undefined, signal);
               if (result.page !== page || result.pageSize !== 100) throw new Error("Paginación de Catálogo incompatible para Inventario.");
@@ -135,7 +135,7 @@ async function start() {
                 if (!product.hasVariants && product.skuBase) output.push({ sku: product.skuBase, ...meta });
                 if (product.hasVariants) {
                   let variantPage = 1;
-                  let variantPages = 1;
+                  let variantPages: number;
                   do {
                     const variants = await catalogServices.catalog.listVariants(product.id, { page: variantPage, pageSize: 100, status: "all" }, undefined, signal);
                     if (variants.page !== variantPage || variants.pageSize !== 100) throw new Error("Paginación de variantes incompatible para Inventario.");
@@ -220,3 +220,4 @@ void start().catch((error: unknown) =>
     </div>,
   ),
 );
+
