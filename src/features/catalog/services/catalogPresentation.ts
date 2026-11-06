@@ -22,7 +22,8 @@ export function readPositiveInteger(
   return Math.min(parsed, max);
 }
 
-export function productStatusLabel(status: ProductStatus): string {
+export function productStatusLabel(status: ProductStatus | null): string {
+  if (status === null) return "Estado administrativo no publicado";
   switch (status) {
     case "ACTIVO":
       return "Activo";

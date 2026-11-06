@@ -42,10 +42,27 @@ export function createAuthenticatedGatewayClient(
     signal: AbortSignal,
     correlationId: string,
   ): Promise<Response> {
-    if (!path.startsWith("/api/v1/") || path.startsWith("//"))
+    if (!path.startsWith("/api/v1/") || path.startsWith("//") || path.includes("\\"))
       throw new Error("La ruta no pertenece al contrato API del Gateway.");
+    const rawPath = path.split(/[?#]/, 1)[0] ?? "";
+    for (const segment of rawPath.split("/")) {
+      let decoded = segment;
+      try {
+        let stable = false;
+        for (let depth = 0; depth < 10; depth++) {
+          const next = decodeURIComponent(decoded);
+          if (next === decoded) { stable = true; break; }
+          decoded = next;
+        }
+        if (!stable) throw new Error("La ruta tiene demasiadas capas de codificación.");
+      } catch {
+        throw new Error("La ruta contiene un segmento codificado inválido.");
+      }
+      if (decoded === "." || decoded === ".." || decoded.includes("/") || decoded.includes("\\") || [...decoded].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127))
+        throw new Error("La ruta contiene un segmento que puede escapar del API del Gateway.");
+    }
     const target = new URL(path, origin);
-    if (target.origin !== origin) throw new Error("Destino de Gateway no válido.");
+    if (target.origin !== origin || !target.pathname.startsWith("/api/v1/")) throw new Error("Destino de Gateway no válido.");
     return fetcher(target.href, {
       method: request.method,
       signal,

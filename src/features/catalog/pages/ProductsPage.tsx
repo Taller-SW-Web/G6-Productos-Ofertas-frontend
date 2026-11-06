@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useContext, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { ActionIcon, Avatar, Button, Group, Stack, Text } from "@mantine/core";
 import { IconEye, IconPlus } from "@tabler/icons-react";
@@ -19,8 +19,10 @@ import {
 import type { CatalogQuery, ProductView } from "../services/catalogRepository";
 import { useTaxonomyFilters } from "../hooks/useTaxonomyFilters";
 import { useMockStateRevision } from "../../shared/useMockStateRevision";
+import { DataModeContext } from "../../../app/config/DataModeContext";
 
 export function ProductsPage() {
+  const mode = useContext(DataModeContext) ?? "mock";
   const [params, setParams] = useSearchParams();
   const location = useLocation();
   const [revision, setRevision] = useState(0);
@@ -182,6 +184,8 @@ export function ProductsPage() {
                 Rechazada
               </StatusBadge>
             );
+          case null:
+            return <Text size="sm" c="dimmed">No publicada por el resumen comercial</Text>;
           default:
             return (
               <StatusBadge semantic="info" size="sm">
@@ -198,7 +202,7 @@ export function ProductsPage() {
       render: (row) => {
         return (
           <StatusBadge semantic="neutral" size="sm">
-            {productStatusLabel(row.status)}
+            {row.commerciallyActive ? "Publicado comercialmente · estado administrativo no publicado" : productStatusLabel(row.status)}
           </StatusBadge>
         );
       },
@@ -263,6 +267,7 @@ export function ProductsPage() {
         }
       />
 
+      {mode === "api" && <FeedbackAlert semantic="info" title="Listado comercial de solo lectura">El contrato publica productos comercialmente activos. La lista no incluye versiones administrativas ni estados de preparación; esos datos se consultan por separado cuando existe una operación de detalle.</FeedbackAlert>}
       {taxonomy.loading && <Text size="sm">Cargando filtros de Taxonomía...</Text>}
       {taxonomy.error && <FeedbackAlert semantic="error" title="Error al cargar filtros"
         actions={<Button variant="outline" onClick={handleRetry}>Reintentar filtros</Button>}>
@@ -270,6 +275,7 @@ export function ProductsPage() {
       </FeedbackAlert>}
       <ProductFilters
         loading={taxonomy.loading}
+        mode={mode}
         query={query}
         categories={taxonomy.categories}
         productTypes={taxonomy.productTypes}

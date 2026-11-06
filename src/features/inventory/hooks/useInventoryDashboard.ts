@@ -88,6 +88,7 @@ export function useInventoryDashboard(filters: DashboardFiltersQuery) {
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
 
     // Filtros contractuales admitidos por obtenerDashboardInventario (agregado)
     const aggregateFilters: DashboardFiltersQuery = { locationId };
@@ -108,7 +109,7 @@ export function useInventoryDashboard(filters: DashboardFiltersQuery) {
       repository.getDashboardKpis(aggregateFilters),
       repository.getDashboardAlerts(tableFilters),
       repository.getLocationDistribution(aggregateFilters),
-      repository.getStockItems(tableFilters),
+      repository.getStockItems(tableFilters, controller.signal),
     ]).then(([kpiResult, alertsResult, distResult, stockResult]) => {
       if (cancelled) return;
       const kpis = fulfilled(kpiResult, null);
@@ -142,6 +143,7 @@ export function useInventoryDashboard(filters: DashboardFiltersQuery) {
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [search, category, brand, locationId, status, requestKey]);
 

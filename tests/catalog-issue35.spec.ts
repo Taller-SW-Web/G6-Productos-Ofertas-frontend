@@ -112,7 +112,7 @@ test("POM-03: Pricing reads the current Catalog identity and name without fabric
   const signal = new AbortController().signal;
   const prices = createMockPricingRepository({ now: () => "2026-10-17T12:00:00Z" }, undefined, { catalogTargets: true });
   const product = (await mockCatalogRepository.getById("PROD-MOCH-001"))!;
-  await mockCatalogRepository.update(product.id, { nombre: "Mochila transversal", descripcion: product.description, categoriaId: product.categoryId, marcaId: product.brandId, catalogVersion: product.catalogVersion });
+  await mockCatalogRepository.update(product.id, { nombre: "Mochila transversal", descripcion: product.description ?? "", categoriaId: product.categoryId, marcaId: product.brandId, catalogVersion: product.catalogVersion! });
   await mockCatalogRepository.deactivate(product.id);
   const target = (await prices.listTargets(signal)).find(row => row.productId === product.id);
   expect(target).toMatchObject({ id: product.id, referenceSku: product.skuBase });

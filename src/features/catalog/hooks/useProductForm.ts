@@ -67,7 +67,7 @@ export function useProductForm({
       });
       return {
         nombre: initialProduct.name,
-        descripcion: initialProduct.description,
+        descripcion: initialProduct.description ?? "",
         categoriaId: initialProduct.categoryId,
         tipoProductoId: initialProduct.typeId,
         marcaId: initialProduct.brandId,
@@ -326,6 +326,9 @@ export function useProductForm({
 
     try {
       if (isEdit && initialProduct) {
+        if (initialProduct.catalogVersion === null) {
+          throw new Error("Catálogo no publica una versión administrativa para este producto; la edición queda deshabilitada hasta disponer de esa versión.");
+        }
         const payload: ProductUpdatePayload = {
           nombre: formData.nombre,
           descripcion: formData.descripcion,

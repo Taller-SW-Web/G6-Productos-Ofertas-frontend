@@ -67,27 +67,44 @@ async function start() {
                 const pageSize = 100;
                 let page = 1;
                 let totalPages: number;
+                let reportedTotal: number | undefined;
+                const productIds = new Set<string>();
+                const targetIds = new Set<string>();
+                const skus = new Set<string>();
                 do {
                   const result = await catalogServices.catalog.list({ page, pageSize, status: "all" }, undefined, signal);
-                  if (result.page !== page || result.pageSize !== pageSize || result.items.length > result.total) throw new Error("Paginación de Catálogo incompatible.");
+                  if (result.page !== page || result.pageSize !== pageSize || (reportedTotal !== undefined && reportedTotal !== result.total) || result.items.length !== Math.min(pageSize, Math.max(0, result.total - (page - 1) * pageSize))) throw new Error("Paginación de Catálogo incompatible.");
+                  reportedTotal = result.total;
                   totalPages = Math.ceil(result.total / pageSize);
                   for (const product of result.items) {
+                    if (!product.id || productIds.has(product.id) || !(product.commerciallyActive === true || product.status === "ACTIVO")) throw new Error("Catálogo devolvió una identidad de producto duplicada o no comercialmente activa.");
+                    productIds.add(product.id);
                     const productTargetId = product.id;
+                    if (targetIds.has(productTargetId)) throw new Error("Catálogo devolvió un objetivo de Pricing duplicado.");
+                    targetIds.add(productTargetId);
                     targets.push({ id: productTargetId, label: product.name, productId: product.id, kind: "product" as const, ...(product.skuBase ? { referenceSku: product.skuBase } : {}) });
                     if (product.hasVariants) {
                       let variantPage = 1;
                       let variantPages: number;
+                      let variantTotal: number | undefined;
                       do {
                         const variants = await catalogServices.catalog.listVariants(product.id, { page: variantPage, pageSize }, undefined, signal);
-                        if (variants.page !== variantPage || variants.pageSize !== pageSize || variants.items.length > variants.total) throw new Error("Paginación de variantes incompatible.");
+                        if (variants.page !== variantPage || variants.pageSize !== pageSize || (variantTotal !== undefined && variantTotal !== variants.total) || variants.items.length !== Math.min(pageSize, Math.max(0, variants.total - (variantPage - 1) * pageSize)) || variants.items.some(variant => variant.productId !== product.id)) throw new Error("Paginación o identidad de variantes incompatible.");
+                        variantTotal = variants.total;
                         variantPages = Math.ceil(variants.total / pageSize);
-                        for (const variant of variants.items) if (variant.status === "ACTIVA") targets.push({ id: `sku:${variant.sku}`, label: `${product.name} · ${variant.sku}`, productId: product.id, kind: "variant" as const, sku: variant.sku, productTargetId });
+                        for (const variant of variants.items) if (variant.status === "ACTIVA") {
+                          if (!variant.sku || skus.has(variant.sku) || targetIds.has(`sku:${variant.sku}`)) throw new Error("Catálogo devolvió un SKU u objetivo de Pricing duplicado.");
+                          skus.add(variant.sku);
+                          targetIds.add(`sku:${variant.sku}`);
+                          targets.push({ id: `sku:${variant.sku}`, label: `${product.name} · ${variant.sku}`, productId: product.id, kind: "variant" as const, sku: variant.sku, productTargetId });
+                        }
                         variantPage++;
                       } while (variantPage <= variantPages);
                     }
                   }
                   page++;
                 } while (page <= totalPages);
+                if (productIds.size !== (reportedTotal ?? 0)) throw new Error("La selección de Pricing no cubre el catálogo completo.");
                 return targets;
               },
             }),
@@ -99,6 +116,54 @@ async function start() {
       ? { api: async () => createHttpAuditRepository(gatewayClient) }
       : {}),
   });
+  let inventorySkuCache: import("./features/inventory/adapters/apiInventoryAdapter").InventoryCatalogSku[] | null = null;
+  let inventorySkuCacheAt = 0;
+  let inventorySkuLoad: Promise<import("./features/inventory/adapters/apiInventoryAdapter").InventoryCatalogSku[]> | null = null;
+  const listInventoryCatalogSkus = async (signal?: AbortSignal) => {
+    if (inventorySkuCache && Date.now() - inventorySkuCacheAt < 30_000) return inventorySkuCache;
+    if (inventorySkuLoad) { const cached = await inventorySkuLoad; signal?.throwIfAborted(); return cached; }
+    inventorySkuLoad = (async () => {
+      const [categories, brands] = await Promise.all([catalogServices.taxonomy.getCategories(signal), catalogServices.taxonomy.getBrands(signal)]);
+      const categoryNames = new Map(categories.map(item => [item.id, item.nombre]));
+      const brandNames = new Map(brands.map(item => [item.id, item.nombre]));
+      const output: import("./features/inventory/adapters/apiInventoryAdapter").InventoryCatalogSku[] = [];
+      let page = 1;
+      let totalPages: number;
+      let reportedTotal: number | undefined;
+      const productIds = new Set<string>();
+      do {
+        const result = await catalogServices.catalog.list({ page, pageSize: 100, status: "all" }, undefined, signal);
+        if (result.page !== page || result.pageSize !== 100 || (reportedTotal !== undefined && reportedTotal !== result.total) || result.items.length !== Math.min(100, Math.max(0, result.total - (page - 1) * 100))) throw new Error("Paginación de Catálogo incompleta para Inventario.");
+        reportedTotal = result.total;
+        totalPages = Math.ceil(result.total / 100);
+        for (const product of result.items) {
+          if (!product.id || productIds.has(product.id) || !(product.commerciallyActive === true || product.status === "ACTIVO")) throw new Error("Catálogo devolvió una identidad de producto duplicada o no activa para Inventario.");
+          productIds.add(product.id);
+          const meta = { productName: product.name, categoryId: product.categoryId, categoryName: categoryNames.get(product.categoryId) ?? `ID ${product.categoryId}`, brandId: product.brandId, brandName: brandNames.get(product.brandId) ?? `ID ${product.brandId}` };
+          if (!product.hasVariants && product.skuBase) output.push({ sku: product.skuBase, ...meta });
+          if (product.hasVariants) {
+            let variantPage = 1;
+            let variantPages: number;
+            let variantTotal: number | undefined;
+            do {
+              const variants = await catalogServices.catalog.listVariants(product.id, { page: variantPage, pageSize: 100, status: "all" }, undefined, signal);
+              if (variants.page !== variantPage || variants.pageSize !== 100 || (variantTotal !== undefined && variantTotal !== variants.total) || variants.items.length !== Math.min(100, Math.max(0, variants.total - (variantPage - 1) * 100)) || variants.items.some(variant => variant.productId !== product.id)) throw new Error("Paginación o identidad de variantes incompleta para Inventario.");
+              variantTotal = variants.total;
+              variantPages = Math.ceil(variants.total / 100);
+              for (const variant of variants.items) if (variant.status === "ACTIVA") output.push({ sku: variant.sku, ...meta });
+              variantPage++;
+            } while (variantPage <= variantPages);
+          }
+        }
+        page++;
+      } while (page <= totalPages);
+      if (productIds.size !== (reportedTotal ?? 0)) throw new Error("Catálogo no entregó todos los productos para Inventario.");
+      if (new Set(output.map(item => item.sku)).size !== output.length) throw new Error("Catálogo devolvió SKU duplicados para Inventario.");
+      return output;
+    })();
+    try { inventorySkuCache = await inventorySkuLoad; inventorySkuCacheAt = Date.now(); return inventorySkuCache; }
+    finally { inventorySkuLoad = null; }
+  };
   if (mode === "api" && gatewayOrigin && promotions) {
     if (gatewayClient) {
       configureTaxonomyGateway({
@@ -115,55 +180,11 @@ async function start() {
       configureInventoryApi(() =>
         createHttpInventoryRepository({
           transport: gatewayClient,
-          listCatalogSkus: async signal => {
-            const [categories, brands] = await Promise.all([
-              catalogServices.taxonomy.getCategories(signal),
-              catalogServices.taxonomy.getBrands(signal),
-            ]);
-            const categoryNames = new Map(categories.map(item => [item.id, item.nombre]));
-            const brandNames = new Map(brands.map(item => [item.id, item.nombre]));
-            const output: import("./features/inventory/adapters/apiInventoryAdapter").InventoryCatalogSku[] = [];
-            let page = 1;
-            let totalPages: number;
-            do {
-              const result = await catalogServices.catalog.list({ page, pageSize: 100, status: "all" }, undefined, signal);
-              if (result.page !== page || result.pageSize !== 100) throw new Error("Paginación de Catálogo incompatible para Inventario.");
-              totalPages = Math.ceil(result.total / 100);
-              for (const product of result.items) {
-                if (product.status !== "ACTIVO") continue;
-                const meta = { productName: product.name, categoryId: product.categoryId, categoryName: categoryNames.get(product.categoryId) ?? `ID ${product.categoryId}`, brandId: product.brandId, brandName: brandNames.get(product.brandId) ?? `ID ${product.brandId}` };
-                if (!product.hasVariants && product.skuBase) output.push({ sku: product.skuBase, ...meta });
-                if (product.hasVariants) {
-                  let variantPage = 1;
-                  let variantPages: number;
-                  do {
-                    const variants = await catalogServices.catalog.listVariants(product.id, { page: variantPage, pageSize: 100, status: "all" }, undefined, signal);
-                    if (variants.page !== variantPage || variants.pageSize !== 100) throw new Error("Paginación de variantes incompatible para Inventario.");
-                    variantPages = Math.ceil(variants.total / 100);
-                    for (const variant of variants.items) if (variant.status === "ACTIVA") output.push({ sku: variant.sku, ...meta });
-                    variantPage++;
-                  } while (variantPage <= variantPages);
-                }
-              }
-              page++;
-            } while (page <= totalPages);
-            return output;
-          },
+          listCatalogSkus: listInventoryCatalogSkus,
           getCategories: async () => (await catalogServices.taxonomy.getCategories()).map(item => ({ id: item.id, name: item.nombre, active: item.activo })),
           getBrands: async () => (await catalogServices.taxonomy.getBrands()).map(item => ({ id: item.id, name: item.nombre, active: item.activo })),
           resolveTransferPresentation: async dto => {
-            const skus = await catalogServices.catalog.list({ page: 1, pageSize: 100, status: "all" });
-            let productName = `SKU ${dto.sku} (nombre no disponible en Catálogo)`;
-            for (let page = 1; page <= Math.max(1, Math.ceil(skus.total / 100)); page++) {
-              const products = page === 1 ? skus : await catalogServices.catalog.list({ page, pageSize: 100, status: "all" });
-              const match = products.items.find(item => item.skuBase === dto.sku);
-              if (match) { productName = match.name; break; }
-              for (const product of products.items.filter(item => item.hasVariants)) {
-                const variants = await catalogServices.catalog.listVariants(product.id, { page: 1, pageSize: 100, status: "all" });
-                if (variants.items.some(variant => variant.sku === dto.sku)) { productName = product.name; break; }
-              }
-              if (productName !== `SKU ${dto.sku} (nombre no disponible en Catálogo)`) break;
-            }
+            const productName = (await listInventoryCatalogSkus()).find(item => item.sku === dto.sku)?.productName ?? `SKU ${dto.sku} (nombre no disponible en Catálogo)`;
             return { transferCode: `ID ${dto.traslado_id}`, productName, sourceLocationName: `ID ${dto.source_location_id}`, targetLocationName: `ID ${dto.target_location_id}` };
           },
         }),
@@ -220,5 +241,3 @@ void start().catch((error: unknown) =>
     </div>,
   ),
 );
-
-\n

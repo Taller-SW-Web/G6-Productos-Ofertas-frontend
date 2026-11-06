@@ -57,7 +57,16 @@ function mapAvailability(value: unknown, comboId: string, status: Combo["status"
 }
 
 export function createHttpCombosRepository(client: AuthenticatedGatewayClient, catalog: CombosCatalogPort): CombosRepository {
-  const uncertain = new Set<string>();
+  const uncertaintyPrefix = "g6:combos:uncertain:create:";
+  const confirmedPrefix = "g6:combos:confirmed:create:";
+  const storedUncertaintyKeys = () => { try { return typeof sessionStorage === "undefined" ? [] : Object.keys(sessionStorage).filter(key => key.startsWith(uncertaintyPrefix)).map(key => key.slice(uncertaintyPrefix.length)); } catch { return []; } };
+  const uncertain = new Set<string>(storedUncertaintyKeys());
+  const confirmedCreates = new Map<string, string>();
+  try { if (typeof sessionStorage !== "undefined") for (const key of Object.keys(sessionStorage).filter(item => item.startsWith(confirmedPrefix))) { const id = sessionStorage.getItem(key); if (id) confirmedCreates.set(key.slice(confirmedPrefix.length), id); } } catch { /* storage is optional; runtime latches still apply */ }
+  class UnconfirmedComboWrite extends Error {
+    constructor(message: string, options?: ErrorOptions) { super(message, options); }
+  }
+  class ConfirmedComboWrite extends Error {}
   async function request(path: string, method: "GET" | "POST" | "PATCH", signal?: AbortSignal, body?: unknown, expected = 200): Promise<unknown> {
     let response: Response;
     try {
@@ -69,18 +78,23 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
       });
     } catch (error) {
       if (signal?.aborted) throw error;
-      throw new Error(method === "GET" ? "No se pudo conectar con Combos." : "No se pudo confirmar la escritura de Combos. Conserva la referencia y consulta el recurso antes de repetir la operación.");
+      if (method === "GET") throw new Error("No se pudo conectar con Combos.", { cause: error });
+      throw new UnconfirmedComboWrite("No se confirmó la escritura de Combos. Conserva la referencia y reconcilia el recurso antes de repetir la operación.", { cause: error });
     }
     if (!response.ok) {
-      if (method !== "GET" && response.status >= 500) throw new Error(`Resultado de escritura incierto (HTTP ${response.status}); consulta Combos antes de crear otra operación.`);
+      if (method !== "GET" && (response.status >= 500 || response.status === 408)) throw new UnconfirmedComboWrite(`Resultado de escritura incierto (HTTP ${response.status}); consulta Combos antes de crear otra operación.`);
       const bodyValue = await response.clone().json().catch(() => null) as { code?: unknown } | null;
       const code = typeof bodyValue?.code === "string" ? bodyValue.code : "ERROR_HTTP";
       throw new Error(`Combos respondió HTTP ${response.status} (${code}).`);
     }
-    if (response.status !== expected || !response.headers.get("content-type")?.toLowerCase().includes("application/json"))
-      throw new Error(method === "GET" ? "Combos devolvió una respuesta incompatible." : "La escritura no se pudo confirmar; consulta Combos antes de repetirla.");
+    if (response.status !== expected) {
+      if (method !== "GET") throw new UnconfirmedComboWrite(`Combos respondió HTTP ${response.status}, distinto del esperado ${expected}; reconcilia antes de reenviar.`);
+      throw new Error("Combos devolvió una respuesta incompatible.");
+    }
+    if (!response.headers.get("content-type")?.toLowerCase().includes("application/json"))
+      throw method === "GET" ? new Error("Combos devolvió una respuesta incompatible.") : new ConfirmedComboWrite("Combos confirmó la escritura, pero el MIME de respuesta es incompatible. No la repitas; consulta el recurso.");
     try { return await response.json(); }
-    catch { throw new Error(method === "GET" ? "Combos devolvió JSON ilegible." : "La respuesta de escritura es ilegible; consulta Combos antes de repetirla."); }
+    catch { throw method === "GET" ? new Error("Combos devolvió JSON ilegible.") : new ConfirmedComboWrite("Combos confirmó la escritura, pero su DTO es ilegible. No la repitas; consulta el recurso."); }
   }
   async function availability(id: string, status: Combo["status"], signal?: AbortSignal): Promise<ComboAvailability> {
     return mapAvailability(await request(`/api/v1/combos/${encodeURIComponent(id)}/disponibilidad`, "GET", signal), id, status);
@@ -108,15 +122,30 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
       availability: await availability(id, status, signal),
     };
   }
-  async function write(key: string, work: () => Promise<Combo>): Promise<Combo> {
-    if (uncertain.has(key)) throw new Error("Hay una escritura de Combos sin confirmar. Consulta el recurso y reconcilia el resultado antes de crear otra operación.");
+  async function createFingerprint(payload: ComboPayload): Promise<string> {
+    const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(toPayload(payload)))));
+    return [...bytes].map(value => value.toString(16).padStart(2, "0")).join("");
+  }
+  async function write(key: string, work: () => Promise<unknown>): Promise<unknown> {
+    if (key.startsWith("create:") && confirmedCreates.has(key.slice("create:".length))) throw new Error(`Esta creación ya recibió confirmación HTTP para ${confirmedCreates.get(key.slice("create:".length))}. Abre ese recurso y reconcilia su presentación antes de iniciar otra creación idéntica.`);
+    if (uncertain.has(key)) throw new Error("Esta intención de Combos requiere reconciliación. Consulta el listado por nombre, componentes y precio antes de repetirla; no se reenvió la mutación. Puedes continuar con otra intención distinta.");
     try {
       const result = await work();
       uncertain.delete(key);
+      if (key.startsWith("create:")) { try { if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(`${uncertaintyPrefix}${key.slice("create:".length)}`); } catch { /* the confirmed runtime latch is already cleared */ } }
       return result;
     }
     catch (error) {
-      if (!(error instanceof Error && /HTTP 4\d\d/.test(error.message))) uncertain.add(key);
+      if (error instanceof UnconfirmedComboWrite) {
+        uncertain.add(key);
+        if (key.startsWith("create:")) { try { if (typeof sessionStorage !== "undefined") sessionStorage.setItem(`${uncertaintyPrefix}${key.slice("create:".length)}`, "1"); } catch { /* the in-memory latch remains active */ } }
+      } else if (error instanceof ConfirmedComboWrite && key.startsWith("create:")) {
+        // A 201 was received but its DTO cannot supply the new ID. It is a
+        // confirmed write that cannot be safely repeated; retain the same
+        // per-intent reconciliation latch across reloads.
+        uncertain.add(key);
+        try { if (typeof sessionStorage !== "undefined") sessionStorage.setItem(`${uncertaintyPrefix}${key.slice("create:".length)}`, "1"); } catch { /* the in-memory latch remains active */ }
+      }
       throw error;
     }
   }
@@ -127,6 +156,20 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
     precioCombo: payload.priceMinor / 100,
     ...(payload.version === undefined ? {} : { version: payload.version }),
   });
+  async function presentConfirmed(value: unknown): Promise<Combo> {
+    const comboId = text(object(value).combo_id);
+    try { return await mapCombo(value); }
+    catch (error) { throw new Error(`La escritura de Combos quedó confirmada para ${comboId}, pero falló el enriquecimiento o la disponibilidad. Consulta ese combo antes de cualquier otra acción. ${error instanceof Error ? error.message : "Error de presentación."}`, { cause: error }); }
+  }
+  async function presentConfirmedCreate(value: unknown, key: string): Promise<Combo> {
+    const id = text(object(value).combo_id); const fingerprint = key.slice("create:".length);
+    confirmedCreates.set(fingerprint, id);
+    try { if (typeof sessionStorage !== "undefined") sessionStorage.setItem(`${confirmedPrefix}${fingerprint}`, id); } catch { /* runtime latch retains the confirmed resource id */ }
+    const result = await presentConfirmed(value);
+    confirmedCreates.delete(fingerprint);
+    try { if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(`${confirmedPrefix}${fingerprint}`); } catch { /* current runtime already reconciled */ }
+    return result;
+  }
   return {
     async list(query: ComboQuery, signal): Promise<ComboPage> {
       const params = new URLSearchParams({ pagina: String(query.page), tamanio: String(query.pageSize) });
@@ -144,8 +187,8 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
       catch (error) { if (error instanceof Error && error.message.includes("HTTP 404")) return null; throw error; }
       return mapCombo(dto, signal);
     },
-    create(payload) { return write("create", async () => mapCombo(await request("/api/v1/combos", "POST", undefined, toPayload(payload), 201))); },
-    update(id, payload) { const key = `update:${id}`; return write(key, async () => mapCombo(await request(`/api/v1/combos/${encodeURIComponent(id)}`, "PATCH", undefined, toPayload(payload)))); },
-    deactivate(id) { const key = `deactivate:${id}`; return write(key, async () => mapCombo(await request(`/api/v1/combos/${encodeURIComponent(id)}/desactivar`, "POST", undefined, {}))); },
+    async create(payload) { const key = `create:${await createFingerprint(payload)}`; const confirmed = await write(key, () => request("/api/v1/combos", "POST", undefined, toPayload(payload), 201)); return presentConfirmedCreate(confirmed, key); },
+    async update(id, payload) { const key = `update:${id}`; const confirmed = await write(key, () => request(`/api/v1/combos/${encodeURIComponent(id)}`, "PATCH", undefined, toPayload(payload))); return presentConfirmed(confirmed); },
+    async deactivate(id) { const key = `deactivate:${id}`; const confirmed = await write(key, () => request(`/api/v1/combos/${encodeURIComponent(id)}/desactivar`, "POST", undefined, {}, 200)); return presentConfirmed(confirmed); },
   };
 }

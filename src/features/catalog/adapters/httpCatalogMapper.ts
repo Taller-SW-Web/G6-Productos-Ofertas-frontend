@@ -41,7 +41,7 @@ function physical(value: unknown): Partial<PhysicalProfile> | null {
   return { pesoKg: measure(dto.pesoKg), largoCm: measure(dims.largo), anchoCm: measure(dims.ancho), altoCm: measure(dims.alto) };
 }
 export type CatalogAttributeMetadata = Pick<AttributeSchema, "caracteristicaId" | "tipo" | "unidad">;
-function attributes(value: unknown, schemas: CatalogAttributeMetadata[]): ProductAttributeValue[] {
+export function mapCommercialAttributes(value: unknown, schemas: CatalogAttributeMetadata[]): ProductAttributeValue[] {
   return array(value).map(value => {
     const dto = object(value); const id = string(dto.caracteristica_id);
     const schema = schemas.find(s => s.caracteristicaId === id);
@@ -58,8 +58,8 @@ export function mapVariant(value: unknown, productId: string, preparation: Produ
   if (preparation.productId !== productId || !prep) return blockedCatalog("No se recibió preparación autoritativa para esta variante.");
   const images = array(dto.images).map(string);
   return { variantId: id, productId, sku, status: choice(dto.status, ["BORRADOR", "ACTIVA", "INACTIVA"] as const),
-    catalogVersion: integer(dto.catalog_version), identifyingAttributes: attributes(dto.identifying_attributes, schemas),
-    nonIdentifyingAttributes: attributes(dto.non_identifying_attributes, schemas), images, imageUrl: images[0] ?? "",
+    catalogVersion: integer(dto.catalog_version), identifyingAttributes: mapCommercialAttributes(dto.identifying_attributes, schemas),
+    nonIdentifyingAttributes: mapCommercialAttributes(dto.non_identifying_attributes, schemas), images, imageUrl: images[0] ?? "",
     physicalProfile: physical(dto.physical_profile), inventoryPreparationStatus: prep.inventario.status,
     inventoryStatus: prep.inventario.status, inventoryManualRetryAllowed: prep.inventario.manualRetryAllowed,
     inventoryPreparationCode: prep.inventario.code };
@@ -79,7 +79,7 @@ export function mapProduct(value: unknown, preparation: ProductPreparationView, 
     brandId: string(dto.marca_id), brandName: string(dto.marca_id),
     status: choice(dto.status, ["BORRADOR", "ACTIVO", "INACTIVO"] as const), catalogVersion: integer(dto.catalog_version),
     preparationSummary: summary, description: dto.description == null ? "" : string(dto.description),
-    imageUrl: images[0], images: images.map(url => ({ url })), attributes: attributes(dto.attributes, schemas),
+    imageUrl: images[0], images: images.map(url => ({ url })), attributes: mapCommercialAttributes(dto.attributes, schemas),
     physicalProfile: physical(dto.perfil_fisico), preparation,
     variants: variants.map(v => ({ variantId: v.variantId, sku: v.sku,
       attributesSummary: v.identifyingAttributes.map(a => String(a.valor)).join(" / "), status: v.status,

@@ -41,7 +41,7 @@ export function createTaxonomyServicesAdapter(
           caracteristicaId: characteristic.id, nombre: characteristic.nombre,
           tipo: characteristic.tipo, obligatorio: association.obligatoria, unidad: characteristic.unidad,
           opciones: values?.filter(value => value.estado === "Activo").map(value => ({ id: value.valorId, valor: value.nombre })),
-          maxLength: characteristic.tipo === "TEXTO" ? catalog.config.maxTexto : undefined,
+          maxLength: characteristic.tipo === "TEXTO" && catalog.config.maxTexto !== null ? catalog.config.maxTexto : undefined,
           ...providerMetadata,
         };
       }));

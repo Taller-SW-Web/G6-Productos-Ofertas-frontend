@@ -100,7 +100,7 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
   const [nombre, setNombre] = useState(detalle.nombre);
   const [padreId, setPadreId] = useState<string | null>(detalle.padreId ?? null);
   const [descripcion, setDescripcion] = useState(detalle.descripcion ?? "");
-  const [orden, setOrden] = useState<number>(detalle.orden);
+  const [orden, setOrden] = useState<number | null>(detalle.orden);
   const [nombreError, setNombreError] = useState<string | null>(null);
 
   const padres = useMemo(() => {
@@ -130,15 +130,16 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
       setNombreError("Ingresa el nombre de la categoría.");
       return;
     }
+    if (orden === null) { setNombreError("Ingresa un orden porque el servicio no publicó el valor actual."); return; }
     setNombreError(null);
-    if (limpio !== detalle.nombre) {
+    if (limpio !== detalle.nombre || !detalle.slug) {
       comprobar(limpio);
       return;
     }
     actualizar({
       id: detalle.id,
       nombre: limpio,
-      slug: slug.trim() || detalle.slug,
+      slug: slug.trim() || detalle.slug!,
       padreId: padreId ?? undefined,
       descripcion: descripcion.trim() || undefined,
       orden,
@@ -149,7 +150,7 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
     if (
       !slugCheck ||
       phase === "comprobando" ||
-      phase === "guardando"
+      phase === "guardando" || orden === null
     ) {
       return;
     }
@@ -211,9 +212,9 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
                   label="Orden"
                   min={1}
                   allowDecimal={false}
-                  value={orden}
+                  value={orden ?? ""}
                   onChange={(value) =>
-                    setOrden(typeof value === "number" ? value : 1)
+                    setOrden(typeof value === "number" ? value : null)
                   }
                 />
                 <Textarea

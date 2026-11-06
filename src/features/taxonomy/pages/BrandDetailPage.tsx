@@ -79,7 +79,7 @@ function BrandDetailLoader({ id }: { id: string }) {
           </FeedbackAlert>
         )}
         {state.status === "success" && (
-          <BrandDetailContent detalle={state.detalle} baja={baja} />
+          <BrandDetailContent detalle={state.detalle} baja={baja} onReload={reload} />
         )}
       </Stack>
     </>
@@ -89,9 +89,11 @@ function BrandDetailLoader({ id }: { id: string }) {
 function BrandDetailContent({
   detalle,
   baja,
+  onReload,
 }: {
   detalle: BrandDetail;
   baja: ReturnType<typeof useSolicitarBajaMarca>;
+  onReload: () => void;
 }) {
   const navigate = useNavigate();
   const [confirmar, setConfirmar] = useState(false);
@@ -116,7 +118,7 @@ function BrandDetailContent({
             >
               Editar
             </Button>
-            {detalle.estado === "Inactivo" && <Button variant="outline" loading={reactivando} onClick={() => { setReactivando(true); setReactivacionError(null); void brandService.reactivar(detalle.marcaId).then(result => { if (!result) throw new Error("Marca no encontrada (404)."); window.location.reload(); }).catch(error => setReactivacionError(error instanceof Error ? error.message : "No se pudo reactivar la marca.")).finally(() => setReactivando(false)); }}>Reactivar</Button>}
+            {detalle.estado === "Inactivo" && <Button variant="outline" loading={reactivando} onClick={() => { setReactivando(true); setReactivacionError(null); void brandService.reactivar(detalle.marcaId).then(result => { if (!result) throw new Error("Marca no encontrada (404)."); onReload(); }).catch(error => setReactivacionError(error instanceof Error ? error.message : "No se pudo reactivar la marca.")).finally(() => setReactivando(false)); }}>Reactivar</Button>}
             {detalle.estado === "Activo" && baja.state.status === "idle" && (
               <Button variant="outline" onClick={() => setConfirmar(true)}>
                 Solicitar desactivación

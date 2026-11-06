@@ -4,16 +4,52 @@ import { array, blockedCatalog, boolean, choice, createCatalogHttp, encoded, int
 /** Read-only Catalog port, not an implementation of Taxonomy administration. */
 export function createHttpTaxonomyRepository(transport: CatalogHttpTransport): TaxonomyRepository {
   const request = createCatalogHttp(transport);
+  const listAll = async (path: string, signal?: AbortSignal) => {
+    const result: unknown[] = [];
+    const identities = new Set<string>();
+    const pageSize = 200;
+    let page = 1;
+    let total = -1;
+    let totalPages = -1;
+    while (page <= Math.max(1, totalPages)) {
+      const dto = object(await request(`${path}?pagina=${page}&tamanio=${pageSize}`, "GET", undefined, signal));
+      const meta = object(dto.meta);
+      const current = integer(meta.pagina, 1);
+      const size = integer(meta.tamanio, 1);
+      const reportedTotal = integer(meta.total);
+      const reportedPages = integer(meta.totalPaginas);
+      const items = array(dto.items);
+      const expectedPages = Math.ceil(reportedTotal / size);
+      if (current !== page || size !== pageSize || reportedPages !== expectedPages ||
+        items.length !== Math.min(size, Math.max(0, reportedTotal - (page - 1) * size)) ||
+        (total !== -1 && (total !== reportedTotal || totalPages !== reportedPages)))
+        return blockedCatalog("La paginación de datos maestros de Taxonomía es inconsistente.");
+      total = reportedTotal;
+      totalPages = reportedPages;
+      for (const item of items) {
+        const row = object(item);
+        const id = string(row.categoriaId ?? row.marcaId);
+        if (identities.has(id)) return blockedCatalog("Taxonomía repitió una identidad en páginas distintas.");
+        identities.add(id);
+        result.push(item);
+      }
+      if (page >= totalPages) break;
+      page++;
+      if (page > 10_000) return blockedCatalog("La consulta excedió el límite defensivo de paginación.");
+    }
+    if (result.length !== total) return blockedCatalog("Taxonomía no entregó el conjunto completo de datos maestros.");
+    return result;
+  };
   return {
     async getCategories(signal) {
-      const dto = object(await request("/categorias/administracion", "GET", undefined, signal));
-      return array(dto.items ?? dto.categorias ?? dto.categories).map(value => { const row = object(value); return {
+      const rows = await listAll("/categorias/administracion", signal);
+      return rows.map(value => { const row = object(value); return {
         id: string(row.categoriaId ?? row.categoria_id), nombre: string(row.nombre ?? row.name), activo: ["ACTIVO", "ACTIVA"].includes(String(row.estado ?? row.status)) };
       });
     },
     async getBrands(signal) {
-      const dto = object(await request("/marcas/administracion", "GET", undefined, signal));
-      return array(dto.items ?? dto.marcas ?? dto.brands).map(value => { const row = object(value); return {
+      const rows = await listAll("/marcas/administracion", signal);
+      return rows.map(value => { const row = object(value); return {
         id: string(row.marcaId ?? row.marca_id), nombre: string(row.nombre ?? row.name), activo: ["ACTIVO", "ACTIVA"].includes(String(row.estado ?? row.status)) };
       });
     },

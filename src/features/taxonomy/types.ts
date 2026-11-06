@@ -65,9 +65,10 @@ export interface CategoryCreateResult {
 export interface CategoryDetail {
   id: string;
   nombre: string;
-  slug: string;
-  nivel: number;
-  orden: number;
+  slug: string | null;
+  nivel: number | null;
+  orden: number | null;
+  version: number;
   estado: CategoryNode["estado"];
   descripcion?: string;
   padreId?: string;
@@ -151,12 +152,12 @@ export interface CharacteristicListItem {
   tipo: CharacteristicType;
   estado: CharacteristicStatus;
   unidad?: string;
-  valoresActivos: number;
+  valoresActivos: number | null;
 }
 
 export interface CharacteristicCatalogConfig {
-  maxTexto: number;
-  maxValoresLista: number;
+  maxTexto: number | null;
+  maxValoresLista: number | null;
 }
 
 // S02 (Crear característica) — presentation models. The type is chosen at creation
@@ -184,7 +185,7 @@ export interface CharacteristicDetail {
   tipo: CharacteristicType;
   estado: CharacteristicStatus;
   unidad?: string;
-  valoresActivos: number;
+  valoresActivos: number | null;
   version?: number;
   valores?: CharacteristicValue[];
 }
@@ -224,7 +225,7 @@ export interface ProductTypeAssociationCharacteristic {
   tipo: CharacteristicType;
   estado: CharacteristicStatus;
   unidad?: string;
-  valoresActivos: number;
+  valoresActivos: number | null;
 }
 
 export interface ProductTypeAssociation {

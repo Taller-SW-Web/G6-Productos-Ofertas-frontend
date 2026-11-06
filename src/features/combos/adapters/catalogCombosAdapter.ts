@@ -25,7 +25,7 @@ export interface CatalogCombosAdapterOptions {
 }
 
 function isActiveProduct(product: ProductView): boolean {
-  return product.status === "ACTIVO";
+  return product.commerciallyActive === true || product.status === "ACTIVO";
 }
 
 export class CatalogCombosAdapter implements CombosCatalogPort {
@@ -51,12 +51,11 @@ export class CatalogCombosAdapter implements CombosCatalogPort {
   async getProduct(productId: string, signal?: AbortSignal): Promise<ProductDetail | null> {
     const detail = await this.catalog.getById(productId, undefined, signal);
     if (!detail) return null;
-    const variants = detail.hasVariants ? await this.listAllVariants(detail.id, signal) : [];
     return {
       ...this.toSummary(detail),
-      variants: variants.map((variant) => ({
+      variants: detail.variants.map((variant) => ({
         sku: variant.sku,
-        label: variantLabel(variant),
+        label: variant.attributesSummary ? `${variant.attributesSummary} · ${variant.sku}` : variant.sku,
         active: variant.status === "ACTIVA",
       })),
     };
@@ -133,23 +132,34 @@ export class CatalogCombosAdapter implements CombosCatalogPort {
 
   private async listAllProducts(signal?: AbortSignal): Promise<ProductView[]> {
     const all: ProductView[] = [];
+    const ids = new Set<string>();
     let page = 1;
+    let total: number | undefined;
     for (;;) {
       const result: CatalogPageResult = await this.catalog.list(
         { page, pageSize: this.pageSize, status: "all" },
         undefined,
         signal,
       );
-      all.push(...result.items);
-      if (result.items.length === 0 || all.length >= result.total || page > 10_000) break;
+      if (result.page !== page || result.pageSize !== this.pageSize || (total !== undefined && total !== result.total) || result.items.length !== Math.min(this.pageSize, Math.max(0, result.total - (page - 1) * this.pageSize))) throw new Error("Catálogo devolvió una paginación incompleta de productos para Combos.");
+      total = result.total;
+      for (const item of result.items) {
+        if (!item.id || ids.has(item.id)) throw new Error("Catálogo devolvió una identidad de producto vacía o repetida para Combos.");
+        ids.add(item.id); all.push(item);
+      }
+      if (page >= Math.ceil(result.total / this.pageSize)) break;
+      if (page >= 10_000) throw new Error("Catálogo excedió el límite defensivo de páginas para Combos.");
       page += 1;
     }
+    if (all.length !== (total ?? 0)) throw new Error("Combos no obtuvo la lista completa de productos.");
     return all;
   }
 
   private async listAllVariants(productId: string, signal?: AbortSignal): Promise<VariantDetailView[]> {
     const all: VariantDetailView[] = [];
+    const ids = new Set<string>();
     let page = 1;
+    let total: number | undefined;
     for (;;) {
       const result: VariantPageResult = await this.catalog.listVariants(
         productId,
@@ -157,17 +167,17 @@ export class CatalogCombosAdapter implements CombosCatalogPort {
         undefined,
         signal,
       );
-      all.push(...result.items);
-      if (result.items.length === 0 || all.length >= result.total || page > 10_000) break;
+      if (result.page !== page || result.pageSize !== this.pageSize || (total !== undefined && total !== result.total) || result.items.length !== Math.min(this.pageSize, Math.max(0, result.total - (page - 1) * this.pageSize)) || result.items.some(item => item.productId !== productId)) throw new Error("Catálogo devolvió una paginación o identidad de variante incompleta para Combos.");
+      total = result.total;
+      for (const item of result.items) {
+        if (!item.variantId || ids.has(item.variantId)) throw new Error("Catálogo devolvió una identidad de variante vacía o repetida para Combos.");
+        ids.add(item.variantId); all.push(item);
+      }
+      if (page >= Math.ceil(result.total / this.pageSize)) break;
+      if (page >= 10_000) throw new Error("Catálogo excedió el límite defensivo de páginas de variantes para Combos.");
       page += 1;
     }
+    if (all.length !== (total ?? 0)) throw new Error("Combos no obtuvo la lista completa de variantes.");
     return all;
   }
-}
-
-function variantLabel(variant: VariantDetailView): string {
-  const attributes = variant.identifyingAttributes
-    .map((attribute) => `${attribute.nombre}: ${String(attribute.valor)}`)
-    .join(" · ");
-  return attributes ? `${attributes} · ${variant.sku}` : variant.sku;
 }

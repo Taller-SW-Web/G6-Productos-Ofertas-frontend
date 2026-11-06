@@ -20,7 +20,7 @@ import type {
 // ScenarioInventoryAdapter (decorador) antes de llegar aquí.
 
 export interface InventoryRepository {
-  getStockItems(filters?: StockFiltersQuery): Promise<StockItem[]>;
+  getStockItems(filters?: StockFiltersQuery, signal?: AbortSignal): Promise<StockItem[]>;
 
   getStockDetail(
     sku: string,

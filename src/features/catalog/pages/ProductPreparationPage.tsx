@@ -139,7 +139,7 @@ export function ProductPreparationPage() {
               Ver detalle
             </Button>
 
-            {p.status !== "INACTIVO" && (
+            {p.catalogVersion !== null && p.status !== "INACTIVO" && (
               <Button
                 component={Link}
                 to={`/productos/${p.id}/editar`}
@@ -150,7 +150,7 @@ export function ProductPreparationPage() {
               </Button>
             )}
 
-            {p.status === "BORRADOR" && (
+            {p.catalogVersion !== null && p.status === "BORRADOR" && (
               <Button
                 onClick={() => setActivateOpened(true)}
                 leftSection={<IconCheck size={16} />}

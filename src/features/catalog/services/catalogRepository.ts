@@ -76,18 +76,20 @@ export interface ProductView {
   typeName: string;
   brandId: string;
   brandName: string;
-  status: ProductStatus;
-  preparationSummary: "COMPLETED" | "PENDING" | "REJECTED" | "PARTIAL";
+  status: ProductStatus | null;
+  /** The consumer endpoint guarantees commercial publication, not admin state. */
+  commerciallyActive?: boolean;
+  preparationSummary: "COMPLETED" | "PENDING" | "REJECTED" | "PARTIAL" | null;
   imageUrl?: string;
-  catalogVersion: number;
+  catalogVersion: number | null;
   priceInitial?: number;
 }
 
 export interface ProductDetailView extends ProductView {
-  description: string;
+  description: string | null;
   images: ProductImageRef[];
   attributes: ProductAttributeValue[];
-  physicalProfile: Partial<PhysicalProfile> | null;
+  physicalProfile: Partial<PhysicalProfile> | null | undefined;
   preparation: ProductPreparationView;
   variants: VariantSummaryView[];
   publishedCommercially?: boolean;

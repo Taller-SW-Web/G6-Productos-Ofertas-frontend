@@ -309,7 +309,7 @@ export const __setCharacteristicMockScenarios = (
     const caracteristica = store.find((item) => item.tipo === "LISTA");
     if (caracteristica) {
       caracteristica.valores = Array.from(
-        { length: characteristicConfigDefaults.maxValoresLista },
+        { length: characteristicConfigDefaults.maxValoresLista ?? 50 },
         (_, index) => ({
           valorId: `fixture-${index + 1}`,
           nombre: `Valor permitido ${String(index + 1).padStart(2, "0")}`,
@@ -497,7 +497,7 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
     // SPEC-009: el límite de valores permitidos se aplica también aquí y no solo como
     // restricción visual del formulario (maxValoresLista sobre valores activos).
     const existentes = r.valores ?? [];
-    if (contarActivos(existentes) >= characteristicConfigDefaults.maxValoresLista) {
+    if (contarActivos(existentes) >= (characteristicConfigDefaults.maxValoresLista ?? 50)) {
       throw new Error(
         `Se alcanzó el límite de ${characteristicConfigDefaults.maxValoresLista} valores permitidos para esta característica.`,
       );

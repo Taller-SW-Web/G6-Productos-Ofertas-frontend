@@ -5,6 +5,7 @@ import type {
   TaxonomyCategory,
   TaxonomyProductType,
 } from "../services/taxonomyRepository";
+import type { DataMode } from "../../../app/config/dataMode";
 
 interface ProductFiltersProps {
   loading?: boolean;
@@ -13,6 +14,7 @@ interface ProductFiltersProps {
   productTypes: TaxonomyProductType[];
   total: number;
   shownCount: number;
+  mode?: DataMode;
   onChange: (patch: Partial<CatalogQuery>) => void;
   onClear: () => void;
 }
@@ -24,6 +26,7 @@ export function ProductFilters({
   productTypes,
   total,
   shownCount,
+  mode = "mock",
   onChange,
   onClear,
 }: ProductFiltersProps) {
@@ -43,7 +46,10 @@ export function ProductFilters({
     { value: "variants", label: "Con variantes" },
   ];
 
-  const statusOptions = [
+  const statusOptions = mode === "api" ? [
+    { value: "all", label: "Activos comerciales" },
+    { value: "ACTIVO", label: "Activo" },
+  ] : [
     { value: "all", label: "Todos los estados" },
     { value: "ACTIVO", label: "Activo" },
     { value: "BORRADOR", label: "Borrador" },
@@ -91,15 +97,15 @@ export function ProductFilters({
           onChange={(val) => onChange({ categoryId: val || "all", page: 1 })}
         />
 
-        <Select
+        {mode !== "api" && <Select
           label="Tipo"
           disabled={loading}
           data={typeOptions}
           value={query.typeId || "all"}
           onChange={(val) => onChange({ typeId: val || "all", page: 1 })}
-        />
+        />}
 
-        <Select
+        {mode !== "api" && <Select
           label="Modelo"
           data={modelOptions}
           value={query.saleModel || "all"}
@@ -109,7 +115,7 @@ export function ProductFilters({
               page: 1,
             })
           }
-        />
+        />}
       </SimpleGrid>
 
       <Group justify="space-between" mt="xs" w="100%">

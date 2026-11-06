@@ -103,6 +103,7 @@ export interface HttpInventoryRepository extends InventoryRepository {
 
 const PAGE_SIZE = 100;
 const MAX_PAGES = 1000;
+const MAX_STOCK_SKUS_PER_REQUEST = 100;
 
 const BLOCKED_DETAILS = {
   getStockItems:
@@ -826,21 +827,23 @@ export function createHttpInventoryRepository(
       return presentConfirmed(frozenPayload, traslado);
     },
 
-    async getStockItems(filters?: import("../services/inventoryTypes").StockFiltersQuery): Promise<StockItem[]> {
+    async getStockItems(filters?: import("../services/inventoryTypes").StockFiltersQuery, signal?: AbortSignal): Promise<StockItem[]> {
       if (!dependencies.listCatalogSkus) throw blocked("getStockItems", "Catálogo no proporcionó el universo paginado de SKU activos");
-      const catalog = await dependencies.listCatalogSkus();
+      const catalog = await dependencies.listCatalogSkus(signal);
       const search = contractFilterValue(filters?.search)?.toLocaleLowerCase();
       const selected = catalog.filter(item => (!search || item.sku.toLocaleLowerCase().includes(search) || item.productName.toLocaleLowerCase().includes(search)) && (!contractFilterValue(filters?.category) || item.categoryId === filters?.category) && (!contractFilterValue(filters?.brand) || item.brandId === filters?.brand));
       const locationId = contractFilterValue(filters?.locationId);
       const locations = locationId ? [{ locationId }] : (await this.getLocationDistribution()).map(item => ({ locationId: item.locationId }));
       if (!selected.length || !locations.length) return [];
       const bySku = new Map(selected.map(item => [item.sku, item])); const output: StockItem[] = [];
-      for (const location of locations) for (let offset = 0; offset < selected.length; offset += 100) {
-        const batch = selected.slice(offset, offset + 100); const params = new URLSearchParams({ skus: batch.map(item => item.sku).join(","), location_id: location.locationId });
-        const response = stockObject(await json(`/api/v1/inventario/disponibilidad?${params}`, { method: "GET" }, false));
+      for (const location of locations) for (let offset = 0; offset < selected.length; offset += MAX_STOCK_SKUS_PER_REQUEST) {
+        signal?.throwIfAborted();
+        const batch = selected.slice(offset, offset + MAX_STOCK_SKUS_PER_REQUEST); const params = new URLSearchParams({ skus: batch.map(item => item.sku).join(","), location_id: location.locationId });
+        const response = stockObject(await json(`/api/v1/inventario/disponibilidad?${params}`, { method: "GET", signal }, false));
         if (!Array.isArray(response.items)) throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario no devolvió saldos por SKU.");
         for (const raw of response.items) { const dto = stockObject(raw); const sku = stockText(dto.sku); const meta = bySku.get(sku); if (!meta) throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario devolvió un SKU que no pertenece al lote solicitado."); const item = toStockItem(dto, meta, location.locationId); if (!contractFilterValue(filters?.status) || item.status === filters?.status) output.push(item); }
       }
+      signal?.throwIfAborted();
       return output;
     },
 

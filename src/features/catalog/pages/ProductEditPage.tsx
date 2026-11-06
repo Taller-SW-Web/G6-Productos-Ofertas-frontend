@@ -56,6 +56,10 @@ export function ProductEditPage() {
     );
   }
 
+  if (detailState.product.catalogVersion === null) {
+    return <Stack gap="md"><PageHeader title={`Detalle de solo lectura: ${detailState.product.name}`} breadcrumbs={[{ label: "Catálogo", to: "/productos" }, { label: "Edición no disponible" }]} /><FeedbackAlert semantic="warning" title="No se puede editar este producto">La consulta comercial no publica una versión administrativa. La pantalla de lectura sigue disponible; no se envía ninguna mutación sin una versión confirmada.</FeedbackAlert><Button component={Link} to={`/productos/${detailState.product.id}`} variant="outline" w="fit-content">Volver al detalle</Button></Stack>;
+  }
+
   return (
     <ProductEditFormContent
       product={detailState.product}
