@@ -25,6 +25,7 @@ import {
   parsePdfStructure,
 } from "../src/features/price-audit/adapters/mockAuditRepository";
 import type { AuditEntry, AuditFilters } from "../src/features/price-audit/services/auditRepository";
+import { createMemoryStorage, createRejectingStorage, fakeOwnerA, fakeOwnerB } from "./fixtures/h4Controlled";
 
 const testSession = {
   getAccessToken: async () => "header.payload.signature",
@@ -112,21 +113,116 @@ describe("adaptador HTTP de Bulk", () => {
 
   it("usa rutas del contrato, bearer y multipart sin fabricar Content-Type", async () => {
     const calls: Array<{ path: string; init: Parameters<BulkHttpTransport["request"]>[1] }> = [];
+    const correlationId = "11111111-1111-4111-8111-111111111111";
+    const contentHash = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+    const expectedBatchId = "159a70a7-b13d-4099-80f0-56a7d0e2cb97";
+    const storage = createMemoryStorage();
+    vi.stubGlobal("sessionStorage", storage);
     const transport: BulkHttpTransport = { request: async (path, init) => {
       calls.push({ path, init });
-      return new Response(JSON.stringify({ batch_id: "b-1", status: "QUEUED", template_version: 2, correlation_id: "00000000-0000-4000-8000-000000000000" }), { status: 202, headers: { "content-type": "application/json" } });
+      const marker = JSON.parse(storage.getItem(`g6:bulk:import-pending:${encodeURIComponent(fakeOwnerA)}:${encodeURIComponent(correlationId)}`) ?? "null") as Record<string, unknown> | null;
+      expect(marker).toMatchObject({ userId: fakeOwnerA, correlationId, expectedBatchId, contentHash, state: "IN_FLIGHT" });
+      return new Response(JSON.stringify({ batch_id: expectedBatchId, status: "QUEUED", template_version: 2, correlation_id: correlationId }), { status: 202, headers: { "content-type": "application/json" } });
     } };
-    const repository = createHttpBulkRepository(transport, testSession);
-    const result = await repository.createImport(new File(["sku,nombre\nA-1,Uno"], "lote.csv", { type: "text/csv" }), { correlationId: "11111111-1111-4111-8111-111111111111" });
-    expect(result).toMatchObject({ batch_id: "b-1", status: "QUEUED" });
-    expect(calls[0]?.path).toBe("/api/v1/carga-masiva/productos/importaciones");
-    expect(calls[0]?.init.headers.Authorization).toBe("Bearer header.payload.signature");
-    expect(calls[0]?.init.headers["X-Correlation-Id"]).toBe("11111111-1111-4111-8111-111111111111");
-    expect(calls[0]?.init.headers["Content-Type"]).toBeUndefined();
-    expect(calls[0]?.init.body).toBeInstanceOf(FormData);
-    const form = calls[0]?.init.body as FormData;
-    expect((form.get("archivo") as File).name).toBe("lote.csv");
-    expect(form.get("template_version")).toBe("2");
+    const session = { ...testSession, snapshot: () => ({ user: { id: fakeOwnerA, nombreCompleto: "H4 A", correo: "owner-a@example.invalid", roles: ["GESTOR_COMERCIAL"] }, mfa: false, busy: false, notice: "" }) };
+    try {
+      const repository = createHttpBulkRepository(transport, session);
+      const result = await repository.createImport(new File(["abc"], "lote.csv", { type: "text/csv" }), { owner: fakeOwnerA, contentHash, expectedBatchId, correlationId });
+      expect(result).toMatchObject({ batch_id: expectedBatchId, status: "QUEUED" });
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.path).toBe("/api/v1/carga-masiva/productos/importaciones");
+      expect(calls[0]?.init.headers.Authorization).toBe("Bearer header.payload.signature");
+      expect(calls[0]?.init.headers["X-Correlation-Id"]).toBe(correlationId);
+      expect(calls[0]?.init.headers["Content-Type"]).toBeUndefined();
+      expect(calls[0]?.init.body).toBeInstanceOf(FormData);
+      const form = calls[0]?.init.body as FormData;
+      expect((form.get("archivo") as File).name).toBe("lote.csv");
+      expect(await (form.get("archivo") as File).text()).toBe("abc");
+      expect(form.get("template_version")).toBe("2");
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it("BUL-08: no envía POST si no puede persistir antes el marcador", async () => {
+    vi.stubGlobal("sessionStorage", createRejectingStorage());
+    const request = vi.fn(async () => new Response(null, { status: 202 }));
+    try {
+      const repository = createHttpBulkRepository({ request }, { ...testSession, snapshot: () => ({ user: { id: fakeOwnerA, nombreCompleto: "H4 A", correo: "a@example.invalid", roles: [] }, mfa: false, busy: false, notice: "" }) });
+      await expect(repository.createImport(new File(["abc"], "a.csv"), { owner: fakeOwnerA, contentHash: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", correlationId: "11111111-1111-4111-8111-111111111111", expectedBatchId: "159a70a7-b13d-4099-80f0-56a7d0e2cb97" })).rejects.toMatchObject({ category: "unknown" });
+      expect(request).not.toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it("BUL-09: HTTP 202 con batch_id ajeno conserva la incertidumbre y no reenvía", async () => {
+    const storage = createMemoryStorage(); vi.stubGlobal("sessionStorage", storage);
+    const request = vi.fn(async () => new Response(JSON.stringify({ batch_id: "22222222-2222-4222-8222-222222222222", status: "QUEUED", template_version: 2 }), { status: 202, headers: { "content-type": "application/json" } }));
+    try {
+      const repository = createHttpBulkRepository({ request }, { ...testSession, snapshot: () => ({ user: { id: fakeOwnerA, nombreCompleto: "H4 A", correo: "a@example.invalid", roles: [] }, mfa: false, busy: false, notice: "" }) });
+      const intent = { owner: fakeOwnerA, contentHash: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", correlationId: "11111111-1111-4111-8111-111111111111", expectedBatchId: "159a70a7-b13d-4099-80f0-56a7d0e2cb97" };
+      await expect(repository.createImport(new File(["abc"], "a.csv"), intent)).rejects.toMatchObject({ category: "unknown", status: 202 });
+      await expect(repository.createImport(new File(["abc"], "a.csv"), intent)).rejects.toMatchObject({ category: "unknown" });
+      expect(request).toHaveBeenCalledOnce();
+      expect(storage.length).toBe(1);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it("BUL-10: un segundo intento tras timeout se bloquea antes del transporte", async () => {
+    const storage = createMemoryStorage(); vi.stubGlobal("sessionStorage", storage);
+    const request = vi.fn(async () => { throw new Error("timeout posterior al despacho"); });
+    try {
+      const repository = createHttpBulkRepository({ request }, { ...testSession, snapshot: () => ({ user: { id: fakeOwnerA, nombreCompleto: "H4 A", correo: "a@example.invalid", roles: [] }, mfa: false, busy: false, notice: "" }) });
+      const file = new File(["abc"], "a.csv");
+      const intent = { owner: fakeOwnerA, contentHash: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", correlationId: "11111111-1111-4111-8111-111111111111", expectedBatchId: "159a70a7-b13d-4099-80f0-56a7d0e2cb97" };
+      await expect(repository.createImport(file, intent)).rejects.toMatchObject({ category: "communication" });
+      await expect(repository.createImport(file, intent)).rejects.toMatchObject({ category: "unknown" });
+      expect(request).toHaveBeenCalledOnce();
+      expect(storage.length).toBe(1);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it("BUL-11: B no recupera ni elimina la intención de A", async () => {
+    const storage = createMemoryStorage(); vi.stubGlobal("sessionStorage", storage);
+    const request = vi.fn(async () => { throw new Error("timeout"); });
+    let owner = fakeOwnerA;
+    const session = { ...testSession, snapshot: () => ({ user: { id: owner, nombreCompleto: "H4", correo: "h4@example.invalid", roles: [] }, mfa: false, busy: false, notice: "" }) };
+    try {
+      const repository = createHttpBulkRepository({ request }, session);
+      const file = new File(["abc"], "a.csv");
+      const intent = { owner: fakeOwnerA, contentHash: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", correlationId: "11111111-1111-4111-8111-111111111111", expectedBatchId: "159a70a7-b13d-4099-80f0-56a7d0e2cb97" };
+      await expect(repository.createImport(file, intent)).rejects.toBeDefined();
+      const before = storage.getItem(`g6:bulk:import-pending:${encodeURIComponent(fakeOwnerA)}:${encodeURIComponent(intent.correlationId)}`);
+      owner = fakeOwnerB;
+      await expect(repository.getImport(intent.expectedBatchId, undefined, fakeOwnerA)).rejects.toMatchObject({ category: "configuration" });
+      await expect(repository.createImport(file, intent)).rejects.toMatchObject({ category: "configuration" });
+      expect(storage.getItem(`g6:bulk:import-pending:${encodeURIComponent(fakeOwnerA)}:${encodeURIComponent(intent.correlationId)}`)).toBe(before);
+      expect(request).toHaveBeenCalledOnce();
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it("BUL-12: exportación incierta persiste el bloqueo y no emite un segundo POST", async () => {
+    const storage = createMemoryStorage(); vi.stubGlobal("sessionStorage", storage);
+    const request = vi.fn(async () => { throw new Error("timeout posterior al despacho"); });
+    try {
+      const repository = createHttpBulkRepository({ request }, { ...testSession, snapshot: () => ({ user: { id: fakeOwnerA, nombreCompleto: "H4 A", correo: "a@example.invalid", roles: [] }, mfa: false, busy: false, notice: "" }) });
+      await expect(repository.createExport("CSV")).rejects.toBeDefined();
+      await expect(repository.createExport("CSV")).rejects.toMatchObject({ category: "unknown" });
+      expect(request).toHaveBeenCalledOnce();
+      expect(storage.length).toBe(1);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it("BUL-13: exportación confirmada conserva export_id y permite seguimiento GET sin repetir POST", async () => {
+    const storage = createMemoryStorage(); vi.stubGlobal("sessionStorage", storage);
+    const exportId = "33333333-3333-4333-8333-333333333333";
+    const request = vi.fn(async (path: string) => path.endsWith("/exportaciones")
+      ? new Response(JSON.stringify({ export_id: exportId, status: "QUEUED", formato: "CSV", created_at: "2026-11-07T12:00:00Z" }), { status: 202, headers: { "content-type": "application/json" } })
+      : new Response(JSON.stringify({ export_id: exportId, status: "COMPLETED", formato: "CSV", created_at: "2026-11-07T12:00:00Z" }), { status: 200, headers: { "content-type": "application/json" } }));
+    try {
+      const repository = createHttpBulkRepository({ request }, { ...testSession, snapshot: () => ({ user: { id: fakeOwnerA, nombreCompleto: "H4 A", correo: "a@example.invalid", roles: [] }, mfa: false, busy: false, notice: "" }) });
+      const created = await repository.createExport("CSV");
+      await expect(repository.getExport(created.export_id)).resolves.toMatchObject({ export_id: exportId, status: "COMPLETED" });
+      expect(request.mock.calls.map(([path]) => path)).toEqual(["/api/v1/carga-masiva/productos/exportaciones", `/api/v1/carga-masiva/productos/exportaciones/${exportId}`]);
+      expect(storage.length).toBe(0);
+    } finally { vi.unstubAllGlobals(); }
   });
 
   it("conserva correlación al reintentar la misma intención y usa otra para una operación nueva", async () => {

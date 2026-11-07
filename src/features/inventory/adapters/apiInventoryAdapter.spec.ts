@@ -150,6 +150,19 @@ async function rejection(promise: Promise<unknown>): Promise<InventoryError> {
 }
 
 describe("apiInventoryAdapter — umbrales (mapeo total)", () => {
+  it("INV-H4-01: rechaza umbral decimal antes de despachar una escritura", async () => {
+    const { repository, request } = setup(async () => jsonResponse(UMBRALES));
+    await expect(rejection(repository.updateSkuThreshold("SKU-A", 2.5))).resolves.toMatchObject({ code: "VALIDACION" });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("INV-H4-02: DELETE 204 del override se emite exactamente una vez y no requiere DTO", async () => {
+    const { repository, calls } = setup(async () => new Response(null, { status: 204 }));
+    await expect(repository.removeSkuThresholdOverride?.("SKU-A")).resolves.toBeUndefined();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ path: "/api/v1/inventario/umbrales/skus/SKU-A", request: { method: "DELETE" } });
+  });
+
   it("getThresholds consulta el contract y mapea UmbralInventario", async () => {
     const { repository, calls } = setup(async () => jsonResponse(UMBRALES));
     await expect(repository.getThresholds()).resolves.toEqual({

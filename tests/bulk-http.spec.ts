@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createHash } from "node:crypto";
 import { AddressInfo } from "node:net";
 import { expect, test } from "@playwright/test";
 import { createBulkFetchTransport, createHttpBulkRepository } from "../src/features/bulk/adapters/httpBulkRepository";
@@ -24,15 +25,33 @@ async function body(request: IncomingMessage): Promise<Buffer> {
   for await (const chunk of request) chunks.push(Buffer.from(chunk));
   return Buffer.concat(chunks);
 }
-function batch(status = "COMPLETED") {
-  return { batch_id: batchId, status, total_rows: 1, completed_rows: 0, failed_rows: 1,
+function batch(id = batchId, status = "COMPLETED") {
+  return { batch_id: id, status, total_rows: 1, completed_rows: 0, failed_rows: 1,
     needs_reconciliation: true, rows: [{ row_id: rowId, sku: "SKU-HTTP-9", nombre: "HTTP producto", status: "FAILED",
       applied_domains: ["CATALOGO"], failed_domain: "PRICING", needs_reconciliation: true,
       code: "PRECIO_INVALIDO", detail: "Precio rechazado", steps: [{ dominio: "CATALOGO", status: "COMPLETED" },
         { dominio: "PRICING", status: "FAILED", code: "PRECIO_INVALIDO", detail: "Precio rechazado" }] }] };
 }
-async function withServer(work: (origin: string, requests: Array<{ method?: string; url?: string; contentType?: string; auth?: string; correlation?: string }>) => Promise<void>, scenario: "actual-backend" | "future-contract" = "actual-backend") {
+function contractBatchId(correlationId: string, fileBytes: Buffer): string {
+  const contentHash = createHash("sha256").update(fileBytes).digest("hex");
+  const digest = createHash("sha256").update(`${correlationId}:${contentHash}`).digest("hex");
+  const uuid = `${digest.slice(0, 12)}4${digest.slice(13, 16)}8${digest.slice(17, 20)}${digest.slice(20, 32)}`;
+  return `${uuid.slice(0, 8)}-${uuid.slice(8, 12)}-${uuid.slice(12, 16)}-${uuid.slice(16, 20)}-${uuid.slice(20)}`;
+}
+function uploadedFileBytes(multipart: Buffer, contentType: string): Buffer {
+  const marker = Buffer.from('name="archivo"; filename="upload.csv"');
+  const start = multipart.indexOf(marker);
+  if (start < 0) throw new Error("El multipart no contiene el campo de archivo esperado.");
+  const headerEnd = multipart.indexOf(Buffer.from("\r\n\r\n"), start);
+  const boundary = /boundary=([^;]+)/i.exec(contentType)?.[1];
+  if (headerEnd < 0 || !boundary) throw new Error("El multipart no tiene encabezados o boundary válido.");
+  const end = multipart.indexOf(Buffer.from(`\r\n--${boundary}`), headerEnd + 4);
+  if (end < 0) throw new Error("El multipart no cierra la parte del archivo.");
+  return multipart.subarray(headerEnd + 4, end);
+}
+async function withServer(work: (origin: string, requests: Array<{ method?: string; url?: string; contentType?: string; auth?: string; correlation?: string }>) => Promise<void>, scenario: "actual-backend" | "future-contract" | "batch-mismatch" = "actual-backend") {
   const requests: Array<{ method?: string; url?: string; contentType?: string; auth?: string; correlation?: string }> = [];
+  let admittedBatchId = batchId;
   const server = createServer(async (request, response) => {
     if (request.method === "OPTIONS") {
       response.writeHead(204, { "access-control-allow-origin": "http://127.0.0.1:5173", "access-control-allow-methods": "GET, POST", "access-control-allow-headers": "authorization, content-type, x-correlation-id" });
@@ -46,19 +65,21 @@ async function withServer(work: (origin: string, requests: Array<{ method?: stri
     }
     if (request.method === "POST" && path === `${root}/importaciones`) {
       const multipart = await body(request);
-      if (!request.headers["content-type"]?.startsWith("multipart/form-data; boundary=") || !multipart.toString().includes('name="archivo"') || !multipart.toString().includes('filename="upload.csv"') || !multipart.toString().includes(validBulkV2Csv) || !multipart.toString().includes('name="template_version"')) return json(response, 400, { status: 400, code: "ARCHIVO_INVALIDO" });
-      return json(response, 202, { batch_id: batchId, status: "QUEUED", template_version: 2, correlation_id: request.headers["x-correlation-id"] });
+      const contentType = request.headers["content-type"] ?? "";
+      const uploaded = uploadedFileBytes(multipart, contentType);
+      if (!contentType.startsWith("multipart/form-data; boundary=") || !multipart.toString().includes('name="archivo"') || !uploaded.equals(Buffer.from(validBulkV2Csv)) || !multipart.toString().includes('name="template_version"')) return json(response, 400, { status: 400, code: "ARCHIVO_INVALIDO" });
+      admittedBatchId = contractBatchId(String(request.headers["x-correlation-id"] ?? ""), uploaded);
+      const returnedBatchId = scenario === "batch-mismatch" ? "99999999-9999-4999-8999-999999999999" : admittedBatchId;
+      return json(response, 202, { batch_id: returnedBatchId, status: "QUEUED", template_version: 2, correlation_id: request.headers["x-correlation-id"] });
     }
-    if (request.method === "GET" && path === `${root}/importaciones/${batchId}`) return json(response, 200, batch());
+    if (request.method === "GET" && path === `${root}/importaciones/${admittedBatchId}`) return json(response, 200, batch(admittedBatchId));
     if (request.method === "GET" && path === `${root}/importaciones/missing`) return json(response, 404, { status: 404, code: "LOTE_NO_ENCONTRADO" });
     if (request.method === "GET" && path === `${root}/importaciones/unauthorized`) return json(response, 401, { status: 401, code: "TOKEN_INVALIDO" });
     if (request.method === "GET" && path === `${root}/importaciones/forbidden`) return json(response, 403, { status: 403, code: "SCOPE_INSUFICIENTE" });
     if (request.method === "GET" && path === `${root}/importaciones/unavailable`) return json(response, 503, { status: 503, code: "SERVICIO_NO_DISPONIBLE" });
     if (request.method === "GET" && path === `${root}/importaciones/network`) { request.socket.destroy(); return; }
     if (request.method === "GET" && path === `${root}/importaciones/conflict-batch`) return json(response, 200, { ...batch(), batch_id: "conflict-batch" });
-    if (request.method === "GET" && path === `${root}/importaciones/${batchId}/reporte`) { response.writeHead(200, { "content-type": "text/csv", "content-disposition": 'attachment; filename="errores.csv"', "access-control-allow-origin": "http://127.0.0.1:5173", "access-control-expose-headers": "content-disposition" }); response.end(`row_id,code\n${rowId},PRECIO_INVALIDO\n`); return; }
-    if (request.method === "POST" && path === `${root}/importaciones/conflict-batch/reanudar`) return json(response, 409, { status: 409, code: "VERSION_CONFLICT" });
-    if (request.method === "POST" && path === `${root}/importaciones/${batchId}/reanudar`) return json(response, 202, { batch_id: batchId, status: "QUEUED", template_version: 2, correlation_id: request.headers["x-correlation-id"] });
+    if (request.method === "GET" && path === `${root}/importaciones/${admittedBatchId}/reporte`) { response.writeHead(200, { "content-type": "text/csv", "content-disposition": 'attachment; filename="errores.csv"', "access-control-allow-origin": "http://127.0.0.1:5173", "access-control-expose-headers": "content-disposition" }); response.end(`row_id,code\n${rowId},PRECIO_INVALIDO\n`); return; }
     if (request.method === "POST" && path === `${root}/exportaciones`) return json(response, 202, { export_id: exportId, status: "QUEUED", formato: "CSV", created_at: iso });
     if (request.method === "GET" && path === `${root}/exportaciones/${exportId}`) return json(response, 200, { export_id: exportId, status: scenario === "actual-backend" ? "FAILED_GENERAL" : "COMPLETED", formato: "CSV", created_at: iso, completed_at: iso, download_url: null });
     if (request.method === "GET" && path === `${root}/exportaciones/${exportId}/archivo`) {
@@ -81,17 +102,18 @@ test("Bulk API contra servidor HTTP aislado simula rutas, upload válido, errore
     await page.locator('input[type="file"]').setInputFiles({ name: "upload.csv", mimeType: "text/csv", buffer: Buffer.from(validBulkV2Csv) });
     await page.getByRole("button", { name: "Continuar a revisión" }).click();
     await page.getByRole("button", { name: "Confirmar importación" }).first().click();
-    await expect(page).toHaveURL(new RegExp(`${batchId}$`));
+    const correlationId = requests.find((request) => request.method === "POST" && request.url === `${root}/importaciones`)?.correlation;
+    const expectedBatchId = contractBatchId(String(correlationId), Buffer.from(validBulkV2Csv));
+    await expect(page).toHaveURL(new RegExp(`${expectedBatchId}$`));
     await expect(page.getByText("SKU-HTTP-9")).toBeVisible();
     await expect(page.getByText("Precio rechazado").first()).toBeVisible();
-    await page.goto(`/tests/harness/bulk-http.html?gateway=${encodeURIComponent(gateway)}#/carga-masiva/importaciones/${batchId}/resultado`);
+    await page.goto(`/tests/harness/bulk-http.html?gateway=${encodeURIComponent(gateway)}#/carga-masiva/importaciones/${expectedBatchId}/resultado`);
     await expect(page.getByText("SKU-HTTP-9")).toBeVisible();
     const reportDownload = page.waitForEvent("download");
     await page.getByRole("button", { name: "Descargar reporte de errores" }).click();
     expect((await reportDownload).suggestedFilename()).toBe("errores.csv");
-    await page.getByRole("button", { name: "Reanudar operaciones pendientes" }).click();
-    await page.getByRole("button", { name: "Confirmar reanudación" }).click();
-    await expect(page).toHaveURL(new RegExp(`${batchId}$`));
+    await expect(page.getByRole("button", { name: "Reanudar operaciones pendientes" })).toHaveCount(0);
+    expect(requests.some((request) => request.method === "POST" && request.url?.includes("/reanudar"))).toBe(false);
 
     await page.goto(`/tests/harness/bulk-http.html?gateway=${encodeURIComponent(gateway)}#/carga-masiva/descargas`);
     const template = page.waitForEvent("download");
@@ -113,14 +135,10 @@ test("Bulk API contra servidor HTTP aislado simula rutas, upload válido, errore
     await expect(page.getByText(/no está disponible temporalmente/i)).toBeVisible();
     await page.goto(`/tests/harness/bulk-http.html?gateway=${encodeURIComponent(gateway)}#/carga-masiva/importaciones/network`);
     await expect(page.getByText(/no se pudo conectar con Gateway/i)).toBeVisible();
-    await page.goto(`/tests/harness/bulk-http.html?gateway=${encodeURIComponent(gateway)}#/carga-masiva/importaciones/conflict-batch/resultado`);
-    await page.getByRole("button", { name: "Reanudar operaciones pendientes" }).click();
-    await page.getByRole("button", { name: "Confirmar reanudación" }).click();
-    await expect(page.getByText(/HTTP 409.*conflicto/i)).toBeVisible();
     expect(requests.every((request) => request.auth === "Bearer test.header.signature")).toBe(true);
     expect(requests.some((request) => request.method === "POST" && request.url === `${root}/importaciones` && request.contentType?.startsWith("multipart/form-data; boundary="))).toBe(true);
     expect(requests.some((request) => request.url === `${root}/exportaciones`)).toBe(true);
-    expect(new Set(requests.filter((request) => request.method === "POST" && request.url === `${root}/importaciones`).map((request) => request.correlation)).size).toBe(1);
+    expect(requests.filter((request) => request.method === "POST" && request.url === `${root}/importaciones`)).toHaveLength(1);
     expect(requests.every((request) => request.correlation && /^[0-9a-f-]{36}$/i.test(request.correlation))).toBe(true);
     const repository = createHttpBulkRepository(createBulkFetchTransport(gateway), {
       getAccessToken: async () => "test.header.signature",

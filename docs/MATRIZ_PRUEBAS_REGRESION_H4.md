@@ -2,7 +2,7 @@
 
 Fecha de preparación: 2026-11-07. Rama de referencia: `fix/frontend-h4-cierre-integral`, SHA base `bfa0048b8d27fccb32ba008e28ec913f8d335c6a`.
 
-Esta matriz registra suites y escenarios por comportamiento. No pretende una prueba por cada una de las 136 operaciones OpenAPI. `EXISTENTE_NO_EJECUTADA` solo indica que se localizó una aserción de comportamiento en el archivo citado; no equivale a aprobación. Las dos filas Bulk añadidas en esta fase quedan `CREADA_NO_EJECUTADA`. Ninguna suite fue ejecutada durante esta fase.
+Esta matriz registra suites y escenarios por comportamiento. No pretende una prueba por cada una de las 136 operaciones OpenAPI. `EXISTENTE_NO_EJECUTADA` solo indica que se localizó una aserción de comportamiento en el archivo citado; no equivale a aprobación. Los IDs BUL-08 a BUL-13 y las filas marcadas como creadas corresponden a aserciones añadidas en Fase C y quedan `CREADA_NO_EJECUTADA`. Ninguna suite fue ejecutada durante esta fase.
 
 Contrato de referencia: Docs `contratos/http/openapi.yaml` (OpenAPI 0.6.0-rc.1); para Bulk la integración de consumidor descrita en `docs/ESTADO_CARGA_MASIVA.md` mantiene operaciones provisionales. Las suites HTTP con servidor local son simulaciones aisladas, nunca pruebas de despliegue.
 
@@ -93,3 +93,84 @@ Los archivos `tests/*.spec.ts` corren sobre la app local con datos mock o adapte
 - Promotions Gateway: requiere entorno descartable, base de datos y sesión G7 de pruebas configurados externamente. Los tests con servidor simulado se mantienen independientes.
 - Revisión estática de código productivo detectó un riesgo que queda para auditoría: Taxonomy confirma algunos PATCH a través de transporte y luego intenta conciliación auxiliar. La suite debe asegurar que HTTP 200 con DTO válido no quede bloqueado por GET auxiliar fallido para Marca; cobertura referenciada en TAX-04, pendiente de confirmar por ejecución.
 - No se corrigió implementación productiva. La cobertura fue preparada; todos los casos permanecen sin ejecutar.
+
+## Casos identificables añadidos en Fase C
+
+Los siguientes IDs apuntan a casos `test/it` concretos añadidos o ampliados en este corte. Toda la ejecución permanece pendiente de la auditoría externa; los mocks HTTP son simulados y no equivalen a integración real.
+
+| ID | MK | Causa raíz | Archivo | Tipo | Contrato HTTP | Entrada / respuesta | Resultado esperado y aserción positiva | Aserción negativa | Estado |
+|---|---|---|---|---|---|---|---|---|---|
+| BUL-H4-08 | MK-001 | La intención no puede perderse ante fallo del storage | `tests/bulk.unit.test.ts` | Unit/adapter | POST importación | Storage no disponible | Admisión bloqueada antes del transporte | POST count = 0 | CREADA_NO_EJECUTADA |
+| BUL-H4-09 | MK-001 | ID admitido debe corresponder al lote derivado | `tests/bulk.unit.test.ts` | Unit/adapter | POST 202 | Respuesta 202 con batchId incompatible | Error tipado y marcador conservado | No se sigue ID ajeno | CREADA_NO_EJECUTADA |
+| BUL-H4-10 | MK-001 | Timeout no habilita replay automático | `tests/bulk.unit.test.ts` | Unit/adapter | POST timeout | Reconsulta posterior por batchId | Intención incierta recuperable | Una sola admisión POST | CREADA_NO_EJECUTADA |
+| BUL-H4-11 | MK-001 | Propietario de la sesión | `tests/bulk.unit.test.ts` | Unit/adapter | POST con sesión ficticia | Cambio A→B durante escritura | A conserva el intento con su owner | B no lo recibe ni reenvía | CREADA_NO_EJECUTADA |
+| BUL-H4-12 | MK-001 | Exportación confirmada/incierta | `tests/bulk.unit.test.ts` | Unit/adapter | GET reporte | Respuestas confirmada y transitoria | Estado/descarga acorde a evidencia | No declara descarga ante incertidumbre | CREADA_NO_EJECUTADA |
+| TAX-H4-01..06 | MK-008–012 | Evidencia de reconciliación, sesión, multipart y auxiliares | `src/features/taxonomy/adapters/taxonomyReconciliationH4.test.ts` | Unit/adapter | PATCH/GET Taxonomy publicados o bloqueados por contrato | GET antiguo/nuevo, versión/schemaVersion, asociación; Marca 200 + auxiliar 503 | Comparación identidad/campos y preservación de marker hasta evidencia | No liberar ante evidencia vieja ni crear incertidumbre tras confirmación | CREADA_NO_EJECUTADA |
+| PRO-H4-01..08 | MK-005–007 | Conciliación de cupón, campaña y recomendación | `src/features/promotions/adapters/httpPromotionsReconciliationH4.test.tsx` | Unit/adapter | POST/PATCH y GET publicados | Cupón paginado, estado/configuración e identidad, errores auxiliares | Marker se libera solo tras conciliación efectiva por identidad/campos | Nombre igual no es evidencia; sin reenvío ni reconciliación falsa | CREADA_NO_EJECUTADA |
+| PRI-H4-01..07 | MK-013 | Canales, programación y línea base | `src/features/pricing/adapters/httpPricingReconciliationH4.spec.ts` | Unit/adapter | GET/PATCH programación | Canales con/sin UUID, precio exacto, páginas previa/nueva | Nueva programación única y posterior reconcilia | Coincidencia previa/ambigua no libera; sin segundo POST | CREADA_NO_EJECUTADA |
+| COM-H4-01..06 | MK-002 | Disponibilidad/identidad y persistencia de mutaciones | `src/features/combos/adapters/httpCombosRepositoryH4.test.ts` | Unit/adapter | GET/POST/PATCH Combos | Auxiliar fallido, concurrency, marker y A/B | Identidad `combo_id`, disponibilidad verificable y propietario preservados | No deducir disponibilidad ni reutilizar nombre como identidad | CREADA_NO_EJECUTADA |
+| INV-H4-01 | MK-015 | Umbral decimal | `src/features/inventory/adapters/apiInventoryAdapter.spec.ts` | Unit/adapter | PUT umbral SKU | Valor decimal 2.5 | Rechazo de validación | Transporte sin llamadas | CREADA_NO_EJECUTADA |
+| INV-H4-02 | MK-015 | Borrado de override | `src/features/inventory/adapters/apiInventoryAdapter.spec.ts` | Unit/adapter | DELETE umbral SKU, HTTP 204 | SKU ficticio | Resolución sin DTO y un DELETE | No POST/PUT adicional | CREADA_NO_EJECUTADA |
+| CAT-H4-01..06 | MK-003/004 | DTO comercial, navegación, variantes y estado no publicado | `tests/catalog-http.spec.ts` | HTTP simulado/UI | GET/POST/PATCH Catálogo publicado | all, BORRADOR, variante 404, TEXTO sin maxLength, A/B | Respuesta del contrato y navegación se conservan | No inventa GET administrativo, versión ni límites ausentes | EXISTENTE_NO_EJECUTADA |
+| AUD-H4-01..05 | MK-014 | Datos nulos, exportación y operaciones restringidas | `tests/price-audit.spec.ts` | Playwright UI/HTTP simulado | GET auditoría, POST exportación y GET archivo según contrato | PRODUCTO, `sku`/canal nulos, `exportId`, 401/403, identidad | Descarga autenticada y consulta conserva nulos | No fabrica SKU/canal ni repite exportación incierta | EXISTENTE_NO_EJECUTADA |
+| SEC-H4-01..06 | Transversal | Autenticación y aislamiento G7 | `tests/promotions-session.spec.ts` | Cliente HTTP con servidor local simulado | Login/logout/refresh y API `/api/v1/` | tokens y cuentas sintéticas, 401/403/408/5xx | refresh permitido para GET, scopes y sesión separados | Mutación nunca se reenvía; sin credenciales reales | EXISTENTE_NO_EJECUTADA |
+| E2E-01 | MK-005/006/007 | Login y navegación Promotions | `tests/h4-demo-regresiones.spec.ts` | Playwright UI con API simulada | endpoints Promotions y DTO G7 simulados | Login ficticio, listado, cupón y logout | Sesión y ruta protegida observadas | No contactar G7 real | CREADA_NO_EJECUTADA |
+| E2E-02 | MK-003/004 | Navegación de variante | `tests/h4-demo-regresiones.spec.ts` | Playwright UI | Catálogo con harness | Producto/variante por ID | Ruta de detalle coincide con la variante seleccionada | No pierde producto padre al volver | CREADA_NO_EJECUTADA |
+| E2E-03 | MK-008–012 | Editar Marca | `tests/h4-demo-regresiones.spec.ts` | Playwright UI | Taxonomy con harness | Cambio de descripción confirmado | Vista muestra el valor confirmado | No conserva formulario de edición tras éxito | CREADA_NO_EJECUTADA |
+| E2E-04 | MK-013 | Consulta y programación autorizada en harness | `tests/h4-demo-regresiones.spec.ts` | Playwright UI | Pricing harness | Importe/vigencias de prueba | Seguimiento muestra programación admitida | No se presenta como integración real | CREADA_NO_EJECUTADA |
+| E2E-05 | MK-015/016 | Dashboard, detalle y umbral | `tests/h4-demo-regresiones.spec.ts` | Playwright UI | Inventory harness | SKU ficticio y umbral entero | Detalle y confirmación visibles | No reporta estado de escritura distinto | CREADA_NO_EJECUTADA |
+| E2E-06 | MK-001 | Admisión, seguimiento y reporte Bulk | `tests/h4-demo-regresiones.spec.ts` | Playwright + routing HTTP local simulado | POST 202, GET lote/reporte | CSV fijo, batchId derivado independientemente | Mismo ID en ruta y descarga | POST exactamente una vez | CREADA_NO_EJECUTADA |
+| E2E-07 | MK-001 | Recuperación de admisión incierta tras recarga | `tests/h4-demo-regresiones.spec.ts` | Playwright + routing HTTP simulado | POST pierde respuesta; GET 404 y posterior 200 | Archivo y owner persistidos | Recupera el lote con el mismo batchId | Un POST y no libera marker con 404 | CREADA_NO_EJECUTADA |
+| E2E-08 | Transversal | Cambio de identidad | `tests/h4-demo-regresiones.spec.ts` | Playwright + routing HTTP simulado | Evento de sesión ficticio | A inicia, B entra | Marker A sigue bajo propietario A | B no hereda ni duplica el intento | CREADA_NO_EJECUTADA |
+
+### Desglose individual de casos añadidos en este corte
+
+| ID | MK | Archivo con aserción ejecutable | Escenario nombrado por la prueba | Estado |
+|---|---|---|---|---|
+| TAX-H4-01 | MK-008–012 | src/features/taxonomy/adapters/taxonomyReconciliationH4.test.ts | conserva entity, recurso, payload y versión ante GET anterior y libera solo con GET actualizado | CREADA_NO_EJECUTADA |
+| TAX-H4-02 | MK-008–012 | src/features/taxonomy/adapters/taxonomyReconciliationH4.test.ts | una versión superior con campos distintos no acredita el PATCH | CREADA_NO_EJECUTADA |
+| TAX-H4-03 | MK-008–012 | src/features/taxonomy/adapters/taxonomyReconciliationH4.test.ts | asociación solo se concilia con schemaVersion avanzado, característica e invariantes esperadas | CREADA_NO_EJECUTADA |
+| TAX-H4-04 | MK-008–012 | src/features/taxonomy/adapters/taxonomyReconciliationH4.test.ts | Marca HTTP 200 confirma escritura aun si el GET auxiliar responde 503 | CREADA_NO_EJECUTADA |
+| TAX-H4-05 | MK-008–012 | src/features/taxonomy/adapters/taxonomyReconciliationH4.test.ts | el GET de Marca sin evidencia de logo conserva marcador y storage nunca contiene el binario | CREADA_NO_EJECUTADA |
+| TAX-H4-06 | MK-008–012 | src/features/taxonomy/adapters/taxonomyReconciliationH4.test.ts | respuesta favorable de A recibida bajo B no libera el marcador de A | CREADA_NO_EJECUTADA |
+| PRI-H4-01 | MK-013 | src/features/pricing/adapters/httpPricingReconciliationH4.spec.ts | los cinco canales conservan su identidad canónica y un canal sin UUID no escribe | CREADA_NO_EJECUTADA |
+| PRI-H4-02 | MK-013 | src/features/pricing/adapters/httpPricingReconciliationH4.spec.ts | PATCH incierto persiste y el segundo PATCH se bloquea antes del transporte | CREADA_NO_EJECUTADA |
+| PRI-H4-03 | MK-013 | src/features/pricing/adapters/httpPricingReconciliationH4.spec.ts | programación idéntica en línea base no se atribuye al POST incierto | CREADA_NO_EJECUTADA |
+| PRI-H4-04 | MK-013 | src/features/pricing/adapters/httpPricingReconciliationH4.spec.ts | una programación nueva y única concilia solo si no estaba en la línea base | CREADA_NO_EJECUTADA |
+| PRI-H4-05 | MK-013 | src/features/pricing/adapters/httpPricingReconciliationH4.spec.ts | coincidencias nuevas ambiguas requieren verificación externa | CREADA_NO_EJECUTADA |
+| PRI-H4-06 | MK-013 | src/features/pricing/adapters/httpPricingReconciliationH4.spec.ts | lectura ordinaria consulta una página; conciliación recorre todas las páginas | CREADA_NO_EJECUTADA |
+| PRI-H4-07 | MK-013 | src/features/pricing/adapters/httpPricingReconciliationH4.spec.ts | GET tardío y su error de A no se entregan a B ni alteran el marker de A | CREADA_NO_EJECUTADA |
+| COM-H4-01 | MK-002 | src/features/combos/adapters/httpCombosRepositoryH4.test.ts | 503 auxiliar conserva el Combo y disponibilidad no verificable | CREADA_NO_EJECUTADA |
+| COM-H4-02 | MK-002 | src/features/combos/adapters/httpCombosRepositoryH4.test.ts | listado limita a cuatro consultas auxiliares simultáneas | CREADA_NO_EJECUTADA |
+| COM-H4-03 | MK-002 | src/features/combos/adapters/httpCombosRepositoryH4.test.ts | alta incierta conserva el marker y no duplica POST | CREADA_NO_EJECUTADA |
+| COM-H4-04 | MK-002 | src/features/combos/adapters/httpCombosRepositoryH4.test.ts | PATCH confirmado sigue confirmado aunque GET de disponibilidad falle | CREADA_NO_EJECUTADA |
+| COM-H4-05 | MK-002 | src/features/combos/adapters/httpCombosRepositoryH4.test.ts | un repositorio nuevo con la misma identidad rehidrata el bloqueo | CREADA_NO_EJECUTADA |
+| COM-H4-06 | MK-002 | src/features/combos/adapters/httpCombosRepositoryH4.test.ts | A no bloquea la escritura independiente de B ni elimina su marker | CREADA_NO_EJECUTADA |
+| PRO-H4-01 | MK-005–007 | src/features/promotions/adapters/httpPromotionsReconciliationH4.test.tsx | cupón incierto se encuentra en segunda página, concilia y elimina el marker sin reenviar | CREADA_NO_EJECUTADA |
+| PRO-H4-02 | MK-005–007 | src/features/promotions/adapters/httpPromotionsReconciliationH4.test.tsx | monto 10.01 no concilia con 10.00 y conserva el marcador | CREADA_NO_EJECUTADA |
+| PRO-H4-03 | MK-005–007 | src/features/promotions/adapters/httpPromotionsReconciliationH4.test.tsx | cupón 201 confirmado no se revierte por promoción auxiliar 503 | CREADA_NO_EJECUTADA |
+| PRO-H4-05 | MK-005–007 | src/features/promotions/adapters/httpPromotionsReconciliationH4.test.tsx | campaña incierta solo concilia tras observar estado esperado y elimina marker | CREADA_NO_EJECUTADA |
+| PRO-H4-06 | MK-005–007 | src/features/promotions/adapters/httpPromotionsReconciliationH4.test.tsx | campaña con mismo ID pero configuración distinta no acredita la escritura | CREADA_NO_EJECUTADA |
+| PRO-H4-07 | MK-005–007 | src/features/promotions/adapters/httpPromotionsReconciliationH4.test.tsx | recomendación A se concilia por su propio ID y estado; regla B no puede acreditarla | CREADA_NO_EJECUTADA |
+| PRO-H4-08 | MK-005–007 | src/features/promotions/adapters/httpPromotionsReconciliationH4.test.tsx | alta sin identidad única queda REQUIRES_EXTERNAL_VERIFICATION y bloquea repetición | CREADA_NO_EJECUTADA |
+| INV-H4-01 | MK-015 | src/features/inventory/adapters/apiInventoryAdapter.spec.ts | rechaza umbral decimal antes de despachar una escritura | CREADA_NO_EJECUTADA |
+| INV-H4-02 | MK-015 | src/features/inventory/adapters/apiInventoryAdapter.spec.ts | DELETE 204 del override se emite exactamente una vez y no requiere DTO | CREADA_NO_EJECUTADA |
+| E2E-01 | MK-005/006/007 | tests/h4-demo-regresiones.spec.ts | G7 de prueba recorre Promotions, cupones, filtros y logout | CREADA_NO_EJECUTADA |
+| E2E-02 | MK-003/004 | tests/h4-demo-regresiones.spec.ts | Catálogo abre producto y variante con la identidad de la ruta | CREADA_NO_EJECUTADA |
+| E2E-03 | MK-008–012 | tests/h4-demo-regresiones.spec.ts | Taxonomy edita Marca y presenta la respuesta confirmada una sola vez | CREADA_NO_EJECUTADA |
+| E2E-04 | MK-013 | tests/h4-demo-regresiones.spec.ts | Pricing consulta y programa vigencia disponible en modo de revisión | CREADA_NO_EJECUTADA |
+| E2E-05 | MK-015/016 | tests/h4-demo-regresiones.spec.ts | Inventory mantiene SKU y formulario de umbral al navegar entre vistas | CREADA_NO_EJECUTADA |
+| E2E-06 | MK-001 | tests/h4-demo-regresiones.spec.ts | Bulk admite CSV, sigue el mismo batchId y descarga reporte simulado | CREADA_NO_EJECUTADA |
+| E2E-07 | MK-001 | tests/h4-demo-regresiones.spec.ts | Bulk incierto recarga, conserva marcador tras 404 y recupera con GET 200 sin segundo POST | CREADA_NO_EJECUTADA |
+| E2E-08 | Transversal | tests/h4-demo-regresiones.spec.ts | identidad B no hereda el intento incierto de A | CREADA_NO_EJECUTADA |
+
+### Escenarios Bulk añadidos con ID individual
+
+| ID | MK | Archivo | Escenario nombrado por la prueba | Estado |
+|---|---|---|---|---|
+| BUL-08 | MK-001 | `tests/bulk.unit.test.ts` | no envía POST si no puede persistir antes el marcador | CREADA_NO_EJECUTADA |
+| BUL-09 | MK-001 | `tests/bulk.unit.test.ts` | HTTP 202 con batch_id ajeno conserva la incertidumbre y no reenvía | CREADA_NO_EJECUTADA |
+| BUL-10 | MK-001 | `tests/bulk.unit.test.ts` | un segundo intento tras timeout se bloquea antes del transporte | CREADA_NO_EJECUTADA |
+| BUL-11 | MK-001 | `tests/bulk.unit.test.ts` | B no recupera ni elimina la intención de A | CREADA_NO_EJECUTADA |
+| BUL-12 | MK-001 | `tests/bulk.unit.test.ts` | exportación incierta persiste el bloqueo y no emite un segundo POST | CREADA_NO_EJECUTADA |
+| BUL-13 | MK-001 | `tests/bulk.unit.test.ts` | exportación confirmada conserva export_id y permite seguimiento GET sin repetir POST | CREADA_NO_EJECUTADA |
