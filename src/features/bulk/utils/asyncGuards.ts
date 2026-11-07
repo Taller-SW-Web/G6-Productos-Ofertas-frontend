@@ -53,6 +53,8 @@ export class AdmissionCoordinator<T> {
     return this.operation?.status ?? "idle";
   }
 
+  get correlationId(): string | null { return this.operation?.correlationId ?? null; }
+
   begin(value: T, retryUncertain = false): AdmissionTask<T> | null {
     const operation = this.operation;
     if (

@@ -19,7 +19,7 @@ export interface BulkRepository {
 
   createImport(
     file: File,
-    localSummary?: { detectedRows?: number; correlationId?: string },
+    localSummary?: { detectedRows?: number; correlationId?: string; expectedBatchId?: string },
     signal?: AbortSignal,
   ): Promise<BulkImportBatch>;
 

@@ -22,11 +22,15 @@ export function BulkReviewPage() {
   const bulkRepository = useBulkRepository();
   const isSubmittingRef = useRef(false);
   const pageIsActiveRef = useRef(true);
+  const recoveryKeyRef = useRef<string | null>(null);
   const {
     selectedFile,
     fileCheck,
     admissionStatus,
     pendingCorrelationId,
+    expectedBatchId,
+    confirmRecoveredBatch,
+    recoveryOwnerIsCurrent,
     beginAdmission,
     finishAdmission,
     submissionError,
@@ -38,6 +42,19 @@ export function BulkReviewPage() {
       pageIsActiveRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (admissionStatus !== "uncertain" || !expectedBatchId || !recoveryOwnerIsCurrent() || recoveryKeyRef.current === expectedBatchId) return;
+    recoveryKeyRef.current = expectedBatchId;
+    const controller = new AbortController();
+    void bulkRepository.getImport(expectedBatchId, controller.signal).then(batch => {
+      if (controller.signal.aborted || !pageIsActiveRef.current || !recoveryOwnerIsCurrent()) return;
+      if (batch?.batch_id === expectedBatchId && confirmRecoveredBatch(expectedBatchId)) {
+        navigate(`/carga-masiva/importaciones/${batch.batch_id}`);
+      }
+    }).catch(() => { /* uncertainty remains persisted; no write is retried */ });
+    return () => controller.abort();
+  }, [admissionStatus, bulkRepository, confirmRecoveredBatch, expectedBatchId, navigate, recoveryOwnerIsCurrent]);
 
   // If page is accessed directly without selecting a file
   if (!selectedFile || !fileCheck) {
@@ -156,7 +173,7 @@ export function BulkReviewPage() {
             {submissionError.message}
             {admissionUncertain && (
               <>
-                <div>No se confirmó el resultado. No se reenvía porque Backend no publica recuperación por correlación.</div>
+                <div>Se consulta el batchId determinista. Si el GET devuelve 404, el resultado sigue sin acreditarse y no se reenvía el archivo.</div>
                 {pendingCorrelationId && <div>Correlación recuperada: {pendingCorrelationId}</div>}
               </>
             )}

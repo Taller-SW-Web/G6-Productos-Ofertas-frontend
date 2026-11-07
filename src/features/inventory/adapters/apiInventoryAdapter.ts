@@ -327,6 +327,8 @@ export function createHttpInventoryRepository(
       );
     }
 
+    const thresholdDelete204 = write && writeKind === "threshold" && request.method === "DELETE" && response.status === 204;
+    if (thresholdDelete204) return response;
     if (response.ok) {
       if (response.status !== 200)
         throw new InventoryError(

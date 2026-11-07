@@ -39,6 +39,9 @@ interface BulkUploadContextValue {
   ) => boolean;
   submissionError: BulkSubmissionError | null;
   pendingCorrelationId: string | null;
+  expectedBatchId: string | null;
+  confirmRecoveredBatch: (batchId: string) => boolean;
+  recoveryOwnerIsCurrent: () => boolean;
 }
 
 const BulkUploadContext = createContext<BulkUploadContextValue | null>(null);
@@ -52,8 +55,16 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
   const [submissionError, setSubmissionError] =
     useState<BulkSubmissionError | null>(null);
   const [pendingCorrelationId, setPendingCorrelationId] = useState<string | null>(null);
+  const [expectedBatchId, setExpectedBatchId] = useState<string | null>(null);
   const admissionOwnerByCorrelation = useRef(new Map<string, { owner: string; key: string }>());
-  const selectedIntent = useRef<{ owner: string; key: string } | null>(null);
+  const selectedIntent = useRef<{ owner: string; key: string; contentHash: string; batchId: string } | null>(null);
+
+  const deriveBatchId = async (correlationId: string, contentHash: string) => {
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${correlationId}:${contentHash}`)));
+    const hex = [...digest].map(value => value.toString(16).padStart(2, "0")).join("");
+    const value = hex.slice(0, 12) + "4" + hex.slice(13, 16) + "8" + hex.slice(17, 20) + hex.slice(20, 32);
+    return [value.slice(0, 8), value.slice(8, 12), value.slice(12, 16), value.slice(16, 20), value.slice(20)].join("-");
+  };
 
   const admissionCoordinatorRef = useRef<AdmissionCoordinator<File> | null>(null);
   if (admissionCoordinatorRef.current == null) {
@@ -67,6 +78,7 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
   const setSelectedFile = useCallback(async (file: File | null) => {
     selectedIntent.current = null;
     setPendingCorrelationId(null);
+    setExpectedBatchId(null);
     const coordinator = validationCoordinatorRef.current;
     if (!coordinator) return;
     const admissionCoordinator = admissionCoordinatorRef.current;
@@ -77,15 +89,16 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
       const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", await file.arrayBuffer()));
       const fingerprint = [...digest].map(value => value.toString(16).padStart(2, "0")).join("");
       intentKey = `g6:bulk:admission:v1:${encodeURIComponent(owner)}:${fingerprint}`;
-      selectedIntent.current = { owner, key: intentKey };
       try {
         const raw = sessionStorage.getItem(intentKey);
         if (raw) {
-          const saved = JSON.parse(raw) as { owner?: string; correlationId?: string };
-          if (saved.owner !== owner || !saved.correlationId) throw new Error("Marcador de admisión incompatible.");
+          const saved = JSON.parse(raw) as { owner?: string; contentHash?: string; correlationId?: string; batchId?: string };
+          if (saved.owner !== owner || saved.contentHash !== fingerprint || !saved.correlationId || !saved.batchId) throw new Error("Marcador de admisión incompatible.");
           restored = { correlationId: saved.correlationId, status: "uncertain" };
+          selectedIntent.current = { owner, key: intentKey, contentHash: fingerprint, batchId: saved.batchId };
           setPendingCorrelationId(saved.correlationId);
-          setSubmissionError({ category: "unknown", message: "Existe una admisión incierta para este archivo y usuario. El contrato no permite recuperar el lote mediante correlación; no se enviará otro POST." });
+          setExpectedBatchId(saved.batchId);
+          setSubmissionError({ category: "unknown", message: "Importación sin respuesta recuperada. Se consultará el batchId determinista; un 404 no acredita que el POST no se haya aplicado." });
         } else setPendingCorrelationId(null);
       } catch {
         restored = { correlationId: "", status: "uncertain" };
@@ -94,6 +107,14 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
       }
     }
     admissionCoordinator?.select(file, restored);
+    const correlation = restored?.correlationId ?? admissionCoordinator?.correlationId;
+    if (file && owner && intentKey && correlation && !selectedIntent.current) {
+      const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", await file.arrayBuffer()));
+      const contentHash = [...digest].map(value => value.toString(16).padStart(2, "0")).join("");
+      const batchId = await deriveBatchId(correlation, contentHash);
+      selectedIntent.current = { owner, key: intentKey, contentHash, batchId };
+      setExpectedBatchId(batchId);
+    }
     const selectedCorrelation = restored?.correlationId;
     if (selectedCorrelation && owner && intentKey) admissionOwnerByCorrelation.current.set(selectedCorrelation, { owner, key: intentKey });
     setAdmissionStatus(admissionCoordinator?.status ?? "idle");
@@ -142,6 +163,15 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
     if (task) {
       const intent = selectedIntent.current;
       admissionOwnerByCorrelation.current.set(task.correlationId, intent ?? { owner: session?.snapshot().user?.id ?? "session-unavailable", key: "" });
+      if (intent) {
+        try { sessionStorage.setItem(intent.key, JSON.stringify({ owner: intent.owner, contentHash: intent.contentHash, correlationId: task.correlationId, batchId: intent.batchId })); }
+        catch {
+          admissionCoordinatorRef.current?.finish(task, "ready");
+          setAdmissionStatus("ready");
+          setSubmissionError({ category: "unknown", message: "No se pudo guardar la correlación y el batchId; no se envió el archivo." });
+          return null;
+        }
+      }
     }
     if (task) setAdmissionStatus(admissionCoordinatorRef.current?.status ?? "idle");
     return task;
@@ -156,8 +186,7 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
     const intent = admissionOwnerByCorrelation.current.get(task.correlationId);
     if (intent?.key) {
       try {
-        if (status === "uncertain") sessionStorage.setItem(intent.key, JSON.stringify({ owner: intent.owner, correlationId: task.correlationId }));
-        else sessionStorage.removeItem(intent.key);
+        if (status !== "uncertain") sessionStorage.removeItem(intent.key);
       } catch { /* repository-level marker remains fail-closed */ }
       if (status !== "uncertain") setPendingCorrelationId(null);
     }
@@ -166,6 +195,16 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
     setSubmissionError(error);
     return true;
   }, []);
+
+  const confirmRecoveredBatch = useCallback((batchId: string) => {
+    const intent = selectedIntent.current;
+    if (!intent || intent.batchId !== batchId || session?.snapshot().user?.id !== intent.owner) return false;
+    try { sessionStorage.removeItem(intent.key); } catch { /* accepted batch remains recoverable from its URL */ }
+    setAdmissionStatus("accepted");
+    setSubmissionError(null);
+    return true;
+  }, [session]);
+  const recoveryOwnerIsCurrent = useCallback(() => selectedIntent.current?.owner === session?.snapshot().user?.id, [session]);
 
   return (
     <BulkUploadContext.Provider
@@ -180,6 +219,9 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
         finishAdmission,
         submissionError,
         pendingCorrelationId,
+        expectedBatchId,
+        confirmRecoveredBatch,
+        recoveryOwnerIsCurrent,
       }}
     >
       {children}

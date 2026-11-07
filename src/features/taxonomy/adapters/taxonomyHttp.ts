@@ -38,8 +38,8 @@ async function fingerprint(transport: TaxonomyGatewayTransport, path: string, me
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", source));
   return `${prefix}${[...digest].map(value => value.toString(16).padStart(2, "0")).join("")}`;
 }
-function markerValue(state: string, path: string, resourcePath: string, scopeHash: string, status?: number): string {
-  return JSON.stringify({ state, path, resourcePath, scopeHash, status, at: Date.now() });
+function markerValue(state: string, path: string, resourcePath: string, scopeHash: string, status?: number, method?: string, body?: unknown, correlationId?: string): string {
+  return JSON.stringify({ state, path, resourcePath, scopeHash, status, method, body: body ?? null, correlationId, at: Date.now() });
 }
 function pendingKeys(): string[] {
   try { return Object.keys(sessionStorage).filter(key => key.startsWith(prefix)); }
@@ -65,6 +65,7 @@ export async function taxonomySend<T = unknown>(
   const key = writing ? await fingerprint(transport, path, method, body) : undefined;
   const scopeBytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(transport.scopeId?.() ?? "session-unavailable")));
   const scopeHash = [...scopeBytes].map(value => value.toString(16).padStart(2, "0")).join("");
+  const correlationId = writing ? crypto.randomUUID() : undefined;
   if (key) {
     if (pendingKeys().includes(key)) {
       let confirmed = false; try { confirmed = JSON.parse(sessionStorage.getItem(key) ?? "{}").state === "confirmed"; } catch { /* malformed marker fails closed */ }
@@ -79,14 +80,14 @@ export async function taxonomySend<T = unknown>(
     });
     if (conflicting) throw new TaxonomyMutationError("unknown", "Existe otra escritura sin resolver sobre este recurso. Consulta y reconcilia esa operación antes de enviar una intención distinta.", key);
     if (pendingKeys().filter(pending => { try { return JSON.parse(sessionStorage.getItem(pending) ?? "{}").scopeHash === scopeHash; } catch { return true; } }).length >= maxPending) throw new TaxonomyMutationError("unknown", "Hay demasiadas intenciones de Taxonomía pendientes de reconciliación; no se envió esta operación.", key);
-    try { sessionStorage.setItem(key, markerValue("dispatching", path, options.resourcePath ?? path, scopeHash)); }
+    try { sessionStorage.setItem(key, markerValue("dispatching", path, options.resourcePath ?? path, scopeHash, undefined, method, body, correlationId)); }
     catch (error) { throw new TaxonomyMutationError("unknown", "No se pudo proteger la intención en esta sesión; no se envió la mutación.", key, { cause: error }); }
   }
   const init = body instanceof FormData ? { method, signal, body } : body === undefined ? { method, signal } : { method, signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
   let response: Response;
   try { response = await transport.requestWithInit(path, init); }
   catch (error) {
-    if (key) { try { sessionStorage.setItem(key, markerValue("unknown", path, options.resourcePath ?? path, scopeHash)); } catch { /* pre-dispatch marker remains */ } }
+    if (key) { try { sessionStorage.setItem(key, markerValue("unknown", path, options.resourcePath ?? path, scopeHash, undefined, method, body, correlationId)); } catch { /* pre-dispatch marker remains */ } }
     if (writing) throw new TaxonomyMutationError("unknown", "No se confirmó el resultado de Taxonomía (transporte, timeout o cancelación). Consulta el recurso antes de reenviar.", key, { cause: error });
     throw error;
   }
@@ -94,14 +95,14 @@ export async function taxonomySend<T = unknown>(
     let code: string | undefined;
     try { const value: unknown = await response.clone().json(); if (value && typeof value === "object" && !Array.isArray(value) && typeof (value as Record<string, unknown>).code === "string") code = (value as Record<string, unknown>).code as string; } catch { /* status remains authoritative */ }
     if (writing && (response.status === 408 || response.status >= 500)) {
-      if (key) { try { sessionStorage.setItem(key, markerValue("unknown", path, options.resourcePath ?? path, scopeHash, response.status)); } catch { /* pre-dispatch marker remains */ } }
+      if (key) { try { sessionStorage.setItem(key, markerValue("unknown", path, options.resourcePath ?? path, scopeHash, response.status, method, body, correlationId)); } catch { /* pre-dispatch marker remains */ } }
       throw new TaxonomyMutationError("unknown", `El resultado de Taxonomía es incierto (HTTP ${response.status}). Consulta antes de reenviar.`, key);
     }
     if (key) clear(key);
     throw new TaxonomyHttpError(response.status, code);
   }
   if (response.status !== expected) {
-    if (key) { try { sessionStorage.setItem(key, markerValue("confirmed_unreadable", path, options.resourcePath ?? path, scopeHash, response.status)); } catch { /* marker remains */ } }
+    if (key) { try { sessionStorage.setItem(key, markerValue("confirmed_unreadable", path, options.resourcePath ?? path, scopeHash, response.status, method, body, correlationId)); } catch { /* marker remains */ } }
     if (writing) throw new TaxonomyMutationError("confirmed_unreadable", `Taxonomía confirmó HTTP ${response.status}, pero no coincide con el contrato esperado ${expected}. No repitas la mutación sin reconciliar.`, key);
     throw new TaxonomyHttpError(response.status);
   }
@@ -110,32 +111,45 @@ export async function taxonomySend<T = unknown>(
     return null as T;
   }
   if (!response.headers.get("content-type")?.toLowerCase().includes("application/json")) {
-    if (key) { try { sessionStorage.setItem(key, markerValue("confirmed_unreadable", path, options.resourcePath ?? path, scopeHash, response.status)); } catch { /* marker remains */ } }
+    if (key) { try { sessionStorage.setItem(key, markerValue("confirmed_unreadable", path, options.resourcePath ?? path, scopeHash, response.status, method, body, correlationId)); } catch { /* marker remains */ } }
     if (writing) throw new TaxonomyMutationError("confirmed_unreadable", "Taxonomía confirmó la mutación, pero el MIME de respuesta no permite reconciliarla. No la repitas.", key);
     throw new Error("Taxonomía devolvió un MIME incompatible.");
   }
   let payload: unknown;
   try { payload = await response.json(); }
   catch (error) {
-    if (key) { try { sessionStorage.setItem(key, markerValue("confirmed_unreadable", path, options.resourcePath ?? path, scopeHash, response.status)); } catch { /* marker remains */ } }
+    if (key) { try { sessionStorage.setItem(key, markerValue("confirmed_unreadable", path, options.resourcePath ?? path, scopeHash, response.status, method, body, correlationId)); } catch { /* marker remains */ } }
     if (writing) throw new TaxonomyMutationError("confirmed_unreadable", "Taxonomía confirmó la mutación, pero el cuerpo es ilegible. No la repitas sin reconciliar.", key, { cause: error });
     throw new Error("Taxonomía devolvió JSON ilegible.", { cause: error });
   }
   try {
     const mapped: TaxonomyMutationResult<T> = { outcome: "confirmed_mapped", value: map ? map(payload) : payload as T };
     if (key) {
-      if (options.retainConfirmed) { try { sessionStorage.setItem(key, markerValue("confirmed", path, options.resourcePath ?? path, scopeHash, response.status)); } catch { /* marker remains */ } }
+      if (options.retainConfirmed) { try { sessionStorage.setItem(key, markerValue("confirmed", path, options.resourcePath ?? path, scopeHash, response.status, method, body, correlationId)); } catch { /* marker remains */ } }
       else clear(key);
     }
     return mapped.value;
   } catch (error) {
-    if (key) { try { sessionStorage.setItem(key, markerValue("confirmed_unreadable", path, options.resourcePath ?? path, scopeHash, response.status)); } catch { /* marker remains */ } }
+    if (key) { try { sessionStorage.setItem(key, markerValue("confirmed_unreadable", path, options.resourcePath ?? path, scopeHash, response.status, method, body, correlationId)); } catch { /* marker remains */ } }
     if (writing) throw new TaxonomyMutationError("confirmed_unreadable", "Taxonomía confirmó la mutación, pero el DTO no pudo validarse. Consulta el recurso antes de repetirla.", key, { cause: error });
     throw error;
   }
 }
 
-export async function reconcileConfirmedTaxonomyResource(transport: TaxonomyGatewayTransport, resourcePath: string): Promise<void> {
+function matchesExpected(observed: unknown, expected: unknown): boolean {
+  if (expected === null || expected === undefined || typeof expected !== "object") return Object.is(observed, expected);
+  if (Array.isArray(expected)) return Array.isArray(observed) && expected.every((entry, index) => matchesExpected(observed[index], entry));
+  if (!observed || typeof observed !== "object" || Array.isArray(observed)) return false;
+  return Object.entries(expected as Record<string, unknown>).every(([key, value]) => key === "schemaVersion" || matchesExpected((observed as Record<string, unknown>)[key], value));
+}
+function containsExpected(observed: unknown, expected: Record<string, unknown>): boolean {
+  if (matchesExpected(observed, expected)) return true;
+  if (Array.isArray(observed)) return observed.some(value => containsExpected(value, expected));
+  if (observed && typeof observed === "object") return Object.values(observed).some(value => containsExpected(value, expected));
+  return false;
+}
+
+export async function reconcileConfirmedTaxonomyResource(transport: TaxonomyGatewayTransport, resourcePath: string, observed?: unknown): Promise<void> {
   let scope: string;
   try { scope = transport.scopeId?.() ?? "session-unavailable"; } catch { return; }
   const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(scope)));
@@ -144,14 +158,23 @@ export async function reconcileConfirmedTaxonomyResource(transport: TaxonomyGate
     try {
       const marker = JSON.parse(sessionStorage.getItem(key) ?? "{}");
       if (["unknown", "confirmed_unreadable", "confirmed_read_failed", "confirmed"].includes(marker.state) && marker.resourcePath === resourcePath && marker.scopeHash === scopeHash) {
-        // A successful GET alone proves reachability, not that this specific
-        // write took effect. Keep the marker until an operation-specific
-        // authoritative comparison is available.
-        throw new TaxonomyMutationError(
-          marker.state === "unknown" ? "unknown" : "confirmed_read_failed",
-          "La lectura autoritativa no expone evidencia suficiente para comparar el efecto de esta intención. Se conserva el bloqueo para este recurso.",
-          key,
-        );
+        if (marker.state === "confirmed") { clear(key); continue; }
+        const expected = marker.body as Record<string, unknown> | null;
+        const validExpected = expected && typeof expected === "object" && Object.keys(expected).some(field => field !== "schemaVersion");
+        const expectedVersion = expected?.schemaVersion;
+        const observedVersion = observed && typeof observed === "object" ? (observed as Record<string, unknown>).schemaVersion : undefined;
+        const versionAdvanced = expectedVersion === undefined || (typeof observedVersion === "number" && observedVersion > Number(expectedVersion));
+        const expectedFields = expected ? Object.fromEntries(Object.entries(expected).filter(([field]) => field !== "schemaVersion")) : null;
+        let identityMatches = true;
+        if (marker.method === "PATCH" && marker.path !== marker.resourcePath) {
+          const resourcePrefix = `${marker.resourcePath}/`;
+          const identifier = typeof marker.path === "string" && marker.path.startsWith(resourcePrefix) ? decodeURIComponent(marker.path.slice(resourcePrefix.length).split("/")[0] ?? "") : "";
+          identityMatches = Boolean(identifier) && containsExpected(observed, { caracteristicaId: identifier, ...(expectedFields ?? {}) });
+        }
+        if (observed !== undefined && validExpected && versionAdvanced && identityMatches && containsExpected(observed, expectedFields!)) { clear(key); continue; }
+        try { sessionStorage.setItem(key, markerValue("confirmed_read_failed", marker.path, marker.resourcePath, scopeHash, marker.status, marker.method, marker.body, marker.correlationId)); } catch { /* retains fail-closed state */ }
+        // Keep presenting the authoritative resource; the pending write guard
+        // still blocks subsequent mutations for this resource.
       }
     } catch (error) { if (error instanceof TaxonomyMutationError) throw error; /* malformed marker remains fail-closed */ }
   }

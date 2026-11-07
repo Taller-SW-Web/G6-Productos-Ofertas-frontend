@@ -186,6 +186,7 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
       const userId = session.snapshot?.().user?.id;
       if (!userId) throw new BulkRepositoryError("Inicia sesión antes de importar.", "configuration");
       const correlationId = summary?.correlationId ?? crypto.randomUUID();
+      if (!summary?.expectedBatchId) throw new BulkRepositoryError("Falta el batchId determinista persistido antes del envío.", "configuration");
       const intentKey = `g6:bulk:import-pending:${encodeURIComponent(userId)}:${encodeURIComponent(correlationId)}`;
       try {
         if (sessionStorage.getItem(intentKey)) throw new BulkRepositoryError("Esta importación tiene una intención previa pendiente. Se conserva su correlación y no se reenvió.", "unknown");
@@ -197,6 +198,7 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
       const form = new FormData(); form.append("archivo", file); form.append("template_version", "2");
       try {
         const accepted = mapAccepted(await json(await send(`${root}/importaciones`, "POST", signal, form, false, correlationId), 202, signal));
+        if (accepted.batch_id !== summary.expectedBatchId) throw new BulkRepositoryError("El lote admitido no coincide con el batchId determinista; requiere verificación externa.", "unknown", 202, "BATCH_ID_MISMATCH");
         try { sessionStorage.removeItem(intentKey); } catch { /* accepted response retains the batch id in URL */ }
         return accepted;
       } catch (error) {
