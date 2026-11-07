@@ -2,6 +2,7 @@ import type { HistorialSlugItem, SeoCategory, SlugPropuesta } from "../types";
 
 export interface SeoListResult {
   items: SeoCategory[];
+  enrichmentUnavailable?: number;
 }
 
 export interface GuardarSeoInput {

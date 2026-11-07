@@ -132,7 +132,7 @@ test("conserva las asociaciones cuando la característica asociada pasa a inacti
   expect(detalle?.asociadas).toHaveLength(1);
   expect(detalle?.caracteristicasAsignadas).toBe(1);
   expect(detalle?.asociadas[0]?.caracteristicaId).toBe(caracteristica.id);
-  expect(detalle?.asociadas[0]?.caracteristica.estado).toBe("Inactivo");
+  expect(detalle?.asociadas[0]?.caracteristica?.estado).toBe("Inactivo");
 });
 
 test("crea y edita una marca y devuelve null al guardar una marca inexistente", async () => {

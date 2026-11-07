@@ -32,6 +32,7 @@ import { useProductDetail } from "../hooks/useProductDetail";
 import { CatalogReadError } from "../components/CatalogReadError";
 import {
   calculateVolumeCm3,
+  formatAttributeValue,
   productStatusLabel,
   readCatalogScenario,
 } from "../services/catalogPresentation";
@@ -151,7 +152,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
               Ver preparación
             </Button>
 
-            {p.status !== "INACTIVO" && (
+            {p.status !== "INACTIVO" && p.catalogVersion !== null && (
               <Button
                 component={Link}
                 to={`/productos/${p.id}/editar`}
@@ -162,7 +163,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
               </Button>
             )}
 
-            {p.status === "BORRADOR" && (
+            {p.status === "BORRADOR" && p.catalogVersion !== null && (
               <Button
                 onClick={() => setActivateOpened(true)}
                 leftSection={<IconCheck size={16} />}
@@ -171,7 +172,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
               </Button>
             )}
 
-            {p.status === "INACTIVO" && (
+            {p.status === "INACTIVO" && p.catalogVersion !== null && (
               <Button
                 onClick={() => setActivateOpened(true)}
                 leftSection={<IconCheck size={16} />}
@@ -180,7 +181,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
               </Button>
             )}
 
-            {p.status === "ACTIVO" && (
+            {p.status === "ACTIVO" && p.catalogVersion !== null && (
               <Button
                 color="danger"
                 variant="outline"
@@ -201,7 +202,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
             {/* Identity and general info */}
             <SectionCard title="Identidad y Clasificación">
               <Stack gap="md">
-                <Text size="sm">{p.description}</Text>
+                <Text size="sm">{p.description ?? "Descripción no publicada por esta consulta."}</Text>
 
                 <SimpleGrid cols={{ base: 2, sm: 3 }} spacing="md">
                   <div>
@@ -241,7 +242,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
                       Estado
                     </Text>
                     <StatusBadge semantic="neutral" size="sm">
-                      {productStatusLabel(p.status)}
+                      {p.commerciallyActive ? "Publicado comercialmente · estado administrativo no publicado" : productStatusLabel(p.status)}
                     </StatusBadge>
                   </div>
                   <div>
@@ -249,7 +250,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
                       Versión de catálogo
                     </Text>
                     <Text size="sm" fw={600}>
-                      v{p.catalogVersion}
+                      {p.catalogVersion === null ? "Versión administrativa no publicada" : `v${p.catalogVersion}`}
                     </Text>
                   </div>
                 </SimpleGrid>
@@ -404,7 +405,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
                         {attr.nombre}
                       </Text>
                       <Text size="sm" fw={600}>
-                        {attr.valor} {attr.unidad ? `(${attr.unidad})` : ""}
+                        {formatAttributeValue(attr)} {attr.unidad ? `(${attr.unidad})` : ""}
                       </Text>
                     </div>
                   ))}

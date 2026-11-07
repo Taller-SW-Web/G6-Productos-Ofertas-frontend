@@ -20,7 +20,7 @@ describe("una sola sesión transversal", () => {
 });
 describe("retorno a rutas registradas", () => {
   it.each([undefined, null, {}, "https://evil.test", "//evil.test", "/\\evil.test", "/login", "/demo/g6/productos", "/no-existe", "/%2f%2fevil.test"])("rechaza %s", value => {
-    expect(loginDestination(value)).toBe("/precios");
+    expect(loginDestination(value)).toBe("/productos");
   });
   it.each(["/productos", "/productos/nuevo", "/combos?vista=lista", "/precios/auditoria"])("conserva %s", value => {
     expect(loginDestination(value)).toBe(value);

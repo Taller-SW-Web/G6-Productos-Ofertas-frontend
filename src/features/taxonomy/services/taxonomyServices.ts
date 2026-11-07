@@ -1,4 +1,6 @@
-import { createHttpProductTypeAdapter } from "../adapters/httpProductTypeAdapter";
+import type { TaxonomyGatewayTransport } from "../adapters/httpProductTypeAdapter";
+import { createHttpProductTypeAdminAdapter } from "../adapters/httpProductTypeAdminAdapter";
+import { createHttpBrandRepository, createHttpCategoryRepository, createHttpCharacteristicRepository, createHttpSeoRepository } from "../adapters/httpTaxonomyAdmin";
 import { getTaxonomyGateway } from "./taxonomyGatewayRuntime";
 import type { DataMode } from "../../../app/config/dataMode";
 import { resolveDataMode } from "../../../app/config/dataMode";
@@ -13,64 +15,28 @@ import type { CharacteristicRepository } from "./characteristicRepository";
 import type { ProductTypeRepository } from "./productTypeRepository";
 import type { SeoRepository } from "./seoRepository";
 
-export const TAXONOMY_API_UNAVAILABLE_MESSAGE =
-  "Integración con API real no disponible actualmente para el módulo de Taxonomía.";
-
-export interface TaxonomyServices {
-  category: CategoryRepository;
-  brand: BrandRepository;
-  productType: ProductTypeRepository;
-  seo: SeoRepository;
-  characteristic: CharacteristicRepository;
-}
-
-// Composition boundary for the whole Taxonomy module. The adapter set is chosen from
-// the global data mode; in api mode there is no automatic fallback to mocks and the
-// resolution fails explicitly instead of serving simulated data.
-const unavailable = new Proxy(
-  {},
-  {
-    get: () => async () => {
-      throw new Error(TAXONOMY_API_UNAVAILABLE_MESSAGE);
-    },
+export const TAXONOMY_API_UNAVAILABLE_MESSAGE = "La sesión G7 o el Gateway autenticado de Taxonomía no están disponibles.";
+export interface TaxonomyServices { category: CategoryRepository; brand: BrandRepository; productType: ProductTypeRepository; seo: SeoRepository; characteristic: CharacteristicRepository; }
+const lazyGateway: TaxonomyGatewayTransport = {
+  scopeId() { return getTaxonomyGateway()?.scopeId?.() ?? null; },
+  request(path, signal, correlationId) {
+    const gateway = getTaxonomyGateway(); if (!gateway) return Promise.reject(new Error(TAXONOMY_API_UNAVAILABLE_MESSAGE));
+    return gateway.request(path, signal, correlationId);
   },
-);
+  requestWithInit(path, init) {
+    const gateway = getTaxonomyGateway(); if (!gateway?.requestWithInit) return Promise.reject(new Error(TAXONOMY_API_UNAVAILABLE_MESSAGE));
+    return gateway.requestWithInit(path, init);
+  },
+};
+const httpServices: TaxonomyServices = {
+  category: createHttpCategoryRepository(lazyGateway), brand: createHttpBrandRepository(lazyGateway),
+  productType: createHttpProductTypeAdminAdapter(lazyGateway), seo: createHttpSeoRepository(lazyGateway),
+  characteristic: createHttpCharacteristicRepository(lazyGateway),
+};
 export function createTaxonomyServices(mode: DataMode): TaxonomyServices {
-  if (mode === "api") {
-    const gateway = getTaxonomyGateway();
-    if (!gateway) throw new Error(TAXONOMY_API_UNAVAILABLE_MESSAGE);
-    return {
-      category: unavailable as CategoryRepository,
-      brand: unavailable as BrandRepository,
-      productType: createHttpProductTypeAdapter(gateway),
-      seo: unavailable as SeoRepository,
-      characteristic: unavailable as CharacteristicRepository,
-    };
-  }
-  return {
-    category: mockCategoryAdapter,
-    brand: mockBrandAdapter,
-    productType: mockProductTypeAdapter,
-    seo: mockSeoAdapter,
-    characteristic: mockCharacteristicAdapter,
-  };
+  if (mode === "api") return httpServices;
+  return { category: mockCategoryAdapter, brand: mockBrandAdapter, productType: mockProductTypeAdapter, seo: mockSeoAdapter, characteristic: mockCharacteristicAdapter };
 }
-
 const cache = new Map<DataMode, TaxonomyServices>();
-
-export function getTaxonomyServices(mode: DataMode): TaxonomyServices {
-  const cached = cache.get(mode);
-  if (cached) return cached;
-  const services = createTaxonomyServices(mode);
-  cache.set(mode, services);
-  return services;
-}
-
-// Reads the validated global configuration (VITE_DATA_MODE). The React tree observes
-// the same value through DataModeContext, so the UI gate and the service layer never
-// disagree about the active mode.
-export function resolveTaxonomyServices(): TaxonomyServices {
-  const env = import.meta.env;
-  const mode = resolveDataMode(env?.VITE_DATA_MODE, env?.DEV ?? true);
-  return getTaxonomyServices(mode);
-}
+export function getTaxonomyServices(mode: DataMode): TaxonomyServices { const cached = cache.get(mode); if (cached) return cached; const services = createTaxonomyServices(mode); cache.set(mode, services); return services; }
+export function resolveTaxonomyServices(): TaxonomyServices { const env = import.meta.env; const mode = resolveDataMode(env?.VITE_DATA_MODE, env?.DEV ?? true); return getTaxonomyServices(mode); }

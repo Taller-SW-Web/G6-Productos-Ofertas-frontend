@@ -11,7 +11,7 @@ export function AdministrationStateDialog<T extends AdministrationRecord>({
   entityLabel,
   opened,
   change,
-  read,
+  reconcile,
   onCancel,
   onConfirmed,
 }: {
@@ -19,9 +19,9 @@ export function AdministrationStateDialog<T extends AdministrationRecord>({
   entityLabel: string;
   opened: boolean;
   change: (status: "active" | "inactive", signal: AbortSignal) => Promise<T>;
-  read: (signal: AbortSignal) => Promise<T | null>;
+  reconcile?: (signal: AbortSignal) => Promise<import("../services/administration").PromotionReconciliation<T>>;
   onCancel: () => void;
-  onConfirmed: () => void;
+  onConfirmed: (outcome: "CONFIRMED" | "RECONCILED") => void;
 }) {
   const command = usePromotionCommand<T>();
   const [checking, setChecking] = useState(false);
@@ -45,11 +45,13 @@ export function AdministrationStateDialog<T extends AdministrationRecord>({
       if (checking) return;
       setChecking(true);
       try {
-        const result = await read(new AbortController().signal);
-        if (result?.status === target) onConfirmed();
+        const resolution = reconcile ? await reconcile(new AbortController().signal) : null;
+        if (resolution?.status === "reconciled" && resolution.value.status === target) onConfirmed("RECONCILED");
+        else if (resolution?.status === "access_denied") setCheckError("No tienes permiso para consultar la intención pendiente.");
+        else if (resolution?.status === "unavailable") setCheckError("La conciliación no está disponible; la intención permanece bloqueada.");
         else
           setCheckError(
-            "La consulta no confirmó el estado solicitado. No se repetirá automáticamente.",
+            "La lectura no acredita la intención pendiente. No se repetirá automáticamente.",
           );
       } catch {
         setCheckError("La consulta del resultado no está disponible.");
@@ -58,7 +60,7 @@ export function AdministrationStateDialog<T extends AdministrationRecord>({
       }
     } else {
       const result = await command.run((signal) => change(target, signal));
-      if (result) onConfirmed();
+      if (result) onConfirmed(result.writeOutcome ?? "CONFIRMED");
     }
   };
   return (

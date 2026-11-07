@@ -12,12 +12,10 @@ import {
   TextInput,
 } from "@mantine/core";
 import {
-  ConfirmDialog,
   FeedbackAlert,
   PageHeader,
   SectionCard,
 } from "../../../components/shared";
-import { SufijoResaltado } from "../components/SufijoResaltado";
 import { useCategoryDetail } from "../hooks/useCategoryDetail";
 import { useCategoryTree } from "../hooks/useCategoryTree";
 import { useUpdateCategory } from "../hooks/useUpdateCategory";
@@ -87,20 +85,17 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
   const { state: treeState } = useCategoryTree();
   const {
     phase,
-    slugCheck,
-    slug,
     error,
     resultado,
-    setSlug,
-    comprobar,
+    isUnknownIntent,
     actualizar,
-    cerrar,
+    reconciliar,
   } = useUpdateCategory();
 
   const [nombre, setNombre] = useState(detalle.nombre);
   const [padreId, setPadreId] = useState<string | null>(detalle.padreId ?? null);
   const [descripcion, setDescripcion] = useState(detalle.descripcion ?? "");
-  const [orden, setOrden] = useState<number>(detalle.orden);
+  const [orden, setOrden] = useState<number | null>(detalle.orden);
   const [nombreError, setNombreError] = useState<string | null>(null);
 
   const padres = useMemo(() => {
@@ -120,9 +115,6 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
     return opciones;
   }, [treeState, detalle.id]);
 
-  const modalAbierto =
-    phase === "comprobando" || phase === "confirmando" || phase === "guardando";
-
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const limpio = nombre.trim();
@@ -130,33 +122,13 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
       setNombreError("Ingresa el nombre de la categoría.");
       return;
     }
+    if (orden === null) { setNombreError("Ingresa un orden porque el servicio no publicó el valor actual."); return; }
     setNombreError(null);
-    if (limpio !== detalle.nombre) {
-      comprobar(limpio);
-      return;
-    }
     actualizar({
       id: detalle.id,
       nombre: limpio,
-      slug: slug.trim() || detalle.slug,
-      padreId: padreId ?? undefined,
-      descripcion: descripcion.trim() || undefined,
-      orden,
-    });
-  };
-
-  const handleConfirmar = () => {
-    if (
-      !slugCheck ||
-      phase === "comprobando" ||
-      phase === "guardando"
-    ) {
-      return;
-    }
-    actualizar({
-      id: detalle.id,
-      nombre: nombre.trim(),
-      slug: slug.trim(),
+      // Slugs are edited independently in the SEO workflow.
+      slug: detalle.slug ?? "",
       padreId: padreId ?? undefined,
       descripcion: descripcion.trim() || undefined,
       orden,
@@ -180,14 +152,17 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
             </Group>
           }
         >
-          {`Se actualizó «${resultado.nombre}» con el slug «${resultado.slug}».`}
+          {resultado.actualizadaSinLectura
+            ? `Se confirmó el cambio de «${resultado.nombre}», pero no se pudo actualizar la lectura. Refresca o abre el detalle para reconciliarlo antes de otra modificación. El slug se administra por separado en SEO.`
+            : `Se actualizaron los datos de «${resultado.nombre}». El slug se administra por separado en SEO.`}
         </FeedbackAlert>
       ) : (
         <>
           <SectionCard
             title="Datos de la categoría"
-            description="Si cambias el nombre, el slug se vuelve a proponer y se confirma antes de guardar."
+            description="Actualiza nombre, categoría padre, descripción y orden. El slug se administra por separado en SEO."
           >
+            {error && <FeedbackAlert semantic={isUnknownIntent({ id: detalle.id, nombre: nombre.trim(), slug: detalle.slug ?? "", padreId: padreId ?? undefined, descripcion: descripcion.trim() || undefined, orden: orden ?? detalle.orden ?? 0 }) ? "warning" : "error"} title={isUnknownIntent({ id: detalle.id, nombre: nombre.trim(), slug: detalle.slug ?? "", padreId: padreId ?? undefined, descripcion: descripcion.trim() || undefined, orden: orden ?? detalle.orden ?? 0 }) ? "Resultado incierto" : "No se pudo guardar"} actions={orden !== null && isUnknownIntent({ id: detalle.id, nombre: nombre.trim(), slug: detalle.slug ?? "", padreId: padreId ?? undefined, descripcion: descripcion.trim() || undefined, orden }) ? <Button variant="outline" onClick={() => void reconciliar({ id: detalle.id, nombre: nombre.trim(), slug: detalle.slug ?? "", padreId: padreId ?? undefined, descripcion: descripcion.trim() || undefined, orden })}>Consultar categoría</Button> : undefined}>{error}</FeedbackAlert>}
             <form onSubmit={handleSubmit} noValidate>
               <Stack gap="md">
                 <TextInput
@@ -211,9 +186,9 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
                   label="Orden"
                   min={1}
                   allowDecimal={false}
-                  value={orden}
+                  value={orden ?? ""}
                   onChange={(value) =>
-                    setOrden(typeof value === "number" ? value : 1)
+                    setOrden(typeof value === "number" ? value : null)
                   }
                 />
                 <Textarea
@@ -230,7 +205,7 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
                   >
                     Cancelar
                   </Button>
-                  <Button type="submit" loading={phase === "comprobando"}>
+                  <Button type="submit" loading={phase === "guardando"} disabled={orden !== null && isUnknownIntent({ id: detalle.id, nombre: nombre.trim(), slug: detalle.slug ?? "", padreId: padreId ?? undefined, descripcion: descripcion.trim() || undefined, orden })}>
                     Guardar cambios
                   </Button>
                 </Group>
@@ -240,73 +215,6 @@ function EditCategoryForm({ detalle }: { detalle: CategoryDetail }) {
         </>
       )}
 
-      <ConfirmDialog
-        opened={modalAbierto}
-        title="Confirmar slug SEO"
-        confirmLabel="Guardar cambios"
-        submitting={phase === "guardando"}
-        confirmDisabled={phase !== "confirmando" || !slugCheck}
-        onCancel={cerrar}
-        onConfirm={handleConfirmar}
-        error={
-          error ? (
-            <FeedbackAlert semantic="error" title="No se pudo guardar">
-              {error}
-            </FeedbackAlert>
-          ) : undefined
-        }
-      >
-        <Stack gap="md">
-          {phase === "comprobando" ? (
-            <Text size="sm" role="status">
-              Verificando disponibilidad del slug…
-            </Text>
-          ) : (
-            <>
-              <Text size="sm" c="dimmed">
-                El slug define la URL pública de la categoría. Confírmalo antes
-                de guardar.
-              </Text>
-              {slugCheck && !slugCheck.disponible && (
-                <FeedbackAlert
-                  semantic="warning"
-                  title="El slug ya está en uso"
-                  actions={
-                    slugCheck.alternativo ? (
-                      <Button
-                        variant="outline"
-                        onClick={() => {
-                          if (slugCheck.alternativo) {
-                            setSlug(slugCheck.alternativo);
-                          }
-                        }}
-                      >
-                        Usar alternativa
-                      </Button>
-                    ) : undefined
-                  }
-                >
-                  <Text size="sm" component="span">
-                    Sugerencia:{" "}
-                  </Text>
-                  {slugCheck.alternativo ? (
-                    <SufijoResaltado
-                      base={slugCheck.slug}
-                      completo={slugCheck.alternativo}
-                    />
-                  ) : null}
-                </FeedbackAlert>
-              )}
-              <TextInput
-                label="Slug (URL)"
-                value={slug}
-                disabled={phase === "guardando"}
-                onChange={(event) => setSlug(event.currentTarget.value)}
-              />
-            </>
-          )}
-        </Stack>
-      </ConfirmDialog>
     </>
   );
 }

@@ -739,7 +739,7 @@ export class MockInventoryAdapter implements InventoryRepository {
       if (payload.disposition === "REINGRESAR_BLOQUEADO") {
         stockItem.blocked += payload.quantityReceived;
       }
-      stockItem.stockVersion += 1;
+      if (stockItem.stockVersion !== null) stockItem.stockVersion += 1;
       stockItem.updatedAt = payload.receivedAt;
       this.recalculateStockStatus(stockItem);
     }

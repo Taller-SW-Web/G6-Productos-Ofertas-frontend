@@ -11,7 +11,7 @@ npm ci
 npm run dev
 ```
 
-Vite inicia en `http://127.0.0.1:5173`. Sin sesión, las rutas administrativas redirigen a `/login`. Tras autenticarse, la entrada inicial es `/precios`. En desarrollo mock se permite recorrer fixtures sin identidad G7; los builds de producción exigen login también en modo mock. Para revisar las pantallas, navega por el menú o abre, por ejemplo, `/productos`, `/categorias`, `/precios/auditoria`, `/carga-masiva`, `/combos` o `/inventario`.
+Vite inicia en `http://127.0.0.1:5173`. Sin sesión, las rutas administrativas redirigen a `/login`. Tras autenticarse, la entrada inicial es `/productos` o el destino interno solicitado. En desarrollo mock se permite recorrer fixtures sin identidad G7; los builds de producción exigen login también en modo mock. Para revisar las pantallas, navega por el menú o abre, por ejemplo, `/productos`, `/categorias`, `/precios/auditoria`, `/carga-masiva`, `/combos` o `/inventario`.
 
 Comandos disponibles:
 
@@ -81,7 +81,7 @@ Si alguna URL de Promotions falta o es inválida, sus rutas muestran indisponibi
 | `mock` | Demostración con repositorios en memoria y fixtures. No requiere Backend, credenciales ni conexión de red. Las escrituras simuladas se conservan en `localStorage` de este navegador (ver «Persistencia de la demostración»). |
 | `api` | Selecciona puertos API cuando hay providers configurados; sin ellos, cada módulo define su respuesta. Bulk y Combos se detallan debajo. |
 
-**Bulk:** `VITE_DATA_MODE=mock` selecciona de forma explícita el repositorio de demostración. En `api`, `/carga-masiva` usa el adaptador HTTP del contrato OpenAPI 0.6.0-rc.2 cuando están configurados `VITE_GATEWAY_ORIGIN`, `VITE_G7_API_BASE` y una sesión G7 válida. Sin sesión se redirige a `/login`; con sesión pero sin Gateway, se informa que el provider no está disponible; las respuestas HTTP y los errores de red se muestran sin recurrir al mock. La integración del consumidor tiene pruebas unitarias y un arnés de interfaz contra un servidor HTTP aislado; el contrato marca las operaciones Bulk como `provisional-internal`, por lo que esas pruebas no acreditan disponibilidad ni homologación del backend. Se conectan plantilla, importación multipart, consulta de lote/filas/dominios, reporte, reanudación y exportación CSV/XLSX. Los modos de datos no comparten estado.
+**Bulk:** `VITE_DATA_MODE=mock` selecciona de forma explícita el repositorio de demostración. En `api`, `/carga-masiva` usa el adaptador HTTP del contrato OpenAPI 0.6.0-rc.2 cuando están configurados `VITE_GATEWAY_ORIGIN`, `VITE_G7_API_BASE` y una sesión G7 válida. Sin sesión se redirige a `/login`; con sesión pero sin Gateway, se informa que el provider no está disponible; las respuestas HTTP y los errores de red se muestran sin recurrir al mock. La integración del consumidor tiene pruebas unitarias y un arnés de interfaz contra un servidor HTTP aislado; el contrato marca las operaciones Bulk como `provisional-internal`, por lo que esas pruebas no acreditan disponibilidad ni homologación del backend. Se conectan plantilla, importación multipart, consulta de lote/filas/dominios, reporte y exportación según formato admitido. La reanudación HTTP requiere protocolo aprobado. Los modos de datos no comparten estado.
 
 En desarrollo, la aplicación usa `mock` si la variable no está definida. Para `npm run build` se requiere definir `VITE_DATA_MODE` expresamente como `mock` o `api`; un valor ausente o inválido detiene el build. Copiar `.env.example` a `.env.local` configura `mock`. Vite carga las variables al arrancar: reinicia el servidor o vuelve a construir tras cambiarlas.
 
@@ -99,18 +99,20 @@ Esta persistencia es **local a este navegador**: no sincroniza entre dispositivo
 
 ## Funcionalidades y estado de datos
 
+El [cierre H4](docs/h4/IMPLEMENTACION_FRONTEND_DEMO_ADMIN.md) describe el arranque con sesión G7 compartida. Consulta sus [dependencias de Backend](docs/h4/DEPENDENCIAS_BACKEND_PARA_DEMO.md) y la [matriz de verificación](docs/h4/MATRIZ_VERIFICACION_FRONTEND.md) antes de preparar la demo administrativa.
+
 La tabla resume lo que muestran el código y la configuración de esta rama; la demostración no equivale a persistencia o API integrada.
 
 | Área | Estado en el frontend |
 |---|---|
 | Productos y variantes/SKU | Mock explícito o adaptadores HTTP por Gateway configurado. Integración administrativa parcial por campos/lecturas contractuales ausentes; errores visibles y sin fallback. Pruebas reales de fase 1 pendientes. |
-| Taxonomía (categorías, características, tipos, marcas y SEO) | En `mock` se muestra un aviso de datos simulados. En `api`, el listado y el enlace de esquema usan adapters Gateway; el esquema valida DTO, acepta `schemaVersion` desde 0, cancela y limita consultas, y reutiliza la sesión humana G7 para renovar una vez ante `401 TOKEN_INVALIDO`. El provider Backend `5abfffc` implementa el GET de esquema. El GET de detalle separado sigue bloqueado porque continúa `provisional-internal`; las escrituras siguen cerradas. No hay fallback a mocks. La homologación de discrepancias, JWT G7 real, grant efectivo y E2E Gateway siguen pendientes. Ver [integración MK-010 H4](docs/INTEGRACION_TAXONOMIA_MK010_H4.md). |
-| Precios y programaciones/importación | Flujos de demostración mock. El modo `api` requiere un adapter; la implementación predeterminada falla explícitamente, sin fallback. Las operaciones de archivo no acreditan procesamiento comercial de Backend. |
-| Auditoría de precios | Listado, detalle y exportación de demostración mock. Las ediciones confirmadas de Pricing incorporan asientos simulados por sesión de navegador; recargar conserva los asientos emitidos. El runtime permite inyección, pero no incluye provider API predeterminado. Los archivos disponibles son muestras. |
+| Taxonomía (categorías, características, tipos, marcas y SEO) | Adapters HTTP de maestros, esquema, asociaciones, SEO y seguimiento asíncrono cuando Gateway y G7 están configurados. Las capacidades dependen del contrato y del grant. |
+| Precios y programaciones/importación | El runtime API consulta objetivos de Catálogo e inyecta el repositorio HTTP. Las escrituras por canal requieren UUID autorizado. Importación pendiente para la demo. |
+| Auditoría de precios | Repositorios separados para demostración y para listado, detalle y exportación HTTP. Las ediciones mock de Pricing siguen alimentando el historial simulado. |
 | Cupones, promociones y recomendaciones | Flujos de demostración mock. En modo `api`, `CommercialModeGate` bloquea estas rutas si no reciben un proveedor explícito mediante `PromotionApiContext`. El adaptador HTTP administrativo está conectado al cliente G7 de sesión en memoria cuando se configuran ambas URLs; su recorrido por Gateway/PostgreSQL está probado en entorno descartable; los selectores disponen de adaptador HTTP tipado de Catálogo/Taxonomía. La homologación con G7 compartido, la prueba contra sus servicios reales y la verificación autoritativa de referencias del backend siguen pendientes. Ver [integración Promotions](docs/INTEGRACION_PROMOTIONS_GATEWAY.md). Las recomendaciones no calculan un precio final ni garantizan stock; ambos datos figuran como no disponibles en la demostración. |
-| Carga masiva | Simulación mock tanto en `mock` como en `api` por la excepción descrita arriba. La revisión local de archivos no sustituye la validación comercial; XLSX y procesamiento/exportación reales requieren Backend. Ver [límites de carga masiva](docs/ESTADO_CARGA_MASIVA.md). |
-| Combos | Gestión de combos (MK-002) con puertos tipados y adapters mock; la disponibilidad es información de catálogo compartido, sin consultar ni reservar stock real. En `api` sin provider la integración se muestra cerrada, sin fallback a fixtures. |
-| Inventario (control de stock, umbrales, traslados y dashboard) | Flujos de demostración mock (`MK-015` y `MK-016`). En modo `api`, `CommercialModeGate` bloquea las rutas de `/inventario` y `ApiPendingRepository` rechaza operaciones sin fallback a mocks. Soporta inyección de repositorio alternativo (`tests/harness/inventory-adapter.html`). Ver [contrato de inventario](docs/CONTRATO_INVENTARIO_FRONTEND.md). |
+| Carga masiva | Repositorio mock explícito o adapter HTTP autenticado para plantilla, importación, consulta, reporte y exportación. La reanudación HTTP requiere el protocolo aprobado. |
+| Combos | El runtime API compone Catálogo y Pricing para el listado y las escrituras respaldadas por contrato. La disponibilidad no verificable conserva el estado desconocido. |
+| Inventario (control de stock, umbrales, traslados y dashboard) | El adapter HTTP usa SKU comerciales activos para cobertura de stock. Dashboard, umbrales y traslados consumen sus operaciones publicadas. Alertas y catálogo físico quedan pendientes. |
 | Foundation | Galería de componentes accesible solo en desarrollo; no es un flujo comercial. |
 
 Los detalles, limitaciones y estados pendientes por feature están en [AUDITORIA_MK013.md](docs/AUDITORIA_MK013.md), [AUDITORIA_CATALOGO_MK003_MK004.md](docs/AUDITORIA_CATALOGO_MK003_MK004.md), [AVANCE_FRONTEND_CUEVA.md](docs/AVANCE_FRONTEND_CUEVA.md), [VALIDACION_MK014.md](docs/VALIDACION_MK014.md) y [CONTRATO_INVENTARIO_FRONTEND.md](docs/CONTRATO_INVENTARIO_FRONTEND.md). Consulta esos informes antes de inferir alcance de una operación o estado de integración.
@@ -123,7 +125,7 @@ Implementa S01–S04 como vistas administrativas con puertos tipados y adapters 
 
 La elegibilidad de componentes, las reglas económicas y la disponibilidad informativa consultan las identidades del Catálogo compartido (no un catálogo paralelo). La disponibilidad se calcula como `min(floor(stockDisponibleSKU / cantidadRequeridaSKU))` sobre un snapshot inyectable; si los datos no permiten verificar, se muestra información incompleta o no verificable en lugar de un cero inventado. Los precios vigentes de referencia provienen del puerto de Pricing y se distinguen del precio comercial guardado.
 
-No hay provider HTTP real ni persistencia comercial. En modo `api`, la integración permanece cerrada y no cae a fixtures. La referencia consultada es OpenAPI `0.6.0-rc.1`: las operaciones administrativas de Combos están marcadas `provisional-internal`; `combos:leer`, `catalogo:leer` y `precios:leer` siguen pendientes de registro de scopes. El component spec de MK-002 permanece **En revisión**: esta entrega no declara aprobación UX, homologación ni integración API.
+El arranque H4 compone el repositorio HTTP cuando hay Gateway y sesión G7. Sin esa configuración, el modo API mantiene la integración cerrada. Las operaciones administrativas de Combos siguen marcadas como provisional-internal en OpenAPI 0.6.0-rc.3. El component spec de MK-002 permanece en revisión y la homologación externa sigue pendiente.
 
 En la aplicación mock, Promociones y Recomendaciones consultan el mismo servicio
 de Catálogo que Productos/Variantes mediante
@@ -152,7 +154,7 @@ registra reproducción, pruebas y revisiones aún pendientes para #7/#8/#9.
 - `components/shared/`: patrones visuales reutilizables sin reglas de negocio ni conocimiento de endpoints.
 - `theme/`: tema, tokens, defaults de componentes y estilos globales.
 
-El flujo previsto es página → componentes/hooks → servicio o puerto → adapter. En las features con composición configurada, esta usa el modo global o recibe un adapter compatible; Bulk es una excepción actual: no consulta ese selector y exporta el mock directamente ([detalle](docs/ESTADO_CARGA_MASIVA.md)). Las páginas no deben crear una selección paralela ni importar fixtures directamente. La capa visual no define endpoints, credenciales o DTO externos. Mantén las reglas y payloads alineados con las fuentes normativas y los contratos publicados por su owner.
+El flujo previsto es página → componentes/hooks → servicio o puerto → adapter. La composición usa el modo global e inyecta un adapter compatible en cada módulo. Las páginas no deben crear una selección paralela ni importar fixtures directamente. La capa visual no define endpoints, credenciales o DTO externos. Mantén las reglas y payloads alineados con las fuentes normativas y los contratos publicados por su owner.
 
 Al añadir una funcionalidad, revisa primero [AGENTS.md](AGENTS.md), la guía de [implementación React](docs/GUIA_IMPLEMENTACION_FRONTEND_REACT.md) y la [guía de componentes Foundation](docs/COMPONENTES_FOUNDATION.md). Identifica las rutas y componentes existentes, reutiliza shell/theme, agrega rutas comerciales en `productRoutes.tsx` y navegación en `navigation.ts`; conserva las demos en `demoRoutes.tsx`. Para decisiones de negocio, UI o integración, consulta Docs antes de implementar.
 
@@ -285,8 +287,10 @@ peticiones de autenticación. El CLI productivo no admite HTTP ni un flag de fix
 Las sondas obligatorias aceptan G7 OPTIONS 200/204 y Gateway GET anónimo 401/403.
 La sonda y la lectura autenticada usan la misma URL de Cupones, con
 `pagina=1&tamanio=10`. La lectura debe devolver 200 con el Bearer de esa sesión.
-El gate comprueba URL y contenido propios de Precios. Para el logout registra
-el cierre local y el HTTP 204 de G7 por separado. La revocación efectiva
+El gate de release completa el recorrido en Cupones. La verificación de
+producción aislada también abre Precios y comprueba la pantalla y la lectura de
+objetivos de Catálogo en loopback. Para el logout se registran el cierre local y
+el HTTP 204 de G7 por separado. La revocación efectiva
 requiere evidencia del owner sin volver a enviar el refresh token.
 
 Sin intervención manual falla si MFA queda pendiente. Para la aceptación real,

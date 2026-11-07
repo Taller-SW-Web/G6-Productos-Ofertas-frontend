@@ -4,6 +4,7 @@ import {
   usePricingRuntime,
 } from "../services/PricingContext";
 import type { ScheduleDraft, ScheduleView } from "../services/pricingModels";
+import type { PriceChannel } from "../services/pricingRepository";
 import { localInstant, validateSchedule } from "../services/pricingValidation";
 import { usePricingAction, usePricingRead } from "./usePricingRequest";
 
@@ -33,7 +34,7 @@ export function usePriceSchedules(targetId: string) {
 export function useScheduleForm(
   targetId: string,
   currency: string,
-  channel: "global" | "retail",
+  channel: PriceChannel,
   onCreated: () => void,
 ) {
   const { service, clock } = usePricingRuntime();

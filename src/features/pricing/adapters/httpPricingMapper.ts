@@ -12,6 +12,9 @@ import type {
 
 export interface PricingChannelIds {
   retail?: string;
+  marketplace?: string;
+  chatbot?: string;
+  ventas?: string;
 }
 
 function invalidResponse(): never {
@@ -140,8 +143,8 @@ function priceChannel(
   channelIds: PricingChannelIds,
 ): PriceChannel {
   if (value === null) return "global";
-  if (value === "RETAIL" || (channelIds.retail && value === channelIds.retail))
-    return "retail";
+  for (const channel of ["retail", "marketplace", "chatbot", "ventas"] as const)
+    if (value === channel.toUpperCase() || (channelIds[channel] && value === channelIds[channel])) return channel;
   return invalidResponse();
 }
 

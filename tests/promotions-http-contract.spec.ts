@@ -1,9 +1,15 @@
+import { createMemoryStorage } from "./fixtures/h4Controlled";
 // Explicit HTTP DTO fixtures test mapping/cancellation only. The separate Gateway
 // suite verifies actual JWT/JWKS, native services and PostgreSQL persistence.
 import { test, expect } from "@playwright/test";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { createHttpPromotionServices } from "../src/features/promotions/adapters/httpPromotionServices";
+
+test.beforeEach(() => {
+  Object.defineProperty(globalThis, "sessionStorage", { value: createMemoryStorage(), configurable: true });
+});
+test.afterEach(() => { Reflect.deleteProperty(globalThis, "sessionStorage"); });
 
 const parent = {
   promotionId: "parent",
@@ -32,6 +38,7 @@ test("logout elimina baselines de edición de la identidad anterior", async () =
     const api = createHttpPromotionServices({
       gatewayOrigin: origin,
       getAccessToken: async () => "synthetic-unit-token",
+      scopeId: () => "fixture-promotions-owner",
       sessionEvents: { version: () => version, subscribe: notify => { changed = notify; return () => {}; } },
     });
     const signal = new AbortController().signal;
@@ -111,6 +118,7 @@ test("HTTP DTO: optional coupon limits remain unknown; current parent instants k
     const api = createHttpPromotionServices({
       gatewayOrigin: origin,
       getAccessToken: async () => "synthetic-unit-token",
+      scopeId: () => "fixture-promotions-owner",
     });
     const coupon = await api.coupons.read(
       "coupon",
@@ -136,6 +144,7 @@ test("HTTP DTO: absent optional recommendation criterion/justification do not fa
     const api = createHttpPromotionServices({
       gatewayOrigin: origin,
       getAccessToken: async () => "synthetic-unit-token",
+      scopeId: () => "fixture-promotions-owner",
     });
     const rule = await api.recommendations.read(
       "rule",
@@ -151,6 +160,7 @@ test("PATCH sends only changed fields, preserving contractual instants with subs
     const api = createHttpPromotionServices({
       gatewayOrigin: origin,
       getAccessToken: async () => "synthetic-unit-token",
+      scopeId: () => "fixture-promotions-owner",
     });
     const signal = new AbortController().signal;
     const current = await api.campaigns.read("parent", signal);

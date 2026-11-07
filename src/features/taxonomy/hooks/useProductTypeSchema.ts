@@ -53,13 +53,13 @@ export function useProductTypeSchema(id: string): {
             obligatoria: asociacion.obligatoria,
             estado: asociacion.estado === "Activo" ? "ACTIVO" : "INACTIVO",
             schemaVersion: asociacion.schemaVersion,
-            caracteristica: {
+            caracteristica: asociacion.caracteristica ? {
               caracteristicaId: asociacion.caracteristica.id,
               nombre: asociacion.caracteristica.nombre,
               tipo: asociacion.caracteristica.tipo,
               unidadMedida: asociacion.caracteristica.unidad ?? null,
               estado: asociacion.caracteristica.estado === "Activo" ? "ACTIVO" : "INACTIVO",
-            },
+            } : null,
           })),
           schemaVersion: detalle.schemaVersion,
         };

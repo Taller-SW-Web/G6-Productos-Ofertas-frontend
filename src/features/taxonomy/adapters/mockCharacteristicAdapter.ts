@@ -160,7 +160,7 @@ const normalizarEtiqueta = (nombre: string): string =>
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 
-// BLOCKED_CONTRACT: no hay contrato OpenAPI confirmado para el sondeo del resultado
+// El mock reproduce el seguimiento publicado en GET /api/v1/taxonomia/operaciones/{operationId}
 // de una baja asíncrona de valor (202). Este registro mantiene las operaciones
 // pendientes en memoria para que la UI consulte su estado sin inventar un endpoint.
 export interface OperacionBajaValor {
@@ -309,7 +309,7 @@ export const __setCharacteristicMockScenarios = (
     const caracteristica = store.find((item) => item.tipo === "LISTA");
     if (caracteristica) {
       caracteristica.valores = Array.from(
-        { length: characteristicConfigDefaults.maxValoresLista },
+        { length: characteristicConfigDefaults.maxValoresLista ?? 50 },
         (_, index) => ({
           valorId: `fixture-${index + 1}`,
           nombre: `Valor permitido ${String(index + 1).padStart(2, "0")}`,
@@ -497,7 +497,7 @@ export const mockCharacteristicAdapter: CharacteristicRepository = {
     // SPEC-009: el límite de valores permitidos se aplica también aquí y no solo como
     // restricción visual del formulario (maxValoresLista sobre valores activos).
     const existentes = r.valores ?? [];
-    if (contarActivos(existentes) >= characteristicConfigDefaults.maxValoresLista) {
+    if (contarActivos(existentes) >= (characteristicConfigDefaults.maxValoresLista ?? 50)) {
       throw new Error(
         `Se alcanzó el límite de ${characteristicConfigDefaults.maxValoresLista} valores permitidos para esta característica.`,
       );

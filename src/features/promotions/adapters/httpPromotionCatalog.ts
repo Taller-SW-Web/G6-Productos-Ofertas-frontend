@@ -4,12 +4,24 @@ import type {
   PromotionCatalogRepository,
 } from "../services/catalogRepository";
 
+export class PromotionCatalogAccessError extends Error {
+  constructor(readonly status: 401 | 403) { super(status === 401 ? "Sesión no autorizada para consultar Catálogo." : "Permiso denegado al consultar Catálogo."); this.name = "PromotionCatalogAccessError"; }
+}
+
 // OpenAPI 0.6.0-rc.1, Docs e6a8ec2: listarProductos (commercial DTO),
 // listarVariantesProducto and listarCategoriasAdmin (administrative DTOs).
 // This is a backoffice USER session adapter, never an inter-service identity.
 export function createHttpPromotionCatalog(
   request: (path: string, signal: AbortSignal) => Promise<unknown>,
 ): PromotionCatalogRepository {
+  const boundedRequest = async (path: string, signal: AbortSignal) => {
+    try { return await request(path, AbortSignal.any([signal, AbortSignal.timeout(7500)])); }
+    catch (error) {
+      const status = error && typeof error === "object" && "status" in error ? Number((error as { status: unknown }).status) : NaN;
+      if (status === 401 || status === 403) throw new PromotionCatalogAccessError(status);
+      throw error;
+    }
+  };
   async function pages(path: string, nested: boolean, signal: AbortSignal) {
     const rows: unknown[] = [];
     let expectedTotal: number | undefined;
@@ -17,7 +29,7 @@ export function createHttpPromotionCatalog(
     for (let current = 1; current <= 1000; current++) {
       signal.throwIfAborted();
       const response = object(
-        await request(`${path}&pagina=${current}&tamanio=100`, signal),
+        await boundedRequest(`${path}&pagina=${current}&tamanio=100`, signal),
       );
       signal.throwIfAborted();
       const meta = nested ? object(response.meta) : response;
@@ -47,7 +59,7 @@ export function createHttpPromotionCatalog(
 
   return {
     async products(signal, retain) {
-      const bounded = AbortSignal.any([signal, AbortSignal.timeout(7500)]);
+      const bounded = signal;
       const retainedIds = new Set(retain?.productIds ?? []);
       const retainedSkus = new Set(retain?.skus ?? []);
       // The commercial DTO omits status. The published backoffice estado
@@ -55,6 +67,21 @@ export function createHttpPromotionCatalog(
       const groups = [{ state: "ACTIVO", rows: await pages("/productos?estado=ACTIVO", false, bounded) }];
       if (retainedIds.size || retainedSkus.size)
         groups.push({ state: "INACTIVO", rows: await pages("/productos?estado=INACTIVO", false, bounded) });
+      const variantRows = new Map<string, unknown[]>();
+      const variantProducts = groups.flatMap(group => group.rows).filter(value => object(value).tiene_variantes === true);
+      let variantIndex = 0;
+      await Promise.all(Array.from({ length: Math.min(4, variantProducts.length) }, async () => {
+        for (;;) {
+          const index = variantIndex++;
+          if (index >= variantProducts.length) return;
+          bounded.throwIfAborted();
+          const product = object(variantProducts[index]);
+          const id = text(product.product_id);
+          const variants = await pages(`/productos/${encodeURIComponent(id)}/variantes?estado=ACTIVA`, true, bounded);
+          if (retainedSkus.size) variants.push(...await pages(`/productos/${encodeURIComponent(id)}/variantes?estado=INACTIVA`, true, bounded));
+          variantRows.set(id, variants);
+        }
+      }));
       const products: CatalogProductChoice[] = [];
       const ids = new Set<string>();
       const skus = new Set<string>();
@@ -86,17 +113,8 @@ export function createHttpPromotionCatalog(
         }
         const choices: CatalogProductChoice["skus"] = [];
         if (row.tiene_variantes) {
-          const variants = await pages(
-            `/productos/${encodeURIComponent(id)}/variantes?estado=ACTIVA`,
-            true,
-            bounded,
-          );
-          if (retainedSkus.size)
-            variants.push(...await pages(
-              `/productos/${encodeURIComponent(id)}/variantes?estado=INACTIVA`,
-              true,
-              bounded,
-            ));
+          const variants = variantRows.get(id);
+          if (!variants) throw new Error("VARIANT_CATALOG_UNAVAILABLE");
           const variantIds = new Set<string>();
           for (const value of variants) {
             const variant = object(value);
@@ -126,7 +144,7 @@ export function createHttpPromotionCatalog(
       return products;
     },
     async categories(signal) {
-      const bounded = AbortSignal.any([signal, AbortSignal.timeout(7500)]);
+      const bounded = signal;
       const rows = await pages(
         "/categorias/administracion?estado=ACTIVO",
         true,

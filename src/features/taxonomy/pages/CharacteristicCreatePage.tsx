@@ -31,7 +31,7 @@ const estados: { value: CharacteristicStatus; label: string }[] = [
 export function CharacteristicCreatePage() {
   const navigate = useNavigate();
 
-  const { phase, error, creado, crear, reiniciar } = useCreateCharacteristic();
+  const { phase, error, creado, crear, reiniciar, reconciliar } = useCreateCharacteristic();
 
   const [nombre, setNombre] = useState("");
   const [tipo, setTipo] = useState<CharacteristicType>("TEXTO");
@@ -174,7 +174,8 @@ export function CharacteristicCreatePage() {
                   {error && (
                     <FeedbackAlert
                       semantic="error"
-                      title="No se pudo crear la característica"
+                      title={phase === "incierto" ? "Resultado incierto" : "No se pudo crear la característica"}
+                      actions={phase === "incierto" ? <Button variant="outline" onClick={() => void reconciliar()}>Consultar características</Button> : undefined}
                     >
                       {error}
                     </FeedbackAlert>
