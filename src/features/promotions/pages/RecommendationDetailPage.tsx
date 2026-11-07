@@ -72,10 +72,13 @@ export function RecommendationDetailPage({
         } : undefined),
         confirmedServices.catalog.categories(signal),
       ]);
+      const errors = [products, categories].filter(result => result.status === "rejected");
+      const accessErrors = errors.filter(result => result.status === "rejected" && /HTTP (401|403)|401|403|sesión|permiso/i.test(result.reason instanceof Error ? result.reason.message : String(result.reason)));
       return {
         products: products.status === "fulfilled" ? products.value : [],
         categories: categories.status === "fulfilled" ? categories.value : [],
-        errors: [products, categories].filter(result => result.status === "rejected"),
+        errors,
+        accessErrors,
       };
     },
     [confirmedServices, record],
@@ -116,6 +119,7 @@ export function RecommendationDetailPage({
       <Stack gap="lg">
         <PromotionDataNotice kind="recommendation-detail" />
         {catalog.status === "success" && catalog.result.errors.length > 0 && <FeedbackAlert semantic="warning" title="Referencias auxiliares parciales">La información de productos y categorías se consultó por separado; la fuente disponible se conserva.</FeedbackAlert>}
+        {catalog.status === "success" && catalog.result.accessErrors.length > 0 && <FeedbackAlert semantic="error" title="Autorización requerida para referencias">Una consulta respondió con error de sesión o permisos; la referencia no se presenta como una lista vacía.</FeedbackAlert>}
         {location.state?.saved && (
           <FeedbackAlert semantic="success" title="Regla guardada">
             La configuración fue confirmada.

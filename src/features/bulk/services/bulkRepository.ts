@@ -10,6 +10,8 @@ export interface DownloadResource {
 }
 
 export interface BulkRepository {
+  /** API backend currently rejects resume; mock may support it. */
+  resumeSupported?: boolean;
   getTemplate(
     format: BulkExportFormat,
     signal?: AbortSignal,

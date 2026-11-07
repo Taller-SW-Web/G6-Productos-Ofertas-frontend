@@ -143,8 +143,17 @@ export async function reconcileConfirmedTaxonomyResource(transport: TaxonomyGate
   for (const key of pendingKeys()) {
     try {
       const marker = JSON.parse(sessionStorage.getItem(key) ?? "{}");
-      if (marker.state === "confirmed" && marker.resourcePath === resourcePath && marker.scopeHash === scopeHash) clear(key);
-    } catch { /* malformed marker remains fail-closed */ }
+      if (["unknown", "confirmed_unreadable", "confirmed_read_failed", "confirmed"].includes(marker.state) && marker.resourcePath === resourcePath && marker.scopeHash === scopeHash) {
+        // A successful GET alone proves reachability, not that this specific
+        // write took effect. Keep the marker until an operation-specific
+        // authoritative comparison is available.
+        throw new TaxonomyMutationError(
+          marker.state === "unknown" ? "unknown" : "confirmed_read_failed",
+          "La lectura autoritativa no expone evidencia suficiente para comparar el efecto de esta intención. Se conserva el bloqueo para este recurso.",
+          key,
+        );
+      }
+    } catch (error) { if (error instanceof TaxonomyMutationError) throw error; /* malformed marker remains fail-closed */ }
   }
 }
 

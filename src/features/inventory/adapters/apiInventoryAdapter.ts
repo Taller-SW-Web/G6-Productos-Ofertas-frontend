@@ -39,6 +39,7 @@ import {
   transitionToConfirmedAwaitingRefreshWithDto,
   setInFlightTransferReception,
   setUncertainTransferReception,
+  setTransferReceptionScope,
   type TransferReceptionPresentationRefresh,
   type TransferReceptionWriteRecord,
 } from "../services/transferReceptionAttempt";
@@ -64,7 +65,7 @@ import {
 // transporte productivo ni conecta el singleton de selección por sí mismo.
 
 export interface InventoryHttpRequest {
-  method: "GET" | "PUT" | "POST";
+  method: "GET" | "PUT" | "POST" | "DELETE";
   signal?: AbortSignal;
   headers?: Readonly<Record<string, string>>;
   body?: string;
@@ -90,6 +91,7 @@ export interface HttpInventoryRepositoryDependencies {
 }
 
 export interface HttpInventoryRepository extends InventoryRepository {
+  getThresholdWriteScope(): string;
   // TAC-P0-11: señal opcional para distinguir una cancelación anterior al
   // despacho HTTP de un AbortError lanzado después de invocar al transporte.
   // No forma parte del contrato OpenAPI ni del repositorio de negocio.
@@ -450,6 +452,7 @@ export function createHttpInventoryRepository(
   async function readTransfers(
     filters: TransferFiltersQuery | undefined,
   ): Promise<TransferItem[]> {
+    setTransferReceptionScope(currentUserScope());
     const collected: TrasladoInventarioDto[] = [];
     const seenTransferIds = new Set<string>();
     let pagina = 1;
@@ -591,6 +594,7 @@ export function createHttpInventoryRepository(
   }
 
   return {
+    getThresholdWriteScope: () => currentUserScope() ?? "session-unavailable",
     getThresholds(): Promise<ThresholdConfig> {
       return json("/api/v1/inventario/umbrales", { method: "GET" }, false).then(
         toThresholdConfig,
@@ -646,9 +650,15 @@ export function createHttpInventoryRepository(
       });
     },
 
+    async removeSkuThresholdOverride(sku: string): Promise<void> {
+      if (!sku.trim()) throw new InventoryError("VALIDACION", "El SKU debe existir.");
+      await send(`/api/v1/inventario/umbrales/skus/${encodeURIComponent(sku)}`, { method: "DELETE" }, true, "threshold");
+    },
+
     getTransferWriteRecord(
       transferId: string,
     ): TransferReceptionWriteRecord | null {
+      setTransferReceptionScope(currentUserScope());
       return transferWrites.get(transferId) ?? null;
     },
 
@@ -660,6 +670,7 @@ export function createHttpInventoryRepository(
       payload,
       signal?: AbortSignal,
     ): Promise<TransferItem> {
+      setTransferReceptionScope(currentUserScope());
       const key = payload.transferId;
       const frozenPayload = freezeReceiveTransferPayload(payload);
       const currentRecord = transferWrites.get(key);

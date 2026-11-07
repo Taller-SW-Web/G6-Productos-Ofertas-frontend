@@ -32,6 +32,7 @@ export interface InventoryRepository {
   updateGlobalThreshold(threshold: number): Promise<ThresholdConfig>;
 
   updateSkuThreshold(sku: string, threshold: number): Promise<ThresholdConfig>;
+  removeSkuThresholdOverride?(sku: string): Promise<void>;
 
   getTransfers(filters?: TransferFiltersQuery): Promise<TransferItem[]>;
 

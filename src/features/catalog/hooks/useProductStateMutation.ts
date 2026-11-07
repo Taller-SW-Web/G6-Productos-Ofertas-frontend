@@ -2,10 +2,12 @@ import { useState } from "react";
 import type { ProductDetailView } from "../services/catalogRepository";
 import { CatalogError } from "../services/catalogRepository";
 import { useCatalogServices } from "./useCatalogServices";
+import { useContext } from "react";
+import { PromotionSessionContext } from "../../../app/config/PromotionSessionContext";
 
-const unknownKey = (id: string) => `g6:catalog:uncertain:product:${id}`;
+const unknownKey = (user: string, id: string) => `g6:catalog:uncertain:product:${encodeURIComponent(user)}:${id}`;
 const unknownProducts = new Set<string>();
-const hasUnknown = (id: string) => unknownProducts.has(id) || (() => { try { return typeof sessionStorage !== "undefined" && sessionStorage.getItem(unknownKey(id)) === "1"; } catch { return false; } })();
+const hasUnknown = (user: string, id: string) => unknownProducts.has(`${user}:${id}`) || (() => { try { return typeof sessionStorage !== "undefined" && sessionStorage.getItem(unknownKey(user, id)) === "1"; } catch { return false; } })();
 
 export interface UseProductStateMutationResult {
   submitting: boolean;
@@ -22,6 +24,8 @@ export interface UseProductStateMutationResult {
 
 export function useProductStateMutation(): UseProductStateMutationResult {
   const { catalog: catalogService } = useCatalogServices();
+  const session = useContext(PromotionSessionContext);
+  const userId = () => session?.snapshot().user?.id ?? "session-unavailable";
   const [submitting, setSubmitting] = useState(false);
   const [reconciling, setReconciling] = useState(false);
   const [error, setError] = useState<string>();
@@ -37,7 +41,7 @@ export function useProductStateMutation(): UseProductStateMutationResult {
     fn: () => Promise<ProductDetailView>,
   ): Promise<ProductDetailView | null> => {
     if (submitting || reconciling) return null;
-    if (hasUnknown(id)) { setIsUnknownError(true); setError("La escritura anterior tiene resultado incierto. Consulta el estado antes de cualquier reenvío."); return null; }
+    if (hasUnknown(userId(), id)) { setIsUnknownError(true); setError("La escritura anterior tiene resultado incierto. Consulta el estado antes de cualquier reenvío."); return null; }
     setSubmitting(true);
     clearError();
 
@@ -49,7 +53,7 @@ export function useProductStateMutation(): UseProductStateMutationResult {
         setError(err.message);
         if (err.kind === "unknown" || err.kind === "write_unknown") {
           setIsUnknownError(true);
-          if (err.kind === "write_unknown") { unknownProducts.add(id); try { sessionStorage.setItem(unknownKey(id), "1"); } catch { /* module latch remains */ } }
+          if (err.kind === "write_unknown") { unknownProducts.add(`${userId()}:${id}`); try { sessionStorage.setItem(unknownKey(userId(), id), "1"); } catch { /* module latch remains */ } }
         }
       } else {
         setError(
@@ -77,19 +81,10 @@ export function useProductStateMutation(): UseProductStateMutationResult {
     if (reconciling) return false;
     setReconciling(true);
     try {
-      const product = await catalogService.getById(id);
-      if (product && product.status === expectedStatus) {
-        unknownProducts.delete(id);
-        try { sessionStorage.removeItem(unknownKey(id)); } catch { /* confirmed by API */ }
-        clearError();
-        return true;
-      }
-      setError(
-        `La consulta no confirmó el estado solicitado (${expectedStatus}). El producto permanece en ${product?.status || "estado actual"}.`,
-      );
-      return false;
-    } catch {
-      setError("No se pudo verificar el estado en el servidor.");
+      // The published GET is commercial and has no administrative status.
+      // Do not treat it as evidence or issue a futile reconciliation read.
+      void id; void expectedStatus;
+      setError("GET /productos/{productoId} devuelve un DTO comercial sin estado administrativo; la intención incierta no puede reconciliarse ni liberarse.");
       return false;
     } finally {
       setReconciling(false);
@@ -106,6 +101,6 @@ export function useProductStateMutation(): UseProductStateMutationResult {
     reactivate,
     reconcile,
     clearError,
-    isUnknown: hasUnknown,
+    isUnknown: (id: string) => hasUnknown(userId(), id),
   };
 }

@@ -61,6 +61,7 @@ async function start() {
           api: async () =>
             createHttpPricingRepository({
               transport: gatewayClient,
+              scopeId: () => promotions?.session.snapshot().user?.id ?? null,
               canManagePricing: () => promotions?.session.snapshot().user?.roles.includes("GESTOR_COMERCIAL") === true,
               listCatalogTargets: async signal => {
                 const targets = [];

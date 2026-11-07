@@ -180,17 +180,44 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
     return { blob: await response.blob(), fileName: safeFileName(response.headers.get("content-disposition"), fallback) };
   }
   return {
+    resumeSupported: false,
     async getTemplate(format, signal) { return download(`${root}/plantilla?formato=${format}`, `plantilla-productos.${format.toLowerCase()}`, signal); },
     async createImport(file, summary, signal) {
+      const userId = session.snapshot?.().user?.id;
+      if (!userId) throw new BulkRepositoryError("Inicia sesión antes de importar.", "configuration");
+      const correlationId = summary?.correlationId ?? crypto.randomUUID();
+      const intentKey = `g6:bulk:import-pending:${encodeURIComponent(userId)}:${encodeURIComponent(correlationId)}`;
+      try {
+        if (sessionStorage.getItem(intentKey)) throw new BulkRepositoryError("Esta importación tiene una intención previa pendiente. Se conserva su correlación y no se reenvió.", "unknown");
+        sessionStorage.setItem(intentKey, JSON.stringify({ userId, correlationId, at: Date.now() }));
+      } catch (error) {
+        if (error instanceof BulkRepositoryError) throw error;
+        throw new BulkRepositoryError("No se pudo persistir la correlación; no se envió la importación.", "unknown");
+      }
       const form = new FormData(); form.append("archivo", file); form.append("template_version", "2");
-      return mapAccepted(await json(await send(`${root}/importaciones`, "POST", signal, form, false, summary?.correlationId), 202, signal));
+      try {
+        const accepted = mapAccepted(await json(await send(`${root}/importaciones`, "POST", signal, form, false, correlationId), 202, signal));
+        try { sessionStorage.removeItem(intentKey); } catch { /* accepted response retains the batch id in URL */ }
+        return accepted;
+      } catch (error) {
+        if (error instanceof BulkRepositoryError && (error.category === "rejected" || error.category === "configuration")) { try { sessionStorage.removeItem(intentKey); } catch { /* preserve fail-closed intent */ } }
+        throw error;
+      }
     },
     async getImport(batchId, signal) {
       try { return mapBatch(await json(await send(`${root}/importaciones/${encodeURIComponent(batchId)}`, "GET", signal), 200, signal)); }
       catch (error) { if (error instanceof BulkRepositoryError && error.status === 404 && error.code === "LOTE_NO_ENCONTRADO") return null; throw error; }
     },
     async getImportReport(batchId, signal) { return download(`${root}/importaciones/${encodeURIComponent(batchId)}/reporte`, `reporte-${batchId}.csv`, signal); },
-    async resumeImport(batchId, signal) { return mapAccepted(await json(await send(`${root}/importaciones/${encodeURIComponent(batchId)}/reanudar`, "POST", signal), 202, signal)); },
+    async resumeImport(batchId, signal) {
+      const key = `g6:bulk:resume-blocked:${encodeURIComponent(session.snapshot?.().user?.id ?? "anonymous")}:${encodeURIComponent(batchId)}`;
+      if (sessionStorage.getItem(key) === "1") throw new BulkRepositoryError("Backend no habilitó el protocolo de reanudación para este lote.", "rejected", 409, "RETRY_PROTOCOL_NOT_APPROVED");
+      try { return mapAccepted(await json(await send(`${root}/importaciones/${encodeURIComponent(batchId)}/reanudar`, "POST", signal), 202, signal)); }
+      catch (error) {
+        if (error instanceof BulkRepositoryError && error.code === "RETRY_PROTOCOL_NOT_APPROVED") { try { sessionStorage.setItem(key, "1"); } catch { /* backend rejection remains visible */ } }
+        throw error;
+      }
+    },
     async createExport(format: BulkExportFormat, signal) {
       const key = await exportIntentKey(format);
       try {

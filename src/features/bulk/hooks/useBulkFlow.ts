@@ -85,7 +85,7 @@ export function useBulkBatch(batchId: string | undefined) {
     isStale: batchView.isStale,
     isNotFound: batchView.isNotFound,
     resuming,
-  });
+  }) && repository.resumeSupported !== false;
 
   const refreshBatch = useCallback(() => {
     setRevision((prev) => prev + 1);

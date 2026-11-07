@@ -64,7 +64,9 @@ export interface TransferReceptionDraftInput {
   readonly note?: string;
 }
 
-const STORAGE_KEY = "inventory.transferReceptionAttempts.v1";
+const STORAGE_BASE = "inventory.transferReceptionAttempts.v1";
+let activeScope = "session-unavailable";
+const STORAGE_KEY = () => `${STORAGE_BASE}:${encodeURIComponent(activeScope)}`;
 const STORAGE_VERSION = 2;
 
 const DISPOSITIONS: readonly string[] = [
@@ -110,6 +112,16 @@ const blockedTransferIds = new Set<string>();
 let storageCorruptedAll = false;
 let storageEphemeral = false;
 let lastGoodPersistedState: string | null = null;
+
+export function setTransferReceptionScope(scope: string | null): void {
+  const next = scope ?? "session-unavailable";
+  if (next === activeScope) return;
+  uncertainReceptionsByTransferId.clear(); inFlightReceptionsByTransferId.clear();
+  confirmedReceptionsAwaitingRefreshByTransferId.clear(); confirmedReceptionsAwaitingRefreshWithDtoByTransferId.clear();
+  blockedTransferIds.clear(); storageCorruptedAll = false; storageEphemeral = false; lastGoodPersistedState = null;
+  activeScope = next;
+  restoreFromStorage();
+}
 
 function createMemoryStorage(): Storage {
   const values = new Map<string, string>();
@@ -271,9 +283,9 @@ function persistState(): void {
   };
   const serialized = JSON.stringify(state);
   try {
-    storage.setItem(STORAGE_KEY, serialized);
+    storage.setItem(STORAGE_KEY(),  serialized);
     if (typeof storage.getItem === "function") {
-      const verified = storage.getItem(STORAGE_KEY);
+      const verified = storage.getItem(STORAGE_KEY());
       if (verified !== serialized) {
         throw new Error("Persisted snapshot verification failed");
       }
@@ -282,7 +294,7 @@ function persistState(): void {
   } catch {
     if (lastGoodPersistedState !== null && typeof storage.setItem === "function") {
       try {
-        storage.setItem(STORAGE_KEY, lastGoodPersistedState);
+        storage.setItem(STORAGE_KEY(),  lastGoodPersistedState);
       } catch {
         // Fall through to throw
       }
@@ -297,9 +309,14 @@ function persistState(): void {
 function restoreFromStorage(): void {
   const storage = getSessionStorage();
   if (!storage) return;
+  try {
+    // Legacy v1 data had no user owner. Preserve it and block safely because
+    // attributing it to the active identity would be an unsafe migration.
+    if (storage.getItem(STORAGE_BASE) !== null) { storageCorruptedAll = true; return; }
+  } catch { storageCorruptedAll = true; return; }
   let rawToParse: string | null;
   try {
-    rawToParse = storage.getItem(STORAGE_KEY);
+    rawToParse = storage.getItem(STORAGE_KEY());
   } catch {
     storageCorruptedAll = true;
     return;
@@ -500,7 +517,7 @@ export function resetUncertainTransferReceptions(): void {
   const storage = getSessionStorage();
   if (storage) {
     try {
-      storage.removeItem(STORAGE_KEY);
+      storage.removeItem(STORAGE_KEY());
     } catch {
       // Ignorar errores de almacenamiento en reset.
     }

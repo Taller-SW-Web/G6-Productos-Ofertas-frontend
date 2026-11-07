@@ -596,7 +596,7 @@ export function createHttpPromotionServices(
     } catch (error) {
       signal.throwIfAborted();
       if (error instanceof CouponReadError && error.kind !== "unavailable")
-        return { ...confirmed, relatedDataAccessDenied: true };
+        return { ...confirmed, relatedDataAccess: error.kind };
       return { ...confirmed, relatedDataUnavailable: true };
     }
   }

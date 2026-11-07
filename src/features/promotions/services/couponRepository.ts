@@ -3,7 +3,7 @@ export type CouponStatus = "active" | "inactive";
 export interface CouponView {
   // Presentation warning after a confirmed write; never a backend state.
   relatedDataUnavailable?: boolean;
-  relatedDataAccessDenied?: boolean;
+  relatedDataAccess?: "session" | "forbidden";
   id: string;
   promotionId: string;
   code: string;

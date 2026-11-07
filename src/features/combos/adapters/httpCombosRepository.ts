@@ -57,9 +57,9 @@ function mapAvailability(value: unknown, comboId: string, status: Combo["status"
 }
 
 export function createHttpCombosRepository(client: AuthenticatedGatewayClient, catalog: CombosCatalogPort, scopeId: () => string | null): CombosRepository {
-  const uncertaintyPrefix = "g6:combos:uncertain:create:";
+  const uncertaintyPrefix = "g6:combos:uncertain:v2:";
   const confirmedPrefix = "g6:combos:confirmed:create:";
-  const storedUncertaintyKeys = () => { try { return typeof sessionStorage === "undefined" ? [] : Object.keys(sessionStorage).filter(key => key.startsWith(uncertaintyPrefix)).map(key => key.slice(uncertaintyPrefix.length)); } catch { return []; } };
+  const storedUncertaintyKeys = () => { try { return typeof sessionStorage === "undefined" ? [] : Object.keys(sessionStorage).filter(key => key.startsWith(uncertaintyPrefix)).flatMap(key => { try { const value = JSON.parse(sessionStorage.getItem(key) ?? "null") as { user?: string; intent?: string } | null; return value?.user === scopeId() && value.intent ? [value.intent] : []; } catch { return [key]; } }); } catch { return []; } };
   const uncertain = new Set<string>(storedUncertaintyKeys());
   const confirmedCreates = new Map<string, string>();
   try { if (typeof sessionStorage !== "undefined") for (const key of Object.keys(sessionStorage).filter(item => item.startsWith(confirmedPrefix))) { const id = sessionStorage.getItem(key); if (id) confirmedCreates.set(key.slice(confirmedPrefix.length), id); } } catch { /* storage is optional; runtime latches still apply */ }
@@ -139,36 +139,40 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
     if (key.startsWith("create:") && confirmedCreates.has(key.slice("create:".length))) throw new Error(`Esta creación ya recibió confirmación HTTP para ${confirmedCreates.get(key.slice("create:".length))}. Abre ese recurso y reconcilia su presentación antes de iniciar otra creación idéntica.`);
     if (uncertain.has(key)) throw new Error("Esta intención de Combos requiere reconciliación. Consulta el listado por nombre, componentes y precio antes de repetirla; no se reenvió la mutación. Puedes continuar con otra intención distinta.");
     const createFingerprint = key.startsWith("create:") ? key.slice("create:".length) : null;
+    const userId = scopeId();
+    if (!userId) throw new Error("Inicia sesión para modificar un combo.");
+    const markerDigest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${userId}\u0000${key}`)))].map(value => value.toString(16).padStart(2, "0")).join("");
+    const markerKey = `${uncertaintyPrefix}${markerDigest}`;
     // Persist the intent before dispatch. If storage is unavailable, fail closed
     // rather than risk an un-reconcilable duplicate after a reload.
-    if (createFingerprint) {
+    {
       try {
         if (typeof sessionStorage === "undefined") throw new Error("sessionStorage unavailable");
-        sessionStorage.setItem(`${uncertaintyPrefix}${createFingerprint}`, "1");
+        sessionStorage.setItem(markerKey, JSON.stringify({ user: userId, intent: key }));
       } catch {
-        throw new Error("No se pudo proteger esta creación frente a un resultado incierto; no se envió la solicitud.");
+        throw new Error("No se pudo proteger esta escritura frente a un resultado incierto; no se envió la solicitud.");
       }
       uncertain.add(key);
     }
     try {
       const result = await work();
       uncertain.delete(key);
-      if (createFingerprint) { try { sessionStorage.removeItem(`${uncertaintyPrefix}${createFingerprint}`); } catch { /* in-memory latch remains authoritative */ } }
+      try { sessionStorage.removeItem(markerKey); } catch { /* in-memory latch remains authoritative */ }
       return result;
     }
     catch (error) {
       if (error instanceof UnconfirmedComboWrite) {
         uncertain.add(key);
-        if (createFingerprint) { try { sessionStorage.setItem(`${uncertaintyPrefix}${createFingerprint}`, "1"); } catch { /* marker was written before dispatch */ } }
+        try { sessionStorage.setItem(markerKey, JSON.stringify({ user: userId, intent: key })); } catch { /* marker was written before dispatch */ }
       } else if (error instanceof ConfirmedComboWrite && createFingerprint) {
         // A 201 was received but its DTO cannot supply the new ID. It is a
         // confirmed write that cannot be safely repeated; retain the same
         // per-intent reconciliation latch across reloads.
         uncertain.add(key);
-        try { sessionStorage.setItem(`${uncertaintyPrefix}${createFingerprint}`, "1"); } catch { /* marker was written before dispatch */ }
+        try { sessionStorage.setItem(markerKey, JSON.stringify({ user: userId, intent: key })); } catch { /* marker was written before dispatch */ }
       } else if (createFingerprint) {
         uncertain.delete(key);
-        try { sessionStorage.removeItem(`${uncertaintyPrefix}${createFingerprint}`); } catch { /* definitive 4xx; marker is only a guard */ }
+        try { sessionStorage.removeItem(markerKey); } catch { /* definitive 4xx; marker is only a guard */ }
       }
       throw error;
     }
