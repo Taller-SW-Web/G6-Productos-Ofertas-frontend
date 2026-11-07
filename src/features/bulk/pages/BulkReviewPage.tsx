@@ -26,6 +26,7 @@ export function BulkReviewPage() {
     selectedFile,
     fileCheck,
     admissionStatus,
+    pendingCorrelationId,
     beginAdmission,
     finishAdmission,
     submissionError,
@@ -155,10 +156,8 @@ export function BulkReviewPage() {
             {submissionError.message}
             {admissionUncertain && (
               <>
-                <div>No se confirmó el resultado. Un reintento explícito conservará la correlación de esta intención.</div>
-                <Button mt="xs" variant="outline" onClick={() => void handleConfirmImport(true)}>
-                  Reintentar esta importación
-                </Button>
+                <div>No se confirmó el resultado. No se reenvía porque Backend no publica recuperación por correlación.</div>
+                {pendingCorrelationId && <div>Correlación recuperada: {pendingCorrelationId}</div>}
               </>
             )}
           </FeedbackAlert>

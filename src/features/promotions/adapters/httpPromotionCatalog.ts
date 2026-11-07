@@ -4,14 +4,24 @@ import type {
   PromotionCatalogRepository,
 } from "../services/catalogRepository";
 
+export class PromotionCatalogAccessError extends Error {
+  constructor(readonly status: 401 | 403) { super(status === 401 ? "Sesión no autorizada para consultar Catálogo." : "Permiso denegado al consultar Catálogo."); this.name = "PromotionCatalogAccessError"; }
+}
+
 // OpenAPI 0.6.0-rc.1, Docs e6a8ec2: listarProductos (commercial DTO),
 // listarVariantesProducto and listarCategoriasAdmin (administrative DTOs).
 // This is a backoffice USER session adapter, never an inter-service identity.
 export function createHttpPromotionCatalog(
   request: (path: string, signal: AbortSignal) => Promise<unknown>,
 ): PromotionCatalogRepository {
-  const boundedRequest = (path: string, signal: AbortSignal) =>
-    request(path, AbortSignal.any([signal, AbortSignal.timeout(7500)]));
+  const boundedRequest = async (path: string, signal: AbortSignal) => {
+    try { return await request(path, AbortSignal.any([signal, AbortSignal.timeout(7500)])); }
+    catch (error) {
+      const status = error && typeof error === "object" && "status" in error ? Number((error as { status: unknown }).status) : NaN;
+      if (status === 401 || status === 403) throw new PromotionCatalogAccessError(status);
+      throw error;
+    }
+  };
   async function pages(path: string, nested: boolean, signal: AbortSignal) {
     const rows: unknown[] = [];
     let expectedTotal: number | undefined;

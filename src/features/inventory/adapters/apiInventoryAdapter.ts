@@ -200,6 +200,7 @@ async function problemCode(response: Response): Promise<string | undefined> {
 // (TAC-P0-09). La identidad sola (`operationId`) NO es suficiente para
 // reutilizarla: primero se compara el fingerprint completo.
 interface ConfirmedReceptionRecord {
+  readonly owner: string;
   readonly payload: Readonly<ReceiveTransferPayload>;
   readonly dto: TrasladoInventarioDto;
 }
@@ -209,6 +210,8 @@ export function createHttpInventoryRepository(
 ): HttpInventoryRepository {
   const { transport, resolveTransferPresentation } = dependencies;
   const currentUserScope = dependencies.currentUserScope ?? (() => null);
+  const stateKey = (owner: string, id: string) => `${encodeURIComponent(owner)}\u0000${id}`;
+  setTransferReceptionScope(currentUserScope());
   // TAC-P0-02: separación explícita de tres estados de escritura por traslado:
   //   - IN_FLIGHT: escritura en curso sin respuesta recibida aún.
   //   - UNCERTAIN: respuesta perdida o fallo >=500; conserva el snapshot
@@ -228,7 +231,7 @@ export function createHttpInventoryRepository(
 
   // Hidratación desde almacenamiento persistido tras refresh/recreación del repositorio.
   for (const payload of getAllUncertainTransferReceptions()) {
-    transferWrites.set(payload.transferId, {
+    transferWrites.set(stateKey(currentUserScope() ?? "session-unavailable", payload.transferId), {
       state: "UNCERTAIN",
       payload: freezeReceiveTransferPayload(payload),
       reconciliation: "UNVERIFIABLE_BY_LIST_CONTRACT",
@@ -236,13 +239,15 @@ export function createHttpInventoryRepository(
     });
   }
   for (const record of getAllConfirmedTransferReceptionsAwaitingRefreshWithDto()) {
-    if (!confirmedReceptions.has(record.payload.operationId)) {
-      confirmedReceptions.set(record.payload.operationId, {
+    const owner = currentUserScope() ?? "session-unavailable";
+    if (!confirmedReceptions.has(stateKey(owner, record.payload.operationId))) {
+      confirmedReceptions.set(stateKey(owner, record.payload.operationId), {
+        owner,
         payload: freezeReceiveTransferPayload(record.payload),
         dto: record.dto,
       });
     }
-    transferWrites.set(record.payload.transferId, {
+    transferWrites.set(stateKey(currentUserScope() ?? "session-unavailable", record.payload.transferId), {
       state: "RECONCILED",
       payload: freezeReceiveTransferPayload(record.payload),
       reconciliation: "CONFIRMED_BY_IDEMPOTENT_RETRY",
@@ -254,7 +259,7 @@ export function createHttpInventoryRepository(
     if (getAllConfirmedTransferReceptionsAwaitingRefreshWithDto().some((r) => r.payload.transferId === payload.transferId)) {
       continue;
     }
-    transferWrites.set(payload.transferId, {
+    transferWrites.set(stateKey(currentUserScope() ?? "session-unavailable", payload.transferId), {
       state: "RECONCILED",
       payload: freezeReceiveTransferPayload(payload),
       reconciliation: "CONFIRMED_BY_IDEMPOTENT_RETRY",
@@ -264,12 +269,25 @@ export function createHttpInventoryRepository(
   }
 
   function setPresentationRefresh(
+    owner: string,
     transferId: string,
     status: TransferReceptionPresentationRefresh,
   ): void {
-    const record = transferWrites.get(transferId);
+    const key = stateKey(owner, transferId);
+    const record = transferWrites.get(key);
     if (!record || record.presentationRefresh === status) return;
-    transferWrites.set(transferId, { ...record, presentationRefresh: status });
+    transferWrites.set(key, { ...record, presentationRefresh: status });
+  }
+
+  function hydrateOwnerState(owner: string): void {
+    for (const payload of getAllUncertainTransferReceptions()) {
+      transferWrites.set(stateKey(owner, payload.transferId), { state: "UNCERTAIN", payload: freezeReceiveTransferPayload(payload), reconciliation: "UNVERIFIABLE_BY_LIST_CONTRACT", updatedAt: payload.receivedAt });
+    }
+    for (const record of getAllConfirmedTransferReceptionsAwaitingRefreshWithDto()) {
+      const operationKey = stateKey(owner, record.payload.operationId);
+      if (!confirmedReceptions.has(operationKey)) confirmedReceptions.set(operationKey, { owner, payload: freezeReceiveTransferPayload(record.payload), dto: record.dto });
+      transferWrites.set(stateKey(owner, record.payload.transferId), { state: "RECONCILED", payload: freezeReceiveTransferPayload(record.payload), reconciliation: "CONFIRMED_BY_IDEMPOTENT_RETRY", updatedAt: record.dto.updated_at, presentationRefresh: "AWAITING" });
+    }
   }
 
   function uncertainWriteMessage(writeKind: "reception" | "threshold"): string {
@@ -418,15 +436,18 @@ export function createHttpInventoryRepository(
   // error tipado (`InventoryPresentationFailedError`) para que hook y formulario
   // bloqueen nuevas intenciones y refresquen la vista sin repetir el POST.
   async function presentConfirmed(
+    owner: string,
     payload: Readonly<ReceiveTransferPayload>,
     dto: TrasladoInventarioDto,
   ): Promise<TransferItem> {
     try {
-      return await present(dto);
+      const item = await present(dto);
+      if ((currentUserScope() ?? "session-unavailable") !== owner) throw new InventoryError("NO_AUTENTICADO", "La sesión cambió durante el enriquecimiento; no se presenta la recepción anterior.");
+      return item;
     } catch (error) {
       // TAC-P1-10: deja constancia de que la confirmación existe pero la vista
       // todavía no tiene evidencia de frescura. No libera el bloqueo.
-      setPresentationRefresh(payload.transferId, "AWAITING");
+      setPresentationRefresh(owner, payload.transferId, "AWAITING");
       throw new InventoryPresentationFailedError(
         payload.transferId,
         payload.operationId,
@@ -452,7 +473,9 @@ export function createHttpInventoryRepository(
   async function readTransfers(
     filters: TransferFiltersQuery | undefined,
   ): Promise<TransferItem[]> {
-    setTransferReceptionScope(currentUserScope());
+    const owner = currentUserScope() ?? "session-unavailable";
+    setTransferReceptionScope(owner);
+    hydrateOwnerState(owner);
     const collected: TrasladoInventarioDto[] = [];
     const seenTransferIds = new Set<string>();
     let pagina = 1;
@@ -463,6 +486,8 @@ export function createHttpInventoryRepository(
         { method: "GET" },
         false,
       );
+      if ((currentUserScope() ?? "session-unavailable") !== owner) throw new InventoryError("NO_AUTENTICADO", "La sesión cambió durante la lectura de traslados; la respuesta no se aplica a la sesión actual.");
+      if ((currentUserScope() ?? "session-unavailable") !== owner) throw new InventoryError("NO_AUTENTICADO", "La sesión cambió durante la lectura de traslados; la respuesta anterior no se aplicó al usuario actual.");
       const page = validateTrasladoListDto(body);
       if (page.pagina !== pagina)
         throw new InventoryError(
@@ -509,9 +534,10 @@ export function createHttpInventoryRepository(
     // `operationId`; deja constancia explícita de que la conciliación por
     // listado no es concluyente.
     for (const dto of collected) {
-      const current = transferWrites.get(dto.traslado_id);
+      setTransferReceptionScope(owner);
+      const current = transferWrites.get(stateKey(owner, dto.traslado_id));
       if (current?.state === "UNCERTAIN") {
-        transferWrites.set(dto.traslado_id, {
+        transferWrites.set(stateKey(owner, dto.traslado_id), {
           ...current,
           reconciliation: "UNVERIFIABLE_BY_LIST_CONTRACT",
           updatedAt: dto.updated_at,
@@ -519,6 +545,7 @@ export function createHttpInventoryRepository(
       }
     }
     const items = await Promise.all(collected.map((dto) => present(dto)));
+    if ((currentUserScope() ?? "session-unavailable") !== owner) throw new InventoryError("NO_AUTENTICADO", "La sesión cambió durante la lectura; los datos anteriores no se presentan.");
     // TAC-P1-10: solo un listado COMPLETO, presentable y con el agregado
     // coherente con la confirmación libera el bloqueo. Un HTTP 200 con saldo
     // anterior no demuestra que la recepción esté reflejada; en ese caso el
@@ -530,21 +557,23 @@ export function createHttpInventoryRepository(
         dto.traslado_id,
       );
       if (!awaiting) continue;
-      let confirmed = confirmedReceptions.get(awaiting.operationId);
+      let confirmed = confirmedReceptions.get(stateKey(owner, awaiting.operationId));
       if (!confirmed) {
         const persistedWithDto = getAllConfirmedTransferReceptionsAwaitingRefreshWithDto().find(
           (record) => record.payload.transferId === dto.traslado_id && record.payload.operationId === awaiting.operationId,
         );
         if (persistedWithDto) {
-          confirmed = { payload: persistedWithDto.payload, dto: persistedWithDto.dto };
-          confirmedReceptions.set(persistedWithDto.payload.operationId, confirmed);
+          confirmed = { owner, payload: persistedWithDto.payload, dto: persistedWithDto.dto };
+          confirmedReceptions.set(stateKey(owner, persistedWithDto.payload.operationId), confirmed);
         }
       }
       if (confirmed && sameTransferAggregate(confirmed.dto, dto)) {
+        setTransferReceptionScope(owner);
         clearConfirmedTransferReceptionAwaitingRefresh(dto.traslado_id);
-        setPresentationRefresh(dto.traslado_id, "REFRESHED");
+        setPresentationRefresh(owner, dto.traslado_id, "REFRESHED");
       } else {
         setPresentationRefresh(
+          owner,
           dto.traslado_id,
           "UNVERIFIABLE_BY_AGGREGATE",
         );
@@ -659,7 +688,9 @@ export function createHttpInventoryRepository(
       transferId: string,
     ): TransferReceptionWriteRecord | null {
       setTransferReceptionScope(currentUserScope());
-      return transferWrites.get(transferId) ?? null;
+      const owner = currentUserScope() ?? "session-unavailable";
+      setTransferReceptionScope(owner);
+      return transferWrites.get(stateKey(owner, transferId)) ?? null;
     },
 
     getTransfers(filters?: TransferFiltersQuery): Promise<TransferItem[]> {
@@ -670,10 +701,14 @@ export function createHttpInventoryRepository(
       payload,
       signal?: AbortSignal,
     ): Promise<TransferItem> {
-      setTransferReceptionScope(currentUserScope());
+      const owner = currentUserScope() ?? "session-unavailable";
+      setTransferReceptionScope(owner);
+      hydrateOwnerState(owner);
       const key = payload.transferId;
+      const scopedTransferKey = stateKey(owner, key);
+      const scopedOperationKey = stateKey(owner, payload.operationId);
       const frozenPayload = freezeReceiveTransferPayload(payload);
-      const currentRecord = transferWrites.get(key);
+      const currentRecord = transferWrites.get(scopedTransferKey);
       const wasUncertainRetry = currentRecord?.state === "UNCERTAIN";
 
       if (currentRecord?.state === "IN_FLIGHT") {
@@ -688,7 +723,7 @@ export function createHttpInventoryRepository(
       // (transferId, cantidad, disposición, cierre final, fecha y nota). Una
       // identidad reutilizada con otra intención nunca devuelve la confirmación
       // anterior: se rechaza como conflicto de idempotencia.
-      const confirmed = confirmedReceptions.get(frozenPayload.operationId);
+      const confirmed = confirmedReceptions.get(scopedOperationKey);
       if (confirmed) {
         if (
           confirmed.dto.traslado_id !== frozenPayload.transferId ||
@@ -699,7 +734,8 @@ export function createHttpInventoryRepository(
             "La identidad de esta recepción ya fue confirmada con otra intención (traslado, cantidad, disposición, cierre final, fecha o nota). No se devuelve un resultado ajeno a la solicitud.",
           );
         }
-        return presentConfirmed(frozenPayload, confirmed.dto);
+        if ((currentUserScope() ?? "session-unavailable") !== owner) throw new InventoryError("NO_AUTENTICADO", "La sesión cambió; no se presenta la confirmación de otro usuario.");
+        return presentConfirmed(owner, frozenPayload, confirmed.dto);
       }
 
       const confirmedAwaitingPayload = getConfirmedTransferReceptionAwaitingRefresh(key);
@@ -747,7 +783,7 @@ export function createHttpInventoryRepository(
       // no se despacha el POST.
       setInFlightTransferReception(frozenPayload);
 
-      transferWrites.set(key, {
+      transferWrites.set(scopedTransferKey, {
         state: "IN_FLIGHT",
         payload: frozenPayload,
         reconciliation: priorReconciliation,
@@ -772,13 +808,14 @@ export function createHttpInventoryRepository(
           true,
         );
       } catch (error) {
+        setTransferReceptionScope(owner);
         // TAC-P1-07: estando en UNCERTAIN, ningún error (red, 5xx, 4xx incluido
         // 409 IDEMPOTENCY_CONFLICT) libera el bloqueo; solo lo hace un 200 con
         // DTO válido. En primer intento, un error incierto conserva UNCERTAIN y
         // un 4xx definitivo limpia el registro.
         if (wasUncertainRetry) {
           setUncertainTransferReception(frozenPayload);
-          transferWrites.set(key, {
+          transferWrites.set(scopedTransferKey, {
             state: "UNCERTAIN",
             payload: frozenPayload,
             reconciliation: priorReconciliation,
@@ -789,7 +826,7 @@ export function createHttpInventoryRepository(
           error.code === "RESULTADO_INCIERTO"
         ) {
           setUncertainTransferReception(frozenPayload);
-          transferWrites.set(key, {
+          transferWrites.set(scopedTransferKey, {
             state: "UNCERTAIN",
             payload: frozenPayload,
             reconciliation: "NONE",
@@ -797,11 +834,12 @@ export function createHttpInventoryRepository(
           });
         } else {
           clearUncertainTransferReception(key, frozenPayload.operationId);
-          transferWrites.delete(key);
+          transferWrites.delete(scopedTransferKey);
         }
         clearInFlightTransferReception(key, frozenPayload.operationId);
         throw error;
       }
+      setTransferReceptionScope(owner);
 
       // Fase B — validar el DTO de confirmación. Si es incompatible, el resultado
       // no se puede determinar: la mutación pudo aplicarse, se preserva UNCERTAIN.
@@ -824,8 +862,9 @@ export function createHttpInventoryRepository(
         }
         traslado = confirmation.traslado;
       } catch (error) {
+        setTransferReceptionScope(owner);
         setUncertainTransferReception(frozenPayload);
-        transferWrites.set(key, {
+        transferWrites.set(scopedTransferKey, {
           state: "UNCERTAIN",
           payload: frozenPayload,
           reconciliation: priorReconciliation,
@@ -838,22 +877,24 @@ export function createHttpInventoryRepository(
       // de presentación (TAC-P0-05 / TAC-P0-09). Transición única persistente
       // de IN_FLIGHT/UNCERTAIN a confirmación pendiente de refresco.
       // NO se eliminan ni persisten estados intermedios vacíos que dejen al traslado sin identidad.
-      confirmedReceptions.set(frozenPayload.operationId, {
+      confirmedReceptions.set(scopedOperationKey, {
+        owner,
         payload: frozenPayload,
         dto: traslado,
       });
-      transferWrites.set(key, {
+      transferWrites.set(scopedTransferKey, {
         state: "RECONCILED",
         payload: frozenPayload,
         reconciliation: "CONFIRMED_BY_IDEMPOTENT_RETRY",
         updatedAt: traslado.updated_at,
       });
       transitionToConfirmedAwaitingRefreshWithDto(frozenPayload, traslado);
+      if ((currentUserScope() ?? "session-unavailable") !== owner) throw new InventoryError("NO_AUTENTICADO", "La recepción quedó confirmada bajo su propietario original; la sesión cambió y no se muestra en la sesión actual.");
 
       // Fase D — enriquecimiento de presentación (no autoritativo). Si falla, la
       // mutación YA está confirmada y el estado permanece RECONCILED; el POST no
       // se repite (el reintento con la misma identidad devuelve el cache).
-      return presentConfirmed(frozenPayload, traslado);
+      return presentConfirmed(owner, frozenPayload, traslado);
     },
 
     async getStockItems(filters?: import("../services/inventoryTypes").StockFiltersQuery, signal?: AbortSignal): Promise<StockItem[]> {

@@ -50,11 +50,13 @@ export function useVariantStateMutation(): UseVariantStateMutationResult {
     setError(null);
   }, []);
   const reconcile = useCallback(async (productId: string, variantId: string, expected: "ACTIVA" | "INACTIVA") => {
+    const owner = userId();
     try {
       const current = await catalogService.getVariantById(productId, variantId);
+      if (userId() !== owner) { setError("La sesión cambió durante la reconciliación; la intención original se conserva."); return false; }
       if (current?.status === expected) {
-        try { sessionStorage.removeItem(unknownKey(userId(), productId, variantId)); } catch { /* current session state is authoritative */ }
-        unknownVariants.delete(`${userId()}:${intentKey(productId, variantId)}`);
+        try { sessionStorage.removeItem(unknownKey(owner, productId, variantId)); } catch { /* current session state is authoritative */ }
+        unknownVariants.delete(`${owner}:${intentKey(productId, variantId)}`);
         setIsUnknownError(false); setError(null); return true;
       }
       setError(`La consulta no confirmó el estado ${expected}; no se reenviará la mutación.`); return false;
@@ -64,11 +66,13 @@ export function useVariantStateMutation(): UseVariantStateMutationResult {
 
   const activate = useCallback(
     async (productId: string, variantId: string, scenario?: string) => {
-      if (isUnknownError || hasUnknown(userId(), productId, variantId)) throw new Error("Resultado de escritura incierto; consulta el estado antes de volver a operar.");
+      const owner = userId();
+      if (isUnknownError || hasUnknown(owner, productId, variantId)) throw new Error("Resultado de escritura incierto; consulta el estado antes de volver a operar.");
       setLoading(true);
       setError(null);
       try {
         const res = await catalogService.activateVariant(productId, variantId, scenario);
+        if (userId() !== owner) throw new Error("La variante fue modificada por otra identidad; no se muestra el resultado en la sesión actual.");
         setResult(res);
         return res;
       } catch (err) {
@@ -76,8 +80,8 @@ export function useVariantStateMutation(): UseVariantStateMutationResult {
           err instanceof CatalogError
             ? err.message
             : "Error inesperado al activar la variante.";
-        setError(msg);
-        if (err instanceof CatalogError && err.kind === "write_unknown") { unknownVariants.add(`${userId()}:${intentKey(productId, variantId)}`); setIsUnknownError(true); try { sessionStorage.setItem(unknownKey(userId(), productId, variantId), "1"); } catch { /* module latch */ } }
+        if (userId() === owner) setError(msg);
+        if (err instanceof CatalogError && err.kind === "write_unknown") { unknownVariants.add(`${owner}:${intentKey(productId, variantId)}`); try { sessionStorage.setItem(unknownKey(owner, productId, variantId), "1"); } catch { /* module latch */ } if (userId() === owner) setIsUnknownError(true); }
         throw err;
       } finally {
         setLoading(false);
@@ -88,11 +92,13 @@ export function useVariantStateMutation(): UseVariantStateMutationResult {
 
   const deactivate = useCallback(
     async (productId: string, variantId: string, scenario?: string) => {
-      if (isUnknownError || hasUnknown(userId(), productId, variantId)) throw new Error("Resultado de escritura incierto; consulta el estado antes de volver a operar.");
+      const owner = userId();
+      if (isUnknownError || hasUnknown(owner, productId, variantId)) throw new Error("Resultado de escritura incierto; consulta el estado antes de volver a operar.");
       setLoading(true);
       setError(null);
       try {
         const res = await catalogService.deactivateVariant(productId, variantId, scenario);
+        if (userId() !== owner) throw new Error("La variante fue modificada por otra identidad; no se muestra el resultado en la sesión actual.");
         setResult(res);
         return res;
       } catch (err) {
@@ -100,8 +106,8 @@ export function useVariantStateMutation(): UseVariantStateMutationResult {
           err instanceof CatalogError
             ? err.message
             : "Error inesperado al desactivar la variante.";
-        setError(msg);
-        if (err instanceof CatalogError && err.kind === "write_unknown") { unknownVariants.add(`${userId()}:${intentKey(productId, variantId)}`); setIsUnknownError(true); try { sessionStorage.setItem(unknownKey(userId(), productId, variantId), "1"); } catch { /* module latch */ } }
+        if (userId() === owner) setError(msg);
+        if (err instanceof CatalogError && err.kind === "write_unknown") { unknownVariants.add(`${owner}:${intentKey(productId, variantId)}`); try { sessionStorage.setItem(unknownKey(owner, productId, variantId), "1"); } catch { /* module latch */ } if (userId() === owner) setIsUnknownError(true); }
         throw err;
       } finally {
         setLoading(false);
@@ -112,11 +118,13 @@ export function useVariantStateMutation(): UseVariantStateMutationResult {
 
   const reactivate = useCallback(
     async (productId: string, variantId: string, scenario?: string) => {
-      if (isUnknownError || hasUnknown(userId(), productId, variantId)) throw new Error("Resultado de escritura incierto; consulta el estado antes de volver a operar.");
+      const owner = userId();
+      if (isUnknownError || hasUnknown(owner, productId, variantId)) throw new Error("Resultado de escritura incierto; consulta el estado antes de volver a operar.");
       setLoading(true);
       setError(null);
       try {
         const res = await catalogService.reactivateVariant(productId, variantId, scenario);
+        if (userId() !== owner) throw new Error("La variante fue modificada por otra identidad; no se muestra el resultado en la sesión actual.");
         setResult(res);
         return res;
       } catch (err) {
@@ -124,8 +132,8 @@ export function useVariantStateMutation(): UseVariantStateMutationResult {
           err instanceof CatalogError
             ? err.message
             : "Error inesperado al reactivar la variante.";
-        setError(msg);
-        if (err instanceof CatalogError && err.kind === "write_unknown") { unknownVariants.add(`${userId()}:${intentKey(productId, variantId)}`); setIsUnknownError(true); try { sessionStorage.setItem(unknownKey(userId(), productId, variantId), "1"); } catch { /* module latch */ } }
+        if (userId() === owner) setError(msg);
+        if (err instanceof CatalogError && err.kind === "write_unknown") { unknownVariants.add(`${owner}:${intentKey(productId, variantId)}`); try { sessionStorage.setItem(unknownKey(owner, productId, variantId), "1"); } catch { /* module latch */ } if (userId() === owner) setIsUnknownError(true); }
         throw err;
       } finally {
         setLoading(false);

@@ -34,6 +34,7 @@ export interface PromotionHttpOptions {
     signal: AbortSignal,
   ): Promise<string | null>;
   invalidateAccessToken?(rejectedToken: string): void;
+  scopeId?: () => string | null;
   catalog?: PromotionCatalogRepository;
 }
 class HttpFailure extends Error {
@@ -387,9 +388,26 @@ export function createHttpPromotionServices(
       );
     }
   }
-  async function write<T>(work: () => Promise<T>, coupon = false): Promise<T> {
+  async function write<T>(intent: string, work: () => Promise<T>, coupon = false): Promise<T> {
+    const owner = options.scopeId?.();
+    if (!owner) throw coupon ? new CouponWriteError("access", "Inicia sesión para modificar cupones.") : new AdministrationError("access", "Inicia sesión para modificar promociones.");
+    const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${owner}\u0000${intent}`)))].map(value => value.toString(16).padStart(2, "0")).join("");
+    const key = `g6:promotions:uncertain:v1:${digest}`;
     try {
-      return await work();
+      const previous = sessionStorage.getItem(key);
+      if (previous !== null) {
+        const marker = JSON.parse(previous) as { owner?: string; intent?: string };
+        if (marker.owner !== owner || marker.intent !== intent) throw new Error("Marcador de escritura incompatible.");
+        throw new Error("La intención previa sigue sin reconciliación; no se reenvió.");
+      }
+      sessionStorage.setItem(key, JSON.stringify({ owner, intent }));
+    } catch (error) {
+      throw coupon ? new CouponWriteError("unknown", error instanceof Error ? error.message : "No se pudo proteger la escritura.") : new AdministrationError("unknown", error instanceof Error ? error.message : "No se pudo proteger la escritura.");
+    }
+    try {
+      const result = await work();
+      try { sessionStorage.removeItem(key); } catch { /* response mapped; marker remains fail-closed */ }
+      return result;
     } catch (e) {
       const status = e instanceof HttpFailure ? e.status : 0;
       const kind =
@@ -412,9 +430,8 @@ export function createHttpPromotionServices(
               : kind === "rejected"
                 ? "El registro ya no está disponible."
                 : "No pudimos confirmar el resultado. Consulta el registro antes de volver a guardar.";
-      throw coupon
-        ? new CouponWriteError(kind, message)
-        : new AdministrationError(kind, message);
+      if (kind !== "unknown") { try { sessionStorage.removeItem(key); } catch { /* retain fail-closed */ } }
+      throw coupon ? new CouponWriteError(kind, message) : new AdministrationError(kind, message);
     }
   }
   const campaignSnapshots = new Map<string, CampaignDraft>(),
@@ -444,9 +461,10 @@ export function createHttpPromotionServices(
           ),
         true,
       ),
-    save: (id, d, s) =>
-      write(async () => {
-        const body = campaignDto(d);
+    save: async (id, d, s) => {
+      const body = campaignDto(d);
+      const digest = id ? "" : [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(body))))].map(value => value.toString(16).padStart(2, "0")).join("");
+      return write(id ? `campaign:${id}` : `campaign:create:${digest}`, async () => {
         if (id) {
           const previous = campaignSnapshots.get(id);
           if (!previous) throw new HttpFailure(409);
@@ -460,9 +478,10 @@ export function createHttpPromotionServices(
           );
         }
         return mapCampaign(await request("/promociones", s, "POST", body));
-      }),
+      });
+    },
     changeStatus: (id, status, s) =>
-      write(() =>
+      write(`campaign:${id}` , () =>
         request(
           "/promociones/" +
             encodeURIComponent(id) +
@@ -487,9 +506,10 @@ export function createHttpPromotionServices(
           ),
         true,
       ),
-    save: (id, d, s) =>
-      write(async () => {
-        const body = recommendationDto(d);
+    save: async (id, d, s) => {
+      const body = recommendationDto(d);
+      const digest = id ? "" : [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(body))))].map(value => value.toString(16).padStart(2, "0")).join("");
+      return write(id ? `recommendation:${id}` : `recommendation:create:${digest}`, async () => {
         if (id) {
           const previous = ruleSnapshots.get(id);
           if (!previous) throw new HttpFailure(409);
@@ -505,9 +525,10 @@ export function createHttpPromotionServices(
         return mapRule(
           await request("/recomendaciones/reglas", s, "POST", body),
         );
-      }),
+      });
+    },
     changeStatus: (id, status, s) =>
-      write(() =>
+      write(`recommendation:${id}`, () =>
         request(
           "/recomendaciones/reglas/" +
             encodeURIComponent(id) +
@@ -588,6 +609,7 @@ export function createHttpPromotionServices(
     body?: unknown,
   ): Promise<CouponView> {
     const confirmed = await write(
+      `coupon:${path}`,
       async () => coupon(await request(path, signal, method, body)),
       true,
     );

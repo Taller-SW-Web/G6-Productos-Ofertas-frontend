@@ -121,26 +121,43 @@ export function createHttpPricingRepository(
     try { sessionStorage.setItem(markerKey(key, operation), JSON.stringify({ key, operation, expected })); }
     catch { throw new PricingFailure("unknown", "No se pudo persistir de forma segura la intención de Pricing; no se envió la escritura."); }
   };
-  const readMarker = (key: string, operation: "update" | "schedule"): unknown | null => {
-    try { const value = sessionStorage.getItem(markerKey(key, operation)); return value ? JSON.parse(value).expected : null; }
-    catch { return null; }
+  const readMarker = (key: string, operation: "update" | "schedule"):
+    | { state: "absent" }
+    | { state: "valid"; expected: UpdateConfirmation | Record<string, unknown> }
+    | { state: "corrupt" | "inaccessible" } => {
+    let raw: string | null;
+    try { raw = sessionStorage.getItem(markerKey(key, operation)); }
+    catch { return { state: "inaccessible" }; }
+    if (raw === null) return { state: "absent" };
+    try {
+      const marker = JSON.parse(raw) as { key?: unknown; operation?: unknown; expected?: unknown };
+      if (marker.key !== key || marker.operation !== operation || !marker.expected || typeof marker.expected !== "object") return { state: "corrupt" };
+      const expected = marker.expected as Record<string, unknown>;
+      if (operation === "update" && (typeof expected.productId !== "string" || typeof expected.version !== "number" || typeof expected.regular !== "string" || ![null, "string"].includes(typeof expected.offer) && expected.offer !== null || typeof expected.currency !== "string" || typeof expected.channel !== "string" || typeof expected.origin !== "string")) return { state: "corrupt" };
+      if (operation === "schedule" && (typeof expected.channel !== "string" || typeof expected.kind !== "string" || typeof expected.amount !== "string" || typeof expected.currency !== "string" || typeof expected.start !== "number" || !(typeof expected.end === "number" || expected.end === null))) return { state: "corrupt" };
+      return { state: "valid", expected: expected as UpdateConfirmation | Record<string, unknown> };
+    } catch { return { state: "corrupt" }; }
   };
   const clearMarker = (key: string, operation: "update" | "schedule") => { try { sessionStorage.removeItem(markerKey(key, operation)); } catch { /* uncertain marker remains fail-closed */ } };
 
-  function scopeKey(target: PriceTarget, channel: PriceChannel): string {
-    return `${targetPath(target)}:${channel}:${encodeURIComponent(dependencies.scopeId?.() ?? "session-unavailable")}`;
+  function scopeKey(target: PriceTarget, channel: PriceChannel, owner = dependencies.scopeId?.() ?? "session-unavailable"): string {
+    return `${targetPath(target)}:${channel}:${encodeURIComponent(owner)}`;
   }
 
   function uncertainUpdate(key: string): UpdateConfirmation | undefined {
-    const value = uncertainUpdates.get(key) ?? readMarker(key, "update");
-    if (value && typeof value === "object") { uncertainUpdates.set(key, value as UpdateConfirmation); return value as UpdateConfirmation; }
-    return undefined;
+    const value = uncertainUpdates.get(key);
+    if (value) return value;
+    const marker = readMarker(key, "update");
+    if (marker.state === "absent") return undefined;
+    if (marker.state !== "valid") throw new PricingFailure("unknown", "El marcador de una escritura previa está corrupto o inaccesible; se bloquea el reenvío por seguridad.");
+    uncertainUpdates.set(key, marker.expected as UpdateConfirmation);
+    return marker.expected as UpdateConfirmation;
   }
   function hasUncertainSchedule(key: string): boolean {
     if (uncertainSchedules.has(key)) return true;
-    const value = readMarker(key, "schedule");
-    if (value !== null) uncertainSchedules.add(key);
-    return value !== null;
+    const marker = readMarker(key, "schedule");
+    if (marker.state !== "absent") uncertainSchedules.add(key);
+    return marker.state !== "absent";
   }
 
   async function catalogTargets(signal: AbortSignal): Promise<PriceTarget[]> {
@@ -318,8 +335,10 @@ export function createHttpPricingRepository(
     },
 
     async readEditable(writeTarget: WriteTarget, signal) {
+      const owner = dependencies.scopeId?.() ?? "session-unavailable";
       const target = await targetById(writeTarget.targetId, signal);
-      const key = scopeKey(target, writeTarget.channel);
+      if ((dependencies.scopeId?.() ?? "session-unavailable") !== owner) throw new PricingFailure("unknown", "La sesión cambió durante la lectura de Pricing.");
+      const key = scopeKey(target, writeTarget.channel, owner);
       if (pendingWrites.has("update:" + key)) {
         throw new PricingFailure(
           "unknown",
@@ -333,6 +352,7 @@ export function createHttpPricingRepository(
         );
       }
       const price = await readTarget(target, writeTarget.channel, signal);
+      if ((dependencies.scopeId?.() ?? "session-unavailable") !== owner) throw new PricingFailure("unknown", "La sesión cambió durante la lectura de precio; no se reconcilia el propietario anterior.");
       if (
         target.kind === "variant" &&
         price &&
@@ -366,10 +386,12 @@ export function createHttpPricingRepository(
     },
 
     async update(change: PriceChange, signal) {
+      const owner = dependencies.scopeId?.() ?? "session-unavailable";
       if (dependencies.canManagePricing && !dependencies.canManagePricing())
         throw new PricingFailure("forbidden", "Tu cuenta no tiene el rol GESTOR_COMERCIAL requerido para modificar precios.");
       const target = await targetById(change.target.targetId, signal);
-      const key = scopeKey(target, change.target.channel);
+      if ((dependencies.scopeId?.() ?? "session-unavailable") !== owner) throw new PricingFailure("unknown", "La sesión cambió antes de despachar el cambio de precio.");
+      const key = scopeKey(target, change.target.channel, owner);
       if (uncertainUpdate(key)) {
         throw new PricingFailure(
           "unknown",
@@ -459,6 +481,7 @@ export function createHttpPricingRepository(
           );
         }
         editableReads.set(key, { productId: target.productId, price: after });
+        if ((dependencies.scopeId?.() ?? "session-unavailable") !== owner) throw new PricingFailure("unknown", "El cambio fue confirmado bajo la identidad original; no se presenta en la sesión actual.");
         clearMarker(key, "update");
         uncertainUpdates.delete(key);
         try {
@@ -485,10 +508,12 @@ export function createHttpPricingRepository(
     },
 
     async listSchedules(targetId, page, signal): Promise<SchedulePage> {
+      const owner = dependencies.scopeId?.() ?? "session-unavailable";
       if (!Number.isSafeInteger(page) || page < 1) {
         throw new PricingFailure("error", "La página solicitada no es válida.");
       }
       const target = await targetById(targetId, signal);
+      if ((dependencies.scopeId?.() ?? "session-unavailable") !== owner) throw new PricingFailure("unknown", "La sesión cambió durante la lectura de programaciones.");
       const suffix = `/programaciones?pagina=${page}&tamanio=${pageSize}`;
       const response = await json(
         targetPath(target, suffix),
@@ -502,21 +527,42 @@ export function createHttpPricingRepository(
         );
       }
       const result = mapSchedulePageDto(response, target, page, pageSize, channelIds);
+      const allSchedules = [...result.items];
+      const pages = Math.ceil(result.total / pageSize);
+      if (pages > 1000) throw new PricingFailure("unknown", "La paginación excede el límite defensivo; no se liberan intenciones de programación.");
+      for (let current = 1; current <= pages; current++) {
+        if (current === page) continue;
+        const pageValue = await json(targetPath(target, `/programaciones?pagina=${current}&tamanio=${pageSize}`), { method: "GET", signal }, false);
+        if (pageValue === null) throw new PricingFailure("unknown", "La lectura paginada quedó incompleta; se conservan los bloqueos.");
+        const mapped = mapSchedulePageDto(pageValue, target, current, pageSize, channelIds);
+        if (mapped.total !== result.total) throw new PricingFailure("unknown", "El total cambió durante la reconciliación; se conservan los bloqueos.");
+        allSchedules.push(...mapped.items);
+      }
+      if ((dependencies.scopeId?.() ?? "session-unavailable") !== owner) throw new PricingFailure("unknown", "La sesión cambió durante la paginación; no se libera ninguna intención.");
       try {
         const scopeSuffix = `:${encodeURIComponent(dependencies.scopeId?.() ?? "session-unavailable")}`;
         const scopePrefix = markerPrefix + "schedule:";
         for (const storageKey of Object.keys(sessionStorage).filter(item => item.startsWith(scopePrefix))) {
-          const entry = JSON.parse(sessionStorage.getItem(storageKey) ?? "null") as { key?: string } | null;
-          if (entry?.key?.startsWith(`${targetPath(target)}:`) && entry.key.endsWith(scopeSuffix)) uncertainSchedules.add(entry.key);
+          let storedIntent: string;
+          try { storedIntent = decodeURIComponent(storageKey.slice(scopePrefix.length)); } catch { continue; }
+          if (!storedIntent.startsWith(`${targetPath(target)}:`) || !storedIntent.endsWith(scopeSuffix)) continue;
+          const entry = JSON.parse(sessionStorage.getItem(storageKey) ?? "null") as { key?: string; operation?: string; expected?: unknown } | null;
+          if (!entry || entry.operation !== "schedule" || !entry.key || !entry.expected) throw new Error("Corrupt pricing marker");
+          if (entry.key !== storedIntent) throw new Error("Mismatched pricing marker");
+          uncertainSchedules.add(entry.key);
         }
-      } catch { /* stored intents remain fail-closed when storage is unreadable */ }
-      for (const [key, expected] of [...uncertainSchedules].map(key => [key, readMarker(key, "schedule")] as const)) {
-        if (!expected || !key.startsWith(`${targetPath(target)}:`)) continue;
-        const match = result.items.find(item => {
-          const value = expected as Record<string, unknown>;
+      } catch { throw new PricingFailure("unknown", "Hay un marcador de programación ilegible o inaccesible; no se libera ninguna intención."); }
+      for (const key of [...uncertainSchedules]) {
+        if (!key.startsWith(`${targetPath(target)}:`)) continue;
+        const marker = readMarker(key, "schedule");
+        if (marker.state === "absent") continue;
+        if (marker.state !== "valid") throw new PricingFailure("unknown", "Una intención de programación está corrupta o inaccesible; no se permite reenviar.");
+        const expected = marker.expected as Record<string, unknown>;
+        const matches = allSchedules.filter(item => {
+          const value = expected;
           return item.channel === value.channel && item.kind === value.kind && item.amount === value.amount && item.currency === value.currency && Date.parse(item.start) === value.start && (item.end === null ? null : Date.parse(item.end)) === value.end;
         });
-        if (match) { clearMarker(key, "schedule"); uncertainSchedules.delete(key); }
+        if (matches.length === 1) { clearMarker(key, "schedule"); uncertainSchedules.delete(key); }
       }
       return result;
     },
@@ -528,7 +574,9 @@ export function createHttpPricingRepository(
     ): Promise<ScheduleView> {
       if (dependencies.canManagePricing && !dependencies.canManagePricing())
         throw new PricingFailure("forbidden", "Tu cuenta no tiene el rol GESTOR_COMERCIAL requerido para programar precios.");
+      const owner = dependencies.scopeId?.() ?? "session-unavailable";
       const target = await targetById(targetId, signal);
+      if ((dependencies.scopeId?.() ?? "session-unavailable") !== owner) throw new PricingFailure("unknown", "La sesión cambió antes de despachar la programación.");
       const validFrom = localInstant(draft.start);
       const validUntil = draft.end ? localInstant(draft.end) : null;
       if (!validFrom || (draft.end && !validUntil)) {
@@ -546,7 +594,7 @@ export function createHttpPricingRepository(
         validUntil,
         motivoCambio: draft.reason,
       };
-      const key = scopeKey(target, draft.channel);
+      const key = scopeKey(target, draft.channel, owner);
       const pendingKey = "schedule:" + key;
       if (hasUncertainSchedule(key) || pendingWrites.has(pendingKey)) {
         throw new PricingFailure(
@@ -581,6 +629,7 @@ export function createHttpPricingRepository(
           ) {
             throw new Error("Confirmación incompatible");
           }
+          if ((dependencies.scopeId?.() ?? "session-unavailable") !== owner) throw new PricingFailure("unknown", "La programación fue confirmada bajo la identidad original; no se presenta en la sesión actual.");
           clearMarker(key, "schedule"); uncertainSchedules.delete(key);
           return created;
         } catch {

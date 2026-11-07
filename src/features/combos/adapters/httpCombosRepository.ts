@@ -59,7 +59,7 @@ function mapAvailability(value: unknown, comboId: string, status: Combo["status"
 export function createHttpCombosRepository(client: AuthenticatedGatewayClient, catalog: CombosCatalogPort, scopeId: () => string | null): CombosRepository {
   const uncertaintyPrefix = "g6:combos:uncertain:v2:";
   const confirmedPrefix = "g6:combos:confirmed:create:";
-  const storedUncertaintyKeys = () => { try { return typeof sessionStorage === "undefined" ? [] : Object.keys(sessionStorage).filter(key => key.startsWith(uncertaintyPrefix)).flatMap(key => { try { const value = JSON.parse(sessionStorage.getItem(key) ?? "null") as { user?: string; intent?: string } | null; return value?.user === scopeId() && value.intent ? [value.intent] : []; } catch { return [key]; } }); } catch { return []; } };
+  const storedUncertaintyKeys = () => { try { return typeof sessionStorage === "undefined" ? [] : Object.keys(sessionStorage).filter(key => key.startsWith(uncertaintyPrefix)).flatMap(key => { try { const value = JSON.parse(sessionStorage.getItem(key) ?? "null") as { user?: string; intent?: string } | null; return value?.user === scopeId() && value.intent ? [`${value.user}:${value.intent}`] : []; } catch { return [`corrupt:${key}`]; } }); } catch { return ["storage-inaccessible"]; } };
   const uncertain = new Set<string>(storedUncertaintyKeys());
   const confirmedCreates = new Map<string, string>();
   try { if (typeof sessionStorage !== "undefined") for (const key of Object.keys(sessionStorage).filter(item => item.startsWith(confirmedPrefix))) { const id = sessionStorage.getItem(key); if (id) confirmedCreates.set(key.slice(confirmedPrefix.length), id); } } catch { /* storage is optional; runtime latches still apply */ }
@@ -136,11 +136,12 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
     return [...bytes].map(value => value.toString(16).padStart(2, "0")).join("");
   }
   async function write(key: string, work: () => Promise<unknown>): Promise<unknown> {
-    if (key.startsWith("create:") && confirmedCreates.has(key.slice("create:".length))) throw new Error(`Esta creación ya recibió confirmación HTTP para ${confirmedCreates.get(key.slice("create:".length))}. Abre ese recurso y reconcilia su presentación antes de iniciar otra creación idéntica.`);
-    if (uncertain.has(key)) throw new Error("Esta intención de Combos requiere reconciliación. Consulta el listado por nombre, componentes y precio antes de repetirla; no se reenvió la mutación. Puedes continuar con otra intención distinta.");
-    const createFingerprint = key.startsWith("create:") ? key.slice("create:".length) : null;
     const userId = scopeId();
     if (!userId) throw new Error("Inicia sesión para modificar un combo.");
+    const scopedIntent = `${userId}:${key}`;
+    if (key.startsWith("create:") && confirmedCreates.has(key.slice("create:".length))) throw new Error(`Esta creación ya recibió confirmación HTTP para ${confirmedCreates.get(key.slice("create:".length))}. Abre ese recurso y reconcilia su presentación antes de iniciar otra creación idéntica.`);
+    if (uncertain.has(scopedIntent)) throw new Error("Esta intención de Combos requiere reconciliación. No se reenvió la mutación.");
+    const createFingerprint = key.startsWith("create:") ? key.slice("create:".length) : null;
     const markerDigest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${userId}\u0000${key}`)))].map(value => value.toString(16).padStart(2, "0")).join("");
     const markerKey = `${uncertaintyPrefix}${markerDigest}`;
     // Persist the intent before dispatch. If storage is unavailable, fail closed
@@ -148,30 +149,37 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
     {
       try {
         if (typeof sessionStorage === "undefined") throw new Error("sessionStorage unavailable");
+        const old = sessionStorage.getItem(markerKey);
+        if (old !== null) {
+          const parsed = JSON.parse(old) as { user?: string; intent?: string };
+          if (parsed.user !== userId || parsed.intent !== key) throw new Error("Marcador de intención incompatible.");
+          throw new Error("Esta intención ya está persistida y requiere conciliación.");
+        }
         sessionStorage.setItem(markerKey, JSON.stringify({ user: userId, intent: key }));
       } catch {
         throw new Error("No se pudo proteger esta escritura frente a un resultado incierto; no se envió la solicitud.");
       }
-      uncertain.add(key);
+      uncertain.add(scopedIntent);
     }
     try {
       const result = await work();
-      uncertain.delete(key);
+      uncertain.delete(scopedIntent);
       try { sessionStorage.removeItem(markerKey); } catch { /* in-memory latch remains authoritative */ }
+      if (scopeId() !== userId) throw new Error("Combos confirmó la escritura bajo la identidad original; no se presenta el resultado en la sesión actual.");
       return result;
     }
     catch (error) {
       if (error instanceof UnconfirmedComboWrite) {
-        uncertain.add(key);
+        uncertain.add(scopedIntent);
         try { sessionStorage.setItem(markerKey, JSON.stringify({ user: userId, intent: key })); } catch { /* marker was written before dispatch */ }
       } else if (error instanceof ConfirmedComboWrite && createFingerprint) {
         // A 201 was received but its DTO cannot supply the new ID. It is a
         // confirmed write that cannot be safely repeated; retain the same
         // per-intent reconciliation latch across reloads.
-        uncertain.add(key);
+        uncertain.add(scopedIntent);
         try { sessionStorage.setItem(markerKey, JSON.stringify({ user: userId, intent: key })); } catch { /* marker was written before dispatch */ }
-      } else if (createFingerprint) {
-        uncertain.delete(key);
+      } else {
+        uncertain.delete(scopedIntent);
         try { sessionStorage.removeItem(markerKey); } catch { /* definitive 4xx; marker is only a guard */ }
       }
       throw error;
@@ -229,6 +237,13 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
     },
     async create(payload) {
       const key = `create:${await createFingerprint(payload)}`;
+      try {
+        const legacyKey = `g6:combos:uncertain:create:${key.slice("create:".length)}`;
+        if (sessionStorage.getItem(legacyKey) !== null) throw new Error("Existe una intención histórica sin propietario verificable; no se reenvía.");
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("intención histórica")) throw error;
+        throw new Error("No se pudo consultar la intención histórica de creación; operación bloqueada.", { cause: error });
+      }
       const confirmed = await write(key, async () => {
         const dto = await request("/api/v1/combos", "POST", undefined, toPayload(payload), 201);
         let id: unknown;

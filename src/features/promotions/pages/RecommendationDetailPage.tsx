@@ -19,6 +19,7 @@ import {
 import { AdministrationStateDialog } from "../components/AdministrationStateDialog";
 import { RecommendationCandidates } from "../components/RecommendationCandidates";
 import { useAdministrationRead } from "../hooks/useAdministrationRead";
+import { PromotionCatalogAccessError } from "../adapters/httpPromotionCatalog";
 
 import {
   recommendationKindLabel,
@@ -73,7 +74,7 @@ export function RecommendationDetailPage({
         confirmedServices.catalog.categories(signal),
       ]);
       const errors = [products, categories].filter(result => result.status === "rejected");
-      const accessErrors = errors.filter(result => result.status === "rejected" && /HTTP (401|403)|401|403|sesión|permiso/i.test(result.reason instanceof Error ? result.reason.message : String(result.reason)));
+      const accessErrors = errors.filter(result => result.status === "rejected" && result.reason instanceof PromotionCatalogAccessError);
       return {
         products: products.status === "fulfilled" ? products.value : [],
         categories: categories.status === "fulfilled" ? categories.value : [],
@@ -84,6 +85,7 @@ export function RecommendationDetailPage({
     [confirmedServices, record],
   );
   const catalog = useAdministrationRead(`catalog:${revision + queryRevision}:${record?.id ?? ""}`, readCatalog);
+  const referencesDenied = catalog.status === "success" && catalog.result.accessErrors.length > 0;
   useEffect(() => {
     if (record && (location.state?.focusState || updated))
       trigger.current?.focus();
@@ -107,7 +109,7 @@ export function RecommendationDetailPage({
       <PageHeader
         title={record?.name ?? "Detalle de regla"}
         actions={
-          <Button
+            <Button
             component={Link}
             variant="outline"
             to={`/recomendaciones${suffix}`}
@@ -192,6 +194,7 @@ export function RecommendationDetailPage({
               products={
                 catalog.status === "success" ? catalog.result.products : []
               }
+              disabled={referencesDenied}
             />
             <Text size="sm" c="dimmed">
               Precio y disponibilidad por producto: No disponible.
@@ -200,6 +203,7 @@ export function RecommendationDetailPage({
               <Button
                 component={Link}
                 to={`/recomendaciones/${ruleId}/editar${suffix}`}
+                disabled={referencesDenied}
               >
                 Editar regla
               </Button>
@@ -207,6 +211,7 @@ export function RecommendationDetailPage({
                 ref={trigger}
                 variant="outline"
                 onClick={() => setOpened(true)}
+                disabled={referencesDenied}
               >
                 {record.status === "active"
                   ? "Desactivar regla"
@@ -216,7 +221,7 @@ export function RecommendationDetailPage({
             <AdministrationStateDialog
               record={record}
               entityLabel="regla"
-              opened={opened || changeState}
+              opened={(opened || changeState) && !referencesDenied}
               change={(status, signal) =>
                 services.recommendations.changeStatus(
                   ruleId,

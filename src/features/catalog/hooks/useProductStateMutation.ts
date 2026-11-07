@@ -40,23 +40,25 @@ export function useProductStateMutation(): UseProductStateMutationResult {
     id: string,
     fn: () => Promise<ProductDetailView>,
   ): Promise<ProductDetailView | null> => {
+    const owner = userId();
     if (submitting || reconciling) return null;
-    if (hasUnknown(userId(), id)) { setIsUnknownError(true); setError("La escritura anterior tiene resultado incierto. Consulta el estado antes de cualquier reenvío."); return null; }
+    if (hasUnknown(owner, id)) { setIsUnknownError(true); setError("La escritura anterior tiene resultado incierto. Consulta el estado antes de cualquier reenvío."); return null; }
     setSubmitting(true);
     clearError();
 
     try {
       const res = await fn();
+      if (userId() !== owner) return null;
       return res;
     } catch (err) {
       if (err instanceof CatalogError) {
-        setError(err.message);
+        if (userId() === owner) setError(err.message);
         if (err.kind === "unknown" || err.kind === "write_unknown") {
-          setIsUnknownError(true);
-          if (err.kind === "write_unknown") { unknownProducts.add(`${userId()}:${id}`); try { sessionStorage.setItem(unknownKey(userId(), id), "1"); } catch { /* module latch remains */ } }
+          if (userId() === owner) setIsUnknownError(true);
+          if (err.kind === "write_unknown") { unknownProducts.add(`${owner}:${id}`); try { sessionStorage.setItem(unknownKey(owner, id), "1"); } catch { /* module latch remains */ } }
         }
       } else {
-        setError(
+        if (userId() === owner) setError(
           err instanceof Error
             ? err.message
             : "Error inesperado al cambiar de estado.",
