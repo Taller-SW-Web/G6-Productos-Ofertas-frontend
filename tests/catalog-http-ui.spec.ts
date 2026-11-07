@@ -11,8 +11,8 @@ test("UI API 1440: POST contractual, error 409 visible, datos conservados y sin 
       posts++; status = 409; body = { code: "SKU_DUPLICADO" };
       expect(request.postDataJSON()).toMatchObject({ nombre: "Producto HTTP", skuBase: "000-SKU", categoriaId: "cat-api", tipoProductoId: "type-api", marcaId: "brand-api" });
       expect(request.headers()).not.toHaveProperty("authorization");
-    } else if (url.pathname.endsWith("/categorias")) body = { categories: [{ categoria_id: "cat-api", name: "Categoría HTTP", status: "ACTIVA" }] };
-    else if (url.pathname.endsWith("/marcas")) body = { brands: [{ marca_id: "brand-api", name: "Marca HTTP", status: "ACTIVA" }] };
+    } else if (url.pathname.endsWith("/categorias/administracion")) body = { items: [{ categoriaId: "cat-api", nombre: "Categoría HTTP", estado: "ACTIVO" }], meta: { pagina: 1, tamanio: 200, total: 1, totalPaginas: 1 } };
+    else if (url.pathname.endsWith("/marcas/administracion")) body = { items: [{ marcaId: "brand-api", nombre: "Marca HTTP", estado: "ACTIVO" }], meta: { pagina: 1, tamanio: 200, total: 1, totalPaginas: 1 } };
     else if (url.pathname.endsWith("/tipos-producto")) body = { items: [{ tipoProductoId: "type-api", nombre: "Tipo HTTP", estado: "ACTIVO" }], meta: { pagina: 1, tamanio: 100, total: 1, totalPaginas: 1 } };
     else body = { tipoProducto: { tipoProductoId: "type-api" }, schemaVersion: 1, caracteristicas: [] };
     await route.fulfill({ status, contentType: "application/json", headers: { "Access-Control-Allow-Origin": "*" }, body: JSON.stringify(body) });
@@ -54,7 +54,8 @@ test("UI API: lectura administrativa bloqueada conserva preparación independien
     } : { code: "PRODUCTO_NO_ENCONTRADO" }) });
   });
   await page.goto("/tests/harness/catalog-http.html?path=/productos/product/preparacion");
-  await expect(page.getByRole("heading", { name: "Información del producto no disponible" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Preparación del producto" })).toBeVisible();
+  await expect(page.getByText("Estado administrativo no disponible", { exact: true })).toBeVisible();
   await expect(page.getByText("Pricing: En preparación", { exact: true })).toBeVisible();
   await expect(page.getByText("Inventario: Rechazado", { exact: true })).toBeVisible();
   await expect(page.getByText("404 - Producto inexistente", { exact: true })).toHaveCount(0);

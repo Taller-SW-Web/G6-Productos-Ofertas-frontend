@@ -91,8 +91,8 @@ test("E2E-01: G7 recorre listado, detalle de campaña, cupones filtrados y logou
   });
   await page.goto("/cupones");
   await page.getByRole("textbox", { name: "Correo electrónico", exact: true }).fill("h4-a@example.invalid");
-  await page.getByLabel("Contraseña").fill("fake-password-h4");
-  await page.getByRole("button", { name: "Iniciar sesión", exact: true }).click();
+  await page.getByRole("textbox", { name: "Contraseña", exact: true }).fill("fake-password-h4");
+  await page.getByRole("button", { name: "Ingresar al panel", exact: true }).click();
   await expect(page.getByText("Sesión de Gestora H4 A", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Ofertas y promociones", exact: true }).click();
   const campaignLink = page.getByRole("link", { name: "Ver detalle de Campaña H4 E2E", exact: true });
@@ -148,7 +148,7 @@ test("TAX-H4-E2E-HTTP: adaptador HTTP real confirma Marca con PATCH 200 aunque G
   await page.route("**/api/v1/marcas/brand-h4-http", async route => {
     const method = route.request().method(); calls.push(method);
     if (method === "PATCH") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ marcaId: "brand-h4-http", nombre: "Marca H4 HTTP", estado: "ACTIVO", version: 5, descripcion: "Actualizada", paisOrigenIso: "PE", logoUrl: null }) });
-    if (calls.filter(item => item === "GET").length === 1) return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ marcaId: "brand-h4-http", nombre: "Marca H4 HTTP", estado: "ACTIVO", version: 4, descripcion: "Anterior", paisOrigenIso: "PE", logoUrl: null }) });
+    if (calls.filter(item => item === "GET").length <= 2) return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ marcaId: "brand-h4-http", nombre: "Marca H4 HTTP", estado: "ACTIVO", version: 4, descripcion: "Anterior", paisOrigenIso: "PE", logoUrl: null }) });
     return route.fulfill({ status: 503, contentType: "application/problem+json", body: JSON.stringify({ status: 503, code: "SERVICIO_NO_DISPONIBLE" }) });
   });
   await page.goto("/tests/harness/taxonomy-brand-http.html");

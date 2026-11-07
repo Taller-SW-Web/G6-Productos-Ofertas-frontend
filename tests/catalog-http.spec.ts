@@ -80,7 +80,7 @@ test("HTTP: las 17 operaciones del puerto usan métodos/rutas publicados y propa
   const h = harness(() => json({ code: "TOKEN_INVALIDO" }, 401));
   const root = `/api/v1/productos/${pid}`; const v = `${root}/variantes/${vid}`;
   const operations: [() => Promise<unknown>, string, string][] = [
-    [() => h.catalog.list({ page: 2, pageSize: 10, categoryId: "category", status: "BORRADOR", q: "text" }), "GET", "/api/v1/productos?pagina=2&tamanio=10&q=text&categoriaId=category&estado=BORRADOR"],
+    [() => h.catalog.list({ page: 2, pageSize: 10, categoryId: "category", status: "ACTIVO", q: "text" }), "GET", "/api/v1/productos?pagina=2&tamanio=10&q=text&categoriaId=category&estado=ACTIVO"],
     [() => h.catalog.getById(pid), "GET", root],
     [() => h.catalog.create(payload), "POST", "/api/v1/productos"],
     [() => h.catalog.update(pid, { nombre: "Cambio", descripcion: "Desc", categoriaId: "category", marcaId: "brand", catalogVersion: 8 }), "PATCH", root],
@@ -105,7 +105,7 @@ test("HTTP: las 17 operaciones del puerto usan métodos/rutas publicados y propa
   expect(h.calls).toHaveLength(17);
 });
 
-for (const [status, code, kind] of [[400, "VALIDACION", "validation"], [403, "SCOPE_INSUFICIENTE", "forbidden"], [404, "PRODUCTO_NO_ENCONTRADO", "not_found"], [409, "VERSION_CONFLICT", "version_conflict"], [409, "COMBINACION_DUPLICADA", "duplicate_combination"], [422, "ATRIBUTO_IDENTIFICADOR_INVALIDO", "invalid_attribute"], [503, "SERVICIO_NO_DISPONIBLE", "server"]] as const) {
+for (const [status, code, kind] of [[400, "VALIDACION", "validation"], [403, "SCOPE_INSUFICIENTE", "forbidden"], [404, "PRODUCTO_NO_ENCONTRADO", "not_found"], [409, "VERSION_CONFLICT", "version_conflict"], [409, "COMBINACION_DUPLICADA", "duplicate_combination"], [422, "ATRIBUTO_IDENTIFICADOR_INVALIDO", "invalid_attribute"], [503, "SERVICIO_NO_DISPONIBLE", "write_unknown"]] as const) {
   test(`HTTP: ${status}/${code} conserva código y no repite escritura`, async () => {
     const h = harness(() => json({ code, detail: "Texto no autoritativo" }, status));
     await expect(h.catalog.updateVariant(pid, vid, { catalogVersion: 7 })).rejects.toMatchObject({ kind, details: { code } });
@@ -261,8 +261,8 @@ test("HTTP variantes: detalle y lista componen características/preparación rea
 
 test("Taxonomía HTTP: IDs oficiales, paginación completa, vacío válido y roles ausentes sin inferencia", async () => {
   const h = harness(path => {
-    if (path.includes("/categorias")) return json({ categories: [{ categoria_id: "official", name: "Categoría", status: "ACTIVA" }] });
-    if (path.includes("/marcas")) return json({ brands: [{ marca_id: "brand", name: "Marca", status: "ACTIVA" }] });
+    if (path.includes("/categorias")) return json({ items: [{ categoriaId: "official", nombre: "Categoría", estado: "ACTIVO" }], meta: { pagina: 1, tamanio: 200, total: 1, totalPaginas: 1 } });
+    if (path.includes("/marcas")) return json({ items: [{ marcaId: "brand", nombre: "Marca", estado: "ACTIVO" }], meta: { pagina: 1, tamanio: 200, total: 1, totalPaginas: 1 } });
     if (path.includes("/caracteristicas")) return json({ tipoProducto: { tipoProductoId: "type" }, schemaVersion: 4, caracteristicas: [{ caracteristicaId: "number", estado: "ACTIVO", obligatoria: true,
       caracteristica: { caracteristicaId: "number", nombre: "Temperatura", tipo: "NUMERO", unidadMedida: "°C", estado: "ACTIVO" } }] });
     return json({ items: [{ tipoProductoId: "type", nombre: "Tipo", estado: "ACTIVO" }], meta: { pagina: 1, tamanio: 100, total: 1, totalPaginas: 1 } });
