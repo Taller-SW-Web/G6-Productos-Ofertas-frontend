@@ -17,7 +17,7 @@ Node 22.23.4 y Chromium. La revisión de escritorio usó viewport de 1440 × 900
 |---|---|
 | `npm ci` | PASS. npm informó 10 avisos moderados y 1 alto. |
 | `npm run typecheck` y `npm run lint` | PASS. |
-| `npm test` | PASS en la primera entrega. 567 casos: Combos/Promociones (113), Bulk (75), Inventario (116), Pricing (163), Taxonomía (67) y política de release (33). |
+| `npm test` | PASS para el código de `32b13f9`. 568 casos entre Combos/Promociones (113), Bulk (75), Inventario (116), Pricing (163), Taxonomía (67) y política de release (34). |
 | `npm run build` con mock y API | PASS. Vite emitió un aviso de import dinámico redundante de SEO. |
 | `npm run test:e2e:smoke` | PASS, 8 casos. |
 | `npm run test:e2e:pricing` | PASS, 6 casos HTTP controlados. |
@@ -36,4 +36,4 @@ En Catálogo se revisó a 1440 px el formulario con HTTP 409 y la conservación 
 
 La ejecución integral de `32d3a23` registró siete fallos E2E y un fallo del gate de producción API. El seguimiento corrige la reconciliación mock, los agregados filtrados de Inventario, las expectativas de Taxonomía y el aislamiento entre las intenciones de exportación de Auditoría. El gate externo conserva su alcance de Cupones y la variante de loopback verifica también Precios. [Run de 32d3a23](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/42378060972).
 
-La ejecución integral por SHA se consulta en los checks del [PR #73](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/73/checks). La aceptación con los providers autorizados está pendiente según [dependencias](DEPENDENCIAS_BACKEND_PARA_DEMO.md).
+El [run de 32b13f9](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/42379995289) identifica el commit funcional con estas correcciones. La ejecución integral por SHA se consulta en los checks del [PR #73](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/73/checks). La aceptación con los providers autorizados está pendiente según [dependencias](DEPENDENCIAS_BACKEND_PARA_DEMO.md).

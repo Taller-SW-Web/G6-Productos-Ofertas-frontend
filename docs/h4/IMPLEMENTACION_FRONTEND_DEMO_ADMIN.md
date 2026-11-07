@@ -2,6 +2,8 @@
 
 La rama integra H4 `520366d` con Frontend master `f9c494a`. Fuentes de consulta: Docs master `aba8d1c` (OpenAPI G6 0.6.0-rc.3, catálogo de errores y DESIGN 1.1.0) y Backend master `b061ef8` (controladores y servicios). La matriz separa las pruebas contractuales locales del entorno compartido.
 
+El [plan adjunto](PLAN_FRONTEND_H4_DEMO_ADMIN.md) conserva el alcance y las condiciones de aceptación de partida. El estado observado está en la [matriz de verificación](MATRIZ_VERIFICACION_FRONTEND.md).
+
 ## Arranque y seguridad
 
 `src/main.tsx` conserva el login general, MFA, guard y recarga del contexto al cambiar de identidad. `src/startApplication.tsx` compone los repositorios H4 detrás de ese login con la misma sesión humana G7. La entrada administrativa predeterminada abre Productos y conserva los enlaces profundos registrados. Pricing consulta los objetivos al entrar en una pantalla que los necesita y cancela esa consulta al salir. Se retiró el gate de sesión duplicado. Se conserva el AppShell existente.
