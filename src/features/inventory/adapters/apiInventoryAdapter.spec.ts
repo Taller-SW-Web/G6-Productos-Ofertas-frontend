@@ -1654,12 +1654,22 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
     expect(calls.filter(call => call.request.method === "POST")).toHaveLength(1);
     const keyA = "inventory.transferReceptionAttempts.v1:g7-inventory-owner-a";
     const keyB = "inventory.transferReceptionAttempts.v1:g7-inventory-owner-b";
-    const persistedA = JSON.parse(memory.get(keyA) ?? "null") as { uncertain?: { operationId?: string; transferId?: string; quantityReceived?: number }[] } | null;
-    expect(persistedA?.uncertain).toContainEqual(expect.objectContaining({
-      operationId: RECEPCION_PAYLOAD.operationId,
-      transferId: RECEPCION_PAYLOAD.transferId,
-      quantityReceived: RECEPCION_PAYLOAD.quantityReceived,
-    }));
+    expect(keyA).toContain("g7-inventory-owner-a");
+    const persistedA = JSON.parse(memory.get(keyA) ?? "null") as {
+      uncertain?: unknown[];
+      inFlight?: unknown[];
+      confirmedAwaitingWithDto?: { payload: ReceiveTransferPayload; dto: TrasladoInventarioDto }[];
+    } | null;
+    expect(persistedA?.uncertain).toEqual([]);
+    expect(persistedA?.inFlight).toEqual([]);
+    expect(persistedA?.confirmedAwaitingWithDto).toContainEqual({
+      payload: expect.objectContaining({
+        ...RECEPCION_PAYLOAD,
+        operationId: RECEPCION_PAYLOAD.operationId,
+        transferId: RECEPCION_PAYLOAD.transferId,
+      }),
+      dto: expect.objectContaining({ traslado_id: RECEPCION_PAYLOAD.transferId }),
+    });
     expect(memory.has(keyB)).toBe(false);
     currentOwner = "g7-inventory-owner-b";
     expect(repository.getTransferWriteRecord("t-1")).toBeNull();

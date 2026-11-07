@@ -28,6 +28,7 @@ import type { AuditEntry, AuditFilters } from "../src/features/price-audit/servi
 import { createMemoryStorage, createRejectingStorage, fakeOwnerA, fakeOwnerB } from "./fixtures/h4Controlled";
 
 const testSession = {
+  snapshot: () => ({ user: { id: "g7-bulk-unit-owner", nombreCompleto: "Usuario de pruebas", correo: "bulk-unit@example.invalid", roles: [] }, mfa: false, busy: false, notice: "" }),
   getAccessToken: async () => "header.payload.signature",
   refreshAccessToken: async () => null,
   invalidateAccessToken: () => undefined,
@@ -267,9 +268,16 @@ describe("adaptador HTTP de Bulk", () => {
   });
 
   it.each([401, 403, 404, 409, 503])("expone el error HTTP %i sin fallback", async (status) => {
+    const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+    vi.stubGlobal("sessionStorage", createMemoryStorage());
     const transport: BulkHttpTransport = { request: async () => new Response(JSON.stringify({ status, code: "ERROR_HTTP" }), { status, headers: { "content-type": "application/problem+json" } }) };
     const repository = createHttpBulkRepository(transport, testSession);
-    await expect(repository.createExport("CSV")).rejects.toThrow(`HTTP ${status}`);
+    try {
+      await expect(repository.createExport("CSV")).rejects.toThrow(`HTTP ${status}`);
+    } finally {
+      if (originalStorage) Object.defineProperty(globalThis, "sessionStorage", originalStorage);
+      else Reflect.deleteProperty(globalThis, "sessionStorage");
+    }
   });
 
   it("selecciona mock solo para mock y exige provider API en modo api", () => {

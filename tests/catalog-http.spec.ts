@@ -196,7 +196,7 @@ test("CAT-H4-01: borrador confirmado continúa siendo consultado solo por prepar
   });
   const created = await h.catalog.create({ ...payload, atributos: [] });
   expect(created).toMatchObject({ id: pid, status: "BORRADOR", catalogVersion: 12 });
-  await expect(h.catalog.getById(pid)).rejects.toMatchObject({ kind: "not_found" });
+  await expect(h.catalog.getById(pid)).resolves.toBeNull();
   expect(h.calls.filter(call => call.init.method === "POST")).toHaveLength(1);
   expect(h.calls.filter(call => call.path === `/api/v1/productos/${pid}`)).toHaveLength(1);
   expect(created.status).toBe("BORRADOR");
@@ -211,11 +211,11 @@ test("CAT-H4-02: filtros all se omiten y la recarga sin DTO transitorio no inven
   const page = await loaded.catalog.list({ page: 1, pageSize: 20 });
   expect(page.items[0]).toMatchObject({ id: pid, status: null, catalogVersion: null, commerciallyActive: true });
   expect(page.items[0]).not.toHaveProperty("administrativeStatus");
-  await expect(loaded.catalog.getById(pid)).rejects.toMatchObject({ kind: "not_found" });
+  await expect(loaded.catalog.getById(pid)).resolves.toBeNull();
   expect(loaded.calls).toHaveLength(2);
 });
 
-test("CAT-H4-03: variante 404 es tipado y TEXTO no adquiere maxLength no publicado", async () => {
+test("CAT-H4-03: variante ausente devuelve null y TEXTO no adquiere maxLength no publicado", async () => {
   const h = harness(path => {
     if (path === `/api/v1/productos/${pid}/variantes/${vid}`) return json({ code: "VARIANTE_NO_ENCONTRADA" }, 404);
     if (path.endsWith("/preparacion")) return json(variantPrep);
@@ -223,7 +223,7 @@ test("CAT-H4-03: variante 404 es tipado y TEXTO no adquiere maxLength no publica
     if (path.endsWith("/caracteristicas/description")) return json({ caracteristicaId: "description", tipo: "TEXTO", estado: "ACTIVO" });
     throw new Error(`Ruta no prevista: ${path}`);
   });
-  await expect(h.catalog.getVariantById(pid, vid)).rejects.toMatchObject({ kind: "not_found" });
+  await expect(h.catalog.getVariantById(pid, vid)).resolves.toBeNull();
   const page = await h.catalog.listVariants(pid, { page: 1, pageSize: 20 });
   expect(page.items[0]?.nonIdentifyingAttributes[0]).toMatchObject({ caracteristicaId: "description", tipo: "TEXTO", valor: "texto" });
   expect(page.items[0]?.nonIdentifyingAttributes[0]).not.toHaveProperty("maxLength");

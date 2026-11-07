@@ -53,7 +53,7 @@ async function attachBulkApi(page: Page, mode: "accepted" | "recover" | "infligh
       if (mode === "recover" && readCount === 1) return route.fulfill({ status: 404, contentType: "application/problem+json", body: JSON.stringify({ status: 404, code: "LOTE_NO_ENCONTRADO" }) });
       return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(batchDto(id)) });
     }
-    if (request.method() === "GET" && path.endsWith("/reporte")) return route.fulfill({ status: 200, contentType: "text/csv", headers: { "content-disposition": 'attachment; filename="h4-reporte.csv"' }, body: "row_id,code\n33333333-3333-4333-8333-333333333333,PRECIO_INVALIDO\n" });
+    if (request.method() === "GET" && path.endsWith("/reporte")) return route.fulfill({ status: 200, contentType: "text/csv", headers: { "content-disposition": 'attachment; filename="h4-reporte.csv"', "access-control-expose-headers": "content-disposition" }, body: "row_id,code\n33333333-3333-4333-8333-333333333333,PRECIO_INVALIDO\n" });
     if (request.method() === "OPTIONS") return route.fulfill({ status: 204 });
     return route.fulfill({ status: 404, contentType: "application/problem+json", body: JSON.stringify({ status: 404, code: "LOTE_NO_ENCONTRADO" }) });
   });
