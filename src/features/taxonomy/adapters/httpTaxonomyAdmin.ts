@@ -72,7 +72,7 @@ async function listAll(transport: TaxonomyGatewayTransport, path: string, idFiel
 }
 
 export function createHttpCategoryRepository(transport: TaxonomyGatewayTransport): CategoryRepository {
-  const get = async (path: string, signal?: AbortSignal) => { const dto = await send(transport, path, "GET", undefined, signal, 200); await reconcileConfirmedTaxonomyResource(transport, path, dto); return dto; };
+  const get = async (path: string, signal?: AbortSignal) => { const owner = transport.scopeId?.() ?? "session-unavailable"; const dto = await send(transport, path, "GET", undefined, signal, 200); if ((transport.scopeId?.() ?? "session-unavailable") !== owner) throw new Error("La sesión cambió durante la lectura de Taxonomía."); await reconcileConfirmedTaxonomyResource(transport, path, dto, owner); return dto; };
   const getCategoryDetail = async (id: string, signal?: AbortSignal) => {
     const dto = row(await get(`/api/v1/categorias/${encodeURIComponent(id)}`, signal));
     if (dto.categoriaId !== id) throw invalid();
@@ -134,7 +134,7 @@ export function createHttpCategoryRepository(transport: TaxonomyGatewayTransport
 }
 
 export function createHttpCharacteristicRepository(transport: TaxonomyGatewayTransport): CharacteristicRepository {
-  const get = async (path: string, signal?: AbortSignal) => { const dto = await send(transport, path, "GET", undefined, signal, 200); await reconcileConfirmedTaxonomyResource(transport, path, dto); return dto; };
+  const get = async (path: string, signal?: AbortSignal) => { const owner = transport.scopeId?.() ?? "session-unavailable"; const dto = await send(transport, path, "GET", undefined, signal, 200); if ((transport.scopeId?.() ?? "session-unavailable") !== owner) throw new Error("La sesión cambió durante la lectura de Taxonomía."); await reconcileConfirmedTaxonomyResource(transport, path, dto, owner); return dto; };
   const valueOperationParents = new Map<string, { caracteristicaId: string; valorId: string }>();
   return {
     async list(signal) {
@@ -177,7 +177,7 @@ export function createHttpCharacteristicRepository(transport: TaxonomyGatewayTra
 }
 
 export function createHttpBrandRepository(transport: TaxonomyGatewayTransport): BrandRepository {
-  const get = (path: string, signal?: AbortSignal) => send(transport, path, "GET", undefined, signal, 200);
+  const get = async (path: string, signal?: AbortSignal) => { const owner = transport.scopeId?.() ?? "session-unavailable"; const dto = await send(transport, path, "GET", undefined, signal, 200); if ((transport.scopeId?.() ?? "session-unavailable") !== owner) throw new Error("La sesión cambió durante la lectura de Taxonomía."); await reconcileConfirmedTaxonomyResource(transport, path, dto, owner); return dto; };
   const form = (input: { nombre: string; descripcion?: string | null; paisOrigenIso?: string | null; logoFile?: File | null; version?: number }) => {
     const body = new FormData(); body.set("nombre", input.nombre);
     // In multipart PATCH, absent means unchanged and an empty text part clears an optional text value.

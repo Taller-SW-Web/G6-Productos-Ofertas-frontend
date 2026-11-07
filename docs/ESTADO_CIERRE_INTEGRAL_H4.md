@@ -157,3 +157,10 @@ TypeScript `npm run typecheck` y ESLint dirigido pasaron para esta entrega; `git
 - **Matriz OpenAPI:** permanece sin cambios y conserva sus 136 operaciones y estados de evidencia anteriores; no se agregaron aprobaciones de operaciones no ejecutadas.
 
 Validaciones de esta corrección: `npm run typecheck`, ESLint dirigido a los archivos modificados y `git diff --check`. No se ejecutaron pruebas, suites, E2E, Playwright ni builds.
+
+### Ajuste estático de aceptación sobre `5de5190` — 2026-11-07
+
+- **Taxonomy:** los cambios de estado de marcadores no acreditados actualizan únicamente `state` y conservan el objeto original completo, incluidos `entity`, propietario/scope, ruta, método, body normalizado, versión, correlación y demás evidencia. Las lecturas capturan identidad antes del GET y vuelven a comprobarla antes de reconciliar o modificar almacenamiento; `taxonomySend` también aborta antes del envío si la identidad cambia durante la preparación. Una lectura que aún muestra valores anteriores mantiene intacta la intención para el GET siguiente.
+- **Pricing:** `listSchedules()` comprueba el propietario tras el GET y el mapeo, antes del retorno ordinario, tras cada página conciliatoria y antes de cambiar marcadores. Si una lectura falla después de cambiar la sesión, se descarta el error/respuesta bajo la identidad anterior. Se conserva la optimización de una sola página cuando no hay intención pendiente del usuario y objetivo actuales.
+
+Verificaciones de este ajuste: se ejecutarán `npm run typecheck`, ESLint dirigido y `git diff --check`. No se crean ni ejecutan pruebas en esta fase.

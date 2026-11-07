@@ -550,17 +550,22 @@ export function createHttpPricingRepository(
 
     async listSchedules(targetId, page, signal): Promise<SchedulePage> {
       const owner = dependencies.scopeId?.() ?? "session-unavailable";
+      const assertOwner = () => {
+        if ((dependencies.scopeId?.() ?? "session-unavailable") !== owner)
+          throw new PricingFailure("unknown", "La sesión cambió durante la lectura de programaciones; la respuesta y la conciliación se descartan.");
+      };
       if (!Number.isSafeInteger(page) || page < 1) {
         throw new PricingFailure("error", "La página solicitada no es válida.");
       }
-      const target = await targetById(targetId, signal);
+      let target: PriceTarget;
+      try { target = await targetById(targetId, signal); }
+      catch (error) { assertOwner(); throw error; }
       if ((dependencies.scopeId?.() ?? "session-unavailable") !== owner) throw new PricingFailure("unknown", "La sesión cambió durante la lectura de programaciones.");
       const suffix = `/programaciones?pagina=${page}&tamanio=${pageSize}`;
-      const response = await json(
-        targetPath(target, suffix),
-        { method: "GET", signal },
-        false,
-      );
+      let response: unknown;
+      try { response = await json(targetPath(target, suffix), { method: "GET", signal }, false); }
+      catch (error) { assertOwner(); throw error; }
+      assertOwner();
       if (response === null) {
         throw new PricingFailure(
           "error",
@@ -568,6 +573,7 @@ export function createHttpPricingRepository(
         );
       }
       const result = mapSchedulePageDto(response, target, page, pageSize, channelIds);
+      assertOwner();
       const scopeSuffix = `:${encodeURIComponent(owner)}`;
       const targetPrefix = `${targetPath(target)}:`;
       let needsReconciliation = [...uncertainSchedules].some(key => key.startsWith(targetPrefix) && key.endsWith(scopeSuffix));
@@ -583,20 +589,25 @@ export function createHttpPricingRepository(
           needsReconciliation = true;
         }
       } catch { throw new PricingFailure("unknown", "Hay un marcador de programación ilegible o inaccesible; no se libera ninguna intención."); }
-      if (!needsReconciliation) return result;
+      if (!needsReconciliation) { assertOwner(); return result; }
       const allSchedules = [...result.items];
       const pages = Math.ceil(result.total / pageSize);
       if (pages > 1000) throw new PricingFailure("unknown", "La paginación excede el límite defensivo; no se liberan intenciones de programación.");
       for (let current = 1; current <= pages; current++) {
         if (current === page) continue;
-        const pageValue = await json(targetPath(target, `/programaciones?pagina=${current}&tamanio=${pageSize}`), { method: "GET", signal }, false);
+        let pageValue: unknown;
+        try { pageValue = await json(targetPath(target, `/programaciones?pagina=${current}&tamanio=${pageSize}`), { method: "GET", signal }, false); }
+        catch (error) { assertOwner(); throw error; }
+        assertOwner();
         if (pageValue === null) throw new PricingFailure("unknown", "La lectura paginada quedó incompleta; se conservan los bloqueos.");
         const mapped = mapSchedulePageDto(pageValue, target, current, pageSize, channelIds);
+        assertOwner();
         if (mapped.total !== result.total) throw new PricingFailure("unknown", "El total cambió durante la reconciliación; se conservan los bloqueos.");
         allSchedules.push(...mapped.items);
       }
-      if ((dependencies.scopeId?.() ?? "session-unavailable") !== owner) throw new PricingFailure("unknown", "La sesión cambió durante la paginación; no se libera ninguna intención.");
+      assertOwner();
       for (const key of [...uncertainSchedules]) {
+        assertOwner();
         if (!key.startsWith(targetPrefix) || !key.endsWith(scopeSuffix)) continue;
         const marker = readMarker(key, "schedule");
         if (marker.state === "absent") continue;
@@ -614,6 +625,7 @@ export function createHttpPricingRepository(
         if (newMatches.length === 1) { clearMarker(key, "schedule"); uncertainSchedules.delete(key); }
         else setMarkerState(key, "schedule", "REQUIRES_EXTERNAL_VERIFICATION");
       }
+      assertOwner();
       return result;
     },
 
