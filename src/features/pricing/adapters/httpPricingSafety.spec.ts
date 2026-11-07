@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { createMemoryStorage } from "../../../../tests/fixtures/h4Controlled";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createHttpPricingRepository,
   type PricingHttpRequest,
@@ -11,6 +12,9 @@ import {
 import { createPricingRuntime } from "../services/pricingService";
 import type { PriceChange } from "../services/pricingModels";
 import type { PriceTarget } from "../services/pricingRepository";
+
+beforeEach(() => { vi.stubGlobal("sessionStorage", createMemoryStorage()); });
+afterEach(() => { vi.unstubAllGlobals(); });
 
 const target: PriceTarget = {
   kind: "product",
@@ -256,8 +260,8 @@ describe("Confirmación y recuperación de escrituras HTTP", () => {
   });
 
   it.each([500, 503])("no reenvía POST después de HTTP %s", async (status) => {
-    const { repository, request } = setup(async () =>
-      response({ code: "SERVICIO_NO_DISPONIBLE" }, status),
+    const { repository, request } = setup(async (_path, init) =>
+      init.method === "GET" ? response({ items: [], meta: { pagina: 1, tamanio: 20, total: 0, totalPaginas: 0 } }) : response({ code: "SERVICIO_NO_DISPONIBLE" }, status),
     );
     await expect(
       repository.schedule(target.id, draft, signal()),
@@ -265,12 +269,12 @@ describe("Confirmación y recuperación de escrituras HTTP", () => {
     await expect(
       repository.schedule(target.id, draft, signal()),
     ).rejects.toMatchObject({ kind: "unknown" });
-    expect(request).toHaveBeenCalledOnce();
+    expect(request.mock.calls.map(([, init]) => init.method)).toEqual(["GET", "POST"]);
   });
 
   it("no reenvía POST tras un 201 de forma incompatible", async () => {
-    const { repository, request } = setup(async () =>
-      response({ programacionId: "incompleta" }, 201),
+    const { repository, request } = setup(async (_path, init) =>
+      init.method === "GET" ? response({ items: [], meta: { pagina: 1, tamanio: 20, total: 0, totalPaginas: 0 } }) : response({ programacionId: "incompleta" }, 201),
     );
     await expect(
       repository.schedule(target.id, draft, signal()),
@@ -278,7 +282,7 @@ describe("Confirmación y recuperación de escrituras HTTP", () => {
     await expect(
       repository.schedule(target.id, draft, signal()),
     ).rejects.toMatchObject({ kind: "unknown" });
-    expect(request).toHaveBeenCalledOnce();
+    expect(request.mock.calls.map(([, init]) => init.method)).toEqual(["GET", "POST"]);
   });
 
   it("rechaza identidad de lote distinta de la solicitada", async () => {
@@ -478,7 +482,8 @@ describe("Identidad autoritativa y recuperación de escrituras", () => {
 
   it("comparte el bloqueo de POST incierto entre selecciones del mismo producto", async () => {
     const alias = { ...target, id: "alias" };
-    const request = vi.fn(async () => {
+    const request = vi.fn(async (_path: string, init: PricingHttpRequest) => {
+      if (init.method === "GET") return response({ items: [], meta: { pagina: 1, tamanio: 20, total: 0, totalPaginas: 0 } });
       throw new Error("Timeout después del envío");
     });
     const repository = createHttpPricingRepository({
@@ -489,7 +494,7 @@ describe("Identidad autoritativa y recuperación de escrituras", () => {
       .rejects.toMatchObject({ kind: "unknown" });
     await expect(repository.schedule(alias.id, draft, signal()))
       .rejects.toMatchObject({ kind: "unknown" });
-    expect(request).toHaveBeenCalledOnce();
+    expect(request.mock.calls.map(([, init]) => init.method)).toEqual(["GET", "POST"]);
   });
 
   it.each([true, false])("no relee para edición durante un PATCH pendiente (confirmado=%s)", async (confirmed) => {

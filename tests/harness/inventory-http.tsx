@@ -238,7 +238,7 @@ window.inventoryHttpScenario = {
 const params = new URLSearchParams(window.location.search);
 window.history.replaceState(null, "", params.get("path") ?? "/inventario/traslados");
 
-const { App } = await import("../../src/app/App");
+const { FeatureTestApp: App } = await import("./FeatureTestApp");
 
 createRoot(document.getElementById("root")!).render(
   <MantineProvider

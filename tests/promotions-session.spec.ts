@@ -373,7 +373,14 @@ test("Gateway: un 403 o un 401 desconocido no dispara renovación", async () => 
   });
 });
 test("Gateway: no reenvía una escritura rechazada ni reusa la sesión invalidada", async () => {
-  await fixture(async (origin, calls, set) => {
+  const values = new Map<string, string>();
+  const restore = replaceGlobal("sessionStorage", {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
+  });
+  try {
+    await fixture(async (origin, calls, set) => {
     let refreshed = false,
       invalidated = false;
     set((_r, response) => {
@@ -383,6 +390,7 @@ test("Gateway: no reenvía una escritura rechazada ni reusa la sesión invalidad
     const api = createHttpPromotionServices({
       gatewayOrigin: origin,
       getAccessToken: async () => dto().accessToken,
+      scopeId: () => dto().usuario.id,
       refreshAccessToken: async () => {
         refreshed = true;
         return dto(2).accessToken;
@@ -397,7 +405,10 @@ test("Gateway: no reenvía una escritura rechazada ni reusa la sesión invalidad
     expect(refreshed).toBe(false);
     expect(invalidated).toBe(true);
     expect(calls).toHaveLength(1);
-  });
+    });
+  } finally {
+    restore();
+  }
 });
 
 test("SEC-H4-01: GET 401 TOKEN_INVALIDO renueva y reintenta exactamente una vez", async () => {

@@ -38,7 +38,7 @@ if (params.get("missing") !== "1")
   };
 window.history.replaceState(null, "", params.get("path") ?? "/precios");
 // Import the identical App/router only after establishing the requested business URL.
-const { App } = await import("../../src/app/App");
+const { FeatureTestApp: App } = await import("./FeatureTestApp");
 createRoot(document.getElementById("root")!).render(
   <MantineProvider
     theme={theme}

@@ -29,7 +29,7 @@ function schedule(id: string) {
 const draft: ScheduleDraft = { kind: "REGULAR", amount: "49.90", currency: "PEN", channel: "global", start: "2026-11-10T09:00", end: "2026-11-11T09:00", reason: "Ajuste H4" };
 
 describe("Pricing reconciliation H4", () => {
-  it("PRI-H4-01: los cinco canales conservan su identidad canónica y un canal sin UUID no escribe", async () => {
+  it("PRI-H4-01: los cinco canales conservan su identidad canónica y la lectura no exige un UUID de escritura", async () => {
     const observed: unknown[] = [];
     const setup = repository(async (_path, request) => {
       const channelId = request.method === "GET" ? new URLSearchParams(_path.split("?")[1]).get("canal") : JSON.parse(request.body ?? "{}").channelId;
@@ -42,8 +42,8 @@ describe("Pricing reconciliation H4", () => {
       expect(view?.price.channel).toBe(channel);
     }
     const withoutUuid = repository(async () => jsonResponse(200, price(null)), { ids: { ...channels, retail: "" } });
-    await expect(withoutUuid.instance.read({ targetId: target.id, channel: "retail" }, signal())).rejects.toMatchObject({ kind: "blocked_contract" });
-    expect(withoutUuid.request).not.toHaveBeenCalled();
+    await expect(withoutUuid.instance.read({ targetId: target.id, channel: "retail" }, signal())).resolves.toMatchObject({ price: { channel: "global" } });
+    expect(withoutUuid.request).toHaveBeenCalledWith(expect.stringContaining("?canal=RETAIL"), expect.objectContaining({ method: "GET" }));
     expect(observed).toHaveLength(5);
   });
 
@@ -162,17 +162,21 @@ describe("Pricing reconciliation H4", () => {
 
   it("PRI-H4-07: GET tardío y su error de A no se entregan a B ni alteran el marker de A", async () => {
     const pending = deferred<Response>();
-    const request = vi.fn(() => pending.promise);
+    const firstStarted = deferred<void>();
+    const request = vi.fn(() => { firstStarted.resolve(); return pending.promise; });
     const { instance } = repository(request);
     const readA = instance.listSchedules(target.id, 1, signal());
+    await firstStarted.promise;
     owner = fakeOwnerB;
     pending.resolve(jsonResponse(200, page([])));
     await expect(readA).rejects.toMatchObject({ kind: "unknown" });
     expect(owner).toBe(fakeOwnerB);
     expect(request).toHaveBeenCalledOnce();
     const failed = deferred<Response>();
-    request.mockImplementationOnce(() => failed.promise);
+    const secondStarted = deferred<void>();
+    request.mockImplementationOnce(() => { secondStarted.resolve(); return failed.promise; });
     const readLateError = instance.listSchedules(target.id, 1, signal());
+    await secondStarted.promise;
     owner = fakeOwnerA;
     failed.resolve(jsonResponse(503, { status: 503, code: "SERVICIO_NO_DISPONIBLE" }));
     await expect(readLateError).rejects.toBeDefined();

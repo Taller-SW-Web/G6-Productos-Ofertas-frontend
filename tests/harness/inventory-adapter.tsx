@@ -36,7 +36,7 @@ resetInventoryRepository(repository);
 
 window.history.replaceState(null, "", params.get("path") ?? "/inventario");
 
-const { App } = await import("../../src/app/App");
+const { FeatureTestApp: App } = await import("./FeatureTestApp");
 
 createRoot(document.getElementById("root")!).render(
   <MantineProvider

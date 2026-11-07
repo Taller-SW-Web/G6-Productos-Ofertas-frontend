@@ -27,6 +27,7 @@ if (!import.meta.env.DEV || !window.__promotionsHttpTest)
   );
 const services = createHttpPromotionServices({
   gatewayOrigin: location.origin,
+  scopeId: () => window.__promotionsHttpTest?.token ? "fixture-promotions-owner" : null,
   getAccessToken: async (signal) => {
     signal.throwIfAborted();
     return window.__promotionsHttpTest?.token ?? null;

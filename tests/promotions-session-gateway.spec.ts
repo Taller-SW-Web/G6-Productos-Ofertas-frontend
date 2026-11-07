@@ -26,9 +26,9 @@ async function login(
   await page
     .getByRole("textbox", { name: "Correo electrónico", exact: true })
     .fill(account + "@example.test");
-  await page.getByLabel("Contraseña").fill(password);
+  await page.getByRole("textbox", { name: "Contraseña", exact: true }).fill(password);
   await page
-    .getByRole("button", { name: "Iniciar sesión", exact: true })
+    .getByRole("button", { name: "Ingresar al panel", exact: true })
     .click();
 }
 async function select(page: Page, label: string, value: string) {

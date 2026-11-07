@@ -13,7 +13,7 @@ test("la composición opcional conserva HTTPS y rechaza credenciales/configuraci
   expect(runtime?.services.coupons).toBeDefined();
 });
 
-for (const [name, mode, gateway, security, integrated] of [
+for (const [name, mode, gateway, security] of [
   ["ambas válidas", "api", "https://gateway.example.test", "https://g7.example.test/api/v1", true],
   ["solo Gateway", "api", "https://gateway.example.test", undefined, false],
   ["solo G7", "api", undefined, "https://g7.example.test/api/v1", false],
@@ -22,13 +22,11 @@ for (const [name, mode, gateway, security, integrated] of [
   ["mock con configuración parcial", "mock", "https://gateway.example.test", undefined, false],
   ["mock con ambas", "mock", "https://gateway.example.test", "https://g7.example.test/api/v1", false],
 ] as const) {
-  test(`arranque real: ${name} conserva módulos independientes`, async ({ page }) => {
+  test(`arranque real: ${name} respeta el guard general y el modo mock local`, async ({ page }) => {
     const errors: string[] = [], calls: string[] = [];
-    const catalogHttpEnabled = mode === "api" && gateway?.startsWith("https://");
     page.on("pageerror", error => errors.push(error.message));
     page.on("request", request => { if (request.url().includes("/api/v1")) calls.push(request.url()); });
-    // Catalog now uses a valid Gateway even without G7. Keep this startup test
-    // isolated: reject its reads explicitly, never contact an external service.
+    // No private reads should reach this endpoint before authentication.
     await page.route("https://gateway.example.test/api/v1/**", async route => {
       expect(route.request().method()).toBe("GET");
       expect(route.request().headers()).not.toHaveProperty("authorization");
@@ -46,6 +44,17 @@ for (const [name, mode, gateway, security, integrated] of [
       await route.fulfill({ response, body });
     });
     await page.goto("/precios");
+    if (mode === "api") {
+      await expect(page).toHaveURL(/\/login$/);
+      await expect(page.getByRole("heading", { name: "Iniciar sesión", exact: true })).toBeVisible();
+      await expect(page.getByRole("navigation")).toHaveCount(0);
+      if (!security || !security.startsWith("https://")) {
+        await expect(page.getByRole("button", { name: "Ingresar al panel", exact: true })).toBeDisabled();
+      }
+      expect(calls).toEqual([]);
+      expect(errors).toEqual([]);
+      return;
+    }
     await expect(page.getByRole("navigation", { name: "Navegación de la aplicación" })).toBeVisible();
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     for (const [label, path] of [["Gestión de productos", "/productos"], ["Gestión de combos", "/combos"]]) {
@@ -54,24 +63,11 @@ for (const [name, mode, gateway, security, integrated] of [
       await expect(page.locator("main")).toBeVisible();
       await expect(page.getByRole("heading", { name: "Iniciar sesión", exact: true })).toHaveCount(0);
       if (mode === "mock") await expect(page.getByRole("heading", { name: label, exact: true })).toBeVisible();
-      if (catalogHttpEnabled && path === "/productos") await expect(page.getByText(/503, SERVICIO_NO_DISPONIBLE/).first()).toBeVisible();
     }
     await page.getByRole("link", { name: "Cupones de descuento", exact: true }).click();
     await expect(page).toHaveURL(/\/cupones$/);
     if (mode === "mock") await expect(page.getByRole("heading", { name: "Cupones de descuento", exact: true })).toBeVisible();
-    else if (integrated) await expect(page.getByRole("heading", { name: "Iniciar sesión", exact: true })).toBeVisible();
-    else {
-      await expect(page.getByRole("alert", { name: "Función no disponible", exact: true })).toBeVisible();
-      await expect(page.getByRole("table")).toHaveCount(0);
-    }
-    if (catalogHttpEnabled) {
-      expect(calls.length).toBeGreaterThan(0);
-      for (const call of calls) {
-        const url = new URL(call);
-        expect(url.origin).toBe(gateway);
-        expect(["/api/v1/productos", "/api/v1/categorias", "/api/v1/tipos-producto"]).toContain(url.pathname);
-      }
-    } else expect(calls).toEqual([]);
+    expect(calls).toEqual([]);
     expect(errors).toEqual([]);
   });
 }

@@ -1,3 +1,4 @@
+import { identityStorageKey } from "../../shared/mockIdentity";
 import { InventoryError } from "./inventoryErrors";
 import type {
   DispositionType,
@@ -66,7 +67,9 @@ export interface TransferReceptionDraftInput {
 
 const STORAGE_BASE = "inventory.transferReceptionAttempts.v1";
 let activeScope = "session-unavailable";
-const STORAGE_KEY = () => `${STORAGE_BASE}:${encodeURIComponent(activeScope)}`;
+const STORAGE_KEY = () => activeScope === "session-unavailable"
+  ? identityStorageKey(STORAGE_BASE)
+  : `${STORAGE_BASE}:${encodeURIComponent(activeScope)}`;
 const STORAGE_VERSION = 2;
 
 const DISPOSITIONS: readonly string[] = [

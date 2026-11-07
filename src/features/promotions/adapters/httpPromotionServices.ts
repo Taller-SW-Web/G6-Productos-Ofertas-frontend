@@ -24,7 +24,8 @@ import type {
 import type { PromotionCatalogRepository } from "../services/catalogRepository";
 import type { PromotionServices } from "../services/promotionServices";
 
-import { createHttpPromotionCatalog } from "./httpPromotionCatalog";
+import { createHttpPromotionCatalog, PromotionCatalogAccessError } from "./httpPromotionCatalog";
+import { isGatewayTokenInvalid } from "../../shared/isGatewayTokenInvalid";
 
 export interface PromotionHttpOptions {
   gatewayOrigin: string;
@@ -36,6 +37,7 @@ export interface PromotionHttpOptions {
   invalidateAccessToken?(rejectedToken: string): void;
   scopeId?: () => string | null;
   catalog?: PromotionCatalogRepository;
+  sessionEvents?: { version(): number; subscribe(notify: () => void): () => void };
 }
 class HttpFailure extends Error {
   constructor(readonly status: number) {
@@ -281,7 +283,7 @@ function page<T>(v: unknown, map: (v: unknown) => T) {
 
 export function createHttpPromotionServices(
   options: PromotionHttpOptions,
-): PromotionServices {
+): PromotionServices & { dispose(): void } {
   const url = new URL(options.gatewayOrigin);
   if (
     url.username ||
@@ -305,6 +307,11 @@ export function createHttpPromotionServices(
   ): Promise<unknown> {
     signal.throwIfAborted();
     const owner = options.scopeId?.() ?? null;
+    const version = options.sessionEvents?.version();
+    const assertSession = (dispatched: boolean) => {
+      if ((options.scopeId?.() ?? null) !== owner || options.sessionEvents?.version() !== version)
+        throw new PromotionSessionChanged(dispatched);
+    };
     const bounded = AbortSignal.any([signal, AbortSignal.timeout(7500)]);
     async function sessionToken(work: () => Promise<string | null>) {
       let abort = () => {};
@@ -323,8 +330,8 @@ export function createHttpPromotionServices(
       }
     }
     const token = await sessionToken(() => options.getAccessToken(bounded));
+    assertSession(false);
     bounded.throwIfAborted();
-    if ((options.scopeId?.() ?? null) !== owner) throw new PromotionSessionChanged(false);
     if (!token || /[\r\n]/.test(token)) throw new HttpFailure(401);
     const send = (accessToken: string) =>
       fetch(origin + "/api/v1" + path, {
@@ -341,36 +348,26 @@ export function createHttpPromotionServices(
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
     let response = await send(token);
-    if ((options.scopeId?.() ?? null) !== owner) throw new PromotionSessionChanged(true);
-    if (response.status === 401 && options.refreshAccessToken) {
-      let code: unknown;
-      try {
-        const problem: unknown = await response.json();
-        code = record(problem).code;
-      } catch {
-        /* An unknown 401 never triggers refresh or replay. */
-      }
-      if (code === "TOKEN_INVALIDO") {
-        if (method === "GET") {
-          const refresh = options.refreshAccessToken;
-          const renewed = await sessionToken(() => refresh(token, bounded));
-          bounded.throwIfAborted();
-          if (renewed && !/[\r\n]/.test(renewed)) {
-            response = await send(renewed);
-            if ((options.scopeId?.() ?? null) !== owner) throw new PromotionSessionChanged(true);
-            if (response.status === 401)
-              options.invalidateAccessToken?.(renewed);
-          }
-        } else {
-          // Preserve the existing no-retry rule for writes; the UI reports the
-          // failed action and requires a new explicit authenticated attempt.
-          options.invalidateAccessToken?.(token);
-        }
+    assertSession(true);
+    if (await isGatewayTokenInvalid(response)) {
+      assertSession(true);
+      const refresh = options.refreshAccessToken;
+      if (method === "GET" && refresh) {
+        const renewed = await sessionToken(() => refresh(token, bounded));
+        assertSession(true);
+        bounded.throwIfAborted();
+        if (renewed && !/[\r\n]/.test(renewed)) {
+          response = await send(renewed);
+          assertSession(true);
+          if (await isGatewayTokenInvalid(response)) options.invalidateAccessToken?.(renewed);
+        } else options.invalidateAccessToken?.(token);
+      } else {
+        options.invalidateAccessToken?.(token);
       }
     }
     if (!response.ok) throw new HttpFailure(response.status);
-    const payload = await response.json();
-    if ((options.scopeId?.() ?? null) !== owner) throw new PromotionSessionChanged(true);
+    const payload: unknown = await response.json();
+    assertSession(true);
     return payload;
   }
   async function read<T>(
@@ -383,15 +380,12 @@ export function createHttpPromotionServices(
       if (e instanceof PromotionSessionChanged) throw new CouponReadError("session", "La sesión cambió durante la consulta; vuelve a consultar con la identidad actual.");
       if (e instanceof CouponReadError) throw e;
       if (e instanceof HttpFailure && missing && e.status === 404) return null;
+      const status = e instanceof HttpFailure || e instanceof PromotionCatalogAccessError ? e.status : undefined;
       throw new CouponReadError(
-        e instanceof HttpFailure && e.status === 401
-          ? "session"
-          : e instanceof HttpFailure && e.status === 403
-            ? "forbidden"
-            : "unavailable",
-        e instanceof HttpFailure && e.status === 401
+        status === 401 ? "session" : status === 403 ? "forbidden" : "unavailable",
+        status === 401
           ? "Tu sesión no está disponible. Vuelve a identificarte."
-          : e instanceof HttpFailure && e.status === 403
+          : status === 403
             ? "No tienes permiso para consultar estos datos."
             : "No se pudo consultar la información. Conservamos el contexto; vuelve a consultar.",
       );
@@ -502,13 +496,26 @@ export function createHttpPromotionServices(
   }
   const campaignSnapshots = new Map<string, CampaignDraft>(),
     ruleSnapshots = new Map<string, RecommendationDraft>();
-  function mapCampaign(v: unknown) {
-    const r = campaign(v);
+  let version = options.sessionEvents?.version();
+  const unsubscribe = options.sessionEvents?.subscribe(() => {
+    const current = options.sessionEvents?.version();
+    if (current !== version) {
+      version = current;
+      campaignSnapshots.clear();
+      ruleSnapshots.clear();
+    }
+  });
+  function requireIdentity<T extends { id: string }>(value: T, expectedId?: string): T {
+    if (expectedId !== undefined && value.id !== expectedId) throw new Error("INVALID_RESPONSE_ID");
+    return value;
+  }
+  function mapCampaign(v: unknown, expectedId?: string) {
+    const r = requireIdentity(campaign(v), expectedId);
     campaignSnapshots.set(r.id, structuredClone(r.configuration));
     return r;
   }
-  function mapRule(v: unknown) {
-    const r = recommendation(v);
+  function mapRule(v: unknown, expectedId?: string) {
+    const r = requireIdentity(recommendation(v), expectedId);
     ruleSnapshots.set(r.id, structuredClone(r.configuration));
     return r;
   }
@@ -522,14 +529,14 @@ export function createHttpPromotionServices(
     list: (q, s) =>
       read(() =>
         request("/promociones/administracion?" + query(q, "modalidad"), s).then(
-          (r) => page(r, mapCampaign),
+          (r) => page(r, value => mapCampaign(value)),
         ),
       ).then((r) => r!),
     read: (id, s) =>
       read(
         () =>
           request("/promociones/" + encodeURIComponent(id), s).then(
-            mapCampaign,
+            value => mapCampaign(value, id),
           ),
         true,
       ),
@@ -548,6 +555,7 @@ export function createHttpPromotionServices(
               "PATCH",
               changes(body, campaignDto(previous)),
             ),
+            id,
           );
         }
         return mapCampaign(await request("/promociones", s, "POST", body));
@@ -564,7 +572,7 @@ export function createHttpPromotionServices(
             (status === "active" ? "/activar" : "/desactivar"),
           s,
           "POST",
-        ).then(mapCampaign), false,
+        ).then(value => mapCampaign(value, id)), false,
         { entity: "campaign", operation: "status", resourceId: id, expectedState: status },
         async saved => { const observed = mapCampaign(await request("/promociones/" + encodeURIComponent(id), s)); return observed.id === saved.resourceId && observed.status === saved.expectedState ? observed : null; },
       ),
@@ -579,14 +587,14 @@ export function createHttpPromotionServices(
     list: (q, s) =>
       read(() =>
         request("/recomendaciones/reglas?" + query(q, "tipo"), s).then((r) =>
-          page(r, mapRule),
+          page(r, value => mapRule(value)),
         ),
       ).then((r) => r!),
     read: (id, s) =>
       read(
         () =>
           request("/recomendaciones/reglas/" + encodeURIComponent(id), s).then(
-            mapRule,
+            value => mapRule(value, id),
           ),
         true,
       ),
@@ -605,6 +613,7 @@ export function createHttpPromotionServices(
               "PATCH",
               changes(body, recommendationDto(previous)),
             ),
+            id,
           );
         }
         return mapRule(
@@ -623,7 +632,7 @@ export function createHttpPromotionServices(
             (status === "active" ? "/activar" : "/desactivar"),
           s,
           "POST",
-        ).then(mapRule), false,
+        ).then(value => mapRule(value, id)), false,
         { entity: "recommendation", operation: "status", resourceId: id, expectedState: status },
         async saved => { const observed = mapRule(await request("/recomendaciones/reglas/" + encodeURIComponent(id), s)); return observed.id === saved.resourceId && observed.status === saved.expectedState ? observed : null; },
       ),
@@ -735,7 +744,7 @@ export function createHttpPromotionServices(
     };
     const confirmed = await write(
       isCreate ? `coupon:create:${expectedCode ?? "missing-code"}` : `coupon:resource:${resourceId ?? path}`,
-      async () => coupon(await request(path, signal, method, body)),
+      async () => requireIdentity(coupon(await request(path, signal, method, body)), resourceId),
       true,
       { entity: "coupon", operation: isCreate ? "create" : expectedStatus ? "status" : "update", ...(resourceId ? { resourceId } : {}), ...(expectedCode ? { naturalCode: expectedCode } : {}), payload: body, changedFields: Object.keys(sent), expectedState: { status: expectedStatus, code: expectedCode } },
       reconcile,
@@ -830,7 +839,7 @@ export function createHttpPromotionServices(
       }).then((r) => r!),
     read: (id, s) =>
       read(async () => {
-        const confirmed = coupon(await request("/cupones/" + encodeURIComponent(id), s));
+        const confirmed = requireIdentity(coupon(await request("/cupones/" + encodeURIComponent(id), s)), id);
         try { return await enrichCoupon(confirmed, s); }
         catch (error) {
           s.throwIfAborted();
@@ -878,6 +887,7 @@ export function createHttpPromotionServices(
   };
   const httpCatalog = createHttpPromotionCatalog(request);
   return {
+    dispose: () => { unsubscribe?.(); campaignSnapshots.clear(); ruleSnapshots.clear(); },
     campaigns,
     coupons,
     recommendations,

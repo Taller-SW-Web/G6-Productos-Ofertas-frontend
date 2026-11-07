@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { createMemoryStorage } from "../../../../tests/fixtures/h4Controlled";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PricingFailure, type PriceChange } from "../services/pricingModels";
 import type { PriceTarget } from "../services/pricingRepository";
 import {
@@ -7,6 +8,9 @@ import {
   type PricingHttpRequest,
 } from "./httpPricingRepository";
 import { requestMoney } from "./httpPricingMapper";
+
+beforeEach(() => { vi.stubGlobal("sessionStorage", createMemoryStorage()); });
+afterEach(() => { vi.unstubAllGlobals(); });
 
 const product: PriceTarget = {
   id: "product-target",
@@ -376,8 +380,10 @@ describe("createHttpPricingRepository", () => {
   });
 
   it("envía POST de programación con campos oficiales y sin versión", async () => {
-    const { repository, calls } = setup(async () =>
-      jsonResponse({
+    const { repository, calls } = setup(async (_path, init) =>
+      init.method === "GET"
+        ? jsonResponse({ items: [], meta: { pagina: 1, tamanio: 20, total: 0, totalPaginas: 0 } })
+        : jsonResponse({
         programacionId: "schedule-2",
         sku: variant.sku,
         tipoPrecio: "OFERTA",
@@ -403,9 +409,8 @@ describe("createHttpPricingRepository", () => {
       },
       new AbortController().signal,
     );
-    const body = JSON.parse(firstCall(calls).request.body ?? "{}");
-
-    expect(firstCall(calls).request.method).toBe("POST");
+    expect(calls.map(({ request }) => request.method)).toEqual(["GET", "POST"]);
+    const body = JSON.parse(calls[1]?.request.body ?? "{}");
     expect(body).toEqual({
       tipoPrecio: "OFERTA",
       importe: 10,

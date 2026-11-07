@@ -7,15 +7,16 @@ import "../../src/theme/global.css";
 import { theme, cssVariablesResolver } from "../../src/theme/theme";
 import { DataModeContext } from "../../src/app/config/DataModeContext";
 import { CatalogServicesContext } from "../../src/features/catalog/services/CatalogServicesContext";
-import { createOptionalCatalogHttpServices } from "../../src/features/catalog/services/catalogHttpRuntime";
+import { createCatalogFetchTransport } from "../../src/features/catalog/adapters/catalogHttp";
+import { createCatalogHttpServices } from "../../src/features/catalog/services/catalogHttpRuntime";
 import { PricingProvider } from "../../src/features/pricing/components/PricingProvider";
 import { createPricingRuntime } from "../../src/features/pricing/services/pricingService";
 
 const path = new URLSearchParams(location.search).get("path") ?? "/productos/nuevo";
 history.replaceState(null, "", path);
-const services = createOptionalCatalogHttpServices("https://gateway.test")!;
+const services = createCatalogHttpServices(createCatalogFetchTransport("https://gateway.test"));
 const pricing = await createPricingRuntime("api");
-const { App } = await import("../../src/app/App");
+const { FeatureTestApp: App } = await import("./FeatureTestApp");
 createRoot(document.getElementById("root")!).render(
   <MantineProvider theme={theme} cssVariablesResolver={cssVariablesResolver} forceColorScheme="light">
     <DataModeContext.Provider value="api"><CatalogServicesContext.Provider value={services}>

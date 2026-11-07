@@ -19,3 +19,28 @@
   overflow-x: hidden;
   overscroll-behavior-y: contain;
 }
+.headerContent {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  height: 100%;
+  padding-inline: 24px;
+  min-width: 0;
+}
+.productName, .brand, .logout { flex-shrink: 0; }
+.identity { margin-left: auto; justify-content: flex-end; flex: 1; min-width: 0; }
+.sessionName { min-width: 0; max-width: 480px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (width < 48em) {
+  .navbar[data-authenticated][data-menu-opened="false"] { visibility: hidden; }
+  .headerContent[data-authenticated] {
+    display: grid;
+    grid-template-columns: 32px 48px minmax(0, 1fr);
+    grid-template-rows: 32px 40px;
+    gap: 8px 16px;
+    padding: 16px;
+  }
+  .headerContent[data-authenticated] .brand { padding-right: 8px; }
+  .headerContent[data-authenticated] .brandLogo { width: 40px; height: 32px; }
+  .headerContent[data-authenticated] .identity { grid-column: 1 / -1; width: 100%; }
+}

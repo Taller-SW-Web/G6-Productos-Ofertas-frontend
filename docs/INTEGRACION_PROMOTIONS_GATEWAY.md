@@ -1,5 +1,15 @@
 # Promotions por Gateway — #77/#78
 
+> Actualización 06/11/2026 — Login general: `AuthSessionContext` concentra la
+> instancia G7; el contexto anterior es un alias. `RequireSession` protege todo
+> el árbol administrativo y `/login` reemplaza `PromotionSessionGate`. El logout
+> vive en el encabezado común. Sin G7 configurado no se habilitan módulos privados.
+> La sesión se crea independientemente de los servicios de Promotions/Gateway;
+> los providers ausentes siguen bloqueados. Desarrollo mock conserva fixtures;
+> producción exige sesión también en mock. Este párrafo sustituye las descripciones
+> históricas de login incrustado y acceso independiente sin sesión de §Composición.
+> Ver [login general](LOGIN_GENERAL.md) para pruebas y límites de la entrega actual.
+
 ## Paso 6 — recorrido de sesión unido al Gateway y PostgreSQL
 
 El runner Backend `apps/promotions-svc/test/flow.isolated.e2e.mjs` exige este

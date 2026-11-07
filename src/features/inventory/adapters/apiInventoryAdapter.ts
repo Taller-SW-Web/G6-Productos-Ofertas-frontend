@@ -114,11 +114,11 @@ const BLOCKED_DETAILS = {
   getStockDetail:
     "mismos campos sin fuente que getStockItems (consultarDisponibilidad)",
   getDashboardKpisFilter:
-    "obtenerDashboardInventario no admite filtrar por texto libre ni por estado de stock; quita ese filtro para consultar el agregado",
+    "obtenerDashboardInventario no admite filtrar por texto libre, estado de stock, categoría o marca; quita ese filtro para consultar el agregado",
   getDashboardAlerts:
     "no existe operación de alertas en el contrato de Inventario",
   getLocationDistribution:
-    "obtenerDashboardInventario no admite filtrar por texto libre ni por estado de stock",
+    "obtenerDashboardInventario no admite filtrar por texto libre, estado de stock, categoría o marca",
   getCategories:
     "operación de Catálogo (no de Inventario); destino de la integración de filtros pendiente de definición (paginación)",
   getBrands:
@@ -618,6 +618,7 @@ export function createHttpInventoryRepository(
     // como si correspondieran a la selección.
     const search = contractFilterValue(filters?.search);
     const status = contractFilterValue(filters?.status);
+    // OpenAPI enumera categoría y marca, pero el provider actual rechaza ambos.
     const category = contractFilterValue(filters?.category);
     const brand = contractFilterValue(filters?.brand);
     if (search || status || category || brand)
@@ -632,7 +633,7 @@ export function createHttpInventoryRepository(
       );
     },
 
-    updateGlobalThreshold(threshold: number): Promise<ThresholdConfig> {
+    async updateGlobalThreshold(threshold: number): Promise<ThresholdConfig> {
       if (!Number.isSafeInteger(threshold) || threshold < 0) throw new InventoryError("VALIDACION", "El umbral debe ser un entero no negativo.");
       return json(
         "/api/v1/inventario/umbrales/global",
@@ -655,7 +656,7 @@ export function createHttpInventoryRepository(
       });
     },
 
-    updateSkuThreshold(
+    async updateSkuThreshold(
       sku: string,
       threshold: number,
     ): Promise<ThresholdConfig> {

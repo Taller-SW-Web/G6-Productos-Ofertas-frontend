@@ -67,9 +67,9 @@ async function login(page: Page) {
   await page
     .getByRole("textbox", { name: "Correo electrónico", exact: true })
     .fill("isolated@example.test");
-  await page.getByLabel("Contraseña").fill("synthetic-password");
+  await page.getByRole("textbox", { name: "Contraseña", exact: true }).fill("synthetic-password");
   await page
-    .getByRole("button", { name: "Iniciar sesión", exact: true })
+    .getByRole("button", { name: "Ingresar al panel", exact: true })
     .click();
 }
 test("MK005: sesión G7 habilita HTTP; recarga y logout sin red exigen login, sin persistir tokens", async ({
@@ -82,6 +82,7 @@ test("MK005: sesión G7 habilita HTTP; recarga y logout sin red exigen login, si
   ).toBeVisible();
   expect(calls).toHaveLength(0);
   await login(page);
+  await expect(page.getByRole("heading", { name: "Iniciar sesión", exact: true })).toHaveCount(0);
   await expect(
     page.getByText("Sesión de Gestora de prueba", { exact: true }),
   ).toBeVisible();

@@ -10,11 +10,29 @@ function session(overrides: Partial<TaxonomySession> = {}): TaxonomySession {
   return {
     getAccessToken: vi.fn().mockResolvedValue("old-token"),
     refreshAccessToken: vi.fn().mockResolvedValue("new-token"),
+    invalidateAccessToken: vi.fn(),
     ...overrides,
   };
 }
 
 describe("transporte autenticado de Taxonomía", () => {
+  it.each([401, 403])("R4-03 preserva sesión ante segundo HTTP %i desconocido", async status => {
+    const auth = session();
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ code: "TOKEN_INVALIDO" }, { status: 401 }))
+      .mockResolvedValueOnce(new Response("ilegible", { status }));
+    await expect(createAuthenticatedTaxonomyGateway("https://gateway.example", auth, fetcher).request("/api/v1/tipos-producto", new AbortController().signal)).rejects.toMatchObject({ status });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(auth.invalidateAccessToken).not.toHaveBeenCalled();
+  });
+  it("R4-03 invalida explícitamente el token renovado rechazado por TOKEN_INVALIDO", async () => {
+    const invalidateAccessToken = vi.fn();
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => Response.json({ code: "TOKEN_INVALIDO" }, { status: 401 }));
+    const auth = { ...session(), invalidateAccessToken };
+    await expect(createAuthenticatedTaxonomyGateway("https://gateway.example", auth, fetcher).request("/api/v1/tipos-producto", new AbortController().signal)).rejects.toBeInstanceOf(TaxonomyGatewayError);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(invalidateAccessToken).toHaveBeenCalledExactlyOnceWith("new-token");
+  });
   it("falla cerrado cuando no existe sesión", async () => {
     const fetcher = vi.fn();
     const gateway = createAuthenticatedTaxonomyGateway(

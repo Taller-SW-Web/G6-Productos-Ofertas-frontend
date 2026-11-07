@@ -1,4 +1,5 @@
 import type { G7Session } from "../../promotions/adapters/g7Session";
+import { isGatewayTokenInvalid } from "../../shared/isGatewayTokenInvalid";
 import type { BulkRepository, DownloadResource } from "../services/bulkRepository";
 import { BulkRepositoryError } from "../services/bulkErrors";
 import type {
@@ -143,15 +144,19 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
     });
     let response: Response;
     try { response = await request(token); }
-    catch (error) { if (signal?.aborted || bounded.aborted) throw error; throw new BulkRepositoryError("No se pudo conectar con Gateway. Revisa la conexión e inténtalo de nuevo.", "communication"); }
-    if (response.status === 401 && method === "GET") {
-      const problem = await response.clone().json().catch(() => null) as { code?: unknown } | null;
-      if (problem?.code === "TOKEN_INVALIDO") {
+    catch (error) {
+      if (method === "POST") throw new BulkRepositoryError("No se confirmó el resultado de Carga masiva. Consulta el estado antes de repetir la operación.", "unknown");
+      if (bounded.aborted) throw error;
+      throw new BulkRepositoryError("No se pudo conectar con Gateway. Revisa la conexión e inténtalo de nuevo.", "communication");
+    }
+    if (await isGatewayTokenInvalid(response)) {
+      if (method === "POST") session.invalidateAccessToken(token);
+      else {
         const renewed = await session.refreshAccessToken(token, bounded).catch(() => null);
         if (renewed && !/[\r\n]/.test(renewed)) {
           response = await request(renewed).catch(() => { throw new BulkRepositoryError("No se pudo conectar con Gateway.", "communication"); });
-          if (response.status === 401) session.invalidateAccessToken(renewed);
-        }
+          if (await isGatewayTokenInvalid(response)) session.invalidateAccessToken(renewed);
+        } else session.invalidateAccessToken(token);
       }
     }
     if (expectedOwner && session.snapshot?.().user?.id !== expectedOwner) throw new BulkRepositoryError("La sesión cambió mientras se procesaba la admisión. Se conserva la intención original sin atribuir la respuesta a otra identidad.", "unknown");
@@ -165,7 +170,7 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
         409: "El lote cambió o tiene un conflicto; actualiza su estado antes de volver a intentarlo.",
         503: "El servicio de carga masiva no está disponible temporalmente.",
       };
-      throw new BulkRepositoryError(`HTTP ${response.status}. ${statusMessage[response.status] ?? "La solicitud falló."} Código: ${code}.`, response.status === 401 || response.status === 403 ? "configuration" : response.status >= 500 ? "communication" : "rejected", response.status, code);
+      throw new BulkRepositoryError(`HTTP ${response.status}. ${statusMessage[response.status] ?? "La solicitud falló."} Código: ${code}.`, response.status === 401 || response.status === 403 ? "configuration" : (response.status >= 500 || response.status === 408) && method === "POST" ? "unknown" : response.status >= 500 ? "communication" : "rejected", response.status, code);
     }
     return response;
   }

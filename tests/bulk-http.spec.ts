@@ -17,7 +17,7 @@ const validBulkV2Csv = [
 ].join("\n") + "\n";
 const iso = "2026-11-02T12:00:00.000Z";
 function json(response: ServerResponse, status: number, body: unknown) {
-  response.writeHead(status, { "content-type": "application/json", "access-control-allow-origin": "http://127.0.0.1:5173" });
+  response.writeHead(status, { "content-type": "application/json", "access-control-allow-origin": `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? 5173}` });
   response.end(JSON.stringify(body));
 }
 async function body(request: IncomingMessage): Promise<Buffer> {
@@ -54,14 +54,14 @@ async function withServer(work: (origin: string, requests: Array<{ method?: stri
   let admittedBatchId = batchId;
   const server = createServer(async (request, response) => {
     if (request.method === "OPTIONS") {
-      response.writeHead(204, { "access-control-allow-origin": "http://127.0.0.1:5173", "access-control-allow-methods": "GET, POST", "access-control-allow-headers": "authorization, content-type, x-correlation-id" });
+      response.writeHead(204, { "access-control-allow-origin": `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? 5173}`, "access-control-allow-methods": "GET, POST", "access-control-allow-headers": "authorization, content-type, x-correlation-id" });
       response.end(); return;
     }
     requests.push({ method: request.method, url: request.url, contentType: request.headers["content-type"], auth: request.headers.authorization, correlation: request.headers["x-correlation-id"] as string });
     const path = request.url ?? "";
     if (request.headers.authorization !== "Bearer test.header.signature") return json(response, 401, { status: 401, code: "TOKEN_INVALIDO" });
     if (request.method === "GET" && path.startsWith(`${root}/plantilla`)) {
-      response.writeHead(200, { "content-type": "text/csv", "content-disposition": 'attachment; filename="plantilla-h4.csv"', "access-control-allow-origin": "http://127.0.0.1:5173", "access-control-expose-headers": "content-disposition" }); response.end(validBulkV2Csv.split("\n")[0] + "\n"); return;
+      response.writeHead(200, { "content-type": "text/csv", "content-disposition": 'attachment; filename="plantilla-h4.csv"', "access-control-allow-origin": `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? 5173}`, "access-control-expose-headers": "content-disposition" }); response.end(validBulkV2Csv.split("\n")[0] + "\n"); return;
     }
     if (request.method === "POST" && path === `${root}/importaciones`) {
       const multipart = await body(request);
@@ -79,12 +79,14 @@ async function withServer(work: (origin: string, requests: Array<{ method?: stri
     if (request.method === "GET" && path === `${root}/importaciones/unavailable`) return json(response, 503, { status: 503, code: "SERVICIO_NO_DISPONIBLE" });
     if (request.method === "GET" && path === `${root}/importaciones/network`) { request.socket.destroy(); return; }
     if (request.method === "GET" && path === `${root}/importaciones/conflict-batch`) return json(response, 200, { ...batch(), batch_id: "conflict-batch" });
-    if (request.method === "GET" && path === `${root}/importaciones/${admittedBatchId}/reporte`) { response.writeHead(200, { "content-type": "text/csv", "content-disposition": 'attachment; filename="errores.csv"', "access-control-allow-origin": "http://127.0.0.1:5173", "access-control-expose-headers": "content-disposition" }); response.end(`row_id,code\n${rowId},PRECIO_INVALIDO\n`); return; }
+    if (request.method === "GET" && path === `${root}/importaciones/${admittedBatchId}/reporte`) { response.writeHead(200, { "content-type": "text/csv", "content-disposition": 'attachment; filename="errores.csv"', "access-control-allow-origin": `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? 5173}`, "access-control-expose-headers": "content-disposition" }); response.end(`row_id,code\n${rowId},PRECIO_INVALIDO\n`); return; }
+    if (request.method === "POST" && path === `${root}/importaciones/conflict-batch/reanudar`) return json(response, 409, { status: 409, code: "VERSION_CONFLICT" });
+    if (request.method === "POST" && path === `${root}/importaciones/${batchId}/reanudar`) return json(response, 202, { batch_id: batchId, status: "QUEUED", template_version: 2, correlation_id: request.headers["x-correlation-id"] });
     if (request.method === "POST" && path === `${root}/exportaciones`) return json(response, 202, { export_id: exportId, status: "QUEUED", formato: "CSV", created_at: iso });
     if (request.method === "GET" && path === `${root}/exportaciones/${exportId}`) return json(response, 200, { export_id: exportId, status: scenario === "actual-backend" ? "FAILED_GENERAL" : "COMPLETED", formato: "CSV", created_at: iso, completed_at: iso, download_url: null });
     if (request.method === "GET" && path === `${root}/exportaciones/${exportId}/archivo`) {
       if (scenario === "actual-backend") return json(response, 503, { status: 503, code: "SERVICIO_NO_DISPONIBLE" });
-      response.writeHead(200, { "content-type": "text/csv", "content-disposition": 'attachment; filename="export.csv"', "access-control-allow-origin": "http://127.0.0.1:5173", "access-control-expose-headers": "content-disposition" }); response.end("sku\nSKU-HTTP-9\n"); return;
+      response.writeHead(200, { "content-type": "text/csv", "content-disposition": 'attachment; filename="export.csv"', "access-control-allow-origin": `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? 5173}`, "access-control-expose-headers": "content-disposition" }); response.end("sku\nSKU-HTTP-9\n"); return;
     }
     return json(response, 404, { status: 404, code: "LOTE_NO_ENCONTRADO" });
   });
@@ -121,7 +123,6 @@ test("Bulk API contra servidor HTTP aislado simula rutas, upload válido, errore
     expect((await template).suggestedFilename()).toBe("plantilla-h4.csv");
     await page.getByRole("button", { name: "Solicitar exportación" }).click();
     await expect(page.getByText(`Trabajo de exportación: ${exportId}`)).toBeVisible();
-    await page.getByRole("button", { name: "Actualizar estado" }).click();
     await expect(page.getByText("Fallo de exportación")).toBeVisible();
     expect(requests.some((request) => request.url === `${root}/exportaciones/${exportId}/archivo`)).toBe(false);
 
@@ -153,7 +154,6 @@ test("Bulk HTTP aislado conserva descarga COMPLETED como escenario de contrato f
   await withServer(async (gateway, requests) => {
     await page.goto(`/tests/harness/bulk-http.html?gateway=${encodeURIComponent(gateway)}#/carga-masiva/descargas`);
     await page.getByRole("button", { name: "Solicitar exportación" }).click();
-    await page.getByRole("button", { name: "Actualizar estado" }).click();
     await expect(page.getByRole("button", { name: "Descargar archivo CSV consolidado" })).toBeEnabled();
     const exported = page.waitForEvent("download");
     await page.getByRole("button", { name: "Descargar archivo CSV consolidado" }).click();

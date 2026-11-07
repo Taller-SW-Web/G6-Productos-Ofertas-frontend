@@ -27,7 +27,10 @@ describe("Promotions reconciliation H4", () => {
     const servicesApi = services(async (input, init) => {
       const url = new URL(String(input));
       if (init?.method === "POST" && url.pathname.endsWith("/cupones")) throw new TypeError("timeout posterior al despacho");
-      if (url.pathname.endsWith("/cupones") && url.searchParams.get("pagina") === "1") return couponPage(null, 1);
+      if (url.pathname.endsWith("/cupones") && url.searchParams.get("pagina") === "1") {
+        const items = Array.from({ length: 100 }, (_, i) => couponDto({ cuponId: "other-" + i, codigo: "OTRO-" + i }));
+        return jsonResponse(200, { items, meta: { pagina: 1, tamanio: 100, total: 101, totalPaginas: 2 } });
+      }
       if (url.pathname.endsWith("/cupones") && url.searchParams.get("pagina") === "2") return couponPage(couponDto(), 2);
       throw new Error(`Solicitud inesperada ${init?.method} ${url.pathname}`);
     });

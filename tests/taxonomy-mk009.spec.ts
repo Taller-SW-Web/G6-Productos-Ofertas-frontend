@@ -95,39 +95,39 @@ test.describe("MK-009 mock funcional", () => {
     test.setTimeout(60_000);
     await page.goto("/caracteristicas");
     await expect(page.getByText("Talla", { exact: true })).toBeVisible();
-    await page.screenshot({ path: "docs/evidencias/mk-009-s01-1440.png" });
+    await page.screenshot({ path: test.info().outputPath("mk-009-s01-1440.png") });
 
     await page.goto("/caracteristicas/nueva");
     await expect(page.getByRole("heading", { name: "Crear característica" })).toBeVisible();
-    await page.screenshot({ path: "docs/evidencias/mk-009-s02-1440.png" });
+    await page.screenshot({ path: test.info().outputPath("mk-009-s02-1440.png") });
 
     await page.goto("/caracteristicas/talla/editar");
     await expect(page.getByRole("textbox", { name: "Tipo" })).toHaveValue("Lista");
-    await page.screenshot({ path: "docs/evidencias/mk-009-s03-1440.png" });
+    await page.screenshot({ path: test.info().outputPath("mk-009-s03-1440.png") });
 
     await page.goto("/caracteristicas/color/valores");
     await expect(page.getByText("Negro", { exact: true })).toBeVisible();
-    await page.screenshot({ path: "docs/evidencias/mk-009-s04-1440.png" });
+    await page.screenshot({ path: test.info().outputPath("mk-009-s04-1440.png") });
     await setCharacteristicScenario(page, { baja: "pendiente-prolongado" });
     await page.getByRole("button", { name: "Solicitar baja de Negro" }).click();
     await expect(page.getByRole("button", { name: "Consultar estado" })).toBeVisible();
-    await page.screenshot({ path: "docs/evidencias/mk-009-s04-p-1440.png" });
+    await page.screenshot({ path: test.info().outputPath("mk-009-s04-p-1440.png") });
 
     await page.goto("/caracteristicas/color/valores");
     await setCharacteristicScenario(page, { baja: "rechazada-asincrona" });
     await page.getByRole("button", { name: "Solicitar baja de Negro" }).click();
     await page.getByRole("button", { name: "Consultar estado" }).click();
     await expect(page.getByRole("alert", { name: "No se pudo dar de baja el valor" })).toBeVisible();
-    await page.screenshot({ path: "docs/evidencias/mk-009-s04-r-1440.png" });
+    await page.screenshot({ path: test.info().outputPath("mk-009-s04-r-1440.png") });
 
     await page.goto("/caracteristicas/material/estado");
     await expect(page.getByRole("heading", { name: "Estado de: Material" })).toBeVisible();
-    await page.screenshot({ path: "docs/evidencias/mk-009-s05-1440.png" });
+    await page.screenshot({ path: test.info().outputPath("mk-009-s05-1440.png") });
 
     await page.goto("/caracteristicas/color");
     await expect(page.getByRole("heading", { name: "Color", level: 1 })).toBeVisible();
     await expect(page.getByText("negro", { exact: true })).toBeVisible();
-    await page.screenshot({ path: "docs/evidencias/mk-009-s06-1440.png" });
+    await page.screenshot({ path: test.info().outputPath("mk-009-s06-1440.png") });
   });
 
   test("S01 expone su estado de carga mientras consulta el adapter mock", async ({

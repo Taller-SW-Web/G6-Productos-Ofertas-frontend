@@ -13,6 +13,7 @@ import {
   resetConfirmedTransferReceptionsAwaitingRefresh,
   resetUncertainTransferReceptions,
   setInFlightTransferReception,
+  setTransferReceptionScope,
   setUncertainTransferReception,
 } from "../services/transferReceptionAttempt";
 import type {
@@ -29,13 +30,15 @@ import {
   type TransferPresentationResolver,
   type TrasladoInventarioDto,
 } from "../services/inventoryMappers";
-import { deferred } from "../../../../tests/fixtures/h4Controlled";
+import { createMemoryStorage, deferred } from "../../../../tests/fixtures/h4Controlled";
 import { resetInventoryRepository } from "../services/inventoryProvider";
 
 let currentOwner = "g7-inventory-owner-a";
 
 beforeEach(() => {
   currentOwner = "g7-inventory-owner-a";
+  vi.stubGlobal("sessionStorage", createMemoryStorage());
+  setTransferReceptionScope(currentOwner);
   resetUncertainTransferReceptions();
   resetConfirmedTransferReceptionsAwaitingRefresh();
 });
@@ -1589,7 +1592,7 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
       expect(calls).toHaveLength(1);
 
       // 2. En storage no quedó un estado vacío: conserva el snapshot IN_FLIGHT previo
-      const rawInStorage = storage.getItem("inventory.transferReceptionAttempts.v1");
+      const rawInStorage = storage.getItem("inventory.transferReceptionAttempts.v1:g7-inventory-owner-a");
       expect(rawInStorage).not.toBeNull();
       expect(rawInStorage).toContain(RECEPCION_PAYLOAD.operationId);
 
@@ -2006,10 +2009,10 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
       globalThis.sessionStorage = storage;
       resetUncertainTransferReceptions();
       setUncertainTransferReception(RECEPCION_PAYLOAD);
-      const raw = storage.getItem("inventory.transferReceptionAttempts.v1");
+      const raw = storage.getItem("inventory.transferReceptionAttempts.v1:g7-inventory-owner-a");
       expect(raw).toContain(RECEPCION_PAYLOAD.operationId);
       resetUncertainTransferReceptions();
-      expect(storage.getItem("inventory.transferReceptionAttempts.v1")).toBeNull();
+      expect(storage.getItem("inventory.transferReceptionAttempts.v1:g7-inventory-owner-a")).toBeNull();
       delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
     });
 
@@ -2028,7 +2031,7 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
 
       // Guardar un estado inicial válido (lastGoodPersistedState)
       setUncertainTransferReception(RECEPCION_PAYLOAD);
-      const initialPersisted = storage.getItem("inventory.transferReceptionAttempts.v1");
+      const initialPersisted = storage.getItem("inventory.transferReceptionAttempts.v1:g7-inventory-owner-a");
       expect(initialPersisted).not.toBeNull();
 
       const { repository, calls } = setup(async () => jsonResponse(RECEPCION_OK));
@@ -2105,14 +2108,14 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
         inFlight: [],
         confirmedAwaiting: [],
       };
-      storage.setItem("inventory.transferReceptionAttempts.v1", JSON.stringify(corruptState));
+      storage.setItem("inventory.transferReceptionAttempts.v1:g7-inventory-owner-a", JSON.stringify(corruptState));
 
       // Primera recarga: detecta corrupción y bloquea el traslado
       rehydrateTransferReceptionsForTesting();
       expect(isTransferReceptionStorageBlocked("t-corrupt")).toBe(true);
 
       // Verifica que NO se eliminó silenciosamente el registro corrupto de storage
-      const rawAfterFirst = storage.getItem("inventory.transferReceptionAttempts.v1");
+      const rawAfterFirst = storage.getItem("inventory.transferReceptionAttempts.v1:g7-inventory-owner-a");
       expect(rawAfterFirst).toContain("t-corrupt");
 
       // Segunda recarga: el bloqueo se mantiene gracias a que no se limpió silenciosamente
@@ -2385,21 +2388,20 @@ describe("apiInventoryAdapter — dashboard KPIs (obtenerDashboardInventario)", 
     expect(kpis.transfersWithDiscrepancy).toBeNull();
   });
 
-  it("admite filtros contractuales del agregado (category, brand, locationId)", async () => {
+  it("admite ubicación y bloquea los filtros de Catálogo que el provider rechaza", async () => {
     const { repository, calls } = setup(async () => jsonResponse(DASHBOARD_DTO));
-    await repository.getDashboardKpis({ category: "cat-1", brand: "brand-1", locationId: "loc-1" });
-    expect(calls[0]?.path).toContain("categoriaId=cat-1");
-    expect(calls[0]?.path).toContain("marcaId=brand-1");
-    expect(calls[0]?.path).toContain("locationId=loc-1");
+    for (const filters of [{ category: "cat-1" }, { brand: "brand-1" }]) {
+      await expect(repository.getDashboardKpis(filters)).rejects.toMatchObject({ code: "CONTRATO_BLOQUEADO" });
+    }
+    expect(calls).toHaveLength(0);
+    await repository.getDashboardKpis({ locationId: "loc-1" });
+    expect(calls[0]?.path).toBe("/api/v1/inventario/dashboard?locationId=loc-1");
   });
 
   it("separación de filtros del dashboard: una búsqueda por SKU en tabla no bloquea consulta agregada", async () => {
     const { repository } = setup(async () => jsonResponse(DASHBOARD_DTO));
     const filters = { search: "SKU-99", category: "cat-1", status: "AGOTADO", locationId: "loc-1" };
-    const aggregateFilters = {
-      category: filters.category,
-      locationId: filters.locationId,
-    };
+    const aggregateFilters = { locationId: filters.locationId };
     const kpis = await repository.getDashboardKpis(aggregateFilters);
     expect(kpis.availableUnits).toBe(125);
     const dist = await repository.getLocationDistribution(aggregateFilters);
@@ -2430,12 +2432,13 @@ describe("apiInventoryAdapter — operaciones sin fuente contractual", () => {
       repository.getDashboardAlerts(),
       repository.getCategories(),
       repository.getBrands(),
-      repository.getLocations(),
     ]) {
       const error = await rejection(promise);
       expect(error.code).toBe("CONTRATO_BLOQUEADO");
     }
     expect(request).not.toHaveBeenCalled();
+    await expect(repository.getLocations()).rejects.toMatchObject({ code: "RESPUESTA_INCOMPATIBLE" });
+    expect(request.mock.calls[0]?.[0]).toBe("/api/v1/inventario/dashboard");
   });
 });
 

@@ -1035,35 +1035,35 @@ test.describe("MK-010 Tipos de producto y esquemas de caracteristicas", () => {
     // S01: Listado
     await page.goto("/tipos-producto");
     await expect(page.getByRole("heading", { level: 1, name: "Tipos de producto" })).toBeVisible();
-    await page.screenshot({ path: "docs/evidencias/mk-010-s01-1440.png" });
+    await page.screenshot({ path: test.info().outputPath("mk-010-s01-1440.png") });
 
     // S01-N: Nuevo tipo de producto
     await page.goto("/tipos-producto/nuevo");
     await expect(page.getByRole("heading", { level: 1, name: "Nuevo tipo de producto" })).toBeVisible();
-    await page.screenshot({ path: "docs/evidencias/mk-010-s01-n-1440.png" });
+    await page.screenshot({ path: test.info().outputPath("mk-010-s01-n-1440.png") });
 
     // S02: Detalle y esquema
     await page.goto("/tipos-producto/calzado");
     await expect(page.getByRole("heading", { level: 1, name: "Calzado deportivo" })).toBeVisible();
-    await page.screenshot({ path: "docs/evidencias/mk-010-s02-1440.png" });
+    await page.screenshot({ path: test.info().outputPath("mk-010-s02-1440.png") });
 
     // S03: Asociar caracteristica
     await page.goto("/tipos-producto/accesorios/asociar");
     await expect(page.getByRole("heading", { level: 1, name: /Asociar caracter/i })).toBeVisible();
-    await page.screenshot({ path: "docs/evidencias/mk-010-s03-1440.png" });
+    await page.screenshot({ path: test.info().outputPath("mk-010-s03-1440.png") });
 
     // S04: Desasociar caracteristica confirmacion
     await page.goto("/tipos-producto/calzado");
     const tallaRow = page.locator("tbody tr", { hasText: "Talla" }).first();
     await tallaRow.getByRole("button", { name: "Desasociar" }).click();
     await expect(page.getByRole("dialog", { name: /Desasociar caracter/i })).toBeVisible();
-    await page.screenshot({ path: "docs/evidencias/mk-010-s04-1440.png" });
+    await page.screenshot({ path: test.info().outputPath("mk-010-s04-1440.png") });
 
     // S02-P: Operacion en verificacion (202 admitida)
     await setProductTypeScenario(page, { verificacion: "clear" });
     await page.getByRole("button", { name: "Continuar" }).click();
     await expect(page.getByRole("status").filter({ hasText: /Desasociaci.n admitida/i })).toBeVisible();
-    await page.screenshot({ path: "docs/evidencias/mk-010-s02-p-1440.png" });
+    await page.screenshot({ path: test.info().outputPath("mk-010-s02-p-1440.png") });
 
     // Confirmar la operacion
     await page.getByRole("button", { name: "Consultar estado" }).click();
@@ -1073,7 +1073,7 @@ test.describe("MK-010 Tipos de producto y esquemas de caracteristicas", () => {
     await page.goto("/tipos-producto/ropa");
     await page.getByRole("button", { name: "Desactivar tipo" }).click();
     await expect(page.getByRole("dialog", { name: /Desactivar tipo de producto/i })).toBeVisible();
-    await page.screenshot({ path: "docs/evidencias/mk-010-s05-1440.png" });
+    await page.screenshot({ path: test.info().outputPath("mk-010-s05-1440.png") });
 
     // S02-R: Rechazo de desactivacion por uso activo (ej. calzado)
     await page.goto("/tipos-producto/calzado");
@@ -1087,6 +1087,6 @@ test.describe("MK-010 Tipos de producto y esquemas de caracteristicas", () => {
     await expect(
       page.getByRole("alert").filter({ hasText: /Desactivaci.n rechazada/i }),
     ).toContainText(/productos o variantes activos/i);
-    await page.screenshot({ path: "docs/evidencias/mk-010-s02-r-1440.png" });
+    await page.screenshot({ path: test.info().outputPath("mk-010-s02-r-1440.png") });
   });
 });

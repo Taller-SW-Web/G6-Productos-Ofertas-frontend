@@ -14,7 +14,7 @@ function transport(requestWithInit: NonNullable<TaxonomyGatewayTransport["reques
   return { scopeId: () => owner, requestWithInit, request: (path, signal) => requestWithInit(path, { method: "GET", signal }) };
 }
 const signal = () => new AbortController().signal;
-const characteristic = (nombre: string, version: number) => ({ caracteristicaId: "attr-h4", nombre, tipo: "TEXTO", estado: "ACTIVO", version });
+const characteristic = (nombre: string, version: number) => ({ caracteristicaId: "attr-h4", nombre, tipo: "TEXTO", estado: "ACTIVO", unidadMedida: null, version });
 
 describe("Taxonomy reconciliation H4", () => {
   it("TAX-H4-01: conserva entity, recurso, payload y versión ante GET anterior y libera solo con GET actualizado", async () => {
@@ -95,8 +95,10 @@ describe("Taxonomy reconciliation H4", () => {
   it("TAX-H4-06: respuesta favorable de A recibida bajo B no libera el marcador de A", async () => {
     const path = "/api/v1/caracteristicas/attr-h4";
     const getWaiting = deferred<Response>();
+    const getStarted = deferred<void>();
     const io = vi.fn(async (_path: string, init: { method: "GET" | "POST" | "PATCH" }) => {
       if (init.method === "PATCH") throw new Error("timeout posterior al despacho");
+      getStarted.resolve();
       return getWaiting.promise;
     });
     const api = transport(io);
@@ -107,6 +109,7 @@ describe("Taxonomy reconciliation H4", () => {
     const repository = createHttpCharacteristicRepository(transport(io));
     const reconciliation = repository.obtener("attr-h4", signal());
     expect(io.mock.calls.filter(([, init]) => init.method === "PATCH")).toHaveLength(1);
+    await getStarted.promise;
     owner = fakeOwnerB;
     getWaiting.resolve(jsonResponse(200, characteristic("Color principal", 5)));
     await expect(reconciliation).rejects.toThrow("La sesión cambió durante la lectura de Taxonomía.");

@@ -7,10 +7,12 @@ export interface SessionUser {
   roles: readonly string[];
 }
 export interface SessionView {
+  expiresAt: number | null;
   user: SessionUser | null;
   mfa: boolean;
   busy: boolean;
   notice: string;
+  noticeSemantic?: "error" | "info" | "success";
 }
 interface Tokens {
   accessToken: string;
@@ -27,6 +29,7 @@ const messages = {
   PASSWORD_CADUCADA:
     "Debes actualizar tu contraseña en Seguridad antes de continuar.",
   CODIGO_INVALIDO: "El código no es correcto. Revísalo e intenta de nuevo.",
+  OTP_EXPIRADO: "El código venció. Solicita un código nuevo para continuar.",
   OTP_INTENTOS_AGOTADOS: "Solicita un código nuevo para continuar.",
   DEMASIADAS_SOLICITUDES:
     "Se alcanzó el límite de intentos. Intenta más tarde.",
@@ -113,14 +116,19 @@ export class G7Session {
   #refresh: Promise<string | null> | null = null;
   #generation = 0;
   #listeners = new Set<() => void>();
-  #view: SessionView = { user: null, mfa: false, busy: false, notice: "" };
+  #view: SessionView = { user: null, mfa: false, busy: false, notice: "", expiresAt: null };
   constructor(
     base: string,
     private readonly clock: () => number = Date.now,
+    initialNotice?: "expired" | "logout",
   ) {
     this.#base = secureBase(base);
+    if (initialNotice) this.#view = { ...this.#view,
+      notice: initialNotice === "expired" ? messages.REFRESCO_INVALIDO : "Cerraste sesión.",
+      noticeSemantic: initialNotice === "expired" ? "error" : "info" };
   }
   snapshot = (): SessionView => this.#view;
+  getSessionVersion = () => this.#generation;
   subscribe = (notify: () => void) => {
     this.#listeners.add(notify);
     return () => {
@@ -131,12 +139,12 @@ export class G7Session {
     this.#view = { ...this.#view, ...change };
     this.#listeners.forEach((notify) => notify());
   }
-  #clear(notice: string) {
+  #clear(notice: string, noticeSemantic: "error" | "info" = "error") {
     this.#generation++;
     this.#tokens = null;
     this.#challenge = null;
     this.#refresh = null;
-    this.#publish({ user: null, mfa: false, busy: false, notice });
+    this.#publish({ user: null, mfa: false, busy: false, notice, noticeSemantic, expiresAt: null });
   }
   async #post(path: string, body: unknown, expected = 200): Promise<unknown> {
     const response = await fetch(this.#base + path, {
@@ -145,6 +153,7 @@ export class G7Session {
       credentials: "omit",
       redirect: "error",
       cache: "no-store",
+      keepalive: expected === 204,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
@@ -185,7 +194,7 @@ export class G7Session {
       expiresAt: this.clock() + positive(dto.expiresIn) * 1000,
     };
     this.#challenge = null;
-    this.#publish({ user, mfa: false, notice: "" });
+    this.#publish({ user, mfa: false, notice: "", expiresAt: this.#tokens.expiresAt });
   }
   async #action(work: () => Promise<void>) {
     if (this.#view.busy) return;
@@ -199,6 +208,7 @@ export class G7Session {
           this.#clear(messages.TOKEN_INVALIDO);
         else
           this.#publish({
+            noticeSemantic: "error",
             notice:
               (error instanceof SessionFailure &&
                 messages[error.code as keyof typeof messages]) ||
@@ -247,6 +257,7 @@ export class G7Session {
       if (dto.expiraEn !== undefined) positive(dto.expiraEn);
       if (dto.desafioExpiraEn !== undefined) positive(dto.desafioExpiraEn);
       this.#publish({
+        noticeSemantic: "success",
         notice: "Enviamos el código a tu correo. Revisa tu bandeja de entrada.",
       });
     });
@@ -272,6 +283,8 @@ export class G7Session {
         const dto = await this.#post("/auth/refresh", { refreshToken: token });
         if (generation !== this.#generation) return null;
         const rotated = object(dto);
+        if (object(rotated.usuario).id !== this.#view.user?.id)
+          throw new SessionFailure("INVALID_RESPONSE");
         if (rotated.refreshToken === token)
           throw new SessionFailure("INVALID_RESPONSE");
         this.#accept(rotated);
@@ -309,13 +322,14 @@ export class G7Session {
   };
   async logout() {
     const token = this.#tokens?.refreshToken;
-    this.#clear("Cerraste sesión.");
-    if (token) {
-      try {
-        await this.#post("/auth/logout", { refreshToken: token }, 204);
-      } catch {
-        /* Local logout is unconditional. */
-      }
-    }
+    // Start keepalive before subscribers reload the realm. Never wait for G7
+    // to discard local access; failed/unknown revocation stays a gate failure.
+    const revocation = token
+      ? this.#post("/auth/logout", { refreshToken: token }, 204).catch(() => {})
+      : undefined;
+    this.#clear(this.#challenge && !this.#tokens
+      ? "Cancelaste la verificación. Puedes iniciar sesión de nuevo."
+      : "Cerraste sesión.", "info");
+    await revocation;
   }
 }

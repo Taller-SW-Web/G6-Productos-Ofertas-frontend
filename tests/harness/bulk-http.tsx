@@ -25,7 +25,7 @@ let currentUser: SessionUser = {
   correo: "h4-owner-a@example.invalid",
   roles: ["GESTOR_COMERCIAL", "ADMINISTRADOR"],
 };
-let sessionView: SessionView = { user: currentUser, mfa: false, busy: false, notice: "" };
+let sessionView: SessionView = { user: currentUser, mfa: false, busy: false, notice: "", expiresAt: null };
 const listeners = new Set<() => void>();
 declare global { interface Window { h4SessionIdentity(): string | null } }
 window.h4SessionIdentity = () => currentUser.id;

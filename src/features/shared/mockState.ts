@@ -13,6 +13,8 @@
 //   non-browser (unit tests, Node) executions stay isolated in memory.
 // - Storage failures are reported but never erase confirmed session state.
 
+import { identityStorageKey } from "./mockIdentity";
+
 export type MockDomain =
   | "catalog"
   | "taxonomy"
@@ -78,12 +80,15 @@ export function isMockPersistenceAvailable(): boolean {
 }
 
 export function mockStateKey(domain: MockDomain): string {
-  return `${MOCK_STATE_PREFIX}${domain}`;
+  return `${identityStorageKey(MOCK_STATE_PREFIX)}${domain}`;
 }
 
 function parseDomainFromKey(key: string): MockDomain | null {
-  if (!key.startsWith(MOCK_STATE_PREFIX)) return null;
-  return key.slice(MOCK_STATE_PREFIX.length) as MockDomain;
+  const prefix = identityStorageKey(MOCK_STATE_PREFIX);
+  if (!key.startsWith(prefix)) return null;
+  const domain = key.slice(prefix.length);
+  if (domain.includes(":")) return null;
+  return domain as MockDomain;
 }
 
 /**

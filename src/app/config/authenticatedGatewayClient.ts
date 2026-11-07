@@ -1,3 +1,4 @@
+import { isGatewayTokenInvalid } from "../../features/shared/isGatewayTokenInvalid";
 import { secureBase, type G7Session } from "../../features/promotions/adapters/g7Session";
 
 export type GatewayMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
@@ -13,24 +14,13 @@ export interface AuthenticatedGatewayClient {
   request(path: string, request: GatewayRequest): Promise<Response>;
 }
 
-function isRecoverableUnauthorized(response: Response): Promise<boolean> {
-  return response.clone().json().then(
-    (body: unknown) =>
-      body !== null &&
-      typeof body === "object" &&
-      !Array.isArray(body) &&
-      (body as Record<string, unknown>).code === "TOKEN_INVALIDO",
-    () => false,
-  );
-}
-
 /** Browser client for one configured Gateway origin and the human G7 session. */
 export function createAuthenticatedGatewayClient(
   gatewayOrigin: string,
   session: Pick<
     G7Session,
     "getAccessToken" | "refreshAccessToken" | "invalidateAccessToken"
-  >,
+  > & Partial<Pick<G7Session, "getSessionVersion">>,
   fetcher: typeof fetch = fetch,
 ): AuthenticatedGatewayClient {
   const origin = secureBase(gatewayOrigin, true);
@@ -81,6 +71,11 @@ export function createAuthenticatedGatewayClient(
 
   return {
     async request(path, request) {
+      const version = session.getSessionVersion?.();
+      const assertSession = () => {
+        if (session.getSessionVersion?.() !== version)
+          throw new Error("La sesión cambió durante la operación.");
+      };
       const timeout = AbortSignal.timeout(15_000);
       const signal = request.signal
         ? AbortSignal.any([request.signal, timeout])
@@ -88,23 +83,28 @@ export function createAuthenticatedGatewayClient(
       signal.throwIfAborted();
       const token = await session.getAccessToken(signal);
       signal.throwIfAborted();
+      assertSession();
       if (!token) throw new Error("Inicia sesión para continuar.");
       const correlationId =
         request.headers?.["X-Correlation-Id"] ?? crypto.randomUUID();
       const response = await send(path, request, token, signal, correlationId);
-      if (response.status !== 401) return response;
-
-      if (request.method === "GET" && (await isRecoverableUnauthorized(response))) {
+      assertSession();
+      if (!(await isGatewayTokenInvalid(response))) return response;
+      assertSession();
+      if (request.method === "GET") {
         const refreshed = await session.refreshAccessToken(token, signal);
         signal.throwIfAborted();
-        if (!refreshed) return response;
+        if (!refreshed) {
+          session.invalidateAccessToken(token);
+          return response;
+        }
+        assertSession();
         const retried = await send(path, request, refreshed, signal, correlationId);
-        if (retried.status === 401) session.invalidateAccessToken(refreshed);
+        assertSession();
+        if (await isGatewayTokenInvalid(retried)) session.invalidateAccessToken(refreshed);
         return retried;
       }
-
-      // Mutations are never replayed automatically. A 401 also ends the local
-      // session so the user cannot continue with stale credentials.
+      // A contractual rejection ends the session without replaying the write.
       session.invalidateAccessToken(token);
       return response;
     },

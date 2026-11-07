@@ -1,9 +1,9 @@
-name: Auditar sincronizacion de desarrolladores
+name: Auditar sincronización de desarrolladores
 
 on:
   workflow_dispatch:
     inputs:
-      target_branch:
+      rama_objetivo:
         description: "Rama que se desea auditar"
         required: true
         type: choice
@@ -19,35 +19,35 @@ permissions:
   contents: read
 
 concurrency:
-  group: audit-sync-${{ inputs.target_branch }}
+  group: auditoria-sincronizacion-${{ inputs.rama_objetivo }}
   cancel-in-progress: false
 
 jobs:
-  audit:
-    name: Auditar integracion con master
+  auditar_integracion:
+    name: Auditar integración con master
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
     env:
       VITE_DATA_MODE: mock
       CI: "true"
-      TARGET_BRANCH: ${{ inputs.target_branch }}
+      TARGET_BRANCH: ${{ inputs.rama_objetivo }}
 
     steps:
-      - name: Obtener repositorio
+      - name: Obtener código
         uses: actions/checkout@v4
         with:
           ref: master
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Configurar Node 22
+      - name: Preparar Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
 
-      - name: Preparar integracion temporal
+      - name: Preparar integración temporal
         shell: bash
         run: |
           set -euo pipefail
@@ -70,24 +70,24 @@ jobs:
           fi
 
           echo "Integración temporal preparada."
-          echo "No se hará commit ni push."
+          echo "No se realizará commit ni push remoto."
 
       - name: Instalar dependencias
         run: npm ci --no-audit --no-fund
 
-      - name: Typecheck
+      - name: Comprobar tipos de TypeScript
         run: npm run typecheck
 
-      - name: Lint
+      - name: Revisar estilo del código
         run: npm run lint
 
-      - name: Build mock
+      - name: Compilar interfaz de demostración
         run: npm run build
 
-      - name: Instalar Chromium
+      - name: Instalar Chromium para Playwright
         run: npx playwright install --with-deps chromium
 
-      - name: Pruebas completas
+      - name: Ejecutar pruebas completas
         run: npm run test:ci
 
       - name: Resumen

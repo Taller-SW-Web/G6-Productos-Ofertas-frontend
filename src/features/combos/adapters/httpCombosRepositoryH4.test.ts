@@ -88,10 +88,11 @@ describe("Combos HTTP reconciliation H4", () => {
   });
 
   it("COM-H4-05: un repositorio nuevo con la misma identidad rehidrata el bloqueo", async () => {
-    const first = setup(async (_path, init) => init.method === "POST" ? Promise.reject(new Error("timeout")) : jsonResponse(200, available("combo-h4")));
+    const first = setup(async (_path, init) => init.method === "PATCH" ? Promise.reject(new Error("timeout")) : jsonResponse(200, available("combo-h4")));
     await expect(first.repository.update("combo-h4", payload)).rejects.toThrow();
     const second = setup(vi.fn(async () => jsonResponse(200, comboDto("combo-h4"))));
-    await expect(second.repository.update("combo-h4", payload)).rejects.toThrow(/reconciliación/);
+    await expect(second.repository.update("combo-h4", payload)).rejects.toThrow(/conciliación/);
+    expect(first.request).toHaveBeenCalledTimes(1);
     expect(second.request).not.toHaveBeenCalled();
     expect(Object.keys(storage).some(key => key.startsWith("g6:combos:uncertain:v2:"))).toBe(true);
   });

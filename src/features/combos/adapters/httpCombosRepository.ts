@@ -147,18 +147,15 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
     // Persist the intent before dispatch. If storage is unavailable, fail closed
     // rather than risk an un-reconcilable duplicate after a reload.
     {
+      let old: string | null;
       try {
         if (typeof sessionStorage === "undefined") throw new Error("sessionStorage unavailable");
-        const old = sessionStorage.getItem(markerKey);
-        if (old !== null) {
-          const parsed = JSON.parse(old) as { user?: string; intent?: string };
-          if (parsed.user !== userId || parsed.intent !== key) throw new Error("Marcador de intención incompatible.");
-          throw new Error("Esta intención ya está persistida y requiere conciliación.");
-        }
-        sessionStorage.setItem(markerKey, JSON.stringify({ user: userId, intent: key }));
+        old = sessionStorage.getItem(markerKey);
+        if (old === null) sessionStorage.setItem(markerKey, JSON.stringify({ user: userId, intent: key }));
       } catch {
         throw new Error("No se pudo proteger esta escritura frente a un resultado incierto; no se envió la solicitud.");
       }
+      if (old !== null) throw new Error("Existe una intención previa que requiere conciliación; no se envió la solicitud.");
       uncertain.add(scopedIntent);
     }
     try {

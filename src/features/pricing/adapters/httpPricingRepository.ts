@@ -269,7 +269,7 @@ export function createHttpPricingRepository(
             ? code === "VIGENCIA_SUPERPUESTA"
               ? "overlap"
               : "conflict"
-            : write && response.status >= 500
+            : write && (response.status >= 500 || response.status === 408)
               ? "unknown"
               : "error";
     const message =
@@ -281,7 +281,7 @@ export function createHttpPricingRepository(
             ? code === "VIGENCIA_SUPERPUESTA"
               ? "La vigencia se superpone con otra del mismo objetivo y canal."
               : "El precio cambió desde la lectura. Conserva la propuesta y vuelve a consultar."
-            : write && response.status >= 500
+            : write && (response.status >= 500 || response.status === 408)
               ? "Pricing no confirmó el resultado. Consulta el estado antes de intentar otra vez."
               : response.status === 400 || response.status === 422
                 ? "Pricing rechazó los datos enviados. Revisa el formulario."
@@ -363,8 +363,10 @@ export function createHttpPricingRepository(
     },
 
     async read(query: PriceQuery, signal) {
+      const owner = dependencies.scopeId?.();
       const target = await targetById(query.targetId, signal);
       const price = await readTarget(target, query.channel, signal);
+      if (dependencies.scopeId?.() !== owner) throw new PricingFailure("unknown", "La sesión cambió durante la lectura de Pricing.");
       return price ? { price, breakdown: [] } : null;
     },
 

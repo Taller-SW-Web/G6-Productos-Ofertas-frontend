@@ -6,9 +6,10 @@ import { createHttpPromotionServices } from "../adapters/httpPromotionServices";
 export function createOptionalPromotionSessionRuntime(
   gatewayOrigin: string,
   securityApiBase: string,
+  session?: G7Session,
 ) {
   try {
-    return createPromotionSessionRuntime(gatewayOrigin, securityApiBase);
+    return createPromotionSessionRuntime(gatewayOrigin, securityApiBase, session);
   } catch {
     return null;
   }
@@ -17,9 +18,9 @@ export function createOptionalPromotionSessionRuntime(
 export function createPromotionSessionRuntime(
   gatewayOrigin: string,
   securityApiBase: string,
+  session = new G7Session(securityApiBase),
 ) {
   const gateway = secureBase(gatewayOrigin, true);
-  const session = new G7Session(securityApiBase);
   return {
     session,
     services: createHttpPromotionServices({
@@ -28,6 +29,7 @@ export function createPromotionSessionRuntime(
       refreshAccessToken: session.refreshAccessToken,
       invalidateAccessToken: session.invalidateAccessToken,
       scopeId: () => session.snapshot().user?.id ?? null,
+      sessionEvents: { version: session.getSessionVersion, subscribe: session.subscribe },
     }),
   };
 }
