@@ -256,25 +256,62 @@ async function expectLoginInsideViewport(page: Page) {
     expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height);
   }
 }
-test("la sesión administrativa consulta objetivos de Pricing solo desde una pantalla que los usa", async ({ page }) => {
-  const reads: string[] = [];
-  await page.route("**/api/v1/cupones?*", route => {
-    reads.push("coupons");
-    return route.fulfill({ json: { items: [], meta: { pagina: 1, tamanio: 10, total: 0 } } });
+test("una sesión administrativa autentica lecturas de los seis módulos", async ({ page }) => {
+  const gateway = `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? 5173}`;
+  const reads: { path: string; method: string; authorization: string | undefined }[] = [];
+  // These repositories also read Vite's mode directly. Match the API mode set in main.tsx by the fixture.
+  await page.route(/\/src\/features\/(taxonomy\/services\/taxonomyServices|inventory\/services\/inventoryProvider)\.ts(?:\?|$)/, async route => {
+    const response = await route.fetch();
+    const body = (await response.text()).replace(/"VITE_DATA_MODE":\s*"[^"]*"/g, '"VITE_DATA_MODE":"api"');
+    await route.fulfill({ response, body });
   });
-  await page.route("**/api/v1/productos?*", route => {
-    const query = new URL(route.request().url()).searchParams;
-    reads.push("pricing-catalog");
-    return route.fulfill({ json: { items: [], pagina: Number(query.get("pagina")), tamanio: Number(query.get("tamanio")), total: 0 } });
+  await page.route(`${gateway}/api/v1/**`, route => {
+    const request = route.request();
+    const { pathname, searchParams } = new URL(request.url());
+    const authorization = request.headers().authorization;
+    reads.push({ path: pathname, method: request.method(), authorization });
+
+    const pageInfo = {
+      pagina: Number(searchParams.get("pagina")),
+      tamanio: Number(searchParams.get("tamanio")),
+      total: 0,
+    };
+    if (pathname === "/api/v1/productos") {
+      return route.fulfill({ json: { items: [], ...pageInfo } });
+    }
+    if (pathname === "/api/v1/categorias/arbol") {
+      return route.fulfill({ json: [] });
+    }
+    if (["/api/v1/cupones", "/api/v1/combos"].includes(pathname)) {
+      return route.fulfill({ json: { items: [], meta: { ...pageInfo, totalPaginas: 0 } } });
+    }
+    // This session fixture also verifies a provider can deny a read without dropping the G7 session.
+    return route.fulfill({ status: 403, json: { code: "FORBIDDEN" } });
   });
   await page.goto("/cupones");
+  await expect(page).toHaveURL(/\/login$/);
+  expect(reads).toHaveLength(0);
   await login(page);
   await expect(page.getByText("Todavía no hay cupones", { exact: true })).toBeVisible();
-  expect(reads).toEqual(["coupons"]);
-  const catalogRead = page.waitForRequest(request => new URL(request.url()).pathname === "/api/v1/productos");
-  await page.getByRole("link", { name: "Consultar precios", exact: true }).click();
-  expect((await catalogRead).headers().authorization).toBe("Bearer " + dto.accessToken);
-  await expect(page.getByRole("heading", { name: "Gestión de precios", exact: true })).toBeVisible();
+  expect(reads.map(read => read.path)).toEqual(["/api/v1/cupones"]);
+
+  const navigation = page.getByRole("navigation", { name: "Navegación de la aplicación", exact: true });
+  for (const [label, path, operation] of [
+    ["Consultar precios", "/precios", "/api/v1/productos"],
+    ["Gestión de productos", "/productos", "/api/v1/productos"],
+    ["Categorías", "/categorias", "/api/v1/categorias/arbol"],
+    ["Dashboard analítico", "/inventario/dashboard", "/api/v1/inventario/dashboard"],
+    ["Gestión de combos", "/combos", "/api/v1/combos"],
+  ]) {
+    const readStart = reads.length;
+    await navigation.getByRole("link", { name: label, exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`${path}$`));
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await expect.poll(() => reads.slice(readStart).map(read => read.path)).toContain(operation);
+  }
+  for (const read of reads) {
+    expect(read, read.path).toMatchObject({ method: "GET", authorization: `Bearer ${dto.accessToken}` });
+  }
   expect(calls.filter(call => call.path.endsWith("/login"))).toHaveLength(1);
 });
 

@@ -405,23 +405,28 @@ test("MK-014: unknown POST cannot be resubmitted; known job GET retries without 
     1,
   );
   await mount(page, "/precios/auditoria/exportar/csv");
-  await page.evaluate(() => {
+  await expect(page.getByRole("button", { name: "Solicitar CSV" })).toBeDisabled();
+  expect(await page.evaluate(() => window.auditControl.requests.length)).toBe(0);
+
+  const knownJobPage = await page.context().newPage();
+  await mount(knownJobPage, "/precios/auditoria/exportar/csv");
+  await knownJobPage.evaluate(() => {
     window.auditControl.readFailure = "unavailable";
   });
-  await page.getByRole("button", { name: "Solicitar CSV" }).click();
-  await expect(page.getByRole("alert")).toContainText(
+  await knownJobPage.getByRole("button", { name: "Solicitar CSV" }).click();
+  await expect(knownJobPage.getByRole("alert")).toContainText(
     "Origen alternativo no disponible",
   );
-  await page.evaluate(() => {
+  await knownJobPage.evaluate(() => {
     window.auditControl.readFailure = undefined;
   });
-  await page
+  await knownJobPage
     .getByRole("button", { name: "Consultar estado", exact: true })
     .click();
   await expect(
-    page.getByText("Generando archivo", { exact: true }).first(),
+    knownJobPage.getByText("Generando archivo", { exact: true }).first(),
   ).toBeVisible();
-  expect(await page.evaluate(() => window.auditControl.requests.length)).toBe(
+  expect(await knownJobPage.evaluate(() => window.auditControl.requests.length)).toBe(
     1,
   );
 });

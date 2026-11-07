@@ -17,4 +17,4 @@ Fuentes verificadas en Docs `aba8d1c` y Backend `b061ef8`. Las columnas de desbl
 
 ## Alcance del verificador de release
 
-El gate autorizado para la lectura de Cupones visita también Precios. Con el repositorio H4, entrar en Precios requiere el listado de objetivos de Catálogo y el gate actual lo rechaza con RELEASE_NETWORK_NOT_APPROVED. Para una aceptación que incluya ambos recorridos, acordar con el owner la operación adicional, su alcance exacto y el procedimiento de verificación. La política vigente conserva su lista de operaciones aprobadas.
+El gate externo prueba la operación aprobada `listarCupones` y el cierre de sesión. El gate contractual aislado añade la navegación a Precios y verifica su lectura exacta `GET /api/v1/productos?pagina=1&tamanio=100` en loopback. Para incluir Precios en una aceptación externa, el owner debe aprobar esa operación y aportar un entorno, una cuenta y los UUID de canales autorizados.

@@ -19,3 +19,9 @@ El transporte de Gateway restringe origen y ruta, conserva correlación y renuev
 | Bulk MK-001 y Auditoría MK-014 | Se preservan sus repositorios H4. Bulk clasifica un POST de resultado incierto y conserva la correlación. | Reanudación Bulk requiere aprobación de protocolo. Auditoría y descarga externa requieren prueba del provider. |
 
 Las decisiones de formalización y los bloqueos se registran en los archivos de esta carpeta. La habilitación de los adapters no acredita homologación ni despliegue.
+
+## Cierre de regresiones
+
+- Promociones guarda un resultado esperado por identidad del registro en el escenario local de respuesta perdida. La reconciliación exige leer el mismo resultado antes de cerrar la acción, y los cambios de estado de cupones usan la capacidad de conciliación del repositorio cuando está disponible.
+- Inventario vuelve a filtrar agregados por categoría y marca en modo mock. En API el agregado conserva el filtro admitido de ubicación. Si el navegador impide guardar la intención de un umbral, la pantalla muestra el error antes del envío.
+- El gate de release externo verifica Cupones. El mismo verificador, en el arnés HTTP aislado, comprueba también la pantalla Precios y su consulta paginada de objetivos. El arnés de sesión comprueba las lecturas de los seis módulos con el mismo Bearer y cero lecturas privadas antes del login.

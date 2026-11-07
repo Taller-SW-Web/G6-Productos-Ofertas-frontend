@@ -296,8 +296,20 @@ export function useThresholds() {
     setFeedback(null);
     setRefreshWarning(null);
     const intentKey = thresholdIntentKey(pending.kind, pending.sku);
-    try { if (sessionStorage.getItem(intentKey)) throw new InventoryError("RESULTADO_INCIERTO", "Hay una escritura previa de este umbral pendiente de conciliación."); sessionStorage.setItem(intentKey, JSON.stringify({ ...pending })); }
-    catch (error) { setFeedback(describeThresholdMutationError(error, fallbackError)); setSaving(false); return false; }
+    try {
+      if (sessionStorage.getItem(intentKey)) {
+        throw new InventoryError("RESULTADO_INCIERTO", "Hay una escritura previa de este umbral pendiente de conciliación.");
+      }
+      sessionStorage.setItem(intentKey, JSON.stringify(pending));
+    } catch (error) {
+      const cause = error instanceof InventoryError ? error : new InventoryError(
+        "OPERATIVO",
+        "El almacenamiento de sesión no está disponible. No se envió el cambio de umbral.",
+      );
+      setFeedback(describeThresholdMutationError(cause, fallbackError));
+      setSaving(false);
+      return false;
+    }
     try {
       const result = await mutate();
       try { sessionStorage.removeItem(intentKey); } catch { /* verified from server on next read */ }

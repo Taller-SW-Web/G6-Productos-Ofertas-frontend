@@ -22,9 +22,10 @@ export function createReviewServiceResolver(base: PromotionServiceContext) {
         : administrationScenario(params);
     let context = contexts.get(scenario);
     if (!context) {
+      const services = createDemoServices(base.services, scenario);
       context = {
-        services: createDemoServices(base.services, scenario),
-        confirmedServices: base.confirmedServices,
+        services,
+        confirmedServices: scenario === "unknown-result" ? services : base.confirmedServices,
         prepareCreation: (signal) =>
           checkAdministrationRead(
             scenario === "session" || scenario === "forbidden"

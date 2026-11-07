@@ -1,12 +1,28 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { releasePolicy, targetUrl, verifyIntegrations, permittedRequest, verifyNoRedirect, verifyPreviewLocation } from "./release-login-policy.mjs";
+import { isolatedPricingCatalogRead, releasePolicy, targetUrl, verifyIntegrations, permittedRequest, verifyNoRedirect, verifyPreviewLocation } from "./release-login-policy.mjs";
 
 const approved = {
   previewUrl: "https://preview.example.test", approvedPreviewOrigin: "https://preview.example.test",
   approvedG7ApiBase: "https://identity.example.test/api/v1", approvedGatewayOrigin: "https://gateway.example.test",
   approvedGatewayOperation: "listarCupones",
 };
+test("solo la fase de Precios de loopback puede consultar la página comercial fija", () => {
+  const real = releasePolicy(approved);
+  const local = releasePolicy({
+    previewUrl: "http://127.0.0.1:1234", approvedPreviewOrigin: "http://127.0.0.1:1234",
+    approvedG7ApiBase: "http://127.0.0.1:1235/api/v1", approvedGatewayOrigin: "http://127.0.0.1:1236",
+  }, { isolatedFixture: true });
+  const request = (policy, path = isolatedPricingCatalogRead, method = "GET") =>
+    ({ url: policy.gateway + path, method, resourceType: "fetch" });
+  const phase = { checkingIsolatedPricing: true };
+  assert.equal(permittedRequest(real, request(real), phase), false);
+  assert.throws(() => verifyPreviewLocation(real, real.preview + "/precios"));
+  assert.equal(permittedRequest(local, request(local)), false);
+  assert.equal(permittedRequest(local, request(local), phase), true);
+  assert.equal(permittedRequest(local, request(local, "/api/v1/productos?pagina=2&tamanio=100"), phase), false);
+  assert.equal(permittedRequest(local, request(local, isolatedPricingCatalogRead, "POST"), phase), false);
+});
 test("R4-02 permite paginación inicial y solo padres acreditados por Cupones", () => {
   const policy = releasePolicy(approved);
   const allow = path => permittedRequest(policy, { url: policy.gateway + path, method: "GET", resourceType: "fetch" }, { promotionIds: new Set(["parent-id"]) });

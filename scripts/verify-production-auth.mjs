@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { chromium } from "playwright";
 import { authContractFixture } from "./auth-contract-fixture.mjs";
 import { verifyAuthenticatedMock } from "./verify-authenticated-mock.mjs";
+import { isolatedPricingCatalogRead } from "./release-login-policy.mjs";
 
 const fixture = await authContractFixture();
 const artifacts = await mkdtemp(join(tmpdir(), "g6-auth-compiled-"));
@@ -133,9 +134,13 @@ try {
           else { await page.getByRole("navigation", { name: "Navegación de la aplicación" }).waitFor(); check(fixture.state.calls.filter(c => c.path.endsWith("/auth/refresh")).length === refreshes, "401 desconocido y 403 no renuevan sesión"); }
         }
         fixture.state.gatewayStatus = 200; fixture.state.mfa = false;
+        const beforeIsolatedRelease = fixture.state.calls.length;
         await run(["scripts/testing/verify-isolated-release.mjs"], { ...env,
           G6_ISOLATED_PREVIEW_URL: base, G6_ISOLATED_G7_API_BASE: fixture.origin + "/g7/api/v1",
           G6_ISOLATED_GATEWAY_ORIGIN: fixture.origin }); checks++;
+        check(fixture.state.calls.slice(beforeIsolatedRelease).some(call =>
+          call.method === "GET" && call.path + call.search === isolatedPricingCatalogRead
+        ), "Precios consulta la primera página comercial dentro del entorno aislado");
       }
       check(errors.length === 0, "sin errores JavaScript");
       check(!/fixture-refresh|eyJhbGci|isolated-fixture-password/.test(await page.evaluate(() => JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage }, cookie: document.cookie }))), "sin secretos persistidos");

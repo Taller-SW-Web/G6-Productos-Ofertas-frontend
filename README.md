@@ -11,7 +11,7 @@ npm ci
 npm run dev
 ```
 
-Vite inicia en `http://127.0.0.1:5173`. Sin sesión, las rutas administrativas redirigen a `/login`. Tras autenticarse, la entrada inicial es `/precios`. En desarrollo mock se permite recorrer fixtures sin identidad G7; los builds de producción exigen login también en modo mock. Para revisar las pantallas, navega por el menú o abre, por ejemplo, `/productos`, `/categorias`, `/precios/auditoria`, `/carga-masiva`, `/combos` o `/inventario`.
+Vite inicia en `http://127.0.0.1:5173`. Sin sesión, las rutas administrativas redirigen a `/login`. Tras autenticarse, la entrada inicial es `/productos` o el destino interno solicitado. En desarrollo mock se permite recorrer fixtures sin identidad G7; los builds de producción exigen login también en modo mock. Para revisar las pantallas, navega por el menú o abre, por ejemplo, `/productos`, `/categorias`, `/precios/auditoria`, `/carga-masiva`, `/combos` o `/inventario`.
 
 Comandos disponibles:
 
@@ -287,8 +287,10 @@ peticiones de autenticación. El CLI productivo no admite HTTP ni un flag de fix
 Las sondas obligatorias aceptan G7 OPTIONS 200/204 y Gateway GET anónimo 401/403.
 La sonda y la lectura autenticada usan la misma URL de Cupones, con
 `pagina=1&tamanio=10`. La lectura debe devolver 200 con el Bearer de esa sesión.
-El gate comprueba URL y contenido propios de Precios. Para el logout registra
-el cierre local y el HTTP 204 de G7 por separado. La revocación efectiva
+El gate de release completa el recorrido en Cupones. La verificación de
+producción aislada también abre Precios y comprueba la pantalla y la lectura de
+objetivos de Catálogo en loopback. Para el logout se registran el cierre local y
+el HTTP 204 de G7 por separado. La revocación efectiva
 requiere evidencia del owner sin volver a enviar el refresh token.
 
 Sin intervención manual falla si MFA queda pendiente. Para la aceptación real,
