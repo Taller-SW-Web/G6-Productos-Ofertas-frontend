@@ -230,9 +230,7 @@ export function RecommendationDetailPage({
                   signal,
                 )
               }
-              read={(signal) =>
-                confirmedServices.recommendations.read(ruleId, signal)
-              }
+              reconcile={(signal) => confirmedServices.recommendations.reconcilePending?.(ruleId, signal) ?? Promise.resolve({ status: "not_accredited" as const })}
               onCancel={close}
               onConfirmed={(outcome) => {
                 close();

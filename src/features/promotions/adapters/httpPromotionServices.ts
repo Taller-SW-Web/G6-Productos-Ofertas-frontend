@@ -398,6 +398,13 @@ export function createHttpPromotionServices(
     }
   }
   type WriteEvidence = { entity: "coupon" | "campaign" | "recommendation"; operation: "create" | "update" | "status"; resourceId?: string; naturalCode?: string; payload?: unknown; changedFields?: string[]; baseline?: unknown; expectedState?: unknown; correlationId: string };
+  const decimalAmount = (value: unknown): string | null => {
+    if (value === undefined || value === null || (typeof value === "string" && value.trim() === "")) return null;
+    const raw = String(value).trim().replace(",", ".");
+    if (!/^\d+(\.\d+)?$/.test(raw)) return null;
+    const [whole, fraction = ""] = raw.split(".");
+    return `${whole!.replace(/^0+(?=\d)/, "")}.${fraction.replace(/0+$/, "") || "0"}`;
+  };
   async function write<T>(intent: string, work: () => Promise<T>, coupon = false, evidence?: Omit<WriteEvidence, "correlationId">, reconcile?: (evidence: WriteEvidence) => Promise<T | null>): Promise<T> {
     const owner = options.scopeId?.();
     if (!owner) throw coupon ? new CouponWriteError("access", "Inicia sesión para modificar cupones.") : new AdministrationError("access", "Inicia sesión para modificar promociones.");
@@ -474,6 +481,25 @@ export function createHttpPromotionServices(
       throw coupon ? new CouponWriteError(kind, message) : new AdministrationError(kind, message);
     }
   }
+  async function reconcileStored<T>(intent: string, resolver: (evidence: WriteEvidence) => Promise<T | null>): Promise<import("../services/administration").PromotionReconciliation<T>> {
+    const owner = options.scopeId?.();
+    if (!owner) return { status: "access_denied" };
+    const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${owner}\u0000${intent}`)))].map(value => value.toString(16).padStart(2, "0")).join("");
+    const key = `g6:promotions:uncertain:v1:${digest}`;
+    let marker: { owner?: string; intent?: string; evidence?: WriteEvidence } | null;
+    try { marker = JSON.parse(sessionStorage.getItem(key) ?? "null") as typeof marker; }
+    catch { return { status: "unavailable" }; }
+    if (!marker || marker.owner !== owner || marker.intent !== intent || !marker.evidence) return { status: "not_accredited" };
+    try {
+      const value = await resolver(marker.evidence);
+      if (!value || options.scopeId?.() !== owner) return { status: "not_accredited" };
+      sessionStorage.removeItem(key);
+      return { status: "reconciled", value: Object.assign(value, { writeOutcome: "RECONCILED" }) };
+    } catch (error) {
+      if (error instanceof HttpFailure && (error.status === 401 || error.status === 403)) return { status: "access_denied" };
+      return { status: "unavailable" };
+    }
+  }
   const campaignSnapshots = new Map<string, CampaignDraft>(),
     ruleSnapshots = new Map<string, RecommendationDraft>();
   function mapCampaign(v: unknown) {
@@ -487,6 +513,12 @@ export function createHttpPromotionServices(
     return r;
   }
   const campaigns: PromotionServices["campaigns"] = {
+    reconcilePending: (id, s) => reconcileStored(`campaign:${id}`, async evidence => {
+      if (evidence.entity !== "campaign" || evidence.resourceId !== id) return null;
+      const observed = mapCampaign(await request("/promociones/" + encodeURIComponent(id), s));
+      if (observed.id !== id) return null;
+      return evidence.operation === "status" ? (observed.status === evidence.expectedState ? observed : null) : JSON.stringify(observed.configuration) === JSON.stringify(evidence.expectedState) ? observed : null;
+    }),
     list: (q, s) =>
       read(() =>
         request("/promociones/administracion?" + query(q, "modalidad"), s).then(
@@ -538,6 +570,12 @@ export function createHttpPromotionServices(
       ),
   };
   const recommendations: PromotionServices["recommendations"] = {
+    reconcilePending: (id, s) => reconcileStored(`recommendation:${id}`, async evidence => {
+      if (evidence.entity !== "recommendation" || evidence.resourceId !== id) return null;
+      const observed = mapRule(await request("/recomendaciones/reglas/" + encodeURIComponent(id), s));
+      if (observed.id !== id) return null;
+      return evidence.operation === "status" ? (observed.status === evidence.expectedState ? observed : null) : JSON.stringify(observed.configuration) === JSON.stringify(evidence.expectedState) ? observed : null;
+    }),
     list: (q, s) =>
       read(() =>
         request("/recomendaciones/reglas?" + query(q, "tipo"), s).then((r) =>
@@ -712,6 +750,34 @@ export function createHttpPromotionServices(
     }
   }
   const coupons: PromotionServices["coupons"] = {
+    reconcilePending: async (id, code, s) => {
+      const intent = id ? `coupon:resource:${id}` : `coupon:create:${code?.trim().toUpperCase() ?? "missing-code"}`;
+      return reconcileStored(intent, async evidence => {
+        if (evidence.entity !== "coupon") return null;
+        const payload = evidence.payload && typeof evidence.payload === "object" ? evidence.payload as Record<string, unknown> : {};
+        const status = evidence.expectedState && typeof evidence.expectedState === "object" ? (evidence.expectedState as Record<string, unknown>).status : undefined;
+        const matches = (found: CouponView) => (!evidence.naturalCode || found.code.toUpperCase() === evidence.naturalCode) &&
+          (status === undefined || found.status === status) && (payload.promocionId === undefined || found.promotionId === payload.promocionId) &&
+          (payload.maxUsosGlobal === undefined || found.globalLimit === payload.maxUsosGlobal) && (payload.maxUsosPorCliente === undefined || found.customerLimit === payload.maxUsosPorCliente) &&
+          (payload.montoMinimo === undefined || decimalAmount(found.minimumAmount) === decimalAmount(payload.montoMinimo === null ? null : String(payload.montoMinimo))) &&
+          (payload.politicaCancelacion === undefined || found.cancellationPolicy === (payload.politicaCancelacion === "RESTAURAR_EN_CANCELACION" ? "restore" : "keep"));
+        if (evidence.operation === "create") {
+          for (let current = 1; current <= 1000; current++) {
+            const result = page(await request("/cupones?" + query({ status: "all", page: current, pageSize: 100 }), s), coupon);
+            if (result.page !== current) throw new Error("INVALID_PAGE");
+            const found = result.items.find(item => item.code.toUpperCase() === evidence.naturalCode);
+            if (found) return matches(found) ? found : null;
+            if (!result.items.length || current * 100 >= result.total) return null;
+          }
+          throw new Error("COUPON_PAGE_LIMIT");
+        }
+        if (!evidence.resourceId) return null;
+        try {
+          const found = coupon(await request("/cupones/" + encodeURIComponent(evidence.resourceId), s));
+          return found.id === evidence.resourceId && matches(found) ? found : null;
+        } catch (error) { if (error instanceof HttpFailure && error.status === 404) return null; throw error; }
+      });
+    },
     list: (q, s) =>
       read(async () => {
         const r = record(await request("/cupones?" + query(q), s)),

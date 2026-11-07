@@ -149,16 +149,39 @@ export async function taxonomySend<T = unknown>(
   }
 }
 
-function matchesExpected(observed: unknown, expected: unknown): boolean {
-  if (expected === null || expected === undefined || typeof expected !== "object") return Object.is(observed, expected);
-  if (Array.isArray(expected)) return Array.isArray(observed) && expected.every((entry, index) => matchesExpected(observed[index], entry));
-  if (!observed || typeof observed !== "object" || Array.isArray(observed)) return false;
-  return Object.entries(expected as Record<string, unknown>).every(([key, value]) => key === "schemaVersion" || matchesExpected((observed as Record<string, unknown>)[key], value));
+function sameFields(observed: Record<string, unknown>, expected: Record<string, unknown>, keys: readonly string[]): boolean {
+  return keys.every(key => Object.hasOwn(expected, key) && Object.is(observed[key], expected[key]));
 }
-function containsExpected(observed: unknown, expected: Record<string, unknown>): boolean {
-  if (matchesExpected(observed, expected)) return true;
-  if (Array.isArray(observed)) return observed.some(value => containsExpected(value, expected));
-  if (observed && typeof observed === "object") return Object.values(observed).some(value => containsExpected(value, expected));
+
+function effectMatches(marker: Record<string, unknown>, observed: unknown): boolean {
+  const body = marker.body as Record<string, unknown> | null;
+  if (!body || typeof body !== "object") return false;
+  const path = typeof marker.path === "string" ? marker.path : "";
+  const resourcePath = typeof marker.resourcePath === "string" ? marker.resourcePath : "";
+  const idFrom = (route: string) => { try { return decodeURIComponent(route.split("/").filter(Boolean).pop() ?? ""); } catch { return ""; } };
+  const root = observed && typeof observed === "object" && !Array.isArray(observed) ? observed as Record<string, unknown> : null;
+  const versionAdvanced = (actual: unknown, field: string) => typeof body[field] === "number" && typeof actual === "number" && actual > Number(body[field]);
+  if (marker.entity === "product_type_association") {
+    const dto = root;
+    const type = dto?.tipoProducto && typeof dto.tipoProducto === "object" ? dto.tipoProducto as Record<string, unknown> : null;
+    const rows = Array.isArray(dto?.caracteristicas) ? dto.caracteristicas : [];
+    const characteristicId = typeof body.caracteristicaId === "string" ? body.caracteristicaId : idFrom(path);
+    const association = rows.find(item => item && typeof item === "object" && !Array.isArray(item) && (item as Record<string, unknown>).caracteristicaId === characteristicId) as Record<string, unknown> | undefined;
+    const typeId = (() => { try { return decodeURIComponent(resourcePath.split("/caracteristicas")[0]?.split("/").filter(Boolean).pop() ?? ""); } catch { return ""; } })();
+    return Boolean(type && type.tipoProductoId === typeId && association && association.caracteristicaId === characteristicId && association.obligatoria === body.obligatoria && versionAdvanced(dto?.schemaVersion, "schemaVersion"));
+  }
+  if (marker.entity === "characteristic") {
+    return Boolean(root && root.caracteristicaId === idFrom(resourcePath) && versionAdvanced(root.version, "version") && sameFields(root, body, ["nombre", "unidadMedida"]));
+  }
+  if (marker.entity === "category") {
+    return Boolean(root && root.categoriaId === idFrom(resourcePath) && versionAdvanced(root.version, "version") && sameFields(root, body, ["nombre", "categoriaPadreId", "descripcion", "orden"]));
+  }
+  if (marker.entity === "characteristic_value") {
+    if (!Array.isArray(observed)) return false;
+    const valueId = idFrom(path);
+    const item = observed.find(entry => entry && typeof entry === "object" && !Array.isArray(entry) && (entry as Record<string, unknown>).valorId === valueId) as Record<string, unknown> | undefined;
+    return Boolean(item && item.valorId === valueId && versionAdvanced(item.version, "version") && sameFields(item, body, ["nombre"]));
+  }
   return false;
 }
 
@@ -187,19 +210,7 @@ export async function reconcileConfirmedTaxonomyResource(transport: TaxonomyGate
           try { sessionStorage.setItem(key, JSON.stringify({ ...marker, state: "confirmed_read_failed" })); } catch { /* marker remains */ }
           continue;
         }
-        const validExpected = expected && typeof expected === "object" && Object.keys(expected).some(field => field !== "schemaVersion");
-        const expectedVersion = expected?.schemaVersion;
-        const observedVersion = observed && typeof observed === "object" ? (observed as Record<string, unknown>).schemaVersion : undefined;
-        const versionAdvanced = expectedVersion === undefined || (typeof observedVersion === "number" && observedVersion > Number(expectedVersion));
-        const expectedFields = expected ? Object.fromEntries(Object.entries(expected).filter(([field]) => field !== "schemaVersion")) : null;
-        let identityMatches = true;
-        if (marker.method === "PATCH" && marker.path !== marker.resourcePath) {
-          const resourcePrefix = `${marker.resourcePath}/`;
-          const identifier = typeof marker.path === "string" && marker.path.startsWith(resourcePrefix) ? decodeURIComponent(marker.path.slice(resourcePrefix.length).split("/")[0] ?? "") : "";
-          identityMatches = Boolean(identifier) && containsExpected(observed, { caracteristicaId: identifier, ...(expectedFields ?? {}) });
-        }
-        const effectMatches = marker.method === "PATCH" ? identityMatches : containsExpected(observed, expectedFields!);
-        if (observed !== undefined && validExpected && versionAdvanced && identityMatches && effectMatches) { clear(key); continue; }
+        if (observed !== undefined && effectMatches(marker, observed)) { clear(key); continue; }
         try { sessionStorage.setItem(key, markerValue("confirmed_read_failed", marker.path, marker.resourcePath, scopeHash, marker.status, marker.method, marker.body, marker.correlationId)); } catch { /* retains fail-closed state */ }
         // Keep presenting the authoritative resource; the pending write guard
         // still blocks subsequent mutations for this resource.

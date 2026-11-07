@@ -226,9 +226,7 @@ export function CampaignDetailPage({
                   signal,
                 )
               }
-              read={(signal) =>
-                confirmedServices.campaigns.read(promotionId, signal)
-              }
+              reconcile={(signal) => confirmedServices.campaigns.reconcilePending?.(promotionId, signal) ?? Promise.resolve({ status: "not_accredited" as const })}
               onCancel={close}
               onConfirmed={(outcome) => {
                 close();

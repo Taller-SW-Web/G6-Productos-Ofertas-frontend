@@ -25,6 +25,7 @@ export interface BulkSubmissionError {
   message: string;
 }
 export type BulkAdmissionTask = AdmissionTask<File> & { owner?: string; contentHash?: string; expectedBatchId?: string };
+type AdmissionIntent = Readonly<{ owner: string; key: string; contentHash: string; batchId: string; correlationId: string }>;
 
 interface BulkUploadContextValue {
   selectedFile: File | null;
@@ -35,7 +36,7 @@ interface BulkUploadContextValue {
   admissionStatus: AdmissionStatus;
   beginAdmission: (file: File, retryUncertain?: boolean) => BulkAdmissionTask | null;
   finishAdmission: (
-    task: AdmissionTask<File>,
+    task: BulkAdmissionTask,
     status: "ready" | "accepted" | "uncertain",
     error?: BulkSubmissionError | null,
   ) => boolean;
@@ -60,8 +61,8 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
     useState<BulkSubmissionError | null>(null);
   const [pendingCorrelationId, setPendingCorrelationId] = useState<string | null>(null);
   const [expectedBatchId, setExpectedBatchId] = useState<string | null>(null);
-  const admissionOwnerByCorrelation = useRef(new Map<string, { owner: string; key: string; contentHash?: string; batchId?: string }>());
-  const selectedIntent = useRef<{ owner: string; key: string; contentHash: string; batchId: string } | null>(null);
+  const admissionOwnerByCorrelation = useRef(new Map<string, AdmissionIntent>());
+  const selectedIntent = useRef<AdmissionIntent | null>(null);
   const selectedFileRef = useRef<File | null>(null);
   const selectionGenerationRef = useRef(0);
 
@@ -93,18 +94,19 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
     let restored: { correlationId: string; status: AdmissionStatus } | undefined;
     const owner = session?.snapshot().user?.id ?? null;
     let intentKey: string | undefined;
+    let fingerprint: string | null = null;
     if (file && owner) {
       const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", await file.arrayBuffer()));
-      const fingerprint = [...digest].map(value => value.toString(16).padStart(2, "0")).join("");
+      fingerprint = [...digest].map(value => value.toString(16).padStart(2, "0")).join("");
       if (generation !== selectionGenerationRef.current || selectedFileRef.current !== file || session?.snapshot().user?.id !== owner) return;
       intentKey = `g6:bulk:admission:v1:${encodeURIComponent(owner)}:${fingerprint}`;
       try {
         const raw = sessionStorage.getItem(intentKey);
         if (raw) {
-          const saved = JSON.parse(raw) as { owner?: string; contentHash?: string; correlationId?: string; batchId?: string; state?: string };
-          if (saved.owner !== owner || saved.contentHash !== fingerprint || !saved.correlationId || !saved.batchId) throw new Error("Marcador de admisión incompatible.");
+          const saved = JSON.parse(raw) as { owner?: string; key?: string; contentHash?: string; correlationId?: string; batchId?: string; state?: string };
+          if (saved.owner !== owner || saved.key !== intentKey || saved.contentHash !== fingerprint || !saved.correlationId || !saved.batchId || !["accepted", "uncertain"].includes(saved.state ?? "")) throw new Error("Marcador de admisión incompatible.");
           restored = { correlationId: saved.correlationId, status: saved.state === "accepted" ? "accepted" : "uncertain" };
-          selectedIntent.current = { owner, key: intentKey, contentHash: fingerprint, batchId: saved.batchId };
+          selectedIntent.current = Object.freeze({ owner, key: intentKey, contentHash: fingerprint, batchId: saved.batchId, correlationId: saved.correlationId });
           setPendingCorrelationId(saved.correlationId);
           setExpectedBatchId(saved.batchId);
           setSubmissionError(restored.status === "accepted" ? null : { category: "unknown", message: "Importación sin respuesta recuperada. Se consultará el batchId determinista; un 404 no acredita que el POST no se haya aplicado." });
@@ -118,15 +120,12 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
     if (generation !== selectionGenerationRef.current || selectedFileRef.current !== file) return;
     admissionCoordinator?.select(file, restored);
     const correlation = restored?.correlationId ?? admissionCoordinator?.correlationId;
-    if (file && owner && intentKey && correlation && !selectedIntent.current) {
-      const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", await file.arrayBuffer()));
-      const contentHash = [...digest].map(value => value.toString(16).padStart(2, "0")).join("");
-      const batchId = await deriveBatchId(correlation, contentHash);
-      selectedIntent.current = { owner, key: intentKey, contentHash, batchId };
+    if (file && owner && intentKey && correlation && fingerprint && !selectedIntent.current) {
+      const batchId = await deriveBatchId(correlation, fingerprint);
+      if (generation !== selectionGenerationRef.current || selectedFileRef.current !== file || session?.snapshot().user?.id !== owner) return;
+      selectedIntent.current = Object.freeze({ owner, key: intentKey, contentHash: fingerprint, batchId, correlationId: correlation });
       setExpectedBatchId(batchId);
     }
-    const selectedCorrelation = restored?.correlationId;
-    if (selectedCorrelation && owner && intentKey) admissionOwnerByCorrelation.current.set(selectedCorrelation, { owner, key: intentKey });
     setAdmissionStatus(admissionCoordinator?.status ?? "idle");
     if (!restored) setSubmissionError(null);
 
@@ -146,19 +145,22 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
     try {
       const result = await checkLocalFile(file, task.signal);
       // Only commit result if this is still the active validation
-      if (task.isCurrent()) {
+      if (task.isCurrent() && generation === selectionGenerationRef.current && selectedFileRef.current === file && (!owner || session?.snapshot().user?.id === owner)) {
         setFileCheck(result);
       }
     } catch (err) {
       if (!task.signal.aborted) throw err;
     } finally {
-      if (task.isCurrent()) {
+      if (task.isCurrent() && generation === selectionGenerationRef.current && selectedFileRef.current === file && (!owner || session?.snapshot().user?.id === owner)) {
         setChecking(false);
       }
     }
   }, [session]);
 
   const clearSelection = useCallback(() => {
+    selectionGenerationRef.current++;
+    selectedFileRef.current = null;
+    selectedIntent.current = null;
     validationCoordinatorRef.current?.cancel();
     admissionCoordinatorRef.current?.select(null);
     setFileState(null);
@@ -166,6 +168,8 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
     setChecking(false);
     setSubmissionError(null);
     setAdmissionStatus("idle");
+    setPendingCorrelationId(null);
+    setExpectedBatchId(null);
   }, []);
 
   const beginAdmission = useCallback((file: File, retryUncertain = false): BulkAdmissionTask | null => {
@@ -176,8 +180,20 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
     const task = admissionCoordinatorRef.current?.begin(file, retryUncertain) ?? null;
     if (task) {
       if (intent) {
-        admissionOwnerByCorrelation.current.set(task.correlationId, { owner: intent.owner, key: intent.key });
-        try { sessionStorage.setItem(intent.key, JSON.stringify({ owner: intent.owner, contentHash: intent.contentHash, correlationId: task.correlationId, batchId: intent.batchId })); }
+        if (task.correlationId !== intent.correlationId || intent.owner !== owner || intent.key !== `g6:bulk:admission:v1:${encodeURIComponent(owner)}:${intent.contentHash}`) {
+          admissionCoordinatorRef.current?.finish(task, "ready");
+          return null;
+        }
+        const immutableIntent = Object.freeze({ ...intent, correlationId: task.correlationId });
+        admissionOwnerByCorrelation.current.set(task.correlationId, immutableIntent);
+        try {
+          const existingRaw = sessionStorage.getItem(intent.key);
+          if (existingRaw !== null) {
+            const existing = JSON.parse(existingRaw) as Partial<AdmissionIntent>;
+            if (existing.owner !== immutableIntent.owner || existing.contentHash !== immutableIntent.contentHash || existing.correlationId !== immutableIntent.correlationId || existing.batchId !== immutableIntent.batchId) throw new Error("Marcador distinto para esta intención.");
+          }
+          sessionStorage.setItem(intent.key, JSON.stringify({ ...immutableIntent, state: "uncertain" }));
+        }
         catch {
           admissionCoordinatorRef.current?.finish(task, "ready");
           setAdmissionStatus("ready");
@@ -191,19 +207,21 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
   }, [dataMode, session]);
 
   const finishAdmission = useCallback((
-    task: AdmissionTask<File>,
+    task: BulkAdmissionTask,
     status: "ready" | "accepted" | "uncertain",
     error: BulkSubmissionError | null = null,
   ) => {
     const coordinator = admissionCoordinatorRef.current;
     const intent = admissionOwnerByCorrelation.current.get(task.correlationId);
-    if (intent?.owner && session?.snapshot().user?.id !== intent.owner) {
+    if (intent && (task.correlationId !== intent.correlationId || task.owner !== intent.owner || task.contentHash !== intent.contentHash || task.expectedBatchId !== intent.batchId || session?.snapshot().user?.id !== intent.owner)) {
       coordinator?.finish(task, status);
       return false;
     }
     if (intent?.key) {
       try {
-        if (status === "accepted" || status === "uncertain") sessionStorage.setItem(intent.key, JSON.stringify({ owner: intent.owner, contentHash: intent.contentHash, correlationId: task.correlationId, batchId: intent.batchId, state: status }));
+        const existing = JSON.parse(sessionStorage.getItem(intent.key) ?? "null") as Partial<AdmissionIntent> | null;
+        if (!existing || existing.owner !== intent.owner || existing.key !== intent.key || existing.contentHash !== intent.contentHash || existing.correlationId !== intent.correlationId || existing.batchId !== intent.batchId) return false;
+        if (status === "accepted" || status === "uncertain") sessionStorage.setItem(intent.key, JSON.stringify({ ...intent, state: status }));
         else sessionStorage.removeItem(intent.key);
       } catch { /* repository-level marker remains fail-closed */ }
       if (status !== "uncertain") setPendingCorrelationId(null);
@@ -217,7 +235,11 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
   const confirmRecoveredBatch = useCallback((batchId: string) => {
     const intent = selectedIntent.current;
     if (!intent || intent.batchId !== batchId || session?.snapshot().user?.id !== intent.owner) return false;
-    try { sessionStorage.setItem(intent.key, JSON.stringify({ owner: intent.owner, contentHash: intent.contentHash, correlationId: admissionCoordinatorRef.current?.correlationId, batchId: intent.batchId, state: "accepted" })); } catch { /* confirmed GET remains available in the current route */ }
+    try {
+      const existing = JSON.parse(sessionStorage.getItem(intent.key) ?? "null") as Partial<AdmissionIntent> | null;
+      if (!existing || existing.owner !== intent.owner || existing.key !== intent.key || existing.contentHash !== intent.contentHash || existing.correlationId !== intent.correlationId || existing.batchId !== intent.batchId) return false;
+      sessionStorage.setItem(intent.key, JSON.stringify({ ...intent, state: "accepted" }));
+    } catch { /* confirmed GET remains available in the current route */ }
     setAdmissionStatus("accepted");
     setSubmissionError(null);
     return true;

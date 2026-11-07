@@ -9,7 +9,6 @@ import {
 } from "../services/couponRepository";
 import {
   couponDraftFromRecord,
-  couponMatchesInput,
   emptyCouponDraft,
   validateCouponDraft,
   type CouponDraft,
@@ -88,14 +87,10 @@ export function useCouponForm(
     setChecking(true);
     try {
       const controller = new AbortController();
-      const result = initial
-        ? await confirmedRepository.read(initial.id, controller.signal)
-        : await findCoupon(confirmedRepository, proposal.code, controller.signal);
-      if (result && couponMatchesInput(result, proposal)) setConfirmed({ ...result, writeOutcome: "RECONCILED" });
-      else
-        setRecoveryMessage(
-          "La consulta no confirma tu propuesta. Conservamos el borrador; revisa el registro antes de iniciar otro guardado.",
-        );
+      if (!confirmedRepository.reconcilePending) { setRecoveryMessage("El repositorio no expone conciliación de intenciones pendientes."); return; }
+      const result = await confirmedRepository.reconcilePending(initial?.id ?? null, initial ? null : proposal.code, controller.signal);
+      if (result.status === "reconciled") setConfirmed(result.value);
+      else setRecoveryMessage(result.status === "access_denied" ? "No tienes permiso para consultar la intención pendiente." : result.status === "unavailable" ? "La conciliación no está disponible; se conserva la intención bloqueada." : "La lectura no acredita la mutación. Conservamos el borrador y la intención bloqueada.");
     } catch {
       setRecoveryMessage(
         "No se pudo consultar el resultado. El guardado no se volverá a enviar automáticamente.",
@@ -119,15 +114,4 @@ export function useCouponForm(
     submitting: command.submitting,
     message: command.error instanceof Error ? command.error.message : undefined,
   };
-}
-
-async function findCoupon(repository: CouponRepository, code: string, signal: AbortSignal): Promise<CouponView | null> {
-  const pageSize = 100;
-  for (let page = 1; page <= 1000; page++) {
-    const result = await repository.list({ status: "all", page, pageSize }, signal);
-    const match = result.items.find((item) => item.code === code);
-    if (match) return match;
-    if (result.items.length === 0 || page * pageSize >= result.total) return null;
-  }
-  throw new Error("COUPON_PAGE_LIMIT");
 }

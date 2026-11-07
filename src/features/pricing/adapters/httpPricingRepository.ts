@@ -568,6 +568,22 @@ export function createHttpPricingRepository(
         );
       }
       const result = mapSchedulePageDto(response, target, page, pageSize, channelIds);
+      const scopeSuffix = `:${encodeURIComponent(owner)}`;
+      const targetPrefix = `${targetPath(target)}:`;
+      let needsReconciliation = [...uncertainSchedules].some(key => key.startsWith(targetPrefix) && key.endsWith(scopeSuffix));
+      try {
+        const scopePrefix = markerPrefix + "schedule:";
+        for (const storageKey of Object.keys(sessionStorage).filter(item => item.startsWith(scopePrefix))) {
+          let storedIntent: string;
+          try { storedIntent = decodeURIComponent(storageKey.slice(scopePrefix.length)); } catch { continue; }
+          if (!storedIntent.startsWith(targetPrefix) || !storedIntent.endsWith(scopeSuffix)) continue;
+          const entry = JSON.parse(sessionStorage.getItem(storageKey) ?? "null") as { key?: string; operation?: string; expected?: unknown } | null;
+          if (!entry || entry.operation !== "schedule" || !entry.key || !entry.expected || entry.key !== storedIntent) throw new Error("Corrupt pricing marker");
+          uncertainSchedules.add(entry.key);
+          needsReconciliation = true;
+        }
+      } catch { throw new PricingFailure("unknown", "Hay un marcador de programación ilegible o inaccesible; no se libera ninguna intención."); }
+      if (!needsReconciliation) return result;
       const allSchedules = [...result.items];
       const pages = Math.ceil(result.total / pageSize);
       if (pages > 1000) throw new PricingFailure("unknown", "La paginación excede el límite defensivo; no se liberan intenciones de programación.");
@@ -580,21 +596,8 @@ export function createHttpPricingRepository(
         allSchedules.push(...mapped.items);
       }
       if ((dependencies.scopeId?.() ?? "session-unavailable") !== owner) throw new PricingFailure("unknown", "La sesión cambió durante la paginación; no se libera ninguna intención.");
-      try {
-        const scopeSuffix = `:${encodeURIComponent(dependencies.scopeId?.() ?? "session-unavailable")}`;
-        const scopePrefix = markerPrefix + "schedule:";
-        for (const storageKey of Object.keys(sessionStorage).filter(item => item.startsWith(scopePrefix))) {
-          let storedIntent: string;
-          try { storedIntent = decodeURIComponent(storageKey.slice(scopePrefix.length)); } catch { continue; }
-          if (!storedIntent.startsWith(`${targetPath(target)}:`) || !storedIntent.endsWith(scopeSuffix)) continue;
-          const entry = JSON.parse(sessionStorage.getItem(storageKey) ?? "null") as { key?: string; operation?: string; expected?: unknown } | null;
-          if (!entry || entry.operation !== "schedule" || !entry.key || !entry.expected) throw new Error("Corrupt pricing marker");
-          if (entry.key !== storedIntent) throw new Error("Mismatched pricing marker");
-          uncertainSchedules.add(entry.key);
-        }
-      } catch { throw new PricingFailure("unknown", "Hay un marcador de programación ilegible o inaccesible; no se libera ninguna intención."); }
       for (const key of [...uncertainSchedules]) {
-        if (!key.startsWith(`${targetPath(target)}:`)) continue;
+        if (!key.startsWith(targetPrefix) || !key.endsWith(scopeSuffix)) continue;
         const marker = readMarker(key, "schedule");
         if (marker.state === "absent") continue;
         if (marker.state !== "valid") throw new PricingFailure("unknown", "Una intención de programación está corrupta o inaccesible; no se permite reenviar.");

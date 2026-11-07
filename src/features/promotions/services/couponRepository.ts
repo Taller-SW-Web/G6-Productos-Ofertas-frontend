@@ -57,6 +57,7 @@ export interface CouponRepository {
   ): Promise<CouponView>;
   list(query: CouponQuery, signal: AbortSignal): Promise<CouponListResult>;
   read(id: string, signal: AbortSignal): Promise<CouponView | null>;
+  reconcilePending?(id: string | null, code: string | null, signal: AbortSignal): Promise<import("./administration").PromotionReconciliation<CouponView>>;
 }
 
 export interface CouponPromotion {
