@@ -128,13 +128,14 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${userId}\u0000${format}`)));
     return `g6:bulk:export-uncertain:${[...digest].map(byte => byte.toString(16).padStart(2, "0")).join("")}`;
   };
-  async function send(path: string, method: HttpInit["method"], signal?: AbortSignal, body?: BodyInit, json = false, correlationId: string = crypto.randomUUID()): Promise<Response> {
+  async function send(path: string, method: HttpInit["method"], signal?: AbortSignal, body?: BodyInit, json = false, correlationId: string = crypto.randomUUID(), expectedOwner?: string): Promise<Response> {
     const bounded = signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000);
     bounded.throwIfAborted();
     let token: string | null;
     try { token = await session.getAccessToken(bounded); }
     catch (error) { if (bounded.aborted) throw error; throw new BulkRepositoryError("No se pudo renovar la sesión. Inicia sesión de nuevo.", "configuration"); }
     if (!token || /[\r\n]/.test(token)) throw new BulkRepositoryError("Inicia sesión para usar la carga masiva en modo API.", "configuration");
+    if (expectedOwner && session.snapshot?.().user?.id !== expectedOwner) throw new BulkRepositoryError("La sesión cambió antes del despacho; no se envió la importación.", "configuration");
     const request = (accessToken: string) => transport.request(path, {
       method, signal: bounded,
       headers: { Accept: "application/json, text/csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", Authorization: `Bearer ${accessToken}`, "X-Correlation-Id": correlationId, ...(json ? { "Content-Type": "application/json" } : {}) },
@@ -153,6 +154,7 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
         }
       }
     }
+    if (expectedOwner && session.snapshot?.().user?.id !== expectedOwner) throw new BulkRepositoryError("La sesión cambió mientras se procesaba la admisión. Se conserva la intención original sin atribuir la respuesta a otra identidad.", "unknown");
     if (!response.ok) {
       const problem = await response.clone().json().catch(() => null) as { code?: unknown } | null;
       const code = typeof problem?.code === "string" ? problem.code : "ERROR_HTTP";
@@ -181,33 +183,48 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
   }
   return {
     resumeSupported: false,
+    confirmRecoveredImport(batchId, owner, correlationId) {
+      if (session.snapshot?.().user?.id !== owner) return;
+      const key = `g6:bulk:import-pending:${encodeURIComponent(owner)}:${encodeURIComponent(correlationId)}`;
+      try { const marker = JSON.parse(sessionStorage.getItem(key) ?? "null") as { userId?: string; correlationId?: string; expectedBatchId?: string } | null; if (marker?.userId === owner && marker.correlationId === correlationId && marker.expectedBatchId === batchId) sessionStorage.removeItem(key); } catch { /* inaccessible intent stays fail-closed */ }
+    },
     async getTemplate(format, signal) { return download(`${root}/plantilla?formato=${format}`, `plantilla-productos.${format.toLowerCase()}`, signal); },
     async createImport(file, summary, signal) {
       const userId = session.snapshot?.().user?.id;
       if (!userId) throw new BulkRepositoryError("Inicia sesión antes de importar.", "configuration");
       const correlationId = summary?.correlationId ?? crypto.randomUUID();
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(correlationId)) throw new BulkRepositoryError("La correlación no es un UUID válido.", "configuration");
+      if (!summary?.expectedBatchId || summary.owner !== userId || !summary.contentHash || !/^[0-9a-f]{64}$/i.test(summary.contentHash)) throw new BulkRepositoryError("La identidad G7, el hash y el lote esperado no pertenecen a una intención API validada.", "configuration");
+      const actualHash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", await file.arrayBuffer()))].map(value => value.toString(16).padStart(2, "0")).join("");
+      if (actualHash !== summary.contentHash) throw new BulkRepositoryError("El archivo seleccionado no coincide con el hash de la intención persistida.", "configuration");
+      const batchDigest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${correlationId}:${actualHash}`)))].map(value => value.toString(16).padStart(2, "0")).join("");
+      const uuidValue = batchDigest.slice(0, 12) + "4" + batchDigest.slice(13, 16) + "8" + batchDigest.slice(17, 20) + batchDigest.slice(20, 32);
+      const computedBatchId = [uuidValue.slice(0, 8), uuidValue.slice(8, 12), uuidValue.slice(12, 16), uuidValue.slice(16, 20), uuidValue.slice(20)].join("-");
+      if (computedBatchId !== summary.expectedBatchId) throw new BulkRepositoryError("El batchId no coincide con la correlación, el hash ni el propietario actuales.", "configuration");
       if (!summary?.expectedBatchId) throw new BulkRepositoryError("Falta el batchId determinista persistido antes del envío.", "configuration");
       const intentKey = `g6:bulk:import-pending:${encodeURIComponent(userId)}:${encodeURIComponent(correlationId)}`;
       try {
         if (sessionStorage.getItem(intentKey)) throw new BulkRepositoryError("Esta importación tiene una intención previa pendiente. Se conserva su correlación y no se reenvió.", "unknown");
-        sessionStorage.setItem(intentKey, JSON.stringify({ userId, correlationId, at: Date.now() }));
+        sessionStorage.setItem(intentKey, JSON.stringify({ userId, correlationId, expectedBatchId: summary.expectedBatchId, contentHash: actualHash, state: "IN_FLIGHT", at: Date.now() }));
       } catch (error) {
         if (error instanceof BulkRepositoryError) throw error;
         throw new BulkRepositoryError("No se pudo persistir la correlación; no se envió la importación.", "unknown");
       }
       const form = new FormData(); form.append("archivo", file); form.append("template_version", "2");
       try {
-        const accepted = mapAccepted(await json(await send(`${root}/importaciones`, "POST", signal, form, false, correlationId), 202, signal));
+        const accepted = mapAccepted(await json(await send(`${root}/importaciones`, "POST", signal, form, false, correlationId, userId), 202, signal));
         if (accepted.batch_id !== summary.expectedBatchId) throw new BulkRepositoryError("El lote admitido no coincide con el batchId determinista; requiere verificación externa.", "unknown", 202, "BATCH_ID_MISMATCH");
         try { sessionStorage.removeItem(intentKey); } catch { /* accepted response retains the batch id in URL */ }
         return accepted;
       } catch (error) {
         if (error instanceof BulkRepositoryError && (error.category === "rejected" || error.category === "configuration")) { try { sessionStorage.removeItem(intentKey); } catch { /* preserve fail-closed intent */ } }
+        else { try { const marker = JSON.parse(sessionStorage.getItem(intentKey) ?? "{}"); sessionStorage.setItem(intentKey, JSON.stringify({ ...marker, state: "PENDING_RECONCILIATION" })); } catch { /* preserve fail-closed intent */ } }
         throw error;
       }
     },
-    async getImport(batchId, signal) {
-      try { return mapBatch(await json(await send(`${root}/importaciones/${encodeURIComponent(batchId)}`, "GET", signal), 200, signal)); }
+    async getImport(batchId, signal, expectedOwner) {
+      if (expectedOwner && session.snapshot?.().user?.id !== expectedOwner) throw new BulkRepositoryError("La sesión no corresponde al propietario original del lote.", "configuration");
+      try { return mapBatch(await json(await send(`${root}/importaciones/${encodeURIComponent(batchId)}`, "GET", signal, undefined, false, crypto.randomUUID(), expectedOwner), 200, signal)); }
       catch (error) { if (error instanceof BulkRepositoryError && error.status === 404 && error.code === "LOTE_NO_ENCONTRADO") return null; throw error; }
     },
     async getImportReport(batchId, signal) { return download(`${root}/importaciones/${encodeURIComponent(batchId)}/reporte`, `reporte-${batchId}.csv`, signal); },

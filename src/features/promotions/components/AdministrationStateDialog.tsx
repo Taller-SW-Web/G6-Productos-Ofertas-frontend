@@ -21,7 +21,7 @@ export function AdministrationStateDialog<T extends AdministrationRecord>({
   change: (status: "active" | "inactive", signal: AbortSignal) => Promise<T>;
   read: (signal: AbortSignal) => Promise<T | null>;
   onCancel: () => void;
-  onConfirmed: () => void;
+  onConfirmed: (outcome: "CONFIRMED" | "RECONCILED") => void;
 }) {
   const command = usePromotionCommand<T>();
   const [checking, setChecking] = useState(false);
@@ -46,7 +46,7 @@ export function AdministrationStateDialog<T extends AdministrationRecord>({
       setChecking(true);
       try {
         const result = await read(new AbortController().signal);
-        if (result?.status === target) onConfirmed();
+        if (result?.status === target) onConfirmed("RECONCILED");
         else
           setCheckError(
             "La consulta no confirmó el estado solicitado. No se repetirá automáticamente.",
@@ -58,7 +58,7 @@ export function AdministrationStateDialog<T extends AdministrationRecord>({
       }
     } else {
       const result = await command.run((signal) => change(target, signal));
-      if (result) onConfirmed();
+      if (result) onConfirmed(result.writeOutcome ?? "CONFIRMED");
     }
   };
   return (

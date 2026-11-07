@@ -4,7 +4,7 @@ import type { CharacteristicRepository } from "../services/characteristicReposit
 import type { BrandRepository } from "../services/brandRepository";
 import type { SeoRepository } from "../services/seoRepository";
 import type { CategoryNode, CategoryDetail, CategoryCreateInput, CategoryCreateResult, CategoryUpdateInput, SlugCheckResult, BajaSolicitudResult, ReactivacionResult, CharacteristicListItem, CharacteristicDetail, CharacteristicValue, BrandDetail, SeoCategory, HistorialSlugItem, OperationFollowUpResult } from "../types";
-import { taxonomySend, TaxonomyHttpError, taxonomyHttpStatus, taxonomyHttpCode } from "./taxonomyHttp";
+import { taxonomySend, TaxonomyHttpError, taxonomyHttpStatus, taxonomyHttpCode, reconcileConfirmedTaxonomyResource } from "./taxonomyHttp";
 
 const invalid = () => new Error("Respuesta administrativa de Taxonomía inválida.");
 type Row = Record<string, unknown>;
@@ -133,7 +133,7 @@ export function createHttpCategoryRepository(transport: TaxonomyGatewayTransport
 }
 
 export function createHttpCharacteristicRepository(transport: TaxonomyGatewayTransport): CharacteristicRepository {
-  const get = (path: string, signal?: AbortSignal) => send(transport, path, "GET", undefined, signal, 200);
+  const get = async (path: string, signal?: AbortSignal) => { const dto = await send(transport, path, "GET", undefined, signal, 200); await reconcileConfirmedTaxonomyResource(transport, path, dto); return dto; };
   const valueOperationParents = new Map<string, { caracteristicaId: string; valorId: string }>();
   return {
     async list(signal) {
@@ -190,7 +190,7 @@ export function createHttpBrandRepository(transport: TaxonomyGatewayTransport): 
     async list(signal) { const rows = await listAll(transport, "/api/v1/marcas/administracion", "marcaId", signal); const items: BrandDetail[] = rows.map(brandDetail); return { items: items.map(({ marcaId, nombre, estado, logoUrl, paisOrigenIso }) => ({ marcaId, nombre, estado, logoUrl, paisOrigenIso })) }; },
     async obtener(id, signal) { try { return brandDetail(await get(`/api/v1/marcas/${encodeURIComponent(id)}`, signal)); } catch (error) { if (httpStatus(error) === 404) return null; throw error; } },
     async crear(input, signal) { return send(transport, "/api/v1/marcas", "POST", form(input), signal, 201, brandDetail); },
-    async actualizar(input, signal) { try { const current = await this.obtener(input.marcaId, signal); if (!current) return null; return send(transport, `/api/v1/marcas/${encodeURIComponent(input.marcaId)}`, "PATCH", form({ ...input, version: current.version }), signal, 200, brandDetail); } catch (error) { if (httpStatus(error) === 404) return null; throw error; } },
+    async actualizar(input, signal) { try { const current = await this.obtener(input.marcaId, signal); if (!current) return null; const resourcePath = `/api/v1/marcas/${encodeURIComponent(input.marcaId)}`; const confirmed = await send(transport, resourcePath, "PATCH", form({ ...input, version: current.version }), signal, 200, brandDetail, false, { retainConfirmed: true, resourcePath, entity: "brand" }); try { await this.obtener(input.marcaId, signal); } catch { /* 2xx DTO remains confirmed; the marker protects only unreconciled presentation */ } return confirmed; } catch (error) { if (httpStatus(error) === 404) return null; throw error; } },
     async solicitarBaja(id, signal) { const operacionId = await send(transport, `/api/v1/marcas/${encodeURIComponent(id)}/desactivar`, "POST", undefined, signal, 202, value => str(row(value).operation_id)); return { resultado: "pendiente", mensaje: "Baja recibida; consulta su operación.", operacionId }; },
     async reactivar(id, signal) { try { return await send(transport, `/api/v1/marcas/${encodeURIComponent(id)}/reactivar`, "POST", undefined, signal, 200, brandDetail); } catch (error) { if (httpStatus(error) === 404) return null; throw error; } },
     async consultarResultadoBaja(operacionId, signal) { const dto = row(await get(`/api/v1/taxonomia/operaciones/${encodeURIComponent(operacionId)}`, signal)); const result = followup(dto); return { resultado: result.estado === "confirmada" ? "exito" : result.estado === "pendiente" ? "pendiente" : result.estado === "rechazada" ? "rechazada" : "no-concluyente", mensaje: result.mensaje, operacionId }; },
@@ -231,6 +231,6 @@ export function createHttpSeoRepository(transport: TaxonomyGatewayTransport): Se
 function httpStatus(error: unknown): number | undefined { return taxonomyHttpStatus(error); }
 function httpCode(error: unknown): string | undefined { return taxonomyHttpCode(error); }
 function httpError(status: number, code: string): Error { return new TaxonomyHttpError(status, code); }
-function send<T = unknown>(transport: TaxonomyGatewayTransport, path: string, method: "GET" | "POST" | "PATCH", body: unknown, signal: AbortSignal | undefined, expected: number, map?: (value: unknown) => T, semanticQuery = false, options?: { retainConfirmed?: boolean; resourcePath?: string }): Promise<T> {
+function send<T = unknown>(transport: TaxonomyGatewayTransport, path: string, method: "GET" | "POST" | "PATCH", body: unknown, signal: AbortSignal | undefined, expected: number, map?: (value: unknown) => T, semanticQuery = false, options?: { retainConfirmed?: boolean; resourcePath?: string; entity?: string }): Promise<T> {
   return taxonomySend(transport, path, method, signal, body, expected, map, semanticQuery, options);
 }

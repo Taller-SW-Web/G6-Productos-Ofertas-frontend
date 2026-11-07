@@ -1,6 +1,7 @@
 // Presentation models for administrative reading; these are not HTTP DTOs.
 export type CouponStatus = "active" | "inactive";
 export interface CouponView {
+  writeOutcome?: "RECONCILED";
   // Presentation warning after a confirmed write; never a backend state.
   relatedDataUnavailable?: boolean;
   relatedDataAccess?: "session" | "forbidden";

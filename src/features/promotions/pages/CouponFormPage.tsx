@@ -100,6 +100,14 @@ function CouponFormContent({ initial }: { initial: CouponView | null }) {
     navigate(initial ? `/cupones/${initial.id}${suffix}` : `/cupones${suffix}`);
   if (form.confirmed) {
     const next = clearTransientParams(params);
+    if (form.confirmed.writeOutcome === "RECONCILED") return (
+      <Stack gap="lg">
+        <PageHeader title={`Cupón — ${form.confirmed.code}`} />
+        <FeedbackAlert semantic="warning" title="Estado final conciliado">La lectura contractual coincide con la configuración esperada. Esto verifica el estado observado, no atribuye su autoría a la solicitud anterior.</FeedbackAlert>
+        <CouponSummary coupon={form.confirmed} />
+        <Button component={Link} to={`/cupones/${form.confirmed.id}?${next.toString()}`}>Consultar detalle</Button>
+      </Stack>
+    );
     if (form.confirmed.relatedDataUnavailable)
       return (
         <Stack gap="lg">

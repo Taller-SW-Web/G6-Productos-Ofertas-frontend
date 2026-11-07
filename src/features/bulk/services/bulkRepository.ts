@@ -19,14 +19,17 @@ export interface BulkRepository {
 
   createImport(
     file: File,
-    localSummary?: { detectedRows?: number; correlationId?: string; expectedBatchId?: string },
+    localSummary?: { detectedRows?: number; correlationId?: string; expectedBatchId?: string; owner?: string; contentHash?: string },
     signal?: AbortSignal,
   ): Promise<BulkImportBatch>;
 
   getImport(
     batchId: string,
     signal?: AbortSignal,
+    expectedOwner?: string,
   ): Promise<BulkImportBatch | null>;
+
+  confirmRecoveredImport?(batchId: string, owner: string, correlationId: string): void;
 
   getImportReport(
     batchId: string,

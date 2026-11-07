@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button, Group, Stack } from "@mantine/core";
 import {
@@ -23,6 +23,8 @@ export function BulkReviewPage() {
   const isSubmittingRef = useRef(false);
   const pageIsActiveRef = useRef(true);
   const recoveryKeyRef = useRef<string | null>(null);
+  const recoveryControllerRef = useRef<AbortController | null>(null);
+  const [recoveryStatus, setRecoveryStatus] = useState<"idle" | "loading" | "not_found" | "unauthorized" | "forbidden" | "unavailable">("idle");
   const {
     selectedFile,
     fileCheck,
@@ -31,6 +33,7 @@ export function BulkReviewPage() {
     expectedBatchId,
     confirmRecoveredBatch,
     recoveryOwnerIsCurrent,
+    recoveryOwnerId,
     beginAdmission,
     finishAdmission,
     submissionError,
@@ -47,14 +50,46 @@ export function BulkReviewPage() {
     if (admissionStatus !== "uncertain" || !expectedBatchId || !recoveryOwnerIsCurrent() || recoveryKeyRef.current === expectedBatchId) return;
     recoveryKeyRef.current = expectedBatchId;
     const controller = new AbortController();
-    void bulkRepository.getImport(expectedBatchId, controller.signal).then(batch => {
+    recoveryControllerRef.current?.abort();
+    recoveryControllerRef.current = controller;
+    setRecoveryStatus("loading");
+    void bulkRepository.getImport(expectedBatchId, controller.signal, recoveryOwnerId() ?? undefined).then(batch => {
       if (controller.signal.aborted || !pageIsActiveRef.current || !recoveryOwnerIsCurrent()) return;
       if (batch?.batch_id === expectedBatchId && confirmRecoveredBatch(expectedBatchId)) {
+        const owner = recoveryOwnerId();
+        if (owner && pendingCorrelationId) bulkRepository.confirmRecoveredImport?.(expectedBatchId, owner, pendingCorrelationId);
+        setRecoveryStatus("idle");
         navigate(`/carga-masiva/importaciones/${batch.batch_id}`);
-      }
-    }).catch(() => { /* uncertainty remains persisted; no write is retried */ });
-    return () => controller.abort();
-  }, [admissionStatus, bulkRepository, confirmRecoveredBatch, expectedBatchId, navigate, recoveryOwnerIsCurrent]);
+      } else setRecoveryStatus("not_found");
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted) return;
+      const status = error instanceof BulkRepositoryError ? error.status : undefined;
+      setRecoveryStatus(status === 401 ? "unauthorized" : status === 403 ? "forbidden" : "unavailable");
+    });
+    return () => { controller.abort(); if (recoveryControllerRef.current === controller) recoveryControllerRef.current = null; };
+  }, [admissionStatus, bulkRepository, confirmRecoveredBatch, expectedBatchId, navigate, pendingCorrelationId, recoveryOwnerId, recoveryOwnerIsCurrent]);
+
+  const recheckImport = async () => {
+    if (!expectedBatchId || !recoveryOwnerIsCurrent() || recoveryStatus === "loading") return;
+    const controller = new AbortController();
+    recoveryControllerRef.current?.abort();
+    recoveryControllerRef.current = controller;
+    setRecoveryStatus("loading");
+    try {
+      const batch = await bulkRepository.getImport(expectedBatchId, controller.signal, recoveryOwnerId() ?? undefined);
+      if (controller.signal.aborted || !pageIsActiveRef.current || !recoveryOwnerIsCurrent()) return;
+      if (batch?.batch_id === expectedBatchId && confirmRecoveredBatch(expectedBatchId)) {
+        const owner = recoveryOwnerId();
+        if (owner && pendingCorrelationId) bulkRepository.confirmRecoveredImport?.(expectedBatchId, owner, pendingCorrelationId);
+        setRecoveryStatus("idle");
+        navigate(`/carga-masiva/importaciones/${batch.batch_id}`);
+      } else setRecoveryStatus("not_found");
+    } catch (error: unknown) {
+      if (controller.signal.aborted) return;
+      const status = error instanceof BulkRepositoryError ? error.status : undefined;
+      setRecoveryStatus(status === 401 ? "unauthorized" : status === 403 ? "forbidden" : "unavailable");
+    }
+  };
 
   // If page is accessed directly without selecting a file
   if (!selectedFile || !fileCheck) {
@@ -97,6 +132,11 @@ export function BulkReviewPage() {
         const batch = await bulkRepository.createImport(selectedFile, {
           detectedRows: fileCheck.detectedRows,
           correlationId: task.correlationId,
+          ...(task.expectedBatchId && task.owner && task.contentHash ? {
+            expectedBatchId: task.expectedBatchId,
+            owner: task.owner,
+            contentHash: task.contentHash,
+          } : {}),
         });
         const isCurrentAdmission = finishAdmission(task, "accepted");
         if (isCurrentAdmission && pageIsActiveRef.current && task.isCurrent()) {
@@ -175,6 +215,11 @@ export function BulkReviewPage() {
               <>
                 <div>Se consulta el batchId determinista. Si el GET devuelve 404, el resultado sigue sin acreditarse y no se reenvía el archivo.</div>
                 {pendingCorrelationId && <div>Correlación recuperada: {pendingCorrelationId}</div>}
+                {recoveryStatus === "not_found" && <div>GET 404: lote no localizado; la admisión original permanece incierta.</div>}
+                {recoveryStatus === "unauthorized" && <div>La sesión expiró. Inicia sesión con el propietario original antes de consultar.</div>}
+                {recoveryStatus === "forbidden" && <div>La identidad original no tiene permiso para consultar el lote.</div>}
+                {recoveryStatus === "unavailable" && <div>La consulta no está disponible; la intención sigue protegida.</div>}
+                <Button variant="outline" onClick={() => void recheckImport()} loading={recoveryStatus === "loading"} disabled={!recoveryOwnerIsCurrent()}>Volver a consultar lote</Button>
               </>
             )}
           </FeedbackAlert>
@@ -182,7 +227,7 @@ export function BulkReviewPage() {
 
         {admissionAlreadyAccepted && (
           <FeedbackAlert semantic="success" title="Archivo ya admitido">
-            Este archivo ya fue admitido. Selecciona un archivo nuevo para iniciar otra importación.
+            Este archivo ya fue admitido. No se enviará otra importación para el mismo archivo e identidad.
           </FeedbackAlert>
         )}
 
@@ -196,6 +241,13 @@ export function BulkReviewPage() {
             disabled={admissionPending}
           >
             Volver
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => expectedBatchId && navigate(`/carga-masiva/importaciones/${expectedBatchId}`)}
+            disabled={!admissionAlreadyAccepted || !expectedBatchId || !recoveryOwnerIsCurrent()}
+          >
+            Continuar seguimiento
           </Button>
           <Button
             leftSection={<IconCheck size={18} stroke={2} aria-hidden="true" />}

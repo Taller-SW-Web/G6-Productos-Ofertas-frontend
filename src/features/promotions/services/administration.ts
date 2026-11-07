@@ -9,6 +9,7 @@ export interface AdministrationRecord {
   id: string;
   name: string;
   status: CouponStatus;
+  writeOutcome?: "RECONCILED";
 }
 export interface AdministrationPage<T> {
   items: T[];

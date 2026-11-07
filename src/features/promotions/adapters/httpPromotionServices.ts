@@ -42,6 +42,8 @@ class HttpFailure extends Error {
     super("PROMOTIONS_HTTP_FAILED");
   }
 }
+class PromotionSessionChanged extends Error { constructor(readonly dispatched: boolean) { super("PROMOTION_SESSION_CHANGED"); } }
+class PromotionConfirmedForPreviousSession extends Error { constructor() { super("PROMOTION_CONFIRMED_FOR_PREVIOUS_SESSION"); } }
 const record = (v: unknown): Record<string, unknown> => {
   if (!v || typeof v !== "object" || Array.isArray(v))
     throw new Error("INVALID_RESPONSE");
@@ -302,6 +304,7 @@ export function createHttpPromotionServices(
     body?: unknown,
   ): Promise<unknown> {
     signal.throwIfAborted();
+    const owner = options.scopeId?.() ?? null;
     const bounded = AbortSignal.any([signal, AbortSignal.timeout(7500)]);
     async function sessionToken(work: () => Promise<string | null>) {
       let abort = () => {};
@@ -321,6 +324,7 @@ export function createHttpPromotionServices(
     }
     const token = await sessionToken(() => options.getAccessToken(bounded));
     bounded.throwIfAborted();
+    if ((options.scopeId?.() ?? null) !== owner) throw new PromotionSessionChanged(false);
     if (!token || /[\r\n]/.test(token)) throw new HttpFailure(401);
     const send = (accessToken: string) =>
       fetch(origin + "/api/v1" + path, {
@@ -337,6 +341,7 @@ export function createHttpPromotionServices(
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
     let response = await send(token);
+    if ((options.scopeId?.() ?? null) !== owner) throw new PromotionSessionChanged(true);
     if (response.status === 401 && options.refreshAccessToken) {
       let code: unknown;
       try {
@@ -352,6 +357,7 @@ export function createHttpPromotionServices(
           bounded.throwIfAborted();
           if (renewed && !/[\r\n]/.test(renewed)) {
             response = await send(renewed);
+            if ((options.scopeId?.() ?? null) !== owner) throw new PromotionSessionChanged(true);
             if (response.status === 401)
               options.invalidateAccessToken?.(renewed);
           }
@@ -363,7 +369,9 @@ export function createHttpPromotionServices(
       }
     }
     if (!response.ok) throw new HttpFailure(response.status);
-    return response.json();
+    const payload = await response.json();
+    if ((options.scopeId?.() ?? null) !== owner) throw new PromotionSessionChanged(true);
+    return payload;
   }
   async function read<T>(
     work: () => Promise<T>,
@@ -372,6 +380,7 @@ export function createHttpPromotionServices(
     try {
       return await work();
     } catch (e) {
+      if (e instanceof PromotionSessionChanged) throw new CouponReadError("session", "La sesión cambió durante la consulta; vuelve a consultar con la identidad actual.");
       if (e instanceof CouponReadError) throw e;
       if (e instanceof HttpFailure && missing && e.status === 404) return null;
       throw new CouponReadError(
@@ -388,30 +397,58 @@ export function createHttpPromotionServices(
       );
     }
   }
-  async function write<T>(intent: string, work: () => Promise<T>, coupon = false): Promise<T> {
+  type WriteEvidence = { entity: "coupon" | "campaign" | "recommendation"; operation: "create" | "update" | "status"; resourceId?: string; naturalCode?: string; payload?: unknown; changedFields?: string[]; baseline?: unknown; expectedState?: unknown; correlationId: string };
+  async function write<T>(intent: string, work: () => Promise<T>, coupon = false, evidence?: Omit<WriteEvidence, "correlationId">, reconcile?: (evidence: WriteEvidence) => Promise<T | null>): Promise<T> {
     const owner = options.scopeId?.();
     if (!owner) throw coupon ? new CouponWriteError("access", "Inicia sesión para modificar cupones.") : new AdministrationError("access", "Inicia sesión para modificar promociones.");
     const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${owner}\u0000${intent}`)))].map(value => value.toString(16).padStart(2, "0")).join("");
     const key = `g6:promotions:uncertain:v1:${digest}`;
+    let previous: string | null;
     try {
-      const previous = sessionStorage.getItem(key);
-      if (previous !== null) {
-        const marker = JSON.parse(previous) as { owner?: string; intent?: string };
-        if (marker.owner !== owner || marker.intent !== intent) throw new Error("Marcador de escritura incompatible.");
-        throw new Error("La intención previa sigue sin reconciliación; no se reenvió.");
+      previous = sessionStorage.getItem(key);
+    } catch {
+      throw coupon ? new CouponWriteError("unknown", "El marcador persistente es inaccesible; se bloquea el reenvío.") : new AdministrationError("unknown", "El marcador persistente es inaccesible; se bloquea el reenvío.");
+    }
+    if (previous !== null) {
+      let marker: { owner?: string; intent?: string; state?: string; evidence?: WriteEvidence };
+      try { marker = JSON.parse(previous) as typeof marker; }
+      catch { throw coupon ? new CouponWriteError("unknown", "El marcador está corrupto; se bloquea el reenvío.") : new AdministrationError("unknown", "El marcador está corrupto; se bloquea el reenvío."); }
+      if (marker.owner !== owner || marker.intent !== intent) throw coupon ? new CouponWriteError("unknown", "La identidad del marcador no coincide; se bloquea el reenvío.") : new AdministrationError("unknown", "La identidad del marcador no coincide; se bloquea el reenvío.");
+      if (reconcile && marker.evidence) {
+        let recovered: T | null;
+        try { recovered = await reconcile(marker.evidence); }
+        catch (error) {
+          if (error instanceof HttpFailure && (error.status === 401 || error.status === 403)) throw coupon ? new CouponWriteError("access", "Tu sesión o permiso no permite consultar el resultado pendiente.") : new AdministrationError("access", "Tu sesión o permiso no permite consultar el resultado pendiente.");
+          throw coupon ? new CouponWriteError("unknown", "No se pudo consultar la intención anterior; permanece bloqueada.") : new AdministrationError("unknown", "No se pudo consultar la intención anterior; permanece bloqueada.");
+        }
+        if (recovered !== null) {
+          try { sessionStorage.removeItem(key); } catch { /* authoritative final state was observed */ }
+          const sameIntent = evidence && marker.evidence.entity === evidence.entity && marker.evidence.operation === evidence.operation && marker.evidence.resourceId === evidence.resourceId && marker.evidence.naturalCode === evidence.naturalCode && JSON.stringify(marker.evidence.payload) === JSON.stringify(evidence.payload) && JSON.stringify(marker.evidence.expectedState) === JSON.stringify(evidence.expectedState);
+          if (!sameIntent) throw coupon ? new CouponWriteError("conflict", "La intención anterior fue conciliada; esta propuesta distinta no se envió. Consulta el estado actual antes de confirmarla explícitamente.") : new AdministrationError("conflict", "La intención anterior fue conciliada; esta propuesta distinta no se envió. Consulta el estado actual antes de confirmarla explícitamente.");
+          if (typeof recovered === "object" && recovered !== null) Object.assign(recovered, { writeOutcome: "RECONCILED" });
+          return recovered;
+        }
       }
-      sessionStorage.setItem(key, JSON.stringify({ owner, intent }));
+      throw coupon ? new CouponWriteError("unknown", "La intención previa sigue sin reconciliación; no se reenvió.") : new AdministrationError("unknown", "La intención previa sigue sin reconciliación; no se reenvió.");
+    }
+    try {
+      const evidenceRecord: WriteEvidence | undefined = evidence ? { ...evidence, correlationId: crypto.randomUUID() } : undefined;
+      sessionStorage.setItem(key, JSON.stringify({ owner, intent, state: "IN_FLIGHT", evidence: evidenceRecord }));
     } catch (error) {
       throw coupon ? new CouponWriteError("unknown", error instanceof Error ? error.message : "No se pudo proteger la escritura.") : new AdministrationError("unknown", error instanceof Error ? error.message : "No se pudo proteger la escritura.");
     }
     try {
       const result = await work();
+      if (options.scopeId?.() !== owner) {
+        try { const marker = JSON.parse(sessionStorage.getItem(key) ?? "{}"); sessionStorage.setItem(key, JSON.stringify({ ...marker, state: "CONFIRMED" })); } catch { /* keep the pre-dispatch marker */ }
+        throw new PromotionConfirmedForPreviousSession();
+      }
       try { sessionStorage.removeItem(key); } catch { /* response mapped; marker remains fail-closed */ }
       return result;
     } catch (e) {
       const status = e instanceof HttpFailure ? e.status : 0;
       const kind =
-        status === 401 || status === 403
+        e instanceof PromotionConfirmedForPreviousSession || (e instanceof PromotionSessionChanged && !e.dispatched) || (e instanceof CouponReadError && (e.kind === "session" || e.kind === "forbidden")) || status === 401 || status === 403
           ? "access"
           : status === 409
             ? "conflict"
@@ -430,7 +467,9 @@ export function createHttpPromotionServices(
               : kind === "rejected"
                 ? "El registro ya no está disponible."
                 : "No pudimos confirmar el resultado. Consulta el registro antes de volver a guardar.";
-      if (kind !== "unknown") { try { sessionStorage.removeItem(key); } catch { /* retain fail-closed */ } }
+      if (e instanceof PromotionConfirmedForPreviousSession) { /* confirmed marker remains in the original identity scope */ }
+      else if (kind === "unknown") { try { const marker = JSON.parse(sessionStorage.getItem(key) ?? "{}"); const external = marker.evidence?.operation === "create" && ["campaign", "recommendation"].includes(marker.evidence?.entity); sessionStorage.setItem(key, JSON.stringify({ ...marker, state: external ? "REQUIRES_EXTERNAL_VERIFICATION" : "PENDING_RECONCILIATION" })); } catch { /* preserve the initial marker */ } }
+      else { try { const marker = JSON.parse(sessionStorage.getItem(key) ?? "{}"); sessionStorage.setItem(key, JSON.stringify({ ...marker, state: "REJECTED" })); sessionStorage.removeItem(key); } catch { /* retain fail-closed */ } }
       throw coupon ? new CouponWriteError(kind, message) : new AdministrationError(kind, message);
     }
   }
@@ -464,6 +503,7 @@ export function createHttpPromotionServices(
     save: async (id, d, s) => {
       const body = campaignDto(d);
       const digest = id ? "" : [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(body))))].map(value => value.toString(16).padStart(2, "0")).join("");
+      const baseline = id ? campaignSnapshots.get(id) : undefined;
       return write(id ? `campaign:${id}` : `campaign:create:${digest}`, async () => {
         if (id) {
           const previous = campaignSnapshots.get(id);
@@ -478,7 +518,10 @@ export function createHttpPromotionServices(
           );
         }
         return mapCampaign(await request("/promociones", s, "POST", body));
-      });
+      }, false, { entity: "campaign", operation: id ? "update" : "create", ...(id ? { resourceId: id } : {}), payload: body, changedFields: id && baseline ? Object.keys(changes(body, campaignDto(baseline))) : Object.keys(body), baseline, expectedState: d }, id ? async saved => {
+        const observed = mapCampaign(await request("/promociones/" + encodeURIComponent(id), s));
+        return observed.id === saved.resourceId && JSON.stringify(observed.configuration) === JSON.stringify(saved.expectedState) ? observed : null;
+      } : undefined);
     },
     changeStatus: (id, status, s) =>
       write(`campaign:${id}` , () =>
@@ -488,7 +531,9 @@ export function createHttpPromotionServices(
             (status === "active" ? "/activar" : "/desactivar"),
           s,
           "POST",
-        ).then(mapCampaign),
+        ).then(mapCampaign), false,
+        { entity: "campaign", operation: "status", resourceId: id, expectedState: status },
+        async saved => { const observed = mapCampaign(await request("/promociones/" + encodeURIComponent(id), s)); return observed.id === saved.resourceId && observed.status === saved.expectedState ? observed : null; },
       ),
   };
   const recommendations: PromotionServices["recommendations"] = {
@@ -509,6 +554,7 @@ export function createHttpPromotionServices(
     save: async (id, d, s) => {
       const body = recommendationDto(d);
       const digest = id ? "" : [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(body))))].map(value => value.toString(16).padStart(2, "0")).join("");
+      const baseline = id ? ruleSnapshots.get(id) : undefined;
       return write(id ? `recommendation:${id}` : `recommendation:create:${digest}`, async () => {
         if (id) {
           const previous = ruleSnapshots.get(id);
@@ -525,7 +571,10 @@ export function createHttpPromotionServices(
         return mapRule(
           await request("/recomendaciones/reglas", s, "POST", body),
         );
-      });
+      }, false, { entity: "recommendation", operation: id ? "update" : "create", ...(id ? { resourceId: id } : {}), payload: body, changedFields: id && baseline ? Object.keys(changes(recommendationDto(d), recommendationDto(baseline))) : Object.keys(body), baseline, expectedState: d }, id ? async saved => {
+        const observed = mapRule(await request("/recomendaciones/reglas/" + encodeURIComponent(id), s));
+        return observed.id === saved.resourceId && JSON.stringify(observed.configuration) === JSON.stringify(saved.expectedState) ? observed : null;
+      } : undefined);
     },
     changeStatus: (id, status, s) =>
       write(`recommendation:${id}`, () =>
@@ -535,7 +584,9 @@ export function createHttpPromotionServices(
             (status === "active" ? "/activar" : "/desactivar"),
           s,
           "POST",
-        ).then(mapRule),
+        ).then(mapRule), false,
+        { entity: "recommendation", operation: "status", resourceId: id, expectedState: status },
+        async saved => { const observed = mapRule(await request("/recomendaciones/reglas/" + encodeURIComponent(id), s)); return observed.id === saved.resourceId && observed.status === saved.expectedState ? observed : null; },
       ),
   };
   function coupon(v: unknown): CouponView {
@@ -608,10 +659,47 @@ export function createHttpPromotionServices(
     method: string,
     body?: unknown,
   ): Promise<CouponView> {
+    const sent = body && typeof body === "object" ? body as Record<string, unknown> : {};
+    const segments = path.split("/").filter(Boolean);
+    const isCreate = method === "POST" && segments.length === 1;
+    const resourceId = !isCreate && segments.length >= 2 ? decodeURIComponent(segments[1]!) : undefined;
+    const statusSuffix = segments[2];
+    const expectedStatus = typeof sent.estado === "string" ? choice(sent.estado, { ACTIVO: "active", INACTIVO: "inactive" }) : statusSuffix === "activar" ? "active" : statusSuffix === "desactivar" ? "inactive" : undefined;
+    const expectedCode = typeof sent.codigo === "string" ? sent.codigo.trim().toUpperCase() : undefined;
+    const matches = (found: CouponView, saved: Record<string, unknown>, code: string | undefined, savedStatus: unknown): boolean => {
+      const decimal = (value: string | null | undefined) => { if (value == null || value.trim() === "") return null; const [whole, fraction = ""] = value.trim().replace(",", ".").split("."); return `${whole!.replace(/^0+(?=\d)/, "")}.${fraction.replace(/0+$/, "") || "0"}`; };
+      return (!code || found.code.toUpperCase() === code) &&
+        (savedStatus === undefined || found.status === savedStatus) &&
+        (saved.promocionId === undefined || found.promotionId === saved.promocionId) &&
+        (saved.maxUsosGlobal === undefined || found.globalLimit === saved.maxUsosGlobal) &&
+        (saved.maxUsosPorCliente === undefined || found.customerLimit === saved.maxUsosPorCliente) &&
+        (saved.montoMinimo === undefined || decimal(found.minimumAmount) === decimal(saved.montoMinimo === null ? null : String(saved.montoMinimo))) &&
+        (saved.politicaCancelacion === undefined || found.cancellationPolicy === (saved.politicaCancelacion === "RESTAURAR_EN_CANCELACION" ? "restore" : "keep"));
+    };
+    const reconcile = async (savedEvidence: WriteEvidence): Promise<CouponView | null> => {
+      const saved = savedEvidence.payload && typeof savedEvidence.payload === "object" ? savedEvidence.payload as Record<string, unknown> : {};
+      const savedCode = savedEvidence.naturalCode;
+      const savedStatus = savedEvidence.expectedState && typeof savedEvidence.expectedState === "object" ? (savedEvidence.expectedState as Record<string, unknown>).status : undefined;
+      if (savedEvidence.operation === "create" && savedCode) {
+        for (let pageNumber = 1; pageNumber <= 1000; pageNumber++) {
+          const pageResult = page(await request("/cupones?" + query({ status: "all", page: pageNumber, pageSize: 100 }), signal), coupon);
+          if (pageResult.page !== pageNumber) throw new Error("INVALID_PAGE");
+          const found = pageResult.items.find(item => item.code.toUpperCase() === savedCode);
+          if (found) return matches(found, saved, savedCode, savedStatus) ? found : null;
+          if (!pageResult.items.length || pageNumber * 100 >= pageResult.total) return null;
+        }
+        throw new Error("COUPON_PAGE_LIMIT");
+      }
+      if (!savedEvidence.resourceId) return null;
+      try { const found = coupon(await request("/cupones/" + encodeURIComponent(savedEvidence.resourceId), signal)); return found.id === savedEvidence.resourceId && matches(found, saved, savedCode, savedStatus) ? found : null; }
+      catch (error) { if (error instanceof HttpFailure && error.status === 404) return null; throw error; }
+    };
     const confirmed = await write(
-      `coupon:${path}`,
+      isCreate ? `coupon:create:${expectedCode ?? "missing-code"}` : `coupon:resource:${resourceId ?? path}`,
       async () => coupon(await request(path, signal, method, body)),
       true,
+      { entity: "coupon", operation: isCreate ? "create" : expectedStatus ? "status" : "update", ...(resourceId ? { resourceId } : {}), ...(expectedCode ? { naturalCode: expectedCode } : {}), payload: body, changedFields: Object.keys(sent), expectedState: { status: expectedStatus, code: expectedCode } },
+      reconcile,
     );
     try {
       return await enrichCoupon(confirmed, signal);

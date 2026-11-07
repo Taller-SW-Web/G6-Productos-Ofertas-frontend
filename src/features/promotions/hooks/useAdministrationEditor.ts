@@ -83,7 +83,7 @@ export function useAdministrationEditor<T extends AdministrationRecord, D>(
           unknown &&
           JSON.stringify(draftOf(result)) === JSON.stringify(draft)
         )
-          setConfirmed(result);
+          setConfirmed({ ...result, writeOutcome: "RECONCILED" });
         else
           setRecoveryMessage(
             "Registro actual consultado. Tu propuesta se conserva para revisarla antes de guardar.",

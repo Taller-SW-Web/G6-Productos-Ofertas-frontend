@@ -41,7 +41,8 @@ export function RecommendationDetailPage({
   } = usePromotionServices();
   const [revision, setRevision] = useState(0),
     [opened, setOpened] = useState(false),
-    [updated, setUpdated] = useState(false);
+    [updated, setUpdated] = useState(false),
+    [statusReconciled, setStatusReconciled] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null),
     location = useLocation(),
     navigate = useNavigate();
@@ -123,14 +124,14 @@ export function RecommendationDetailPage({
         {catalog.status === "success" && catalog.result.errors.length > 0 && <FeedbackAlert semantic="warning" title="Referencias auxiliares parciales">La información de productos y categorías se consultó por separado; la fuente disponible se conserva.</FeedbackAlert>}
         {catalog.status === "success" && catalog.result.accessErrors.length > 0 && <FeedbackAlert semantic="error" title="Autorización requerida para referencias">Una consulta respondió con error de sesión o permisos; la referencia no se presenta como una lista vacía.</FeedbackAlert>}
         {location.state?.saved && (
-          <FeedbackAlert semantic="success" title="Regla guardada">
-            La configuración fue confirmada.
-          </FeedbackAlert>
+          location.state?.reconciled
+            ? <FeedbackAlert semantic="warning" title="Estado final conciliado">La lectura administrativa coincide con los campos esperados. Esto acredita el estado observado, no que la solicitud anterior haya sido su causa.</FeedbackAlert>
+            : <FeedbackAlert semantic="success" title="Regla guardada">La configuración fue confirmada.</FeedbackAlert>
         )}
         {updated && (
-          <FeedbackAlert semantic="success" title="Estado actualizado">
-            El cambio fue confirmado y los candidatos se conservan.
-          </FeedbackAlert>
+          statusReconciled
+            ? <FeedbackAlert semantic="warning" title="Estado final conciliado">El estado solicitado se observa en la lectura administrativa; no se atribuye a la petición original. Los candidatos se conservan.</FeedbackAlert>
+            : <FeedbackAlert semantic="success" title="Estado actualizado">El cambio fue confirmado y los candidatos se conservan.</FeedbackAlert>
         )}
         {state.status === "loading" && (
           <Text role="status">Consultando regla…</Text>
@@ -233,9 +234,10 @@ export function RecommendationDetailPage({
                 confirmedServices.recommendations.read(ruleId, signal)
               }
               onCancel={close}
-              onConfirmed={() => {
+              onConfirmed={(outcome) => {
                 close();
                 setUpdated(true);
+                setStatusReconciled(outcome === "RECONCILED");
                 setRevision((value) => value + 1);
               }}
             />

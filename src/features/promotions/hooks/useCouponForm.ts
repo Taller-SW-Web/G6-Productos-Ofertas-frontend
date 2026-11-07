@@ -91,7 +91,7 @@ export function useCouponForm(
       const result = initial
         ? await confirmedRepository.read(initial.id, controller.signal)
         : await findCoupon(confirmedRepository, proposal.code, controller.signal);
-      if (result && couponMatchesInput(result, proposal)) setConfirmed(result);
+      if (result && couponMatchesInput(result, proposal)) setConfirmed({ ...result, writeOutcome: "RECONCILED" });
       else
         setRecoveryMessage(
           "La consulta no confirma tu propuesta. Conservamos el borrador; revisa el registro antes de iniciar otro guardado.",

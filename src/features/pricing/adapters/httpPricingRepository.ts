@@ -57,18 +57,31 @@ const pageSize = 20;
 
 type UpdateConfirmation = Pick<
   PriceView,
-  "version" | "regular" | "offer" | "currency" | "channel" | "origin"
-> & { productId: string };
+  "id" | "sku" | "version" | "regular" | "offer" | "currency" | "channel" | "origin"
+> & { productId: string; owner: string; targetKind: PriceTarget["kind"]; channelId: string | null };
 
 function confirmsUpdate(price: PriceView, expected: UpdateConfirmation): boolean {
   return (
+    price.id === expected.id && price.sku === expected.sku &&
     price.version > expected.version &&
-    price.regular === expected.regular &&
-    price.offer === expected.offer &&
+    sameMoney(price.regular, expected.regular) &&
+    (price.offer === null || expected.offer === null ? price.offer === expected.offer : sameMoney(price.offer, expected.offer)) &&
     price.currency === expected.currency &&
     price.channel === expected.channel &&
     price.origin === expected.origin
   );
+}
+
+function sameMoney(left: string, right: string): boolean {
+  try {
+    const toCents = (value: string) => {
+      if (!/^\d+(?:\.\d{1,2})?$/.test(value)) return null;
+      const [whole = "0", fraction = ""] = value.split(".");
+      return BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
+    };
+    const a = toCents(left), b = toCents(right);
+    return a !== null && b !== null && a === b;
+  } catch { return false; }
 }
 
 function blocked(message: string): PricingFailure {
@@ -118,8 +131,11 @@ export function createHttpPricingRepository(
   const markerKey = (key: string, operation: "update" | "schedule") =>
     markerPrefix + operation + ":" + encodeURIComponent(key);
   const persistMarker = (key: string, operation: "update" | "schedule", expected: unknown) => {
-    try { sessionStorage.setItem(markerKey(key, operation), JSON.stringify({ key, operation, expected })); }
+    try { sessionStorage.setItem(markerKey(key, operation), JSON.stringify({ key, operation, expected, state: "IN_FLIGHT" })); }
     catch { throw new PricingFailure("unknown", "No se pudo persistir de forma segura la intención de Pricing; no se envió la escritura."); }
+  };
+  const setMarkerState = (key: string, operation: "update" | "schedule", state: "PENDING_RECONCILIATION" | "REQUIRES_EXTERNAL_VERIFICATION") => {
+    try { const storageKey = markerKey(key, operation); const marker = JSON.parse(sessionStorage.getItem(storageKey) ?? "null") as Record<string, unknown> | null; if (marker?.key === key && marker.operation === operation) sessionStorage.setItem(storageKey, JSON.stringify({ ...marker, state })); } catch { /* an unreadable marker remains fail-closed */ }
   };
   const readMarker = (key: string, operation: "update" | "schedule"):
     | { state: "absent" }
@@ -130,11 +146,11 @@ export function createHttpPricingRepository(
     catch { return { state: "inaccessible" }; }
     if (raw === null) return { state: "absent" };
     try {
-      const marker = JSON.parse(raw) as { key?: unknown; operation?: unknown; expected?: unknown };
-      if (marker.key !== key || marker.operation !== operation || !marker.expected || typeof marker.expected !== "object") return { state: "corrupt" };
+      const marker = JSON.parse(raw) as { key?: unknown; operation?: unknown; expected?: unknown; state?: unknown };
+      if (marker.key !== key || marker.operation !== operation || !marker.expected || typeof marker.expected !== "object" || !["IN_FLIGHT", "PENDING_RECONCILIATION", "REQUIRES_EXTERNAL_VERIFICATION"].includes(String(marker.state))) return { state: "corrupt" };
       const expected = marker.expected as Record<string, unknown>;
-      if (operation === "update" && (typeof expected.productId !== "string" || typeof expected.version !== "number" || typeof expected.regular !== "string" || ![null, "string"].includes(typeof expected.offer) && expected.offer !== null || typeof expected.currency !== "string" || typeof expected.channel !== "string" || typeof expected.origin !== "string")) return { state: "corrupt" };
-      if (operation === "schedule" && (typeof expected.channel !== "string" || typeof expected.kind !== "string" || typeof expected.amount !== "string" || typeof expected.currency !== "string" || typeof expected.start !== "number" || !(typeof expected.end === "number" || expected.end === null))) return { state: "corrupt" };
+      if (operation === "update" && (typeof expected.productId !== "string" || typeof expected.id !== "string" || typeof expected.owner !== "string" || expected.owner !== (dependencies.scopeId?.() ?? "session-unavailable") || (expected.targetKind !== "product" && expected.targetKind !== "variant") || !(typeof expected.channelId === "string" || expected.channelId === null) || typeof expected.version !== "number" || typeof expected.regular !== "string" || ![null, "string"].includes(typeof expected.offer) && expected.offer !== null || typeof expected.currency !== "string" || typeof expected.channel !== "string" || typeof expected.origin !== "string" || (expected.sku !== undefined && typeof expected.sku !== "string"))) return { state: "corrupt" };
+      if (operation === "schedule" && (typeof expected.owner !== "string" || expected.owner !== (dependencies.scopeId?.() ?? "session-unavailable") || typeof expected.targetId !== "string" || (expected.targetKind !== "product" && expected.targetKind !== "variant") || !(typeof expected.channelId === "string" || expected.channelId === null) || typeof expected.channel !== "string" || typeof expected.kind !== "string" || typeof expected.amount !== "string" || typeof expected.currency !== "string" || typeof expected.start !== "number" || !(typeof expected.end === "number" || expected.end === null) || !Array.isArray(expected.baselineIds) || expected.baselineIds.some(id => typeof id !== "string"))) return { state: "corrupt" };
       return { state: "valid", expected: expected as UpdateConfirmation | Record<string, unknown> };
     } catch { return { state: "corrupt" }; }
   };
@@ -295,6 +311,24 @@ export function createHttpPricingRepository(
     }
   }
 
+  async function readAllSchedules(target: PriceTarget, signal: AbortSignal): Promise<ScheduleView[]> {
+    const first = await json(targetPath(target, `/programaciones?pagina=1&tamanio=${pageSize}`), { method: "GET", signal }, false);
+    if (first === null) throw new PricingFailure("unknown", "No se pudo capturar la línea base de programaciones.");
+    const initial = mapSchedulePageDto(first, target, 1, pageSize, channelIds);
+    const pages = Math.ceil(initial.total / pageSize);
+    if (pages > 1000) throw new PricingFailure("unknown", "La línea base supera el límite de paginación; no se envía la programación sin evidencia reconciliable.");
+    const items = [...initial.items];
+    for (let page = 2; page <= pages; page++) {
+      const value = await json(targetPath(target, `/programaciones?pagina=${page}&tamanio=${pageSize}`), { method: "GET", signal }, false);
+      if (value === null) throw new PricingFailure("unknown", "La línea base quedó incompleta; no se envía la programación.");
+      const mapped = mapSchedulePageDto(value, target, page, pageSize, channelIds);
+      if (mapped.total !== initial.total) throw new PricingFailure("unknown", "El total cambió al capturar la línea base; no se envía la programación.");
+      items.push(...mapped.items);
+    }
+    if (items.length !== initial.total) throw new PricingFailure("unknown", "La paginación de línea base está incompleta; no se envía la programación.");
+    return items;
+  }
+
   async function readTarget(
     target: PriceTarget,
     channel: PriceChannel,
@@ -371,6 +405,7 @@ export function createHttpPricingRepository(
           uncertain.productId !== target.productId ||
           !confirmsUpdate(price, uncertain)
         ) {
+          setMarkerState(key, "update", "REQUIRES_EXTERNAL_VERIFICATION");
           throw new PricingFailure(
             "unknown",
             "El cambio sigue pendiente de verificación. La lectura no confirma una versión superior con los valores solicitados; no se permite reenviarlo.",
@@ -435,7 +470,12 @@ export function createHttpPricingRepository(
         body.precioOferta = requestMoney(change.draft.offer);
       if (change.draft.offerAction === "ELIMINAR") body.precioOferta = null;
       const expected: UpdateConfirmation = {
+        id: target.id,
+        sku: target.kind === "variant" ? target.sku : target.referenceSku,
         productId: target.productId,
+        owner,
+        targetKind: target.kind,
+        channelId: body.channelId,
         version: before.version,
         regular: String(body.precioRegular),
         offer:
@@ -498,9 +538,10 @@ export function createHttpPricingRepository(
         }
         return after;
       } catch (error) {
-        if (error instanceof PricingFailure && error.kind === "unknown")
+        if (error instanceof PricingFailure && error.kind === "unknown") {
           uncertainUpdates.set(key, expected);
-        else clearMarker(key, "update");
+          setMarkerState(key, "update", "PENDING_RECONCILIATION");
+        } else clearMarker(key, "update");
         throw error;
       } finally {
         pendingWrites.delete(pendingKey);
@@ -558,11 +599,17 @@ export function createHttpPricingRepository(
         if (marker.state === "absent") continue;
         if (marker.state !== "valid") throw new PricingFailure("unknown", "Una intención de programación está corrupta o inaccesible; no se permite reenviar.");
         const expected = marker.expected as Record<string, unknown>;
+        const expectedChannel = expected.channel as PriceChannel;
+        const expectedChannelId = expectedChannel === "global" ? null : channelIds[expectedChannel as Exclude<PriceChannel, "global">];
+        if (expected.channelId !== expectedChannelId) throw new PricingFailure("unknown", "La identidad canónica del canal cambió o falta; no se libera la programación incierta.");
         const matches = allSchedules.filter(item => {
           const value = expected;
-          return item.channel === value.channel && item.kind === value.kind && item.amount === value.amount && item.currency === value.currency && Date.parse(item.start) === value.start && (item.end === null ? null : Date.parse(item.end)) === value.end;
+          return item.targetId === value.targetId && item.channel === value.channel && item.kind === value.kind && sameMoney(item.amount, String(value.amount)) && item.currency === value.currency && Date.parse(item.start) === value.start && (item.end === null ? null : Date.parse(item.end)) === value.end;
         });
-        if (matches.length === 1) { clearMarker(key, "schedule"); uncertainSchedules.delete(key); }
+        const baselineIds = expected.baselineIds as string[];
+        const newMatches = matches.filter(item => !baselineIds.includes(item.id));
+        if (newMatches.length === 1) { clearMarker(key, "schedule"); uncertainSchedules.delete(key); }
+        else setMarkerState(key, "schedule", "REQUIRES_EXTERNAL_VERIFICATION");
       }
       return result;
     },
@@ -602,7 +649,9 @@ export function createHttpPricingRepository(
           "Hay una programación pendiente de verificación. Consulta las programaciones antes de realizar otra escritura.",
         );
       }
-      const expectedSchedule = { channel: draft.channel, kind: draft.kind, amount: String(body.importe), currency: draft.currency, start: Date.parse(body.validFrom), end: validUntil === null ? null : Date.parse(validUntil) };
+      const baselineSchedules = await readAllSchedules(target, signal);
+      if ((dependencies.scopeId?.() ?? "session-unavailable") !== owner) throw new PricingFailure("unknown", "La sesión cambió al capturar la línea base; no se envió la programación.");
+      const expectedSchedule = { owner, targetId: target.id, targetKind: target.kind, channelId: body.channelId, channel: draft.channel, kind: draft.kind, amount: String(body.importe), currency: draft.currency, start: Date.parse(body.validFrom), end: validUntil === null ? null : Date.parse(validUntil), baselineIds: baselineSchedules.filter(item => item.targetId === target.id && item.channel === draft.channel && item.kind === draft.kind && sameMoney(item.amount, String(body.importe)) && item.currency === draft.currency && Date.parse(item.start) === Date.parse(body.validFrom) && (item.end === null ? null : Date.parse(item.end)) === (validUntil === null ? null : Date.parse(validUntil))).map(item => item.id) };
       persistMarker(key, "schedule", expectedSchedule);
       pendingWrites.add(pendingKey);
       try {
@@ -639,9 +688,10 @@ export function createHttpPricingRepository(
           );
         }
       } catch (error) {
-        if (error instanceof PricingFailure && error.kind === "unknown")
+        if (error instanceof PricingFailure && error.kind === "unknown") {
           uncertainSchedules.add(key);
-        else clearMarker(key, "schedule");
+          setMarkerState(key, "schedule", "PENDING_RECONCILIATION");
+        } else clearMarker(key, "schedule");
         throw error;
       } finally {
         pendingWrites.delete(pendingKey);
