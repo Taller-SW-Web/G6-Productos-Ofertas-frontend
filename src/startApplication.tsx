@@ -22,6 +22,7 @@ import { createCombosRuntime } from "./features/combos/services/combosService";
 import { CombosProvider } from "./features/combos/components/CombosProvider";
 import { BulkRepositoryContext } from "./features/bulk/services/BulkRepositoryContext";
 import { createBulkFetchTransport, createHttpBulkRepository } from "./features/bulk/adapters/httpBulkRepository";
+import { GatewayOriginContext } from "./app/config/GatewayOriginContext";
 
 
 export async function startApplication(root: Root, mode: "mock" | "api", session: G7Session | null, gatewayOrigin?: string, securityApiBase?: string) {
@@ -34,22 +35,22 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
     mode === "api" && gatewayOrigin && securityApiBase && session
       ? (
           await import("./features/promotions/services/promotionSessionRuntime")
-        ).createOptionalPromotionSessionRuntime(gatewayOrigin, securityApiBase, session)
+        ).createOptionalPromotionSessionRuntime(gatewayOrigin, securityApiBase, session, { publicReads: true })
       : null;
   if (mode === "api" && gateway && session) {
     configureTaxonomyGateway(
-      createAuthenticatedTaxonomyGateway(gateway, session),
+      createAuthenticatedTaxonomyGateway(gateway, session, fetch, { publicReads: true }),
     );
   }
   const combosRuntime = await createCombosRuntime(mode, runtime);
   let catalogServices = (mode === "api" ? createOptionalCatalogHttpServices(gatewayOrigin) : null) ?? getCatalogServices(mode);
   if (mode === "api" && gateway && session) {
     catalogServices = createCatalogHttpServices(
-      createAuthenticatedCatalogTransport(gateway, session),
+      createAuthenticatedCatalogTransport(gateway, session, { publicReads: true }),
     );
   }
   const bulkRepository = mode === "api" && gateway && session
-    ? createHttpBulkRepository(createBulkFetchTransport(gateway), session)
+    ? createHttpBulkRepository(createBulkFetchTransport(gateway), session, { publicReads: true })
     : null;
   root.render(
     <StrictMode>
@@ -65,7 +66,7 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
                 <AuthSessionContext.Provider value={session}>
                   <PromotionApiContext.Provider value={promotions?.services ?? null}>
                     <CombosProvider mode={mode} runtime={combosRuntime}>
-                      <App />
+                      <GatewayOriginContext.Provider value={gateway}><App /></GatewayOriginContext.Provider>
                     </CombosProvider>
                   </PromotionApiContext.Provider>
                 </AuthSessionContext.Provider>

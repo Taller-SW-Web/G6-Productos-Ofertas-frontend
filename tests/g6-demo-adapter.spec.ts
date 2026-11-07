@@ -5,9 +5,22 @@ import {
   DemoApiError,
 } from "../src/features/catalog/adapters/demoCatalogApi";
 
-test("Deploy: no existe rewrite externo de API y la demo apagada no ocupa rutas", async ({ page }) => {
+test("Deploy: proxies limitados a Azure/G7 y la demo apagada no ocupa rutas", async ({ page }) => {
   const config = JSON.parse(readFileSync("vercel.json", "utf8"));
-  expect(config.rewrites).toEqual([{ source: "/(.*)", destination: "/index.html" }]);
+  const external = config.rewrites.filter((rule: { destination: string }) => rule.destination.startsWith("https://"));
+  expect(external).toHaveLength(2);
+  const destinations = new Map([
+    ["/api/v1/:path*", "https://api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io/api/v1/:path*"],
+    ["/g7/api/v1/:path*", "https://g7-auth-service.onrender.com/api/v1/:path*"],
+  ]);
+  for (const rule of external) {
+    // Only the fixed API prefixes may leave the frontend; no arbitrary destination.
+    expect(destinations.get(rule.source)).toBe(rule.destination);
+    const policy = config.headers.find((item: { source: string }) => item.source === rule.source);
+    expect(policy.headers).toContainEqual({ key: "Cache-Control", value: "private, no-store" });
+  }
+  expect(config.rewrites.at(-1)).toEqual({ source: "/(.*)", destination: "/index.html" });
+  expect(config.buildCommand).toContain("VITE_DATA_MODE=api");
   await page.goto("/demo/g6/productos");
   await expect(page.getByRole("heading", { name: "G6 · Productos y Ofertas" })).toHaveCount(0);
   await expect(page.getByRole("navigation").first()).toBeVisible();

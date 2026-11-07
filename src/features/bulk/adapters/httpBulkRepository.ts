@@ -122,7 +122,7 @@ export function createBulkFetchTransport(origin: string, fetcher: typeof fetch =
   return { request: (path, init) => fetcher(url.origin + path, { ...init, credentials: "omit", redirect: "error", cache: "no-store" }) };
 }
 
-export function createHttpBulkRepository(transport: BulkHttpTransport, session: AuthSession): BulkRepository {
+export function createHttpBulkRepository(transport: BulkHttpTransport, session: AuthSession, options: { publicReads?: boolean } = {}): BulkRepository {
   async function send(path: string, method: HttpInit["method"], signal?: AbortSignal, body?: BodyInit, json = false, correlationId: string = crypto.randomUUID()): Promise<Response> {
     const bounded = signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000);
     bounded.throwIfAborted();
@@ -132,13 +132,13 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
     if (!token || /[\r\n]/.test(token)) throw new BulkRepositoryError("Inicia sesión para usar la carga masiva en modo API.", "configuration");
     const request = (accessToken: string) => transport.request(path, {
       method, signal: bounded,
-      headers: { Accept: "application/json, text/csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", Authorization: `Bearer ${accessToken}`, "X-Correlation-Id": correlationId, ...(json ? { "Content-Type": "application/json" } : {}) },
+      headers: { Accept: "application/json, text/csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ...(options.publicReads && method === "GET" ? {} : { Authorization: `Bearer ${accessToken}` }), "X-Correlation-Id": correlationId, ...(json ? { "Content-Type": "application/json" } : {}) },
       ...(body === undefined ? {} : { body }),
     });
     let response: Response;
     try { response = await request(token); }
     catch (error) { if (signal?.aborted || bounded.aborted) throw error; throw new BulkRepositoryError("No se pudo conectar con Gateway. Revisa la conexión e inténtalo de nuevo.", "communication"); }
-    if (await isGatewayTokenInvalid(response)) {
+    if (!(options.publicReads && method === "GET") && await isGatewayTokenInvalid(response)) {
       if (method === "POST") session.invalidateAccessToken(token);
       else {
         const renewed = await session.refreshAccessToken(token, bounded).catch(() => null);

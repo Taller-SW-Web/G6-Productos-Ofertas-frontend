@@ -29,6 +29,7 @@ import { isGatewayTokenInvalid } from "../../shared/isGatewayTokenInvalid";
 
 export interface PromotionHttpOptions {
   gatewayOrigin: string;
+  publicReads?: boolean;
   getAccessToken(signal: AbortSignal): Promise<string | null>;
   refreshAccessToken?(
     rejectedToken: string,
@@ -336,7 +337,7 @@ export function createHttpPromotionServices(
         redirect: "error",
         cache: "no-store",
         headers: {
-          Authorization: "Bearer " + accessToken,
+          ...(options.publicReads && method === "GET" ? {} : { Authorization: "Bearer " + accessToken }),
           "X-Correlation-Id": crypto.randomUUID(),
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         },
@@ -344,7 +345,7 @@ export function createHttpPromotionServices(
       });
     let response = await send(token);
     const refresh = options.refreshAccessToken;
-    if (refresh && await isGatewayTokenInvalid(response)) {
+    if (!(options.publicReads && method === "GET") && refresh && await isGatewayTokenInvalid(response)) {
       if (method === "GET") {
         const renewed = await sessionToken(() => refresh(token, bounded));
         bounded.throwIfAborted();

@@ -17,11 +17,12 @@ import { AuthEntry } from "./features/auth/components/AuthEntry";
 import { canAdminister } from "./features/auth/authorization";
 import { setMockIdentity } from "./features/shared/mockIdentity";
 import { loginDestination } from "./app/routes/loginDestination";
+import { resolveGatewayOrigin, resolveG7ApiBase } from "./app/config/gatewayOrigin";
 
 const root = createRoot(document.getElementById("root")!);
 const mode = resolveDataMode(import.meta.env.VITE_DATA_MODE, import.meta.env.DEV);
-const gatewayOrigin = import.meta.env.VITE_GATEWAY_ORIGIN as string | undefined;
-const securityApiBase = import.meta.env.VITE_G7_API_BASE as string | undefined;
+const gatewayOrigin = resolveGatewayOrigin(import.meta.env.VITE_GATEWAY_ORIGIN as string | undefined, location, import.meta.env.PROD);
+const securityApiBase = resolveG7ApiBase(import.meta.env.VITE_G7_API_BASE as string | undefined, location, import.meta.env.PROD);
 // Public URLs from the same configuration consumed by the transports. The gate
 // compares these values with independent approvals, then restricts real traffic.
 const integrations = document.createElement("meta");

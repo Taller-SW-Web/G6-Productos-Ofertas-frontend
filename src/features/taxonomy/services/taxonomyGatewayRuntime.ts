@@ -44,6 +44,7 @@ export function createAuthenticatedTaxonomyGateway(
   gatewayOrigin: string,
   session: TaxonomySession,
   fetcher: typeof fetch = fetch,
+  options: { publicReads?: boolean } = {},
 ): TaxonomyGatewayTransport {
   const origin = secureGatewayOrigin(gatewayOrigin);
   return {
@@ -61,13 +62,13 @@ export function createAuthenticatedTaxonomyGateway(
           redirect: "error",
           cache: "no-store",
           headers: {
-            Authorization: `Bearer ${accessToken}`,
+            ...(options.publicReads ? {} : { Authorization: `Bearer ${accessToken}` }),
             "X-Correlation-Id": requestId,
           },
         });
       let response = await send(token);
       signal.throwIfAborted();
-      if (await isGatewayTokenInvalid(response)) {
+      if (!options.publicReads && await isGatewayTokenInvalid(response)) {
         const renewed = await session.refreshAccessToken(token, signal);
         signal.throwIfAborted();
         if (!renewed) {

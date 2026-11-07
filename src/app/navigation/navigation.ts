@@ -50,6 +50,7 @@ export const bulkNavigation: NavigationItem[] = [
   },
 ];
 export const productNavigation: NavigationItem[] = [
+  { to: "/consultas", label: "Consultas de los módulos", icon: IconLayoutList, group: "Consultas" },
   {
     to: "/combos",
     label: "Gestión de combos",

@@ -256,6 +256,31 @@ async function expectLoginInsideViewport(page: Page) {
     expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height);
   }
 }
+test("la entrada de productos conserva el login y consulta el canal elegido sin JWT", async ({ page }) => {
+  const reads: string[] = [];
+  await page.route("**/api/v1/productos?**", async route => {
+    expect(route.request().method()).toBe("GET");
+    expect(route.request().headers()).not.toHaveProperty("authorization");
+    reads.push(route.request().url());
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      items: [{ product_id: "isolated-product", name: "Producto contractual de lectura" }], pagina: 1, tamanio: 20, total: 1,
+    }) });
+  });
+  await page.goto("/productos");
+  await expect(page).toHaveURL(/\/login$/);
+  await login(page);
+  await expect(page.getByRole("heading", { name: "Consultas de los módulos", exact: true })).toBeVisible();
+  await page.getByRole("combobox", { name: /^Canal/ }).click();
+  await page.getByRole("option", { name: "MARKETPLACE", exact: true }).click();
+  await page.getByRole("button", { name: "Consultar", exact: true }).click();
+  await expect(page.getByText("Producto contractual de lectura", { exact: true })).toBeVisible();
+  expect(reads).toHaveLength(1);
+  const read = reads[0];
+  if (!read) throw new Error("No se registró la consulta de productos.");
+  expect(new URL(read).searchParams.get("canal")).toBe("MARKETPLACE");
+  expect(calls.filter(call => call.path.endsWith("/login"))).toHaveLength(1);
+});
+
 test("el shell autenticado permanece montado al cambiar repetidamente de sección", async ({ page }) => {
   await page.goto("/combos");
   await login(page);
