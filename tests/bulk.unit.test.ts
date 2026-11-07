@@ -33,6 +33,83 @@ const testSession = {
 };
 
 describe("adaptador HTTP de Bulk", () => {
+  it("valida un vector SHA-256 independiente y persiste la intención completa antes del POST", async () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+      removeItem: (key: string) => { values.delete(key); },
+      clear: () => values.clear(),
+      key: (index: number) => [...values.keys()][index] ?? null,
+      get length() { return values.size; },
+    };
+    vi.stubGlobal("sessionStorage", storage);
+    const owner = "g7-user-fixture-a";
+    const correlationId = "11111111-1111-4111-8111-111111111111";
+    const contentHash = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+    // Vector calculado fuera del código productivo: SHA256(correlationId + ':' + SHA256('abc')).
+    const expectedBatchId = "159a70a7-b13d-4099-80f0-56a7d0e2cb97";
+    const session = { ...testSession, snapshot: () => ({ user: { id: owner, nombreCompleto: "Usuario de prueba", correo: "bulk-a@example.invalid", roles: [] }, mfa: false, busy: false, notice: "" }) };
+    const request = vi.fn(async () => {
+      const marker = JSON.parse(storage.getItem(`g6:bulk:import-pending:${encodeURIComponent(owner)}:${encodeURIComponent(correlationId)}`) ?? "null") as Record<string, unknown> | null;
+      expect(marker).toMatchObject({ userId: owner, correlationId, expectedBatchId, contentHash, state: "IN_FLIGHT" });
+      return new Response(JSON.stringify({ batch_id: expectedBatchId, status: "QUEUED", template_version: 2 }), { status: 202, headers: { "content-type": "application/json" } });
+    });
+    try {
+      const repository = createHttpBulkRepository({ request }, session);
+      const result = await repository.createImport(new File(["abc"], "fixture.csv"), {
+        owner, correlationId, contentHash, expectedBatchId,
+      });
+      expect(result.batch_id).toBe(expectedBatchId);
+      expect(request).toHaveBeenCalledOnce();
+      expect(storage.length).toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("conserva una admisión incierta tras GET 404 y recupera el mismo lote con GET 200 sin otro POST", async () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+      removeItem: (key: string) => { values.delete(key); },
+      clear: () => values.clear(),
+      key: (index: number) => [...values.keys()][index] ?? null,
+      get length() { return values.size; },
+    };
+    vi.stubGlobal("sessionStorage", storage);
+    const owner = "g7-user-fixture-a";
+    const correlationId = "11111111-1111-4111-8111-111111111111";
+    const expectedBatchId = "159a70a7-b13d-4099-80f0-56a7d0e2cb97";
+    let reads = 0;
+    const request = vi.fn(async (path: string) => {
+      if (path.endsWith("/importaciones")) throw new Error("timeout luego del despacho");
+      reads += 1;
+      if (reads === 1) return new Response(JSON.stringify({ status: 404, code: "LOTE_NO_ENCONTRADO" }), { status: 404, headers: { "content-type": "application/problem+json" } });
+      return new Response(JSON.stringify({ batch_id: expectedBatchId, status: "QUEUED", total_rows: 1, completed_rows: 0, failed_rows: 0, needs_reconciliation: false }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    try {
+      const repository = createHttpBulkRepository({ request }, { ...testSession, snapshot: () => ({ user: { id: owner, nombreCompleto: "Usuario de prueba", correo: "bulk-a@example.invalid", roles: [] }, mfa: false, busy: false, notice: "" }) });
+      const file = new File(["abc"], "fixture.csv");
+      const intent = {
+        owner, correlationId, contentHash: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", expectedBatchId,
+      };
+      await expect(repository.createImport(file, intent)).rejects.toMatchObject({ category: "unknown" });
+      expect(storage.length).toBe(1);
+      await expect(repository.getImport(expectedBatchId, undefined, owner)).resolves.toBeNull();
+      expect(storage.length).toBe(1);
+      await expect(repository.getImport(expectedBatchId, undefined, owner)).resolves.toMatchObject({ batch_id: expectedBatchId, status: "QUEUED" });
+      expect(request.mock.calls.filter(([path]) => path.endsWith("/importaciones"))).toHaveLength(1);
+      expect(request.mock.calls.filter(([path]) => path.includes("/importaciones/")).map(([path]) => path)).toEqual([
+        `/api/v1/carga-masiva/productos/importaciones/${expectedBatchId}`,
+        `/api/v1/carga-masiva/productos/importaciones/${expectedBatchId}`,
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("usa rutas del contrato, bearer y multipart sin fabricar Content-Type", async () => {
     const calls: Array<{ path: string; init: Parameters<BulkHttpTransport["request"]>[1] }> = [];
     const transport: BulkHttpTransport = { request: async (path, init) => {
