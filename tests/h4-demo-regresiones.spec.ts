@@ -50,7 +50,7 @@ async function attachBulkApi(page: Page, mode: "accepted" | "recover" | "infligh
     }
     if (request.method() === "GET" && id && path.endsWith(`/importaciones/${id}`)) {
       readCount += 1;
-      if (mode === "recover" && readCount === 1) return route.fulfill({ status: 404, contentType: "application/problem+json", body: JSON.stringify({ status: 404, code: "LOTE_NO_ENCONTRADO" }) });
+      if (mode === "recover" && readCount <= 2) return route.fulfill({ status: 404, contentType: "application/problem+json", body: JSON.stringify({ status: 404, code: "LOTE_NO_ENCONTRADO" }) });
       return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(batchDto(id)) });
     }
     if (request.method() === "GET" && path.endsWith("/reporte")) return route.fulfill({ status: 200, contentType: "text/csv", headers: { "content-disposition": 'attachment; filename="h4-reporte.csv"', "access-control-expose-headers": "content-disposition" }, body: "row_id,code\n33333333-3333-4333-8333-333333333333,PRECIO_INVALIDO\n" });
@@ -124,7 +124,7 @@ test("E2E-02 mock UI: Catálogo abre producto y variante con la identidad de la 
   await detail.click();
   await expect(page).toHaveURL(/\/productos\/PROD-RUN-001\/variantes\/[^/]+$/);
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-  await page.getByRole("link", { name: /Volver a variantes/ }).click();
+  await page.goBack();
   await expect(page).toHaveURL(/\/productos\/PROD-RUN-001\/variantes/);
   await expect(page.getByRole("link", { name: /Ver detalle/ })).toHaveCount(3);
 });
@@ -167,9 +167,10 @@ test("E2E-04 mock UI: Pricing revisa y presenta una programación del runtime de
   await expect(page.getByRole("heading", { name: "Programaciones de precio" })).toBeVisible();
   await expect(page.getByText("Mostrando 1 a 2 de 3", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Programar precio", exact: true }).click();
-  await page.getByRole("textbox", { name: "Importe", exact: true }).fill("35.50");
+  await page.getByRole("textbox", { name: "Importe programado", exact: true }).fill("35.50");
   await page.getByRole("textbox", { name: "Fecha y hora de inicio", exact: true }).fill("2026-12-01T09:00");
   await page.getByRole("textbox", { name: "Fecha y hora de fin (opcional)", exact: true }).fill("2026-12-02T09:00");
+  await page.getByRole("textbox", { name: "Motivo de la programación", exact: true }).fill("Ajuste de temporada H4");
   await page.getByRole("button", { name: "Programar precio", exact: true }).click();
   await page.getByRole("button", { name: "Confirmar programación", exact: true }).click();
   await expect(page.getByText("Precio programado", { exact: true })).toBeVisible();
@@ -197,7 +198,7 @@ test("E2E-05 mock UI: Inventory mantiene SKU y formulario de umbral al navegar e
 
 test("E2E-05 stale GET: umbral global editado conserva 12 ante respuesta tardía con 10", async ({ page }) => {
   await page.goto("/tests/harness/inventory-http.html?path=%2Finventario%2Fumbrales");
-  const input = page.getByRole("spinbutton", { name: "Umbral global de stock bajo" });
+  const input = page.getByRole("textbox", { name: "Umbral global de stock bajo" });
   await expect(input).toHaveValue("10");
   await page.evaluate(() => window.inventoryHttpScenario.beginStaleThresholdRead());
   await expect.poll(() => page.evaluate(() => window.inventoryHttpScenario.thresholdReadPending())).toBe(true);
@@ -233,7 +234,7 @@ test("E2E-07: Bulk incierto recarga, conserva marcador tras 404 y recupera con G
   expect(beforeReload).not.toBeNull();
   expect(JSON.parse(beforeReload!)).toMatchObject({ owner: "g7-h4-owner-a", state: "uncertain" });
   await page.reload();
-  await page.getByRole("button", { name: "Ir a selección de archivo" }).click();
+  await page.getByRole("link", { name: "Ir a selección de archivo" }).click();
   await selectCsv(page);
   await expect(page.getByText(/GET 404: lote no localizado/)).toBeVisible();
   const after404 = await page.evaluate(() => Object.entries(sessionStorage).find(([key]) => key.startsWith("g6:bulk:admission:v1:"))?.[1] ?? null);

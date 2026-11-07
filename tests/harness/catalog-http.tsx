@@ -1,3 +1,5 @@
+import { AuthSessionContext } from "../../src/app/config/AuthSessionContext";
+import { createCatalogFixtureSession } from "./catalogSession";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
@@ -19,8 +21,10 @@ const pricing = await createPricingRuntime("api");
 const { FeatureTestApp: App } = await import("./FeatureTestApp");
 createRoot(document.getElementById("root")!).render(
   <MantineProvider theme={theme} cssVariablesResolver={cssVariablesResolver} forceColorScheme="light">
+    <AuthSessionContext.Provider value={createCatalogFixtureSession()}>
     <DataModeContext.Provider value="api"><CatalogServicesContext.Provider value={services}>
       <PricingProvider runtime={pricing}><App /></PricingProvider>
     </CatalogServicesContext.Provider></DataModeContext.Provider>
+    </AuthSessionContext.Provider>
   </MantineProvider>,
 );

@@ -135,6 +135,7 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
     let token: string | null;
     try { token = await session.getAccessToken(bounded); }
     catch (error) { if (bounded.aborted) throw error; throw new BulkRepositoryError("No se pudo renovar la sesión. Inicia sesión de nuevo.", "configuration"); }
+    bounded.throwIfAborted();
     if (!token || /[\r\n]/.test(token)) throw new BulkRepositoryError("Inicia sesión para usar la carga masiva en modo API.", "configuration");
     if (expectedOwner && session.snapshot?.().user?.id !== expectedOwner) throw new BulkRepositoryError("La sesión cambió antes del despacho; no se envió la importación.", "configuration");
     const request = (accessToken: string) => transport.request(path, {

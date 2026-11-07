@@ -1,5 +1,7 @@
 # Cierre integral H4 — estado para auditoría estática
 
+El estado previo de esta rama se conserva a continuación. El estado del merge y las ejecuciones posteriores figuran en [la matriz de verificación de la demo](h4/MATRIZ_VERIFICACION_FRONTEND.md).
+
 **Frontend branch:** `fix/frontend-h4-cierre-integral`
 **Base:** Frontend `origin/master` `4d1b85969816f2879a6f6f17b3553cccba0ab764`
 **Docs consultado:** `origin/master` `a7778ec1a22811c1213a94ef096ab905911342cc`

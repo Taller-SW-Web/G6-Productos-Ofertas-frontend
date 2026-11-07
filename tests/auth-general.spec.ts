@@ -256,6 +256,28 @@ async function expectLoginInsideViewport(page: Page) {
     expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height);
   }
 }
+test("la sesión administrativa consulta objetivos de Pricing solo desde una pantalla que los usa", async ({ page }) => {
+  const reads: string[] = [];
+  await page.route("**/api/v1/cupones?*", route => {
+    reads.push("coupons");
+    return route.fulfill({ json: { items: [], meta: { pagina: 1, tamanio: 10, total: 0 } } });
+  });
+  await page.route("**/api/v1/productos?*", route => {
+    const query = new URL(route.request().url()).searchParams;
+    reads.push("pricing-catalog");
+    return route.fulfill({ json: { items: [], pagina: Number(query.get("pagina")), tamanio: Number(query.get("tamanio")), total: 0 } });
+  });
+  await page.goto("/cupones");
+  await login(page);
+  await expect(page.getByText("Todavía no hay cupones", { exact: true })).toBeVisible();
+  expect(reads).toEqual(["coupons"]);
+  const catalogRead = page.waitForRequest(request => new URL(request.url()).pathname === "/api/v1/productos");
+  await page.getByRole("link", { name: "Consultar precios", exact: true }).click();
+  expect((await catalogRead).headers().authorization).toBe("Bearer " + dto.accessToken);
+  await expect(page.getByRole("heading", { name: "Gestión de precios", exact: true })).toBeVisible();
+  expect(calls.filter(call => call.path.endsWith("/login"))).toHaveLength(1);
+});
+
 test("el shell autenticado permanece montado al cambiar repetidamente de sección", async ({ page }) => {
   await page.goto("/combos");
   await login(page);

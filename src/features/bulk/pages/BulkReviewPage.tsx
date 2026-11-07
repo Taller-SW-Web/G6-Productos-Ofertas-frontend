@@ -22,7 +22,6 @@ export function BulkReviewPage() {
   const bulkRepository = useBulkRepository();
   const isSubmittingRef = useRef(false);
   const pageIsActiveRef = useRef(true);
-  const recoveryKeyRef = useRef<string | null>(null);
   const recoveryControllerRef = useRef<AbortController | null>(null);
   const [recoveryStatus, setRecoveryStatus] = useState<"idle" | "loading" | "not_found" | "unauthorized" | "forbidden" | "unavailable">("idle");
   const {
@@ -47,24 +46,26 @@ export function BulkReviewPage() {
   }, []);
 
   useEffect(() => {
-    if (admissionStatus !== "uncertain" || !expectedBatchId || !recoveryOwnerIsCurrent() || recoveryKeyRef.current === expectedBatchId) return;
-    recoveryKeyRef.current = expectedBatchId;
+    if (admissionStatus !== "uncertain" || !expectedBatchId || !recoveryOwnerIsCurrent()) return;
     const controller = new AbortController();
     recoveryControllerRef.current?.abort();
     recoveryControllerRef.current = controller;
-    setRecoveryStatus("loading");
-    void bulkRepository.getImport(expectedBatchId, controller.signal, recoveryOwnerId() ?? undefined).then(batch => {
-      if (controller.signal.aborted || !pageIsActiveRef.current || !recoveryOwnerIsCurrent()) return;
-      if (batch?.batch_id === expectedBatchId && confirmRecoveredBatch(expectedBatchId)) {
-        const owner = recoveryOwnerId();
-        if (owner && pendingCorrelationId) bulkRepository.confirmRecoveredImport?.(expectedBatchId, owner, pendingCorrelationId);
-        setRecoveryStatus("idle");
-        navigate(`/carga-masiva/importaciones/${batch.batch_id}`);
-      } else setRecoveryStatus("not_found");
-    }).catch((error: unknown) => {
+    queueMicrotask(() => {
       if (controller.signal.aborted) return;
-      const status = error instanceof BulkRepositoryError ? error.status : undefined;
-      setRecoveryStatus(status === 401 ? "unauthorized" : status === 403 ? "forbidden" : "unavailable");
+      setRecoveryStatus("loading");
+      void bulkRepository.getImport(expectedBatchId, controller.signal, recoveryOwnerId() ?? undefined).then(batch => {
+        if (controller.signal.aborted || !pageIsActiveRef.current || !recoveryOwnerIsCurrent()) return;
+        if (batch?.batch_id === expectedBatchId && confirmRecoveredBatch(expectedBatchId)) {
+          const owner = recoveryOwnerId();
+          if (owner && pendingCorrelationId) bulkRepository.confirmRecoveredImport?.(expectedBatchId, owner, pendingCorrelationId);
+          setRecoveryStatus("idle");
+          navigate(`/carga-masiva/importaciones/${batch.batch_id}`);
+        } else setRecoveryStatus("not_found");
+      }).catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        const status = error instanceof BulkRepositoryError ? error.status : undefined;
+        setRecoveryStatus(status === 401 ? "unauthorized" : status === 403 ? "forbidden" : "unavailable");
+      });
     });
     return () => { controller.abort(); if (recoveryControllerRef.current === controller) recoveryControllerRef.current = null; };
   }, [admissionStatus, bulkRepository, confirmRecoveredBatch, expectedBatchId, navigate, pendingCorrelationId, recoveryOwnerId, recoveryOwnerIsCurrent]);

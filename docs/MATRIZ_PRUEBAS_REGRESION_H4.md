@@ -1,5 +1,7 @@
 # Matriz de pruebas de regresión H4
 
+Los conteos de este archivo corresponden a la auditoría previa a integrar el login general. El estado del merge y las ejecuciones posteriores figuran en [la matriz de verificación de la demo](h4/MATRIZ_VERIFICACION_FRONTEND.md).
+
 Actualizada sobre la rama `fix/frontend-h4-cierre-integral`. SHA base de esta revisión: `7e8bfc7cdb67f261351355d2bc139df2717ea4b8`.
 
 Las suites locales se ejecutaron el 2026-11-07; resultados exactos y reruns están en «Ejecución local controlada». Los recorridos browser con `page.route`, los adapters con transporte stub y los harnesses exclusivos de pruebas son simulados. Ninguno acredita Gateway, G7, Backend, Supabase, Oracle ni Vercel real. Los IDs agrupados del documento anterior se retiraron: aquí cada fila identifica el literal de un `test()` o `it()`. `EXISTENTE_NO_EJECUTADA` y `CREADA_NO_EJECUTADA` indican casos sin ejecución registrada en esta intervención; `BLOQUEADA_POR_ENTORNO` se usa solo para integración real no disponible.

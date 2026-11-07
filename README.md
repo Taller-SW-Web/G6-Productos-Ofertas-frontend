@@ -125,7 +125,7 @@ Implementa S01–S04 como vistas administrativas con puertos tipados y adapters 
 
 La elegibilidad de componentes, las reglas económicas y la disponibilidad informativa consultan las identidades del Catálogo compartido (no un catálogo paralelo). La disponibilidad se calcula como `min(floor(stockDisponibleSKU / cantidadRequeridaSKU))` sobre un snapshot inyectable; si los datos no permiten verificar, se muestra información incompleta o no verificable en lugar de un cero inventado. Los precios vigentes de referencia provienen del puerto de Pricing y se distinguen del precio comercial guardado.
 
-No hay provider HTTP real ni persistencia comercial. En modo `api`, la integración permanece cerrada y no cae a fixtures. La referencia consultada es OpenAPI `0.6.0-rc.1`: las operaciones administrativas de Combos están marcadas `provisional-internal`; `combos:leer`, `catalogo:leer` y `precios:leer` siguen pendientes de registro de scopes. El component spec de MK-002 permanece **En revisión**: esta entrega no declara aprobación UX, homologación ni integración API.
+El arranque H4 compone el repositorio HTTP cuando hay Gateway y sesión G7. Sin esa configuración, el modo API mantiene la integración cerrada. Las operaciones administrativas de Combos siguen marcadas como provisional-internal en OpenAPI 0.6.0-rc.3. El component spec de MK-002 permanece en revisión y la homologación externa sigue pendiente.
 
 En la aplicación mock, Promociones y Recomendaciones consultan el mismo servicio
 de Catálogo que Productos/Variantes mediante

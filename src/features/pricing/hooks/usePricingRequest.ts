@@ -12,6 +12,7 @@ export function usePricingRead<T>(
   requestKey: string,
   read: (signal: AbortSignal) => Promise<T>,
   identity = requestKey,
+  enabled = true,
 ) {
   const session = useContext(PromotionSessionContext);
   const userId = useSyncExternalStore(
@@ -32,6 +33,7 @@ export function usePricingRead<T>(
   },
   );
   useEffect(() => {
+    if (!enabled) return;
     const controller = new AbortController();
     void read(controller.signal).then(
       (result) => {
@@ -55,7 +57,7 @@ export function usePricingRead<T>(
       },
     );
     return () => controller.abort();
-  }, [read, scopedRequestKey, scopedIdentity]);
+  }, [enabled, read, scopedRequestKey, scopedIdentity]);
   return {
     state:
       response?.key === scopedRequestKey
