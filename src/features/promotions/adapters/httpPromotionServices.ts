@@ -593,8 +593,10 @@ export function createHttpPromotionServices(
     );
     try {
       return await enrichCoupon(confirmed, signal);
-    } catch {
-      return { ...confirmed, relatedDataUnavailable: true };
+    } catch (error) {
+      if (error instanceof CouponReadError && error.kind === "unavailable")
+        return { ...confirmed, relatedDataUnavailable: true };
+      throw error;
     }
   }
   const coupons: PromotionServices["coupons"] = {

@@ -13,7 +13,7 @@ const root = "/api/v1/carga-masiva/productos";
 const xlsxMime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 type HttpInit = { method: "GET" | "POST"; signal: AbortSignal; headers: Record<string, string>; body?: BodyInit };
 export interface BulkHttpTransport { request(path: string, init: HttpInit): Promise<Response> }
-type AuthSession = Pick<G7Session, "getAccessToken" | "refreshAccessToken" | "invalidateAccessToken">;
+type AuthSession = Pick<G7Session, "getAccessToken" | "refreshAccessToken" | "invalidateAccessToken"> & Partial<Pick<G7Session, "snapshot">>;
 
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw invalid("La respuesta del servicio no tiene la estructura esperada.");
@@ -122,6 +122,12 @@ export function createBulkFetchTransport(origin: string, fetcher: typeof fetch =
 }
 
 export function createHttpBulkRepository(transport: BulkHttpTransport, session: AuthSession): BulkRepository {
+  const exportIntentKey = async (format: BulkExportFormat) => {
+    const userId = session.snapshot?.().user?.id;
+    if (!userId) throw new BulkRepositoryError("Inicia sesión para solicitar una exportación.", "configuration");
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${userId}\u0000${format}`)));
+    return `g6:bulk:export-uncertain:${[...digest].map(byte => byte.toString(16).padStart(2, "0")).join("")}`;
+  };
   async function send(path: string, method: HttpInit["method"], signal?: AbortSignal, body?: BodyInit, json = false, correlationId: string = crypto.randomUUID()): Promise<Response> {
     const bounded = signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000);
     bounded.throwIfAborted();
@@ -186,7 +192,22 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
     async getImportReport(batchId, signal) { return download(`${root}/importaciones/${encodeURIComponent(batchId)}/reporte`, `reporte-${batchId}.csv`, signal); },
     async resumeImport(batchId, signal) { return mapAccepted(await json(await send(`${root}/importaciones/${encodeURIComponent(batchId)}/reanudar`, "POST", signal), 202, signal)); },
     async createExport(format: BulkExportFormat, signal) {
-      return mapExport(await json(await send(`${root}/exportaciones`, "POST", signal, JSON.stringify({ formato: format }), true), 202, signal));
+      const key = await exportIntentKey(format);
+      try {
+        if (sessionStorage.getItem(key) === "1") throw new BulkRepositoryError("La solicitud anterior de exportación sigue sin resolverse para esta identidad. No se reenvió.", "unknown");
+        sessionStorage.setItem(key, "1");
+      } catch (error) {
+        if (error instanceof BulkRepositoryError) throw error;
+        throw new BulkRepositoryError("No se pudo persistir el bloqueo de exportación; no se envió la solicitud.", "unknown");
+      }
+      try {
+        const result = mapExport(await json(await send(`${root}/exportaciones`, "POST", signal, JSON.stringify({ formato: format }), true), 202, signal));
+        sessionStorage.removeItem(key);
+        return result;
+      } catch (error) {
+        if (error instanceof BulkRepositoryError && error.category !== "communication" && error.category !== "unknown") sessionStorage.removeItem(key);
+        throw error;
+      }
     },
     async getExport(exportId, signal) {
       try { return mapExport(await json(await send(`${root}/exportaciones/${encodeURIComponent(exportId)}`, "GET", signal), 200, signal)); }

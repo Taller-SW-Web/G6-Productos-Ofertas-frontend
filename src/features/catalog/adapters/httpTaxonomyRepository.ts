@@ -78,8 +78,7 @@ export function createHttpTaxonomyRepository(transport: CatalogHttpTransport): T
         if (c.caracteristicaId !== association.caracteristicaId || c.estado !== "ACTIVO") return blockedCatalog("La característica asociada no está disponible.");
         const tipo = choice(c.tipo, ["TEXTO", "NUMERO", "LISTA"] as const);
         // The published schema has no role metadata or configurable text limit.
-        // Do not turn obligatoria into esIdentificadora, or use the initial SPEC limit.
-        if (tipo === "TEXTO") return blockedCatalog("Taxonomía no publica el límite de texto configurado para esta característica.");
+        // Keep TEXTO usable without maxLength; consumers can enforce it only when published.
         return { caracteristicaId: string(c.caracteristicaId), nombre: string(c.nombre), tipo,
           obligatorio: boolean(association.obligatoria), unidad: c.unidadMedida == null ? undefined : string(c.unidadMedida),
           opciones: tipo === "LISTA" ? array(c.valores).filter(v => object(v).estado === "ACTIVO").map(v => {

@@ -34,7 +34,8 @@ export function StockControlPage() {
 
   const { items, loading, error, refetch } = useInventoryStock(filters);
   const { locations, loading: catalogLoading } = useInventoryFilterOptions();
-  const [selectedItem, setSelectedItem] = useState<StockItem | null>(null);
+  const [selection, setSelection] = useState<{ sku: string; locationId: string } | null>(null);
+  const selectedItem = selection ? items.find(item => item.sku === selection.sku && item.locationId === selection.locationId) ?? null : null;
 
   const isRevisionMode =
     import.meta.env.DEV && params.get("modoRevision") === "1";
@@ -180,7 +181,7 @@ export function StockControlPage() {
           size={32}
           aria-label="Ver detalle"
           title={`Ver detalle de ${row.sku} en ${row.locationName}`}
-          onClick={() => setSelectedItem(row)}
+          onClick={() => setSelection({ sku: row.sku, locationId: row.locationId })}
         >
           <IconEye size={16} />
         </ActionIcon>
@@ -275,7 +276,7 @@ export function StockControlPage() {
       <StockDetailDrawer
         item={selectedItem}
         opened={Boolean(selectedItem)}
-        onClose={() => setSelectedItem(null)}
+        onClose={() => setSelection(null)}
       />
     </>
   );

@@ -95,9 +95,6 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
       if (schemas.some(s => s.esIdentificadora === undefined)) {
         throw new Error("El esquema no informa el rol identificador de las características.");
       }
-      if (schemas.some(s => s.tipo === "TEXTO" && s.maxLength === undefined)) {
-        throw new Error("El esquema no informa el límite de texto configurado.");
-      }
       setSchemaResult({ typeId, repository: taxonomy, schemas, error: null });
       setFormData(prev => {
         const entry = (s: AttributeSchema, existing: FormAttributeEntry[]): FormAttributeEntry => {

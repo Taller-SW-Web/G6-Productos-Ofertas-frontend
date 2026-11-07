@@ -548,6 +548,18 @@ export function createHttpInventoryRepository(
     return items;
   }
 
+  const dashboardReads = new Map<string, Promise<unknown>>();
+  function readDashboard(filters: DashboardFiltersQuery | undefined): Promise<unknown> {
+    const path = dashboardPath(filters);
+    const existing = dashboardReads.get(path);
+    if (existing) return existing;
+    const pending = json(path, { method: "GET" }, false).finally(() => {
+      if (dashboardReads.get(path) === pending) dashboardReads.delete(path);
+    });
+    dashboardReads.set(path, pending);
+    return pending;
+  }
+
   function dashboardPath(filters: DashboardFiltersQuery | undefined): string {
     const params = new URLSearchParams();
     const locationId = contractFilterValue(filters?.locationId);
@@ -582,6 +594,7 @@ export function createHttpInventoryRepository(
     },
 
     updateGlobalThreshold(threshold: number): Promise<ThresholdConfig> {
+      if (!Number.isSafeInteger(threshold) || threshold < 0) throw new InventoryError("VALIDACION", "El umbral debe ser un entero no negativo.");
       return json(
         "/api/v1/inventario/umbrales/global",
         {
@@ -607,6 +620,7 @@ export function createHttpInventoryRepository(
       sku: string,
       threshold: number,
     ): Promise<ThresholdConfig> {
+      if (!sku.trim() || !Number.isSafeInteger(threshold) || threshold < 0) throw new InventoryError("VALIDACION", "El SKU debe existir y el umbral debe ser un entero no negativo.");
       return json(
         `/api/v1/inventario/umbrales/skus/${encodeURIComponent(sku)}`,
         {
@@ -861,7 +875,7 @@ export function createHttpInventoryRepository(
       filters?: DashboardFiltersQuery,
     ): Promise<InventoryKpiSummary> {
       assertDashboardFiltersSupported("getDashboardKpis", filters);
-      return json(dashboardPath(filters), { method: "GET" }, false).then(
+      return readDashboard(filters).then(
         toDashboardKpiSummary,
       );
     },
@@ -879,7 +893,7 @@ export function createHttpInventoryRepository(
       // `porUbicacion` de obtenerDashboardInventario es la fuente autoritativa
       // de saldos por ubicación. No publica nombre de ubicación ni unidades
       // bloqueadas: esos campos se exponen como `null`, nunca como cero.
-      return json(dashboardPath(filters), { method: "GET" }, false).then(
+      return readDashboard(filters).then(
         toLocationDistributionList,
       );
     },

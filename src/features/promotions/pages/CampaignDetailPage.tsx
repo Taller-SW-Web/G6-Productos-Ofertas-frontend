@@ -57,7 +57,7 @@ export function CampaignDetailPage({
     setPrevResult(state.result);
     setCachedRecord(state.result);
   }
-  const record = state.status === "success" ? state.result : cachedRecord;
+  const record = state.status === "success" ? state.result : cachedRecord?.id === promotionId ? cachedRecord : null;
   const catalogRead = useCallback(
     (signal: AbortSignal) => confirmedServices.catalog.products(signal, record
       ? { productIds: record.configuration.productIds, skus: record.configuration.skus }

@@ -177,7 +177,15 @@ export function createHttpCharacteristicRepository(transport: TaxonomyGatewayTra
 
 export function createHttpBrandRepository(transport: TaxonomyGatewayTransport): BrandRepository {
   const get = (path: string, signal?: AbortSignal) => send(transport, path, "GET", undefined, signal, 200);
-  const form = (input: { nombre: string; descripcion?: string | null; paisOrigenIso?: string | null; logoFile?: File | null; version?: number }) => { const body = new FormData(); body.set("nombre", input.nombre); if (input.descripcion != null) body.set("descripcion", input.descripcion); if (input.paisOrigenIso != null) body.set("paisOrigenIso", input.paisOrigenIso); if (input.version !== undefined) body.set("version", String(input.version)); if (input.logoFile) body.set("logo", input.logoFile); return body; };
+  const form = (input: { nombre: string; descripcion?: string | null; paisOrigenIso?: string | null; logoFile?: File | null; version?: number }) => {
+    const body = new FormData(); body.set("nombre", input.nombre);
+    // In multipart PATCH, absent means unchanged and an empty text part clears an optional text value.
+    if (Object.hasOwn(input, "descripcion")) body.set("descripcion", input.descripcion ?? "");
+    if (Object.hasOwn(input, "paisOrigenIso")) body.set("paisOrigenIso", input.paisOrigenIso ?? "");
+    if (input.version !== undefined) body.set("version", String(input.version));
+    if (input.logoFile) body.set("logo", input.logoFile);
+    return body;
+  };
   return {
     async list(signal) { const rows = await listAll(transport, "/api/v1/marcas/administracion", "marcaId", signal); const items: BrandDetail[] = rows.map(brandDetail); return { items: items.map(({ marcaId, nombre, estado, logoUrl, paisOrigenIso }) => ({ marcaId, nombre, estado, logoUrl, paisOrigenIso })) }; },
     async obtener(id, signal) { try { return brandDetail(await get(`/api/v1/marcas/${encodeURIComponent(id)}`, signal)); } catch (error) { if (httpStatus(error) === 404) return null; throw error; } },
@@ -193,7 +201,26 @@ export function createHttpSeoRepository(transport: TaxonomyGatewayTransport): Se
   const get = (path: string, signal?: AbortSignal) => send(transport, path, "GET", undefined, signal, 200);
   const map = (value: unknown, nombre: string): SeoCategory => { const dto = row(value); return { id: str(dto.categoriaId), nombre, slug: str(dto.slug), ...(typeof dto.metaTitulo === "string" ? { metaTitulo: dto.metaTitulo } : {}), ...(typeof dto.metaDescripcion === "string" ? { metaDescripcion: dto.metaDescripcion } : {}) }; };
   return {
-    async list(signal) { const categories=await listAll(transport,"/api/v1/categorias/administracion","categoriaId",signal); const items:SeoCategory[]=[]; for(const category of categories){ try { items.push(map(await get(`/api/v1/categorias/${encodeURIComponent(str(category.categoriaId))}/seo`,signal),str(category.nombre))); } catch(error){ if(httpStatus(error)!==404) throw error; } } return {items}; },
+    async list(signal) {
+      const categories = await listAll(transport, "/api/v1/categorias/administracion", "categoriaId", signal);
+      const results: PromiseSettledResult<SeoCategory | null>[] = new Array(categories.length);
+      let next = 0;
+      await Promise.all(Array.from({ length: Math.min(4, categories.length) }, async () => {
+        for (;;) {
+          const index = next++;
+          if (index >= categories.length) return;
+          const category = categories[index];
+          if (!category) continue;
+          try { results[index] = { status: "fulfilled", value: map(await get(`/api/v1/categorias/${encodeURIComponent(str(category.categoriaId))}/seo`, signal), str(category.nombre)) }; }
+          catch (reason) {
+            if (signal?.aborted || httpStatus(reason) === 401 || httpStatus(reason) === 403) throw reason;
+            results[index] = httpStatus(reason) === 404 ? { status: "fulfilled", value: null } : { status: "rejected", reason };
+          }
+        }
+      }));
+      const items = results.flatMap(result => result?.status === "fulfilled" && result.value ? [result.value] : []);
+      return { items, enrichmentUnavailable: results.filter(result => result?.status === "rejected").length };
+    },
     async obtener(id, signal) { try { const [seo,category]=await Promise.all([get(`/api/v1/categorias/${encodeURIComponent(id)}/seo`,signal),get(`/api/v1/categorias/${encodeURIComponent(id)}`,signal)]); return map(seo,str(row(category).nombre)); } catch (error) { if (httpStatus(error) === 404) return null; throw error; } },
     async proponerSlug(nombre, signal) { const dto = row(await send(transport, "/api/v1/seo/categorias/slug/resolver", "POST", { nombre }, signal, 200, undefined, true)); return { slug: str(dto.slug), colisionResuelta: dto.colisionResuelta === true }; },
     async guardar(input, signal) { try { const category=await get(`/api/v1/categorias/${encodeURIComponent(input.id)}`,signal); return await send(transport, `/api/v1/categorias/${encodeURIComponent(input.id)}/seo`, "PATCH", { slug: input.slug, metaTitulo: input.metaTitulo, metaDescripcion: input.metaDescripcion }, signal, 200, value => map(value,str(row(category).nombre))); } catch (error) { if (httpStatus(error) === 404) return null; if (httpCode(error) === "SLUG_DUPLICADO") { const { SeoConflictError } = await import("../services/seoRepository"); throw new SeoConflictError(input.slug); } throw error; } },

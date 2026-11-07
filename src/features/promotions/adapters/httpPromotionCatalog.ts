@@ -55,6 +55,21 @@ export function createHttpPromotionCatalog(
       const groups = [{ state: "ACTIVO", rows: await pages("/productos?estado=ACTIVO", false, bounded) }];
       if (retainedIds.size || retainedSkus.size)
         groups.push({ state: "INACTIVO", rows: await pages("/productos?estado=INACTIVO", false, bounded) });
+      const variantRows = new Map<string, unknown[]>();
+      const variantProducts = groups.flatMap(group => group.rows).filter(value => object(value).tiene_variantes === true);
+      let variantIndex = 0;
+      await Promise.all(Array.from({ length: Math.min(4, variantProducts.length) }, async () => {
+        for (;;) {
+          const index = variantIndex++;
+          if (index >= variantProducts.length) return;
+          bounded.throwIfAborted();
+          const product = object(variantProducts[index]);
+          const id = text(product.product_id);
+          const variants = await pages(`/productos/${encodeURIComponent(id)}/variantes?estado=ACTIVA`, true, bounded);
+          if (retainedSkus.size) variants.push(...await pages(`/productos/${encodeURIComponent(id)}/variantes?estado=INACTIVA`, true, bounded));
+          variantRows.set(id, variants);
+        }
+      }));
       const products: CatalogProductChoice[] = [];
       const ids = new Set<string>();
       const skus = new Set<string>();
@@ -86,17 +101,8 @@ export function createHttpPromotionCatalog(
         }
         const choices: CatalogProductChoice["skus"] = [];
         if (row.tiene_variantes) {
-          const variants = await pages(
-            `/productos/${encodeURIComponent(id)}/variantes?estado=ACTIVA`,
-            true,
-            bounded,
-          );
-          if (retainedSkus.size)
-            variants.push(...await pages(
-              `/productos/${encodeURIComponent(id)}/variantes?estado=INACTIVA`,
-              true,
-              bounded,
-            ));
+          const variants = variantRows.get(id);
+          if (!variants) throw new Error("VARIANT_CATALOG_UNAVAILABLE");
           const variantIds = new Set<string>();
           for (const value of variants) {
             const variant = object(value);

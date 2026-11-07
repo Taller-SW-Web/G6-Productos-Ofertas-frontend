@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { Button, Skeleton, Stack, Text } from "@mantine/core";
 import { EmptyState, FeedbackAlert } from "../../../components/shared";
 import { PriceSummary } from "../components/PriceSummary";
+import { priceChannelLabel } from "../services/pricePresentation";
 import { PriceBreakdown } from "../components/PriceBreakdown";
 import { PriceFilters } from "../components/PriceFilters";
 import { useCurrentPrice } from "../hooks/useCurrentPrice";
@@ -103,10 +104,10 @@ function CurrentPriceContent({
               vigente están bloqueadas.
             </FeedbackAlert>
           )}
-          {query.channel === "retail" &&
+          {query.channel !== "global" &&
             snapshot.price.channel === "global" && (
               <FeedbackAlert semantic="info" title="Fallback al precio global">
-                Para el canal Retail seleccionado, el precio disponible
+                Para el canal {priceChannelLabel(query.channel)} seleccionado, el precio disponible
                 corresponde al alcance global.
               </FeedbackAlert>
             )}

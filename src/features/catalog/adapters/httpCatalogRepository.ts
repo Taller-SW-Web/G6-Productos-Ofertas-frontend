@@ -80,12 +80,16 @@ export function createHttpCatalogRepository(transport: CatalogHttpTransport): Ca
   });
   return {
     async list(q, _scenario, signal) {
-      if (q.typeId || (q.saleModel && q.saleModel !== "all")) return blockedCatalog("Los filtros por tipo y modelo de venta no están publicados para esta consulta.");
-      if (q.status && q.status !== "all" && q.status !== "ACTIVO") return blockedCatalog("El resumen comercial sólo publica productos comercialmente activos; no acredita el estado administrativo solicitado.");
+      const categoryId = q.categoryId && q.categoryId !== "all" ? q.categoryId : undefined;
+      const typeId = q.typeId && q.typeId !== "all" ? q.typeId : undefined;
+      const saleModel = q.saleModel && q.saleModel !== "all" ? q.saleModel : undefined;
+      const status = q.status && q.status !== "all" ? q.status : undefined;
+      if (typeId || saleModel) return blockedCatalog("Los filtros por tipo y modelo de venta no están publicados para esta consulta.");
+      if (status && status !== "ACTIVO") return blockedCatalog("El resumen comercial sólo publica productos comercialmente activos; no acredita el estado administrativo solicitado.");
       const params = new URLSearchParams({ pagina: String(q.page), tamanio: String(q.pageSize) });
       if (q.q) params.set("q", q.q);
-      if (q.categoryId) params.set("categoriaId", q.categoryId);
-      if (q.status && q.status !== "all") params.set("estado", q.status);
+      if (categoryId) params.set("categoriaId", categoryId);
+      if (status) params.set("estado", status);
       const dto = object(await request(`/productos?${params}`, "GET", undefined, signal));
       const items = array(dto.items); const total = integer(dto.total);
       const page = integer(dto.pagina, 1); const pageSize = integer(dto.tamanio, 1);

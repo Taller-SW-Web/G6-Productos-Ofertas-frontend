@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { PricingFailure } from "../services/pricingModels";
+import { PromotionSessionContext } from "../../../app/config/PromotionSessionContext";
 
 const readCache = new Map<string, unknown>();
 
@@ -12,29 +13,37 @@ export function usePricingRead<T>(
   read: (signal: AbortSignal) => Promise<T>,
   identity = requestKey,
 ) {
+  const session = useContext(PromotionSessionContext);
+  const userId = useSyncExternalStore(
+    session?.subscribe ?? (() => () => undefined),
+    () => session?.snapshot().user?.id ?? "anonymous",
+    () => "anonymous",
+  );
+  const scopedIdentity = `${userId}:${identity}`;
+  const scopedRequestKey = `${userId}:${requestKey}`;
   const [response, setResponse] = useState<{
     key: string;
     state: RequestState<T>;
   }>();
   const [previous, setPrevious] = useState<{ key: string; result: T } | undefined>(
     () => {
-      const cached = readCache.get(identity) as T | undefined;
-      return cached !== undefined ? { key: identity, result: cached } : undefined;
-    },
+      const cached = readCache.get(scopedIdentity) as T | undefined;
+      return cached !== undefined ? { key: scopedIdentity, result: cached } : undefined;
+  },
   );
   useEffect(() => {
     const controller = new AbortController();
     void read(controller.signal).then(
       (result) => {
         if (controller.signal.aborted) return;
-        readCache.set(identity, result);
-        setPrevious({ key: identity, result });
-        setResponse({ key: requestKey, state: { status: "success", result } });
+        readCache.set(scopedIdentity, result);
+        setPrevious({ key: scopedIdentity, result });
+        setResponse({ key: scopedRequestKey, state: { status: "success", result } });
       },
       (error: unknown) => {
         if (!controller.signal.aborted)
           setResponse({
-            key: requestKey,
+            key: scopedRequestKey,
             state: {
               status: "error",
               message:
@@ -46,13 +55,13 @@ export function usePricingRead<T>(
       },
     );
     return () => controller.abort();
-  }, [read, requestKey, identity]);
+  }, [read, scopedRequestKey, scopedIdentity]);
   return {
     state:
-      response?.key === requestKey
+      response?.key === scopedRequestKey
         ? response.state
         : ({ status: "loading" } as const),
-    previous: previous?.key === identity ? previous.result : undefined,
+    previous: previous?.key === scopedIdentity ? previous.result : undefined,
   };
 }
 export function usePricingAction<T>() {

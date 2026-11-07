@@ -46,7 +46,7 @@ export function ThresholdConfigForm({
   const handleGlobalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const val = Number(globalVal);
-    if (!isNaN(val) && val >= 0) {
+    if (globalVal !== "" && Number.isSafeInteger(val) && val >= 0) {
       onUpdateStart?.();
       await onUpdateGlobal(val);
     }
@@ -56,7 +56,7 @@ export function ThresholdConfigForm({
     e.preventDefault();
     if (!selectedSku) return;
     const val = Number(skuVal);
-    if (!isNaN(val) && val >= 0) {
+    if (skuVal !== "" && Number.isSafeInteger(val) && val >= 0) {
       onUpdateStart?.();
       await onUpdateSku(selectedSku, val);
     }
@@ -87,6 +87,8 @@ export function ThresholdConfigForm({
                   label="Unidades mínimas de stock bajo"
                   description="Valor entero mayor o igual a 0 (default normativo: 10)."
                   min={0}
+                  step={1}
+                  decimalScale={0}
                   value={globalVal}
                   onChange={setGlobalVal}
                   disabled={saving}
@@ -130,6 +132,8 @@ export function ThresholdConfigForm({
                   label="Unidades de umbral para este SKU"
                   description="Si el disponible es menor o igual a este valor, se marcará STOCK_BAJO."
                   min={0}
+                  step={1}
+                  decimalScale={0}
                   value={skuVal}
                   onChange={setSkuVal}
                   disabled={saving}

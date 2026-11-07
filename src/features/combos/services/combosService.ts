@@ -26,12 +26,12 @@ export interface CombosRuntime {
 export async function createCombosRuntime(
   mode: DataMode,
   pricing: PricingRuntime,
-  dependencies: { gateway?: AuthenticatedGatewayClient; catalog?: CatalogRepository } = {},
+  dependencies: { gateway?: AuthenticatedGatewayClient; catalog?: CatalogRepository; scopeId?: () => string | null } = {},
 ): Promise<CombosRuntime> {
   if (mode === "api") {
     if (!dependencies.gateway || !dependencies.catalog) return createUnavailableCombosAdapters();
     const catalog = new CatalogCombosAdapter({ catalog: dependencies.catalog });
-    const comboRepository = createHttpCombosRepository(dependencies.gateway, catalog);
+    const comboRepository = createHttpCombosRepository(dependencies.gateway, catalog, dependencies.scopeId ?? (() => null));
     const availability: CombosAvailabilityPort = {
       async readStocks(skus, signal) {
         signal?.throwIfAborted();

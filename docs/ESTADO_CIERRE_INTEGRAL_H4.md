@@ -66,6 +66,21 @@ La matriz es un inventario de evidencia por capas. Una fila `PUBLISHED` solo acr
 
 ## Dependencias externas pendientes
 
+## Cambios frontend de esta intervención — 2026-11-06
+
+Base Frontend: `a6b0bcef8e7979600fb3e8480f629b531409a58a` en `fix/frontend-h4-cierre-integral`.
+TypeScript sin emisión y ESLint dirigido pasan; `git diff --check` no detecta errores de whitespace. No se ejecutaron suites, Playwright, E2E ni builds.
+
+- Catálogo: normaliza filtros vacíos y `all`; los listados ya no rechazan `typeId=all` ni envían `categoriaId=all`. El esquema HTTP permite TEXTO sin `maxLength`; el rol `esIdentificadora` sigue limitado a proveedores que lo publiquen.
+- Taxonomy: concurrencia SEO limitada a cuatro, errores secundarios parciales visibles, y exclusión de escrituras pendientes sobre el mismo recurso/sesión. El multipart de marca conserva campos omitidos y representa vaciado como parte vacía; el provider debe homologar esa semántica.
+- Promotions: detalles no reutilizan el registro anterior al cambiar de ID; errores auxiliares de promoción no ocultan 401/403 del enriquecimiento de cupón; las referencias de catálogo de recomendaciones cargan independientemente; variantes se consultan con concurrencia máxima cuatro y timeout total de 7,5 s.
+- Pricing: el modelo/mapeador/pantallas aceptan GLOBAL, RETAIL, MARKETPLACE, CHATBOT y VENTAS; los valores de nombre se distinguen de `channelId` canónicos y las escrituras siguen bloqueadas si falta la identidad contractual. La caché React de lecturas queda namespaced por identidad G7.
+- Inventory: el dashboard comparte la misma promesa de GET cuando KPI y distribución piden iguales filtros; la carga compartida de SKU se namespacia por usuario y abortar un consumidor no cancela a los demás. El detalle de stock conserva `(sku, locationId)` y toma la fila actualizada de la consulta vigente. Los umbrales rechazan vacío, decimal y valores fuera de entero seguro antes del envío. El catálogo de SKU sigue siendo comercial y no demuestra cobertura de inventario físico completo.
+- Combos: enriquecimiento de disponibilidad fallido conserva el registro con estado `NO_VERIFICABLE`; 401/403 se propagan. Listado limita concurrencia a cuatro y las intenciones de alta incorporan identidad G7 al fingerprint.
+- Bulk: un resultado incierto de exportación conserva un bloqueo por usuario/formato en `sessionStorage`; un `202` mapeado y una referencia confirmada se persisten en `export_id` de la URL.
+- Price Audit: el bloqueo persistido de exportación ahora se aísla por identidad G7, formato y filtros; el modelo DTO conserva los campos exigidos por OpenAPI y no fabrica SKU/canal alternativos.
+- Los detalles estáticos no equivalen a integración autenticada, homologación ni despliegue. Operaciones marcadas `provisional-internal`, la ausencia de introspección/DTO y la provisión de grants siguen sujetas a las filas de dependencias de abajo.
+
 | Owner | Operación o frontera | Condición concreta de desbloqueo |
 |---|---|---|
 | G7 Seguridad / Marco | Login G7, MFA, JWT humano, refresh, roles/scopes y sesiones reales para los ocho servicios | Issuer/JWKS, audience, grant/roles reales provisionados y una sesión humana de prueba válida; luego evidencia positiva y negativa HTTP vinculada a SHA. |

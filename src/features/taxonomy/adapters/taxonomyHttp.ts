@@ -70,6 +70,14 @@ export async function taxonomySend<T = unknown>(
       let confirmed = false; try { confirmed = JSON.parse(sessionStorage.getItem(key) ?? "{}").state === "confirmed"; } catch { /* malformed marker fails closed */ }
       throw new TaxonomyMutationError(confirmed ? "confirmed_read_failed" : "unknown", "Esta intención ya fue enviada y requiere reconciliación. Consulta el recurso antes de volver a intentarlo.", key);
     }
+    const resourcePath = options.resourcePath ?? path;
+    const conflicting = pendingKeys().some(pending => {
+      try {
+        const marker = JSON.parse(sessionStorage.getItem(pending) ?? "{}");
+        return marker.scopeHash === scopeHash && marker.resourcePath === resourcePath;
+      } catch { return true; }
+    });
+    if (conflicting) throw new TaxonomyMutationError("unknown", "Existe otra escritura sin resolver sobre este recurso. Consulta y reconcilia esa operación antes de enviar una intención distinta.", key);
     if (pendingKeys().filter(pending => { try { return JSON.parse(sessionStorage.getItem(pending) ?? "{}").scopeHash === scopeHash; } catch { return true; } }).length >= maxPending) throw new TaxonomyMutationError("unknown", "Hay demasiadas intenciones de Taxonomía pendientes de reconciliación; no se envió esta operación.", key);
     try { sessionStorage.setItem(key, markerValue("dispatching", path, options.resourcePath ?? path, scopeHash)); }
     catch (error) { throw new TaxonomyMutationError("unknown", "No se pudo proteger la intención en esta sesión; no se envió la mutación.", key, { cause: error }); }

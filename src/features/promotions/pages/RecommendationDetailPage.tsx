@@ -59,18 +59,25 @@ export function RecommendationDetailPage({
     setPrevResult(state.result);
     setCachedRecord(state.result);
   }
-  const record = state.status === "success" ? state.result : cachedRecord;
+  const record = state.status === "success" ? state.result : cachedRecord?.id === ruleId ? cachedRecord : null;
   const readCatalog = useCallback(
-    async (signal: AbortSignal) => ({
-      products: await confirmedServices.catalog.products(signal, record ? {
-        productIds: [
-          ...(record.configuration.originType === "product" ? [record.configuration.originId] : []),
-          ...record.configuration.candidates.map((candidate) => candidate.productId),
-        ],
-        skus: [],
-      } : undefined),
-      categories: await confirmedServices.catalog.categories(signal),
-    }),
+    async (signal: AbortSignal) => {
+      const [products, categories] = await Promise.allSettled([
+        confirmedServices.catalog.products(signal, record ? {
+          productIds: [
+            ...(record.configuration.originType === "product" ? [record.configuration.originId] : []),
+            ...record.configuration.candidates.map((candidate) => candidate.productId),
+          ],
+          skus: [],
+        } : undefined),
+        confirmedServices.catalog.categories(signal),
+      ]);
+      return {
+        products: products.status === "fulfilled" ? products.value : [],
+        categories: categories.status === "fulfilled" ? categories.value : [],
+        errors: [products, categories].filter(result => result.status === "rejected"),
+      };
+    },
     [confirmedServices, record],
   );
   const catalog = useAdministrationRead(`catalog:${revision + queryRevision}:${record?.id ?? ""}`, readCatalog);
@@ -108,6 +115,7 @@ export function RecommendationDetailPage({
       />
       <Stack gap="lg">
         <PromotionDataNotice kind="recommendation-detail" />
+        {catalog.status === "success" && catalog.result.errors.length > 0 && <FeedbackAlert semantic="warning" title="Referencias auxiliares parciales">La información de productos y categorías se consultó por separado; la fuente disponible se conserva.</FeedbackAlert>}
         {location.state?.saved && (
           <FeedbackAlert semantic="success" title="Regla guardada">
             La configuración fue confirmada.

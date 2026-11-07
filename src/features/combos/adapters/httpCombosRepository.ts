@@ -56,7 +56,7 @@ function mapAvailability(value: unknown, comboId: string, status: Combo["status"
   };
 }
 
-export function createHttpCombosRepository(client: AuthenticatedGatewayClient, catalog: CombosCatalogPort): CombosRepository {
+export function createHttpCombosRepository(client: AuthenticatedGatewayClient, catalog: CombosCatalogPort, scopeId: () => string | null): CombosRepository {
   const uncertaintyPrefix = "g6:combos:uncertain:create:";
   const confirmedPrefix = "g6:combos:confirmed:create:";
   const storedUncertaintyKeys = () => { try { return typeof sessionStorage === "undefined" ? [] : Object.keys(sessionStorage).filter(key => key.startsWith(uncertaintyPrefix)).map(key => key.slice(uncertaintyPrefix.length)); } catch { return []; } };
@@ -97,7 +97,14 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
     catch { throw method === "GET" ? new Error("Combos devolvió JSON ilegible.") : new ConfirmedComboWrite("Combos confirmó la escritura, pero su DTO es ilegible. No la repitas; consulta el recurso."); }
   }
   async function availability(id: string, status: Combo["status"], signal?: AbortSignal): Promise<ComboAvailability> {
-    return mapAvailability(await request(`/api/v1/combos/${encodeURIComponent(id)}/disponibilidad`, "GET", signal), id, status);
+    try { return mapAvailability(await request(`/api/v1/combos/${encodeURIComponent(id)}/disponibilidad`, "GET", signal), id, status); }
+    catch (error) {
+      if (signal?.aborted) throw error;
+      if (error instanceof Error && /HTTP (401|403)/.test(error.message)) throw error;
+      return { state: status === "INACTIVO" ? "COMBO_INACTIVO" : "NO_VERIFICABLE", verifiable: false, quantity: null,
+        freshness: "NO_VERIFICABLE", calculatedAt: null,
+        reason: `No se pudo consultar la disponibilidad auxiliar; el registro del combo sigue disponible. ${error instanceof Error ? error.message : "Error de consulta."}` };
+    }
   }
   async function mapCombo(value: unknown, signal?: AbortSignal): Promise<Combo> {
     const dto = object(value);
@@ -123,7 +130,9 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
     };
   }
   async function createFingerprint(payload: ComboPayload): Promise<string> {
-    const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(toPayload(payload)))));
+    const userId = scopeId();
+    if (!userId) throw new Error("Inicia sesión para crear un combo.");
+    const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${userId}\u0000${JSON.stringify(toPayload(payload))}`)));
     return [...bytes].map(value => value.toString(16).padStart(2, "0")).join("");
   }
   async function write(key: string, work: () => Promise<unknown>): Promise<unknown> {
@@ -194,9 +203,19 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
       const dto = object(await request(`/api/v1/combos?${params}`, "GET", signal));
       const meta = object(dto.meta);
       if (!Array.isArray(dto.items)) throw new Error("Combos no devolvió su lista de items.");
+      const rawItems: unknown[] = dto.items;
       const page = integer(meta.pagina, 1), pageSize = integer(meta.tamanio, 1), total = integer(meta.total);
       if (page !== query.page || pageSize !== query.pageSize) throw new Error("Combos devolvió una página distinta de la solicitada.");
-      return { items: await Promise.all(dto.items.map((item) => mapCombo(item, signal))), page, pageSize, total };
+      const items: Combo[] = new Array(rawItems.length);
+      let next = 0;
+      await Promise.all(Array.from({ length: Math.min(4, rawItems.length) }, async () => {
+        for (;;) {
+          const index = next++;
+          if (index >= rawItems.length) return;
+          items[index] = await mapCombo(rawItems[index], signal);
+        }
+      }));
+      return { items, page, pageSize, total };
     },
     async getById(id, signal) {
       let dto: unknown;

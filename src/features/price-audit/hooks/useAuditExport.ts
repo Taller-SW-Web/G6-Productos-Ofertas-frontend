@@ -1,12 +1,13 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useAuditRuntime } from "../services/AuditRuntimeContext";
+import { PromotionSessionContext } from "../../../app/config/PromotionSessionContext";
 import {
   AuditFailure,
   type AuditExportInput,
   type AuditJob,
 } from "../services/auditRepository";
 
-const uncertaintyKey = (format: string, filters: string) => `g6:audit-export:uncertain:${format}:${encodeURIComponent(filters)}`;
+const uncertaintyKey = (scope: string, format: string, filters: string) => `g6:audit-export:uncertain:${encodeURIComponent(scope)}:${format}:${encodeURIComponent(filters)}`;
 const hasUncertainOutcome = (key: string) => { try { return sessionStorage.getItem(key) === "1"; } catch { return false; } };
 const setUncertainOutcome = (key: string) => { try { sessionStorage.setItem(key, "1"); } catch { /* the hook latch still protects this mount */ } };
 const clearUncertainOutcome = (key: string) => { try { sessionStorage.removeItem(key); } catch { /* storage can be unavailable in restricted browsers */ } };
@@ -26,10 +27,16 @@ export function useAuditExport(
   navigationKey: string,
 ) {
   const { repository, downloader } = useAuditRuntime();
+  const session = useContext(PromotionSessionContext);
+  const scopeId = useSyncExternalStore(
+    session?.subscribe ?? (() => () => undefined),
+    () => session?.snapshot().user?.id ?? "anonymous",
+    () => "anonymous",
+  );
   const filters = JSON.stringify(input.filters);
   const context = useMemo(
-    () => ({ repository, id, format: input.format, filters }),
-    [repository, id, input.format, filters],
+    () => ({ repository, id, format: input.format, filters, scopeId }),
+    [repository, id, input.format, filters, scopeId],
   );
   type State = {
     context: typeof context;
@@ -110,7 +117,7 @@ export function useAuditExport(
     return () => clearTimeout(timer);
   }, [id, job, readError, revision]);
   async function submit() {
-    const pendingKey = uncertaintyKey(input.format, filters);
+    const pendingKey = uncertaintyKey(scopeId, input.format, filters);
     if (request.current || id || job || requestError?.kind === "unknown" || hasUncertainOutcome(pendingKey))
       return;
     const controller = new AbortController();
@@ -186,7 +193,7 @@ export function useAuditExport(
     job,
     requestError,
     readError,
-    exportOutcomeUncertain: !id && hasUncertainOutcome(uncertaintyKey(input.format, filters)),
+    exportOutcomeUncertain: !id && hasUncertainOutcome(uncertaintyKey(scopeId, input.format, filters)),
     downloadError: state.downloadError,
     submitting: !!state.submitting,
     downloading: !!state.downloading,

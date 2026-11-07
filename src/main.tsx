@@ -116,14 +116,28 @@ async function start() {
       ? { api: async () => createHttpAuditRepository(gatewayClient) }
       : {}),
   });
-  let inventorySkuCache: import("./features/inventory/adapters/apiInventoryAdapter").InventoryCatalogSku[] | null = null;
-  let inventorySkuCacheAt = 0;
-  let inventorySkuLoad: Promise<import("./features/inventory/adapters/apiInventoryAdapter").InventoryCatalogSku[]> | null = null;
+  type InventorySkus = import("./features/inventory/adapters/apiInventoryAdapter").InventoryCatalogSku[];
+  const inventorySkuCache = new Map<string, { items: InventorySkus; at: number }>();
+  const inventorySkuLoads = new Map<string, Promise<InventorySkus>>();
+  const waitForInventorySkus = (promise: Promise<InventorySkus>, signal?: AbortSignal): Promise<InventorySkus> => {
+    if (!signal) return promise;
+    if (signal.aborted) return Promise.reject(signal.reason);
+    return new Promise((resolve, reject) => {
+      const abort = () => { signal.removeEventListener("abort", abort); reject(signal.reason); };
+      signal.addEventListener("abort", abort, { once: true });
+      promise.then(value => { signal.removeEventListener("abort", abort); resolve(value); }, error => { signal.removeEventListener("abort", abort); reject(error); });
+    });
+  };
   const listInventoryCatalogSkus = async (signal?: AbortSignal) => {
-    if (inventorySkuCache && Date.now() - inventorySkuCacheAt < 30_000) return inventorySkuCache;
-    if (inventorySkuLoad) { const cached = await inventorySkuLoad; signal?.throwIfAborted(); return cached; }
-    inventorySkuLoad = (async () => {
-      const [categories, brands] = await Promise.all([catalogServices.taxonomy.getCategories(signal), catalogServices.taxonomy.getBrands(signal)]);
+    signal?.throwIfAborted();
+    const identity = promotions?.session.snapshot().user?.id;
+    if (!identity) throw new Error("Inicia sesión para consultar las identidades de SKU.");
+    const cached = inventorySkuCache.get(identity);
+    if (cached && Date.now() - cached.at < 30_000) return cached.items;
+    let inventorySkuLoad = inventorySkuLoads.get(identity);
+    if (!inventorySkuLoad) {
+      inventorySkuLoad = (async () => {
+      const [categories, brands] = await Promise.all([catalogServices.taxonomy.getCategories(), catalogServices.taxonomy.getBrands()]);
       const categoryNames = new Map(categories.map(item => [item.id, item.nombre]));
       const brandNames = new Map(brands.map(item => [item.id, item.nombre]));
       const output: import("./features/inventory/adapters/apiInventoryAdapter").InventoryCatalogSku[] = [];
@@ -132,7 +146,7 @@ async function start() {
       let reportedTotal: number | undefined;
       const productIds = new Set<string>();
       do {
-        const result = await catalogServices.catalog.list({ page, pageSize: 100, status: "all" }, undefined, signal);
+        const result = await catalogServices.catalog.list({ page, pageSize: 100, status: "all" });
         if (result.page !== page || result.pageSize !== 100 || (reportedTotal !== undefined && reportedTotal !== result.total) || result.items.length !== Math.min(100, Math.max(0, result.total - (page - 1) * 100))) throw new Error("Paginación de Catálogo incompleta para Inventario.");
         reportedTotal = result.total;
         totalPages = Math.ceil(result.total / 100);
@@ -146,7 +160,7 @@ async function start() {
             let variantPages: number;
             let variantTotal: number | undefined;
             do {
-              const variants = await catalogServices.catalog.listVariants(product.id, { page: variantPage, pageSize: 100, status: "all" }, undefined, signal);
+              const variants = await catalogServices.catalog.listVariants(product.id, { page: variantPage, pageSize: 100, status: "all" });
               if (variants.page !== variantPage || variants.pageSize !== 100 || (variantTotal !== undefined && variantTotal !== variants.total) || variants.items.length !== Math.min(100, Math.max(0, variants.total - (variantPage - 1) * 100)) || variants.items.some(variant => variant.productId !== product.id)) throw new Error("Paginación o identidad de variantes incompleta para Inventario.");
               variantTotal = variants.total;
               variantPages = Math.ceil(variants.total / 100);
@@ -160,9 +174,13 @@ async function start() {
       if (productIds.size !== (reportedTotal ?? 0)) throw new Error("Catálogo no entregó todos los productos para Inventario.");
       if (new Set(output.map(item => item.sku)).size !== output.length) throw new Error("Catálogo devolvió SKU duplicados para Inventario.");
       return output;
-    })();
-    try { inventorySkuCache = await inventorySkuLoad; inventorySkuCacheAt = Date.now(); return inventorySkuCache; }
-    finally { inventorySkuLoad = null; }
+      })();
+      inventorySkuLoads.set(identity, inventorySkuLoad);
+      void inventorySkuLoad.finally(() => { if (inventorySkuLoads.get(identity) === inventorySkuLoad) inventorySkuLoads.delete(identity); }).catch(() => undefined);
+    }
+    const items = await waitForInventorySkus(inventorySkuLoad, signal);
+    inventorySkuCache.set(identity, { items, at: Date.now() });
+    return items;
   };
   if (mode === "api" && gatewayOrigin && promotions) {
     if (gatewayClient) {
@@ -195,6 +213,7 @@ async function start() {
   const combosRuntime = await createCombosRuntime(mode, runtime, {
     gateway: gatewayClient ?? undefined,
     catalog: catalogServices.catalog,
+    scopeId: () => promotions?.session.snapshot().user?.id ?? null,
   });
   const bulkRepository = mode === "api" && gatewayOrigin && promotions?.session
     ? createHttpBulkRepository(createBulkFetchTransport(gatewayOrigin), promotions.session)

@@ -162,9 +162,9 @@ export function createHttpPricingRepository(
 
   function channelIdFor(channel: PriceChannel): string | null {
     if (channel === "global") return null;
-    if (channelIds.retail) return channelIds.retail;
+    if (channelIds[channel]) return channelIds[channel];
     throw blocked(
-      "El contrato de escritura requiere el channelId canónico de Retail; Catálogo/Integración todavía no lo proporciona.",
+      `El contrato de escritura requiere el channelId canónico de ${channel.toUpperCase()}; Catálogo/Integración todavía no lo proporciona.`,
     );
   }
 
@@ -258,13 +258,12 @@ export function createHttpPricingRepository(
     channel: PriceChannel,
     signal: AbortSignal,
   ): Promise<PriceView | null> {
-    if (target.kind === "product" && channel === "retail") {
+    if (target.kind === "product" && channel !== "global") {
       throw blocked(
         "El GET administrativo de producto no resuelve canal Retail. Se requiere un SKU legítimo o una operación contractual que confirme ese alcance.",
       );
     }
-    const suffix =
-      target.kind === "variant" && channel === "retail" ? "?canal=RETAIL" : "";
+    const suffix = target.kind === "variant" && channel !== "global" ? `?canal=${channel.toUpperCase()}` : "";
     const response = await json(
       targetPath(target, suffix),
       { method: "GET", signal },
@@ -303,7 +302,7 @@ export function createHttpPricingRepository(
         );
       }
       editableReads.delete(key);
-      if (target.kind === "product" && writeTarget.channel === "retail") {
+      if (target.kind === "product" && writeTarget.channel !== "global") {
         throw blocked(
           "GET de precio de producto no admite canal. No es posible leer la versión exacta de un precio Retail para editarlo.",
         );
@@ -360,7 +359,7 @@ export function createHttpPricingRepository(
           "Vuelve a leer el precio exacto de este objetivo y canal antes de guardar.",
         );
       }
-      if (target.kind === "product" && change.target.channel === "retail") {
+      if (target.kind === "product" && change.target.channel !== "global") {
         throw blocked(
           "No existe una lectura contractual de precio de producto por canal para verificar la versión antes de editar Retail.",
         );
@@ -569,7 +568,7 @@ export function createHttpPricingRepository(
         );
       }
       const params = new URLSearchParams({ at });
-      if (query.channel === "retail") params.set("canal", "RETAIL");
+      if (query.channel !== "global") params.set("canal", query.channel.toUpperCase());
       const response = await json(
         `/api/v1/precios/skus/${encoded(sku)}?${params.toString()}`,
         { method: "GET", signal },
