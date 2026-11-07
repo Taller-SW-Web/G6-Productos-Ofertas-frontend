@@ -428,6 +428,7 @@ export function createHttpPromotionServices(
           if (typeof recovered === "object" && recovered !== null) Object.assign(recovered, { writeOutcome: "RECONCILED" });
           return recovered;
         }
+        try { sessionStorage.setItem(key, JSON.stringify({ ...marker, state: "REQUIRES_EXTERNAL_VERIFICATION" })); } catch { /* keep the existing uncertainty marker */ }
       }
       throw coupon ? new CouponWriteError("unknown", "La intención previa sigue sin reconciliación; no se reenvió.") : new AdministrationError("unknown", "La intención previa sigue sin reconciliación; no se reenvió.");
     }
