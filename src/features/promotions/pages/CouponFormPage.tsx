@@ -118,6 +118,15 @@ function CouponFormContent({ initial }: { initial: CouponView | null }) {
           </Button>
         </Stack>
       );
+    if (form.confirmed.relatedDataAccessDenied)
+      return (
+        <Stack gap="lg">
+          <PageHeader title={`Cupón — ${form.confirmed.code}`} />
+          <FeedbackAlert semantic="success" title="Cupón guardado">La escritura fue confirmada por Backend.</FeedbackAlert>
+          <FeedbackAlert semantic="error" title="Acceso auxiliar denegado">La promoción asociada no pudo consultarse por falta de autorización. Revisa el acceso antes de continuar.</FeedbackAlert>
+          <CouponSummary coupon={form.confirmed} />
+        </Stack>
+      );
     return (
       <Navigate
         to={`/cupones/${form.confirmed.id}?${next.toString()}`}

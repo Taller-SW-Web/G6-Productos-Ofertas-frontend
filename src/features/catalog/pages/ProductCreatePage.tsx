@@ -43,7 +43,7 @@ export function ProductCreatePage() {
     onSuccess: (created) => {
       // FLOW-003 §4.1: On 201 BORRADOR success, navigate immediately to S06 preparation!
       navigate(`/productos/${created.id}/preparacion`, {
-        state: { justCreated: true },
+        state: { justCreated: true, createdProduct: created },
       });
     },
   });

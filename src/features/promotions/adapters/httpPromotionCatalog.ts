@@ -10,6 +10,8 @@ import type {
 export function createHttpPromotionCatalog(
   request: (path: string, signal: AbortSignal) => Promise<unknown>,
 ): PromotionCatalogRepository {
+  const boundedRequest = (path: string, signal: AbortSignal) =>
+    request(path, AbortSignal.any([signal, AbortSignal.timeout(7500)]));
   async function pages(path: string, nested: boolean, signal: AbortSignal) {
     const rows: unknown[] = [];
     let expectedTotal: number | undefined;
@@ -17,7 +19,7 @@ export function createHttpPromotionCatalog(
     for (let current = 1; current <= 1000; current++) {
       signal.throwIfAborted();
       const response = object(
-        await request(`${path}&pagina=${current}&tamanio=100`, signal),
+        await boundedRequest(`${path}&pagina=${current}&tamanio=100`, signal),
       );
       signal.throwIfAborted();
       const meta = nested ? object(response.meta) : response;
@@ -47,7 +49,7 @@ export function createHttpPromotionCatalog(
 
   return {
     async products(signal, retain) {
-      const bounded = AbortSignal.any([signal, AbortSignal.timeout(7500)]);
+      const bounded = signal;
       const retainedIds = new Set(retain?.productIds ?? []);
       const retainedSkus = new Set(retain?.skus ?? []);
       // The commercial DTO omits status. The published backoffice estado
@@ -132,7 +134,7 @@ export function createHttpPromotionCatalog(
       return products;
     },
     async categories(signal) {
-      const bounded = AbortSignal.any([signal, AbortSignal.timeout(7500)]);
+      const bounded = signal;
       const rows = await pages(
         "/categorias/administracion?estado=ACTIVO",
         true,

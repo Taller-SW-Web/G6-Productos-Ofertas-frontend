@@ -90,12 +90,7 @@ export function useCouponForm(
       const controller = new AbortController();
       const result = initial
         ? await confirmedRepository.read(initial.id, controller.signal)
-        : (
-            await confirmedRepository.list(
-              { status: "all", page: 1, pageSize: 100 },
-              controller.signal,
-            )
-          ).items.find((item) => item.code === proposal.code);
+        : await findCoupon(confirmedRepository, proposal.code, controller.signal);
       if (result && couponMatchesInput(result, proposal)) setConfirmed(result);
       else
         setRecoveryMessage(
@@ -124,4 +119,15 @@ export function useCouponForm(
     submitting: command.submitting,
     message: command.error instanceof Error ? command.error.message : undefined,
   };
+}
+
+async function findCoupon(repository: CouponRepository, code: string, signal: AbortSignal): Promise<CouponView | null> {
+  const pageSize = 100;
+  for (let page = 1; page <= 1000; page++) {
+    const result = await repository.list({ status: "all", page, pageSize }, signal);
+    const match = result.items.find((item) => item.code === code);
+    if (match) return match;
+    if (result.items.length === 0 || page * pageSize >= result.total) return null;
+  }
+  throw new Error("COUPON_PAGE_LIMIT");
 }

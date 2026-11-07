@@ -199,6 +199,7 @@ async function start() {
       configureInventoryApi(() =>
         createHttpInventoryRepository({
           transport: gatewayClient,
+          currentUserScope: () => promotions.session.snapshot().user?.id ?? null,
           listCatalogSkus: listInventoryCatalogSkus,
           getCategories: async () => (await catalogServices.taxonomy.getCategories()).map(item => ({ id: item.id, name: item.nombre, active: item.activo })),
           getBrands: async () => (await catalogServices.taxonomy.getBrands()).map(item => ({ id: item.id, name: item.nombre, active: item.activo })),

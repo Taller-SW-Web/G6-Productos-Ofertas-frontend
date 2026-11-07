@@ -79,6 +79,7 @@ export interface InventoryCatalogSku { sku: string; productName: string; categor
 
 export interface HttpInventoryRepositoryDependencies {
   transport: InventoryHttpTransport;
+  currentUserScope?: () => string | null;
   listCatalogSkus?: (signal?: AbortSignal) => Promise<InventoryCatalogSku[]>;
   getCategories?: () => Promise<{ id: string; name: string; active: boolean }[]>;
   getBrands?: () => Promise<{ id: string; name: string; active: boolean }[]>;
@@ -205,6 +206,7 @@ export function createHttpInventoryRepository(
   dependencies: HttpInventoryRepositoryDependencies,
 ): HttpInventoryRepository {
   const { transport, resolveTransferPresentation } = dependencies;
+  const currentUserScope = dependencies.currentUserScope ?? (() => null);
   // TAC-P0-02: separación explícita de tres estados de escritura por traslado:
   //   - IN_FLIGHT: escritura en curso sin respuesta recibida aún.
   //   - UNCERTAIN: respuesta perdida o fallo >=500; conserva el snapshot
@@ -551,12 +553,14 @@ export function createHttpInventoryRepository(
   const dashboardReads = new Map<string, Promise<unknown>>();
   function readDashboard(filters: DashboardFiltersQuery | undefined): Promise<unknown> {
     const path = dashboardPath(filters);
-    const existing = dashboardReads.get(path);
+    const identity = currentUserScope();
+    const key = `${identity ?? "anonymous"}:${path}`;
+    const existing = dashboardReads.get(key);
     if (existing) return existing;
     const pending = json(path, { method: "GET" }, false).finally(() => {
-      if (dashboardReads.get(path) === pending) dashboardReads.delete(path);
+      if (dashboardReads.get(key) === pending) dashboardReads.delete(key);
     });
-    dashboardReads.set(path, pending);
+    dashboardReads.set(key, pending);
     return pending;
   }
 

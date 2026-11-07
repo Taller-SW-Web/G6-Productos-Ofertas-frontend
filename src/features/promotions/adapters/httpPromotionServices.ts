@@ -594,9 +594,10 @@ export function createHttpPromotionServices(
     try {
       return await enrichCoupon(confirmed, signal);
     } catch (error) {
-      if (error instanceof CouponReadError && error.kind === "unavailable")
-        return { ...confirmed, relatedDataUnavailable: true };
-      throw error;
+      signal.throwIfAborted();
+      if (error instanceof CouponReadError && error.kind !== "unavailable")
+        return { ...confirmed, relatedDataAccessDenied: true };
+      return { ...confirmed, relatedDataUnavailable: true };
     }
   }
   const coupons: PromotionServices["coupons"] = {
@@ -651,13 +652,15 @@ export function createHttpPromotionServices(
         };
       }).then((r) => r!),
     read: (id, s) =>
-      read(
-        () =>
-          request("/cupones/" + encodeURIComponent(id), s).then((v) =>
-            enrichCoupon(coupon(v), s),
-          ),
-        true,
-      ),
+      read(async () => {
+        const confirmed = coupon(await request("/cupones/" + encodeURIComponent(id), s));
+        try { return await enrichCoupon(confirmed, s); }
+        catch (error) {
+          s.throwIfAborted();
+          if (error instanceof CouponReadError && error.kind !== "unavailable") throw error;
+          return { ...confirmed, relatedDataUnavailable: true };
+        }
+      }, true),
     create: (d, s) => writeCoupon("/cupones", s, "POST", couponDto(d)),
     update: (id, d, s) =>
       writeCoupon(

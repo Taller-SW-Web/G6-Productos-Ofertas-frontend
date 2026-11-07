@@ -161,7 +161,10 @@ export function createHttpCatalogRepository(transport: CatalogHttpTransport): Ca
       ]).then(([prep, schema]) => items.map(v => mapVariant(v, pid, prep, schema))) : [];
       return { items: mapped, total, page: requestedPage, pageSize: requestedPageSize };
     },
-    getVariantById: async (pid, vid, _sc, sig) => variantResult(await request(variantPath(pid, vid), "GET", undefined, sig), pid, sig, vid),
+    getVariantById: async (pid, vid, _sc, sig) => {
+      try { return await variantResult(await request(variantPath(pid, vid), "GET", undefined, sig), pid, sig, vid); }
+      catch (error) { if (error instanceof CatalogError && error.kind === "not_found") return null; throw error; }
+    },
     createVariant: async (pid, p, _sc, sig) => {
       if (typeof p.sku !== "string" || !p.sku.trim()) throw new CatalogError("validation", "El SKU es obligatorio (SKU_INVALIDO).", { sku: "Ingrese un SKU explícito." });
       return write(variantPath(pid), "POST", { sku: p.sku,
