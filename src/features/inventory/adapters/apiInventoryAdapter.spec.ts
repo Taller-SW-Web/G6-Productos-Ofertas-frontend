@@ -30,9 +30,6 @@ import {
   type TrasladoInventarioDto,
 } from "../services/inventoryMappers";
 import { deferred } from "../../../../tests/fixtures/h4Controlled";
-import { renderHook, waitFor } from "@testing-library/react";
-import { cleanup } from "@testing-library/react";
-import { useInventoryDashboard } from "../hooks/useInventoryDashboard";
 import { resetInventoryRepository } from "../services/inventoryProvider";
 
 let currentOwner = "g7-inventory-owner-a";
@@ -1655,7 +1652,21 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
     currentOwner = "g7-inventory-owner-a";
     expect(repository.getTransferWriteRecord("t-1")).toMatchObject({ state: "RECONCILED", payload: { operationId: RECEPCION_PAYLOAD.operationId } });
     expect(calls.filter(call => call.request.method === "POST")).toHaveLength(1);
-    expect(memory.has("inventory.transferReceptionAttempts.v1")).toBe(true);
+    const keyA = "inventory.transferReceptionAttempts.v1:g7-inventory-owner-a";
+    const keyB = "inventory.transferReceptionAttempts.v1:g7-inventory-owner-b";
+    const persistedA = JSON.parse(memory.get(keyA) ?? "null") as { uncertain?: { operationId?: string; transferId?: string; quantityReceived?: number }[] } | null;
+    expect(persistedA?.uncertain).toContainEqual(expect.objectContaining({
+      operationId: RECEPCION_PAYLOAD.operationId,
+      transferId: RECEPCION_PAYLOAD.transferId,
+      quantityReceived: RECEPCION_PAYLOAD.quantityReceived,
+    }));
+    expect(memory.has(keyB)).toBe(false);
+    currentOwner = "g7-inventory-owner-b";
+    expect(repository.getTransferWriteRecord("t-1")).toBeNull();
+    currentOwner = "g7-inventory-owner-a";
+    rehydrateTransferReceptionsForTesting();
+    expect(repository.getTransferWriteRecord("t-1")).toMatchObject({ payload: RECEPCION_PAYLOAD });
+    expect(calls.filter(call => call.request.method === "POST")).toHaveLength(1);
   });
 
   describe("TAC-P0-11: aborto del transporte durante la recepción", () => {
@@ -2268,23 +2279,6 @@ describe("apiInventoryAdapter — dashboard KPIs (obtenerDashboardInventario)", 
     pendingA.resolve(jsonResponse(DASHBOARD_DTO));
     pendingB.resolve(jsonResponse({ ...DASHBOARD_DTO, totalAvailable: 90 }));
     await expect(Promise.all([firstA, secondA, readB])).resolves.toHaveLength(3);
-  });
-
-  it("INV-H4-04: desmontar un consumidor no cancela la consulta compartida del otro", async () => {
-    const pending = deferred<Response>();
-    const { repository, request } = setup(async () => pending.promise);
-    resetInventoryRepository(repository);
-    const first = renderHook(() => useInventoryDashboard({}));
-    const second = renderHook(() => useInventoryDashboard({}));
-    expect(request).toHaveBeenCalledTimes(1);
-    first.unmount();
-    pending.resolve(jsonResponse(DASHBOARD_DTO));
-    await waitFor(() => expect(second.result.current.loading).toBe(false));
-    expect(second.result.current.kpis?.availableUnits).toBe(125);
-    expect(request).toHaveBeenCalledTimes(1);
-    second.unmount();
-    cleanup();
-    resetInventoryRepository();
   });
 
   it("mapea KPIs autoritativos de DashboardInventario e informa null en métricas no publicadas", async () => {

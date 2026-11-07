@@ -883,17 +883,26 @@ test("AUD-H4-03: POST de exportación 503 conserva resultado incierto y esta sol
 
 test("AUD-H4-04: exportId confirmado se consulta y descarga bajo el mismo identificador", async () => {
   const calls: { path: string; method: string }[] = [];
+  let exportStatus: "QUEUED" | "PROCESSING" | "COMPLETED" = "QUEUED";
   const repository = createHttpAuditRepository({ request: async (path, init) => {
     calls.push({ path, method: init.method });
-    if (path.endsWith("/archivo")) return new Response("row\n", { status: 200, headers: { "content-type": "text/csv" } });
-    return new Response(JSON.stringify(path.endsWith("export-h4-001") ? auditHttpJobH4 : { ...auditHttpJobH4, status: "PROCESSING" }), { status: 200, headers: { "content-type": "application/json" } });
+    if (path.endsWith("/archivo")) {
+      expect(exportStatus).toBe("COMPLETED");
+      return new Response("row\n", { status: 200, headers: { "content-type": "text/csv" } });
+    }
+    if (init.method === "POST") return new Response(JSON.stringify(auditHttpJobH4), { status: 202, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify({ ...auditHttpJobH4, status: exportStatus }), { status: 200, headers: { "content-type": "application/json" } });
   } });
   const created = await repository.requestExport({ format: "CSV", filters: { sku: "", canal: "", desde: "", hasta: "", usuarioId: "", batchId: "" } }, new AbortController().signal);
   expect(created.id).toBe("export-h4-001");
+  exportStatus = "PROCESSING";
   await expect(repository.getExport(created.id, new AbortController().signal)).resolves.toMatchObject({ id: created.id, status: "PROCESSING" });
+  exportStatus = "COMPLETED";
+  await expect(repository.getExport(created.id, new AbortController().signal)).resolves.toMatchObject({ id: created.id, status: "COMPLETED" });
   await expect(repository.download(created.id, new AbortController().signal)).resolves.toMatchObject({ filename: "auditoria-precios.csv" });
   expect(calls).toEqual([
     { path: "/api/v1/auditoria-precios/exportaciones", method: "POST" },
+    { path: "/api/v1/auditoria-precios/exportaciones/export-h4-001", method: "GET" },
     { path: "/api/v1/auditoria-precios/exportaciones/export-h4-001", method: "GET" },
     { path: "/api/v1/auditoria-precios/exportaciones/export-h4-001/archivo", method: "GET" },
   ]);

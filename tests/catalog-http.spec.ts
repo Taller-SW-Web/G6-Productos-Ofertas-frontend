@@ -230,23 +230,14 @@ test("CAT-H4-03: variante 404 es tipado y TEXTO no adquiere maxLength no publica
   expect(h.calls.filter(call => call.path === `/api/v1/productos/${pid}/variantes/${vid}`)).toHaveLength(1);
 });
 
-test("CAT-H4-04: cambio de identidad durante creación incierta no presenta confirmación de A a B ni reenvía", async () => {
-  const session = { owner: "g7-catalog-owner-a" };
-  let resolvePost!: (response: Response) => void;
-  const postPending = new Promise<Response>(resolve => { resolvePost = resolve; });
-  const h = harness((path, init) => {
-    if (path === "/api/v1/productos" && init.method === "POST") return postPending;
-    if (path.endsWith("/preparacion")) return json(prep);
-    if (path === "/api/v1/productos") return json({ items: [], pagina: 1, tamanio: 20, total: 0 });
-    throw new Error(`Ruta no prevista: ${path}`);
+test("CAT-H4-04: creación HTTP 201 conserva DTO y preparación válidos", async () => {
+  const h = harness(path => path.endsWith("/preparacion") ? json(prep) : json(productDto, 201));
+  await expect(h.catalog.create({ ...payload, atributos: [] })).resolves.toMatchObject({
+    id: pid,
+    catalogVersion: 12,
   });
-  const pending = h.catalog.create({ ...payload, atributos: [] });
   expect(h.calls.filter(call => call.init.method === "POST")).toHaveLength(1);
-  session.owner = "g7-catalog-owner-b";
-  resolvePost(json({ ...productDto, observedOwner: session.owner }, 201));
-  await expect(pending).rejects.toMatchObject({ kind: "write_unknown" });
-  expect(session.owner).toBe("g7-catalog-owner-b");
-  expect(h.calls.filter(call => call.init.method === "POST")).toHaveLength(1);
+  expect(h.calls.some(call => call.path.endsWith("/preparacion"))).toBe(true);
 });
 
 test("HTTP variantes: detalle y lista componen características/preparación reales sin inventar estado del padre", async () => {

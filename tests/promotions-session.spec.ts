@@ -1,5 +1,4 @@
 import { test, expect } from "@playwright/test";
-import { vi } from "vitest";
 import {
   createServer,
   type IncomingMessage,
@@ -14,6 +13,18 @@ import { createHttpPromotionServices } from "../src/features/promotions/adapters
 import { createAuthenticatedGatewayClient } from "../src/app/config/authenticatedGatewayClient";
 
 const signal = () => new AbortController().signal;
+type LocalSpy<T extends (...args: never[]) => unknown> = T & { mock: { calls: Parameters<T>[] } };
+function spy<T extends (...args: never[]) => unknown>(implementation?: T): LocalSpy<T> {
+  const calls: Parameters<T>[] = [];
+  const wrapped = ((...args: Parameters<T>) => { calls.push(args); return implementation?.(...args); }) as LocalSpy<T>;
+  wrapped.mock = { calls };
+  return wrapped;
+}
+function replaceGlobal(key: PropertyKey, value: unknown): () => void {
+  const original = Object.getOwnPropertyDescriptor(globalThis, key);
+  Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+  return () => original ? Object.defineProperty(globalThis, key, original) : Reflect.deleteProperty(globalThis, key);
+}
 const dto = (version = 1) => ({
   accessToken: `eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJzeW50aGV0aWMifQ.signature${version}`,
   refreshToken: `synthetic-refresh-${version}`,
@@ -391,10 +402,10 @@ test("Gateway: no reenvía una escritura rechazada ni reusa la sesión invalidad
 
 test("SEC-H4-01: GET 401 TOKEN_INVALIDO renueva y reintenta exactamente una vez", async () => {
   let token = "h4.fake.access.a";
-  const refresh = vi.fn(async () => { token = "h4.fake.access.b"; return token; });
-  const invalidate = vi.fn();
+  const refresh = spy<() => Promise<string>>(async () => { token = "h4.fake.access.b"; return token; });
+  const invalidate = spy<(...args: [string]) => void>(() => {});
   const calls: { method: string; authorization: string | undefined }[] = [];
-  const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+  const fetcher = spy<typeof fetch>(async (_input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ method: init?.method ?? "GET", authorization: new Headers(init?.headers).get("Authorization") ?? undefined });
     return calls.length === 1
       ? new Response(JSON.stringify({ status: 401, code: "TOKEN_INVALIDO" }), { status: 401, headers: { "content-type": "application/problem+json" } })
@@ -410,9 +421,9 @@ test("SEC-H4-01: GET 401 TOKEN_INVALIDO renueva y reintenta exactamente una vez"
 });
 
 test("SEC-H4-02: POST 401 invalida la sesión y no reenvía la mutación", async () => {
-  const fetcher = vi.fn(async () => new Response(JSON.stringify({ status: 401, code: "TOKEN_INVALIDO" }), { status: 401, headers: { "content-type": "application/problem+json" } }));
-  const refresh = vi.fn(async () => "h4.fake.new");
-  const invalidate = vi.fn();
+  const fetcher = spy<typeof fetch>(async () => new Response(JSON.stringify({ status: 401, code: "TOKEN_INVALIDO" }), { status: 401, headers: { "content-type": "application/problem+json" } }));
+  const refresh = spy<() => Promise<string>>(async () => "h4.fake.new");
+  const invalidate = spy<(...args: [string]) => void>(() => {});
   const client = createAuthenticatedGatewayClient("http://127.0.0.1:9000", { getAccessToken: async () => "h4.fake.old", refreshAccessToken: refresh, invalidateAccessToken: invalidate }, fetcher);
   const response = await client.request("/api/v1/promociones", { method: "POST", body: "{}", signal: new AbortController().signal });
   expect(response.status).toBe(401);
@@ -422,8 +433,8 @@ test("SEC-H4-02: POST 401 invalida la sesión y no reenvía la mutación", async
 });
 
 test("SEC-H4-03: rutas con prefijo ajeno o segmento peligroso no llegan a fetch", async () => {
-  const fetcher = vi.fn();
-  const client = createAuthenticatedGatewayClient("http://127.0.0.1:9000", { getAccessToken: async () => "h4.fake.access", refreshAccessToken: async () => null, invalidateAccessToken: vi.fn() }, fetcher as typeof fetch);
+  const fetcher = spy();
+  const client = createAuthenticatedGatewayClient("http://127.0.0.1:9000", { getAccessToken: async () => "h4.fake.access", refreshAccessToken: async () => null, invalidateAccessToken: spy<(...args: [string]) => void>(() => {}) }, fetcher as unknown as typeof fetch);
   for (const path of ["/g7/api/v1/auth/login", "/api/v1/../admin", "/api/v1/%252fadmin", "/api/v1/%5cadmin", "//evil.invalid/api/v1/x"]) {
     await expect(client.request(path, { method: "GET", signal: new AbortController().signal })).rejects.toThrow();
   }
@@ -450,15 +461,15 @@ test("SEC-H4-04: una respuesta GET de A que llega después del cambio de sesión
 
 test("SEC-H4-05: storage inaccesible bloquea la persistencia comercial antes de fetch", async () => {
   const original = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
-  const fetcher = vi.fn(async () => new Response("{}", { status: 201 }));
-  vi.stubGlobal("fetch", fetcher);
+  const fetcher = spy<typeof fetch>(async () => new Response("{}", { status: 201 }));
+  const restoreFetch = replaceGlobal("fetch", fetcher);
   Object.defineProperty(globalThis, "sessionStorage", { configurable: true, get() { throw new Error("storage denied"); } });
   try {
     const api = createHttpPromotionServices({ gatewayOrigin: "http://127.0.0.1:9000", getAccessToken: async () => "h4.fake.token", scopeId: () => "g7-storage-owner" });
     await expect(api.campaigns.save(null, { name: "Campaña storage", mode: "coupon", status: "active", discountType: "percentage", benefit: "10", priority: "1", validFrom: "2026-11-08T00:00", validUntil: "2026-11-10T00:00", channels: ["retail"], productIds: [], skus: [], combination: { pricing: false, automatic: false, coupon: true } }, new AbortController().signal)).rejects.toMatchObject({ kind: "unknown" });
     expect(fetcher.mock.calls).toHaveLength(0);
   } finally {
-    vi.unstubAllGlobals();
+    restoreFetch();
     if (original) Object.defineProperty(globalThis, "sessionStorage", original);
     else Reflect.deleteProperty(globalThis, "sessionStorage");
   }
@@ -466,7 +477,7 @@ test("SEC-H4-05: storage inaccesible bloquea la persistencia comercial antes de 
 
 test("SEC-H4-06: PATCH 2xx con ID de campaña ajeno no se acepta como confirmación", async () => {
   const values = new Map<string, string>();
-  vi.stubGlobal("sessionStorage", { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); } });
+  const restoreStorage = replaceGlobal("sessionStorage", { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); } });
   try {
   await fixture(async (origin, calls, set) => {
     set((request, response, raw) => {
@@ -484,5 +495,5 @@ test("SEC-H4-06: PATCH 2xx con ID de campaña ajeno no se acepta como confirmaci
     expect(calls.length - before).toBe(1);
     expect(calls.filter(call => call.path.endsWith("/promociones/promo-expected") && call.auth === "Bearer h4.fake.token")).toHaveLength(2);
   });
-  } finally { vi.unstubAllGlobals(); }
+  } finally { restoreStorage(); }
 });
