@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { vi } from "vitest";
 import {
   createServer,
   type IncomingMessage,
@@ -10,6 +11,7 @@ import {
   secureBase,
 } from "../src/features/promotions/adapters/g7Session";
 import { createHttpPromotionServices } from "../src/features/promotions/adapters/httpPromotionServices";
+import { createAuthenticatedGatewayClient } from "../src/app/config/authenticatedGatewayClient";
 
 const signal = () => new AbortController().signal;
 const dto = (version = 1) => ({
@@ -385,4 +387,102 @@ test("Gateway: no reenvía una escritura rechazada ni reusa la sesión invalidad
     expect(invalidated).toBe(true);
     expect(calls).toHaveLength(1);
   });
+});
+
+test("SEC-H4-01: GET 401 TOKEN_INVALIDO renueva y reintenta exactamente una vez", async () => {
+  let token = "h4.fake.access.a";
+  const refresh = vi.fn(async () => { token = "h4.fake.access.b"; return token; });
+  const invalidate = vi.fn();
+  const calls: { method: string; authorization: string | undefined }[] = [];
+  const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({ method: init?.method ?? "GET", authorization: new Headers(init?.headers).get("Authorization") ?? undefined });
+    return calls.length === 1
+      ? new Response(JSON.stringify({ status: 401, code: "TOKEN_INVALIDO" }), { status: 401, headers: { "content-type": "application/problem+json" } })
+      : new Response(JSON.stringify({ items: [], meta: { pagina: 1, tamanio: 10, total: 0, totalPaginas: 0 } }), { status: 200, headers: { "content-type": "application/json" } });
+  });
+  const client = createAuthenticatedGatewayClient("http://127.0.0.1:9000", { getAccessToken: async () => token, refreshAccessToken: refresh, invalidateAccessToken: invalidate }, fetcher);
+  const response = await client.request("/api/v1/promociones", { method: "GET", signal: new AbortController().signal });
+  expect(response.status).toBe(200);
+  expect(fetcher.mock.calls).toHaveLength(2);
+  expect(refresh.mock.calls).toHaveLength(1);
+  expect(calls.map(call => call.authorization)).toEqual(["Bearer h4.fake.access.a", "Bearer h4.fake.access.b"]);
+  expect(invalidate.mock.calls).toHaveLength(0);
+});
+
+test("SEC-H4-02: POST 401 invalida la sesión y no reenvía la mutación", async () => {
+  const fetcher = vi.fn(async () => new Response(JSON.stringify({ status: 401, code: "TOKEN_INVALIDO" }), { status: 401, headers: { "content-type": "application/problem+json" } }));
+  const refresh = vi.fn(async () => "h4.fake.new");
+  const invalidate = vi.fn();
+  const client = createAuthenticatedGatewayClient("http://127.0.0.1:9000", { getAccessToken: async () => "h4.fake.old", refreshAccessToken: refresh, invalidateAccessToken: invalidate }, fetcher);
+  const response = await client.request("/api/v1/promociones", { method: "POST", body: "{}", signal: new AbortController().signal });
+  expect(response.status).toBe(401);
+  expect(fetcher.mock.calls).toHaveLength(1);
+  expect(refresh.mock.calls).toHaveLength(0);
+  expect(invalidate.mock.calls).toHaveLength(1);
+});
+
+test("SEC-H4-03: rutas con prefijo ajeno o segmento peligroso no llegan a fetch", async () => {
+  const fetcher = vi.fn();
+  const client = createAuthenticatedGatewayClient("http://127.0.0.1:9000", { getAccessToken: async () => "h4.fake.access", refreshAccessToken: async () => null, invalidateAccessToken: vi.fn() }, fetcher as typeof fetch);
+  for (const path of ["/g7/api/v1/auth/login", "/api/v1/../admin", "/api/v1/%252fadmin", "/api/v1/%5cadmin", "//evil.invalid/api/v1/x"]) {
+    await expect(client.request(path, { method: "GET", signal: new AbortController().signal })).rejects.toThrow();
+  }
+  expect(fetcher.mock.calls).toHaveLength(0);
+});
+
+test("SEC-H4-04: una respuesta GET de A que llega después del cambio de sesión no se consume bajo B", async () => {
+  let owner = "g7-security-owner-a";
+  let release: ServerResponse | null = null;
+  let arrived!: () => void;
+  const requestArrived = new Promise<void>(resolve => { arrived = resolve; });
+  await fixture(async (origin, calls, set) => {
+    set((_request, response) => { release = response; arrived(); });
+    const api = createHttpPromotionServices({ gatewayOrigin: origin, getAccessToken: async () => "h4.fake.token", scopeId: () => owner });
+    const read = api.campaigns.read("promo-owner-a", new AbortController().signal);
+    await requestArrived;
+    owner = "g7-security-owner-b";
+    release!.end(JSON.stringify({ promotionId: "promo-owner-a", nombre: "Campaña A", estado: "ACTIVO", puedeCambiarModalidad: true, modalidad: "CUPON", tipoDescuento: "PORCENTAJE", valor: 10, prioridad: 1, validFrom: "2026-11-08T05:00:00Z", validUntil: "2026-11-10T05:00:00Z", alcance: { productIds: [], skus: [] }, canalesHabilitados: ["RETAIL"], politicaCombinacion: { ofertaPricing: false, promocionAutomatica: false, cupon: true } }));
+    await expect(read).rejects.toMatchObject({ kind: "session" });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.auth).toBe("Bearer h4.fake.token");
+  });
+});
+
+test("SEC-H4-05: storage inaccesible bloquea la persistencia comercial antes de fetch", async () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+  const fetcher = vi.fn(async () => new Response("{}", { status: 201 }));
+  vi.stubGlobal("fetch", fetcher);
+  Object.defineProperty(globalThis, "sessionStorage", { configurable: true, get() { throw new Error("storage denied"); } });
+  try {
+    const api = createHttpPromotionServices({ gatewayOrigin: "http://127.0.0.1:9000", getAccessToken: async () => "h4.fake.token", scopeId: () => "g7-storage-owner" });
+    await expect(api.campaigns.save(null, { name: "Campaña storage", mode: "coupon", status: "active", discountType: "percentage", benefit: "10", priority: "1", validFrom: "2026-11-08T00:00", validUntil: "2026-11-10T00:00", channels: ["retail"], productIds: [], skus: [], combination: { pricing: false, automatic: false, coupon: true } }, new AbortController().signal)).rejects.toMatchObject({ kind: "unknown" });
+    expect(fetcher.mock.calls).toHaveLength(0);
+  } finally {
+    vi.unstubAllGlobals();
+    if (original) Object.defineProperty(globalThis, "sessionStorage", original);
+    else Reflect.deleteProperty(globalThis, "sessionStorage");
+  }
+});
+
+test("SEC-H4-06: PATCH 2xx con ID de campaña ajeno no se acepta como confirmación", async () => {
+  const values = new Map<string, string>();
+  vi.stubGlobal("sessionStorage", { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); } });
+  try {
+  await fixture(async (origin, calls, set) => {
+    set((request, response, raw) => {
+      if (request.path.endsWith("/promociones/promo-expected")) {
+        const id = raw.method === "PATCH" ? "promo-other" : "promo-expected";
+        response.end(JSON.stringify({ promotionId: id, nombre: "Campaña", estado: "ACTIVO", puedeCambiarModalidad: true, modalidad: "CUPON", tipoDescuento: "PORCENTAJE", valor: 10, prioridad: 1, validFrom: "2026-11-08T05:00:00Z", validUntil: "2026-11-10T05:00:00Z", alcance: { productIds: [], skus: [] }, canalesHabilitados: ["RETAIL"], politicaCombinacion: { ofertaPricing: false, promocionAutomatica: false, cupon: true } }));
+        return;
+      }
+      response.statusCode = 404; response.end(JSON.stringify({ status: 404, code: "NO_ENCONTRADO" }));
+    });
+    const api = createHttpPromotionServices({ gatewayOrigin: origin, getAccessToken: async () => "h4.fake.token", scopeId: () => "g7-h4-owner-a" });
+    await api.campaigns.read("promo-expected", new AbortController().signal);
+    const before = calls.length;
+    await expect(api.campaigns.save("promo-expected", { name: "Campaña editada", mode: "coupon", status: "active", discountType: "percentage", benefit: "10", priority: "1", validFrom: "2026-11-08T00:00", validUntil: "2026-11-10T00:00", channels: ["retail"], productIds: [], skus: [], combination: { pricing: false, automatic: false, coupon: true } }, new AbortController().signal)).rejects.toBeDefined();
+    expect(calls.length - before).toBe(1);
+    expect(calls.filter(call => call.path.endsWith("/promociones/promo-expected") && call.auth === "Bearer h4.fake.token")).toHaveLength(2);
+  });
+  } finally { vi.unstubAllGlobals(); }
 });

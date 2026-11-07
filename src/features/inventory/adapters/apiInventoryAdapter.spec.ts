@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   InventoryError,
   isInventoryPresentationFailure,
@@ -29,11 +29,20 @@ import {
   type TransferPresentationResolver,
   type TrasladoInventarioDto,
 } from "../services/inventoryMappers";
+import { deferred } from "../../../../tests/fixtures/h4Controlled";
+import { renderHook, waitFor } from "@testing-library/react";
+import { cleanup } from "@testing-library/react";
+import { useInventoryDashboard } from "../hooks/useInventoryDashboard";
+import { resetInventoryRepository } from "../services/inventoryProvider";
+
+let currentOwner = "g7-inventory-owner-a";
 
 beforeEach(() => {
+  currentOwner = "g7-inventory-owner-a";
   resetUncertainTransferReceptions();
   resetConfirmedTransferReceptionsAwaitingRefresh();
 });
+afterEach(() => { vi.unstubAllGlobals(); resetInventoryRepository(); });
 
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
@@ -134,6 +143,7 @@ function setup(
     : (options.resolver ?? (async () => PRESENTATION));
   const repository = createHttpInventoryRepository({
     transport,
+    currentUserScope: () => currentOwner,
     ...(resolver ? { resolveTransferPresentation: resolver } : {}),
   });
   return { repository, request, calls };
@@ -1471,7 +1481,7 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
       delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
     });
 
-    it("TAC-P0-06-R2: una operación UNCERTAIN persiste tras recarga con snapshot inmutable exacto", async () => {
+    it("INV-H4-08 / TAC-P0-06-R2: recarga conserva intención, rechaza payload incompatible y no reenvía automáticamente", async () => {
       const storage = createMockStorage();
       globalThis.sessionStorage = storage;
       resetUncertainTransferReceptions();
@@ -1623,6 +1633,29 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
 
       delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
     });
+  });
+
+  it("INV-H4-07: recepción de A que responde durante B queda almacenada bajo A y no se presenta a B", async () => {
+    const memory = new Map<string, string>();
+    const storage: Storage = {
+      get length() { return memory.size; }, clear: () => memory.clear(),
+      getItem: key => memory.get(key) ?? null, key: index => [...memory.keys()][index] ?? null,
+      removeItem: key => { memory.delete(key); }, setItem: (key, value) => { memory.set(key, value); },
+    };
+    vi.stubGlobal("sessionStorage", storage);
+    currentOwner = "g7-inventory-owner-a";
+    const gate = deferred<Response>();
+    const { repository, calls } = setup(async (_path, request) => request.method === "POST" ? gate.promise : jsonResponse({ items: [], pagina: 1, tamanio: 100, total: 0 }));
+    const reception = repository.receiveTransfer(RECEPCION_PAYLOAD);
+    expect(calls.filter(call => call.request.method === "POST")).toHaveLength(1);
+    currentOwner = "g7-inventory-owner-b";
+    gate.resolve(jsonResponse(RECEPCION_OK));
+    await expect(reception).rejects.toMatchObject({ code: "NO_AUTENTICADO" });
+    expect(repository.getTransferWriteRecord("t-1")).toBeNull();
+    currentOwner = "g7-inventory-owner-a";
+    expect(repository.getTransferWriteRecord("t-1")).toMatchObject({ state: "RECONCILED", payload: { operationId: RECEPCION_PAYLOAD.operationId } });
+    expect(calls.filter(call => call.request.method === "POST")).toHaveLength(1);
+    expect(memory.has("inventory.transferReceptionAttempts.v1")).toBe(true);
   });
 
   describe("TAC-P0-11: aborto del transporte durante la recepción", () => {
@@ -2220,6 +2253,39 @@ describe("apiInventoryAdapter — dashboard KPIs (obtenerDashboardInventario)", 
       },
     ],
   };
+
+  it("INV-H4-03: identidad A comparte el GET pendiente y B realiza su propia consulta", async () => {
+    const pendingA = deferred<Response>();
+    const pendingB = deferred<Response>();
+    const request = vi.fn(async () => request.mock.calls.length === 1 ? pendingA.promise : pendingB.promise);
+    const { repository } = setup(request);
+    const firstA = repository.getDashboardKpis();
+    const secondA = repository.getDashboardKpis();
+    expect(request).toHaveBeenCalledTimes(1);
+    currentOwner = "g7-inventory-owner-b";
+    const readB = repository.getDashboardKpis();
+    expect(request).toHaveBeenCalledTimes(2);
+    pendingA.resolve(jsonResponse(DASHBOARD_DTO));
+    pendingB.resolve(jsonResponse({ ...DASHBOARD_DTO, totalAvailable: 90 }));
+    await expect(Promise.all([firstA, secondA, readB])).resolves.toHaveLength(3);
+  });
+
+  it("INV-H4-04: desmontar un consumidor no cancela la consulta compartida del otro", async () => {
+    const pending = deferred<Response>();
+    const { repository, request } = setup(async () => pending.promise);
+    resetInventoryRepository(repository);
+    const first = renderHook(() => useInventoryDashboard({}));
+    const second = renderHook(() => useInventoryDashboard({}));
+    expect(request).toHaveBeenCalledTimes(1);
+    first.unmount();
+    pending.resolve(jsonResponse(DASHBOARD_DTO));
+    await waitFor(() => expect(second.result.current.loading).toBe(false));
+    expect(second.result.current.kpis?.availableUnits).toBe(125);
+    expect(request).toHaveBeenCalledTimes(1);
+    second.unmount();
+    cleanup();
+    resetInventoryRepository();
+  });
 
   it("mapea KPIs autoritativos de DashboardInventario e informa null en métricas no publicadas", async () => {
     const { repository, calls } = setup(async () => jsonResponse(DASHBOARD_DTO));

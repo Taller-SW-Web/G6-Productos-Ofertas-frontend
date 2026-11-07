@@ -28,8 +28,9 @@ function batchDto(batchId: string) {
   return { batch_id: batchId, status: "COMPLETED", total_rows: 1, completed_rows: 0, failed_rows: 1, needs_reconciliation: true,
     rows: [{ row_id: "33333333-3333-4333-8333-333333333333", sku: "SKU-H4-E2E", nombre: "Producto H4", status: "FAILED", applied_domains: ["CATALOGO"], failed_domain: "PRICING", needs_reconciliation: true, code: "PRECIO_INVALIDO", detail: "Rechazo simulado", steps: [{ dominio: "PRICING", status: "FAILED", code: "PRECIO_INVALIDO", detail: "Rechazo simulado" }] }] };
 }
-async function attachBulkApi(page: Page, mode: "accepted" | "recover"): Promise<{ posts: () => number; batchId: () => string | null; reads: () => number }> {
+async function attachBulkApi(page: Page, mode: "accepted" | "recover" | "inflight"): Promise<{ posts: () => number; batchId: () => string | null; reads: () => number; releasePost: () => void }> {
   let postCount = 0, readCount = 0, id: string | null = null;
+  let releasePendingPost: (() => void) | null = null;
   await page.route("http://127.0.0.1:9000/api/v1/carga-masiva/productos/**", async route => {
     const request = route.request(), path = new URL(request.url()).pathname;
     expect(request.headers().authorization).toBe("Bearer test.header.signature");
@@ -41,6 +42,10 @@ async function attachBulkApi(page: Page, mode: "accepted" | "recover"): Promise<
       expect(correlation).toMatch(/^[0-9a-f-]{36}$/i);
       id = deterministicBatch(correlation!, bytes);
       if (mode === "recover") return route.abort("failed");
+      if (mode === "inflight") {
+        await new Promise<void>(resolve => { releasePendingPost = resolve; });
+        return route.abort("failed");
+      }
       return route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ batch_id: id, status: "QUEUED", template_version: 2, correlation_id: correlation }) });
     }
     if (request.method() === "GET" && id && path.endsWith(`/importaciones/${id}`)) {
@@ -52,7 +57,7 @@ async function attachBulkApi(page: Page, mode: "accepted" | "recover"): Promise<
     if (request.method() === "OPTIONS") return route.fulfill({ status: 204 });
     return route.fulfill({ status: 404, contentType: "application/problem+json", body: JSON.stringify({ status: 404, code: "LOTE_NO_ENCONTRADO" }) });
   });
-  return { posts: () => postCount, batchId: () => id, reads: () => readCount };
+  return { posts: () => postCount, batchId: () => id, reads: () => readCount, releasePost: () => releasePendingPost?.() };
 }
 async function openBulkHarness(page: Page) {
   await page.goto(`/tests/harness/bulk-http.html?gateway=${encodeURIComponent("http://127.0.0.1:9000") }#/carga-masiva`);
@@ -62,28 +67,56 @@ async function selectCsv(page: Page) {
   await page.getByRole("button", { name: "Continuar a revisión", exact: true }).click();
 }
 
-test("E2E-01: G7 de prueba recorre Promotions, cupones, filtros y logout", async ({ page }) => {
+test("E2E-01: G7 recorre listado, detalle de campaña, cupones filtrados y logout", async ({ page }) => {
   const html = await (await page.request.get("/tests/harness/promotions-session.html")).text();
-  const calls: string[] = [];
+  const calls: { method: string; path: string; search: string }[] = [];
   await page.route("**/*", route => route.request().resourceType() === "document" && new URL(route.request().url()).pathname === "/cupones" ? route.fulfill({ contentType: "text/html", body: html }) : route.fallback());
-  await page.route("**/api/v1/**", async route => {
-    const path = new URL(route.request().url()).pathname; calls.push(path);
-    if (path.startsWith("/g7/")) return route.fulfill({ json: { accessToken: "h4.fake.access", refreshToken: "h4.fake.refresh", tokenType: "Bearer", expiresIn: 900, usuario: { id: "11111111-1111-4111-8111-111111111111", nombreCompleto: "Gestora H4 A", correo: "h4-a@example.invalid", roles: ["GESTOR_COMERCIAL"] } } });
-    return route.fulfill({ json: { items: [], meta: { pagina: 1, tamanio: 10, total: 0, totalPaginas: 0 } } });
+  const campaign = { promotionId: "promo-h4-e2e", nombre: "Campaña H4 E2E", estado: "ACTIVO", puedeCambiarModalidad: true, modalidad: "CUPON", tipoDescuento: "PORCENTAJE", valor: 10, prioridad: 1, validFrom: "2026-11-08T05:00:00Z", validUntil: "2026-11-10T05:00:00Z", alcance: { productIds: [], skus: [] }, canalesHabilitados: ["RETAIL"], politicaCombinacion: { ofertaPricing: false, promocionAutomatica: false, cupon: true } };
+  await page.route("**/g7/api/v1/auth/login", async route => {
+    calls.push({ method: route.request().method(), path: new URL(route.request().url()).pathname, search: "" });
+    await route.fulfill({ json: { accessToken: "h4.fake.access", refreshToken: "h4.fake.refresh", tokenType: "Bearer", expiresIn: 900, usuario: { id: "11111111-1111-4111-8111-111111111111", nombreCompleto: "Gestora H4 A", correo: "h4-a@example.invalid", roles: ["GESTOR_COMERCIAL"] } } });
+  });
+  await page.route("**/g7/api/v1/auth/logout", async route => { calls.push({ method: route.request().method(), path: new URL(route.request().url()).pathname, search: "" }); await route.fulfill({ status: 204 }); });
+  await page.route("**/api/v1/promociones/administracion?*", async route => {
+    calls.push({ method: route.request().method(), path: new URL(route.request().url()).pathname, search: new URL(route.request().url()).search });
+    await route.fulfill({ json: { items: [campaign], meta: { pagina: 1, tamanio: 10, total: 1, totalPaginas: 1 } } });
+  });
+  await page.route("**/api/v1/promociones/promo-h4-e2e", async route => {
+    calls.push({ method: route.request().method(), path: new URL(route.request().url()).pathname, search: "" });
+    await route.fulfill({ json: campaign });
+  });
+  await page.route("**/api/v1/cupones?*", async route => {
+    const url = new URL(route.request().url()); calls.push({ method: route.request().method(), path: url.pathname, search: url.search });
+    await route.fulfill({ json: { items: [{ cuponId: "coupon-h4-e2e", promocionId: campaign.promotionId, codigo: "H4-E2E", estado: "ACTIVO", maxUsosGlobal: 10, maxUsosPorCliente: 1, montoMinimo: 10, politicaCancelacion: "RESTAURAR_EN_CANCELACION", usosGlobalesConsumidos: 0, usosDisponibles: 10, createdAt: "2026-11-07T12:00:00Z", updatedAt: "2026-11-07T12:00:00Z" }], meta: { pagina: Number(url.searchParams.get("pagina") ?? 1), tamanio: 10, total: 1, totalPaginas: 1 } } });
   });
   await page.goto("/cupones");
   await page.getByRole("textbox", { name: "Correo electrónico", exact: true }).fill("h4-a@example.invalid");
   await page.getByLabel("Contraseña").fill("fake-password-h4");
   await page.getByRole("button", { name: "Iniciar sesión", exact: true }).click();
   await expect(page.getByText("Sesión de Gestora H4 A", { exact: true })).toBeVisible();
-  await expect.poll(() => calls.some(path => path === "/api/v1/cupones")).toBe(true);
+  await page.getByRole("link", { name: "Ofertas y promociones", exact: true }).click();
+  const campaignLink = page.getByRole("link", { name: "Ver detalle de Campaña H4 E2E", exact: true });
+  await expect(campaignLink).toBeVisible();
+  await expect(campaignLink).toHaveAttribute("href", /\/promociones\/promo-h4-e2e/);
+  await campaignLink.click();
+  await expect(page).toHaveURL(/\/promociones\/promo-h4-e2e$/);
+  await expect(page.getByRole("heading", { name: "Campaña H4 E2E", exact: true })).toBeVisible();
+  await page.getByRole("link", { name: /Cupones/ }).first().click();
+  await expect(page.getByRole("link", { name: "Ver detalle de H4-E2E", exact: true })).toBeVisible();
+  const status = page.getByRole("combobox", { name: "Estado del cupón", exact: true });
+  await status.click();
+  await page.getByRole("option", { name: "Inactivo", exact: true }).click();
+  await expect.poll(() => calls.some(call => call.path === "/api/v1/cupones" && call.search.includes("estado=INACTIVO"))).toBe(true);
+  expect(calls.some(call => call.path === "/api/v1/promociones/promo-h4-e2e")).toBe(true);
+  expect(calls.filter(call => call.path.startsWith("/api/v1/") && call.method !== "GET")).toHaveLength(0);
   await expect(page.getByRole("button", { name: "Cerrar sesión", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Cerrar sesión", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Iniciar sesión", exact: true })).toBeVisible();
-  expect(calls.filter(path => path === "/api/v1/cupones")).toHaveLength(1);
+  await expect(page.getByRole("link", { name: "Ver detalle de H4-E2E", exact: true })).toHaveCount(0);
+  expect(calls.filter(call => call.path.startsWith("/api/v1/") && call.method !== "GET")).toHaveLength(0);
 });
 
-test("E2E-02: Catálogo abre producto y variante con la identidad de la ruta", async ({ page }) => {
+test("E2E-02 mock UI: Catálogo abre producto y variante con la identidad de la ruta", async ({ page }) => {
   await page.goto("/productos/PROD-RUN-001/variantes");
   await expect(page.getByRole("heading", { name: "Variantes de Camiseta Running Endurance" })).toBeVisible();
   await expect(page.getByText("SKU Base: CAM-RUN")).toBeVisible();
@@ -96,7 +129,7 @@ test("E2E-02: Catálogo abre producto y variante con la identidad de la ruta", a
   await expect(page.getByRole("link", { name: /Ver detalle/ })).toHaveCount(3);
 });
 
-test("E2E-03: Taxonomy edita Marca y presenta la respuesta confirmada una sola vez", async ({ page }) => {
+test("E2E-03 mock UI: Taxonomy permite editar Marca y volver a consultar la pantalla", async ({ page }) => {
   await page.goto("/marcas/nike/editar");
   await expect(page.getByRole("heading", { level: 1, name: "Editar marca" })).toBeVisible();
   const description = page.getByLabel("Descripción (opcional)");
@@ -110,7 +143,26 @@ test("E2E-03: Taxonomy edita Marca y presenta la respuesta confirmada una sola v
   await expect(description).toHaveValue("Descripción H4 confirmada");
 });
 
-test("E2E-04: Pricing consulta y programa vigencia disponible en modo de revisión", async ({ page }) => {
+test("TAX-H4-E2E-HTTP: adaptador HTTP real confirma Marca con PATCH 200 aunque GET auxiliar falle", async ({ page }) => {
+  const calls: string[] = [];
+  await page.route("**/api/v1/marcas/brand-h4-http", async route => {
+    const method = route.request().method(); calls.push(method);
+    if (method === "PATCH") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ marcaId: "brand-h4-http", nombre: "Marca H4 HTTP", estado: "ACTIVO", version: 5, descripcion: "Actualizada", paisOrigenIso: "PE", logoUrl: null }) });
+    if (calls.filter(item => item === "GET").length === 1) return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ marcaId: "brand-h4-http", nombre: "Marca H4 HTTP", estado: "ACTIVO", version: 4, descripcion: "Anterior", paisOrigenIso: "PE", logoUrl: null }) });
+    return route.fulfill({ status: 503, contentType: "application/problem+json", body: JSON.stringify({ status: 503, code: "SERVICIO_NO_DISPONIBLE" }) });
+  });
+  await page.goto("/tests/harness/taxonomy-brand-http.html");
+  await expect(page.getByText("Marca H4 HTTP v4", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Guardar marca" }).click();
+  await expect(page.getByText("Marca H4 HTTP v5 confirmada", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Consultar marca" })).toBeVisible();
+  await page.getByRole("button", { name: "Consultar marca" }).click();
+  await expect(page.getByText("Marca H4 HTTP v5 confirmada", { exact: true })).toBeVisible();
+  expect(calls.filter(method => method === "PATCH")).toHaveLength(1);
+  expect(await page.evaluate(() => Object.keys(sessionStorage).some(key => key.startsWith("g6:taxonomy:pending:")))).toBe(false);
+});
+
+test("E2E-04 mock UI: Pricing revisa y presenta una programación del runtime demo", async ({ page }) => {
   await page.goto("/precios/programaciones?target=base&modoRevision=1");
   await expect(page.getByRole("heading", { name: "Programaciones de precio" })).toBeVisible();
   await expect(page.getByText("Mostrando 1 a 2 de 3", { exact: true })).toBeVisible();
@@ -125,7 +177,7 @@ test("E2E-04: Pricing consulta y programa vigencia disponible en modo de revisi�
   await expect(page.getByRole("button", { name: "Confirmar programación", exact: true })).toHaveCount(0);
 });
 
-test("E2E-05: Inventory mantiene SKU y formulario de umbral al navegar entre vistas", async ({ page }) => {
+test("E2E-05 mock UI: Inventory mantiene SKU y formulario de umbral al navegar entre vistas", async ({ page }) => {
   await page.goto("/inventario");
   await expect(page.getByRole("heading", { name: "Control de stock y disponibilidad" })).toBeVisible();
   const sku = page.getByText("ZAP-TRL-40-BLK", { exact: true }).first();
@@ -141,6 +193,20 @@ test("E2E-05: Inventory mantiene SKU y formulario de umbral al navegar entre vis
   await page.getByRole("button", { name: "Guardar umbral global" }).click();
   await expect(page.getByText("Escritura confirmada")).toBeVisible();
   await expect(page.getByText("Cambio aplicado")).toHaveCount(0);
+});
+
+test("E2E-05 stale GET: umbral global editado conserva 12 ante respuesta tardía con 10", async ({ page }) => {
+  await page.goto("/tests/harness/inventory-http.html?path=%2Finventario%2Fumbrales");
+  const input = page.getByRole("spinbutton", { name: "Umbral global de stock bajo" });
+  await expect(input).toHaveValue("10");
+  await page.evaluate(() => window.inventoryHttpScenario.beginStaleThresholdRead());
+  await expect.poll(() => page.evaluate(() => window.inventoryHttpScenario.thresholdReadPending())).toBe(true);
+  await input.fill("12");
+  await page.evaluate(() => window.inventoryHttpScenario.releaseStaleThresholdRead());
+  await expect(input).toHaveValue("12");
+  await page.getByRole("button", { name: "Guardar umbral global" }).click();
+  await expect(page.getByText("Escritura confirmada", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => window.inventoryHttpScenario.thresholdWrites())).toEqual([12]);
 });
 
 test("E2E-06: Bulk admite CSV, sigue el mismo batchId y descarga reporte simulado", async ({ page }) => {
@@ -182,18 +248,22 @@ test("E2E-07: Bulk incierto recarga, conserva marcador tras 404 y recupera con G
   expect(await page.evaluate(() => Object.keys(sessionStorage).some(key => key.startsWith("g6:bulk:import-pending:")))).toBe(false);
 });
 
-test("E2E-08: identidad B no hereda el intento incierto de A", async ({ page }) => {
-  const state = await attachBulkApi(page, "recover");
+test("E2E-08: cambio A→B mientras el POST Bulk está pendiente conserva aislada la intención de A", async ({ page }) => {
+  const state = await attachBulkApi(page, "inflight");
   await openBulkHarness(page); await selectCsv(page);
   await page.getByRole("button", { name: "Confirmar importación", exact: true }).first().click();
-  await expect(page.getByText(/GET 404: lote no localizado/)).toBeVisible();
+  await expect.poll(() => state.posts()).toBe(1);
   const markerA = await page.evaluate(() => Object.entries(sessionStorage).find(([key]) => key.startsWith("g6:bulk:admission:v1:"))?.[1] ?? null);
   expect(JSON.parse(markerA!)).toMatchObject({ owner: "g7-h4-owner-a", state: "uncertain" });
+  const correlationA = JSON.parse(markerA!).correlationId;
   await page.evaluate(() => window.dispatchEvent(new CustomEvent("h4:identity", { detail: { id: "g7-h4-owner-b", nombreCompleto: "Usuario H4 B", correo: "h4-owner-b@example.invalid", roles: ["GESTOR_COMERCIAL"] } })));
-  await page.getByRole("link", { name: "Carga masiva" }).first().click();
-  await selectCsv(page);
-  await expect(page.getByText("No se confirmó el resultado de admisión")).toHaveCount(0);
+  expect(await page.evaluate(() => window.h4SessionIdentity())).toBe("g7-h4-owner-b");
+  state.releasePost();
+  await expect(page.getByText("Producto H4", { exact: true })).toHaveCount(0);
+  await expect(page).not.toHaveURL(/\/importaciones\//);
+  const markerAfterB = await page.evaluate(() => Object.entries(sessionStorage).find(([key]) => key.startsWith("g6:bulk:admission:v1:"))?.[1] ?? null);
+  expect(JSON.parse(markerAfterB!)).toMatchObject({ owner: "g7-h4-owner-a", correlationId: correlationA });
+  expect(await page.evaluate(() => Object.keys(sessionStorage).filter(key => key.startsWith("g6:bulk:admission:v1:") && key.includes("g7-h4-owner-b")))).toHaveLength(0);
   expect(state.posts()).toBe(1);
-  const original = await page.evaluate(() => Object.entries(sessionStorage).find(([key]) => key.startsWith("g6:bulk:admission:v1:") && key.includes("g7-h4-owner-a"))?.[1] ?? null);
-  expect(original).toBe(markerA);
+  expect(state.reads()).toBe(0);
 });

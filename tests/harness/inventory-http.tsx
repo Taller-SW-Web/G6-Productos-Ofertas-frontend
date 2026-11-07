@@ -54,6 +54,10 @@ interface InventoryHttpScenario {
   lastOperationId(): string | null;
   /** Último body enviado en el POST. */
   lastPayload(): Record<string, unknown> | null;
+  beginStaleThresholdRead(): void;
+  thresholdReadPending(): boolean;
+  releaseStaleThresholdRead(): void;
+  thresholdWrites(): number[];
 }
 
 declare global {
@@ -71,6 +75,10 @@ let receivedQuantity = 0;
 let postCount = 0;
 let lastOperationId: string | null = null;
 let lastPayload: Record<string, unknown> | null = null;
+let holdThresholdRead = false;
+let thresholdReadIsPending = false;
+let releaseThresholdRead: ((response: Response) => void) | null = null;
+const thresholdWrites: number[] = [];
 
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
@@ -114,6 +122,18 @@ const transport = {
     path: string,
     request: InventoryHttpRequest,
   ): Promise<Response> {
+    if (path === "/api/v1/inventario/umbrales" && request.method === "GET") {
+      if (holdThresholdRead) {
+        thresholdReadIsPending = true;
+        return new Promise<Response>(resolve => { releaseThresholdRead = resolve; });
+      }
+      return jsonResponse({ umbralGlobal: 10, overrides: [] });
+    }
+    if (path === "/api/v1/inventario/umbrales/global" && request.method === "PUT") {
+      const value = Number(JSON.parse(request.body ?? "{}").umbral);
+      thresholdWrites.push(value);
+      return jsonResponse({ umbralGlobal: value, overrides: [] });
+    }
     if (path.includes("/recepciones")) {
       if (request.method !== "POST") {
         return problemResponse(405, "METODO_NO_PERMITIDO");
@@ -202,6 +222,17 @@ window.inventoryHttpScenario = {
   lastPayload(): Record<string, unknown> | null {
     return lastPayload;
   },
+  beginStaleThresholdRead(): void {
+    holdThresholdRead = true;
+    notifyInventoryChanged();
+  },
+  thresholdReadPending(): boolean { return thresholdReadIsPending; },
+  releaseStaleThresholdRead(): void {
+    holdThresholdRead = false;
+    releaseThresholdRead?.(jsonResponse({ umbralGlobal: 10, overrides: [] }));
+    releaseThresholdRead = null;
+  },
+  thresholdWrites(): number[] { return [...thresholdWrites]; },
 };
 
 const params = new URLSearchParams(window.location.search);

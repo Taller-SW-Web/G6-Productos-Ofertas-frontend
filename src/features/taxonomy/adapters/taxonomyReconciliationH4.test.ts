@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { createHttpBrandRepository, createHttpCharacteristicRepository } from "./httpTaxonomyAdmin";
 import { reconcileConfirmedTaxonomyResource, taxonomySend } from "./taxonomyHttp";
 import type { TaxonomyGatewayTransport } from "./httpProductTypeAdapter";
@@ -93,21 +94,25 @@ describe("Taxonomy reconciliation H4", () => {
 
   it("TAX-H4-06: respuesta favorable de A recibida bajo B no libera el marcador de A", async () => {
     const path = "/api/v1/caracteristicas/attr-h4";
-    const waiting = deferred<Response>();
-    const api = transport(vi.fn(() => waiting.promise));
+    const getWaiting = deferred<Response>();
+    const io = vi.fn(async (_path: string, init: { method: "GET" | "POST" | "PATCH" }) => {
+      if (init.method === "PATCH") throw new Error("timeout posterior al despacho");
+      return getWaiting.promise;
+    });
+    const api = transport(io);
     await expect(taxonomySend(api, path, "PATCH", signal(), { nombre: "Color principal", unidadMedida: null, version: 4 }, 200, value => value, false, { resourcePath: path, entity: "characteristic" })).rejects.toMatchObject({ outcome: "unknown" });
     const marker = Object.keys(storage).find(item => item.startsWith("g6:taxonomy:pending:"));
     expect(marker).toBeDefined();
-    const repository = createHttpCharacteristicRepository({
-      scopeId: () => owner,
-      requestWithInit: () => waiting.promise,
-      request: () => waiting.promise,
-    });
+    const original = storage.getItem(marker!);
+    const repository = createHttpCharacteristicRepository(transport(io));
     const reconciliation = repository.obtener("attr-h4", signal());
+    expect(io.mock.calls.filter(([, init]) => init.method === "PATCH")).toHaveLength(1);
     owner = fakeOwnerB;
-    waiting.resolve(jsonResponse(200, characteristic("Color principal", 5)));
+    getWaiting.resolve(jsonResponse(200, characteristic("Color principal", 5)));
     await expect(reconciliation).rejects.toThrow("La sesión cambió durante la lectura de Taxonomía.");
-    expect(storage.getItem(marker!)).not.toBeNull();
+    expect(storage.getItem(marker!)).toBe(original);
+    expect(JSON.parse(storage.getItem(marker!) ?? "null")).toMatchObject({ owner: createHash("sha256").update(fakeOwnerA).digest("hex"), entity: "characteristic", resourcePath: path, state: "unknown", body: { nombre: "Color principal", version: 4 } });
+    expect(io.mock.calls.filter(([, init]) => init.method !== "GET")).toHaveLength(1);
     expect(owner).toBe(fakeOwnerB);
   });
 });

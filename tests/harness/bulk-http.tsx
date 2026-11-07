@@ -27,6 +27,8 @@ let currentUser: SessionUser = {
 };
 let sessionView: SessionView = { user: currentUser, mfa: false, busy: false, notice: "" };
 const listeners = new Set<() => void>();
+declare global { interface Window { h4SessionIdentity(): string | null } }
+window.h4SessionIdentity = () => currentUser.id;
 window.addEventListener("h4:identity", ((event: CustomEvent<SessionUser>) => {
   currentUser = event.detail;
   sessionView = { ...sessionView, user: currentUser };

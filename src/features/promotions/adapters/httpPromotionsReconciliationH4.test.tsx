@@ -52,6 +52,20 @@ describe("Promotions reconciliation H4", () => {
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
 
+  it("PRO-H4-02b: monto 10 equivale exactamente a 10.00 y la reconciliación elimina el marcador", async () => {
+    const api = services(async (_input, init) => {
+      if (init?.method === "POST") throw new TypeError("timeout posterior al despacho");
+      return couponPage(couponDto({ montoMinimo: 10 }), 1, 1);
+    });
+    await expect(api.coupons.create(couponInput, signal())).rejects.toMatchObject({ kind: "unknown" });
+    const marker = Object.keys(storage).find(key => key.startsWith("g6:promotions:uncertain:v1:"));
+    expect(marker).toBeDefined();
+    expect(storage.getItem(marker!)).not.toBeNull();
+    await expect(api.coupons.reconcilePending!(null, couponInput.code, signal())).resolves.toMatchObject({ status: "reconciled" });
+    expect(storage.getItem(marker!)).toBeNull();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+
   it("PRO-H4-03: cupón 201 confirmado no se revierte por promoción auxiliar 503", async () => {
     const api = services(async (input, init) => {
       const url = new URL(String(input));

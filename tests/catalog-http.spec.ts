@@ -187,6 +187,68 @@ test("Mapper variante: IDs, schema LISTA, kg/cm y preparación provienen de sus 
   expect(variant).toMatchObject({ variantId: vid, productId: pid, sku: "000-case-SKU", catalogVersion: 9, physicalProfile: { largoCm: 2 }, identifyingAttributes: [{ valorId: "red" }], inventoryStatus: "COMPLETED" });
 });
 
+test("CAT-H4-01: borrador confirmado continúa siendo consultado solo por preparación si GET comercial responde 404", async () => {
+  const h = harness(path => {
+    if (path === "/api/v1/productos") return json(productDto, 201);
+    if (path === `/api/v1/productos/${pid}/preparacion`) return json(prep);
+    if (path === `/api/v1/productos/${pid}`) return json({ code: "PRODUCTO_NO_ENCONTRADO" }, 404);
+    throw new Error(`Ruta no prevista: ${path}`);
+  });
+  const created = await h.catalog.create({ ...payload, atributos: [] });
+  expect(created).toMatchObject({ id: pid, status: "BORRADOR", catalogVersion: 12 });
+  await expect(h.catalog.getById(pid)).rejects.toMatchObject({ kind: "not_found" });
+  expect(h.calls.filter(call => call.init.method === "POST")).toHaveLength(1);
+  expect(h.calls.filter(call => call.path === `/api/v1/productos/${pid}`)).toHaveLength(1);
+  expect(created.status).toBe("BORRADOR");
+  expect(created).not.toHaveProperty("administrativeStatus");
+});
+
+test("CAT-H4-02: filtros all se omiten y la recarga sin DTO transitorio no inventa estado ni versión", async () => {
+  const h = harness(() => json({ items: [], pagina: 1, tamanio: 20, total: 0 }));
+  await expect(h.catalog.list({ page: 1, pageSize: 20, categoryId: "all", typeId: "all", saleModel: "all", status: "all" })).resolves.toMatchObject({ items: [], total: 0 });
+  expect(h.calls[0]?.path).toBe("/api/v1/productos?pagina=1&tamanio=20");
+  const loaded = harness(path => path.includes("?") ? json({ items: [{ product_id: pid, name: "Comercial", tiene_variantes: false, categoria_id: "cat-h4", marca_id: "brand-h4", tipo_producto_id: "type-h4" }], pagina: 1, tamanio: 20, total: 1 }) : json({ code: "PRODUCTO_NO_ENCONTRADO" }, 404));
+  const page = await loaded.catalog.list({ page: 1, pageSize: 20 });
+  expect(page.items[0]).toMatchObject({ id: pid, status: null, catalogVersion: null, commerciallyActive: true });
+  expect(page.items[0]).not.toHaveProperty("administrativeStatus");
+  await expect(loaded.catalog.getById(pid)).rejects.toMatchObject({ kind: "not_found" });
+  expect(loaded.calls).toHaveLength(2);
+});
+
+test("CAT-H4-03: variante 404 es tipado y TEXTO no adquiere maxLength no publicado", async () => {
+  const h = harness(path => {
+    if (path === `/api/v1/productos/${pid}/variantes/${vid}`) return json({ code: "VARIANTE_NO_ENCONTRADA" }, 404);
+    if (path.endsWith("/preparacion")) return json(variantPrep);
+    if (path.endsWith(`/variantes?pagina=1&tamanio=20`)) return json({ items: [{ ...variantDto, non_identifying_attributes: [{ caracteristica_id: "description", nombre: "Descripción", valor: "texto" }] }], meta: { pagina: 1, tamanio: 20, total: 1 } });
+    if (path.endsWith("/caracteristicas/description")) return json({ caracteristicaId: "description", tipo: "TEXTO", estado: "ACTIVO" });
+    throw new Error(`Ruta no prevista: ${path}`);
+  });
+  await expect(h.catalog.getVariantById(pid, vid)).rejects.toMatchObject({ kind: "not_found" });
+  const page = await h.catalog.listVariants(pid, { page: 1, pageSize: 20 });
+  expect(page.items[0]?.nonIdentifyingAttributes[0]).toMatchObject({ caracteristicaId: "description", tipo: "TEXTO", valor: "texto" });
+  expect(page.items[0]?.nonIdentifyingAttributes[0]).not.toHaveProperty("maxLength");
+  expect(h.calls.filter(call => call.path === `/api/v1/productos/${pid}/variantes/${vid}`)).toHaveLength(1);
+});
+
+test("CAT-H4-04: cambio de identidad durante creación incierta no presenta confirmación de A a B ni reenvía", async () => {
+  const session = { owner: "g7-catalog-owner-a" };
+  let resolvePost!: (response: Response) => void;
+  const postPending = new Promise<Response>(resolve => { resolvePost = resolve; });
+  const h = harness((path, init) => {
+    if (path === "/api/v1/productos" && init.method === "POST") return postPending;
+    if (path.endsWith("/preparacion")) return json(prep);
+    if (path === "/api/v1/productos") return json({ items: [], pagina: 1, tamanio: 20, total: 0 });
+    throw new Error(`Ruta no prevista: ${path}`);
+  });
+  const pending = h.catalog.create({ ...payload, atributos: [] });
+  expect(h.calls.filter(call => call.init.method === "POST")).toHaveLength(1);
+  session.owner = "g7-catalog-owner-b";
+  resolvePost(json({ ...productDto, observedOwner: session.owner }, 201));
+  await expect(pending).rejects.toMatchObject({ kind: "write_unknown" });
+  expect(session.owner).toBe("g7-catalog-owner-b");
+  expect(h.calls.filter(call => call.init.method === "POST")).toHaveLength(1);
+});
+
 test("HTTP variantes: detalle y lista componen características/preparación reales sin inventar estado del padre", async () => {
   const variant = { variant_id: vid, sku: "000-case", status: "BORRADOR", catalog_version: 3,
     identifying_attributes: [{ caracteristica_id: "color", nombre: "Color", valor_id: "red", valor: "Rojo" }],

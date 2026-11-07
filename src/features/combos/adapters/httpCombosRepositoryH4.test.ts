@@ -32,23 +32,37 @@ describe("Combos HTTP reconciliation H4", () => {
 
   it("COM-H4-02: listado limita a cuatro consultas auxiliares simultáneas", async () => {
     const gate = deferred<void>();
+    const firstFour = deferred<void>();
     let active = 0, maximum = 0, availabilityCalls = 0;
     const items = Array.from({ length: 6 }, (_, index) => comboDto(`combo-${index + 1}`));
-    const { repository } = setup(async path => {
+    const expectedIds = items.map(item => item.combo_id);
+    const requestedIds: string[] = [];
+    const { repository, request } = setup(async path => {
       if (path === "/api/v1/combos?pagina=1&tamanio=20") return jsonResponse(200, { items, meta: { pagina: 1, tamanio: 20, total: 6 } });
+      const match = /^\/api\/v1\/combos\/([^/]+)\/disponibilidad$/.exec(path);
+      expect(match).not.toBeNull();
+      const comboId = decodeURIComponent(match?.[1] ?? "");
+      expect(expectedIds).toContain(comboId);
+      requestedIds.push(comboId);
       active += 1; availabilityCalls += 1; maximum = Math.max(maximum, active);
       if (availabilityCalls === 4) firstFour.resolve();
-      await gate.promise; active -= 1;
-      return jsonResponse(200, available(decodeURIComponent(path.split("/")[3] ?? "")));
+      await gate.promise;
+      active -= 1;
+      return jsonResponse(200, available(comboId));
     });
-    const firstFour = deferred<void>();
     const listing = repository.list(query);
     await firstFour.promise;
     expect(maximum).toBe(4);
     gate.resolve();
     const result = await listing;
     expect(result.items).toHaveLength(6);
-    expect(maximum).toBeLessThanOrEqual(4);
+    expect(result.items.map(item => item.id)).toEqual(expectedIds);
+    expect(result.items.every(item => item.availability.verifiable && item.availability.quantity === 3)).toBe(true);
+    expect(requestedIds).toEqual(expectedIds);
+    expect(maximum).toBe(4);
+    expect(availabilityCalls).toBe(6);
+    expect(request.mock.calls.filter(([path]) => path.includes("/disponibilidad"))).toHaveLength(6);
+    expect(request).toHaveBeenCalledTimes(7);
   });
 
   it("COM-H4-03: alta incierta conserva el marker y no duplica POST", async () => {
@@ -70,7 +84,7 @@ describe("Combos HTTP reconciliation H4", () => {
     const result = await repository.update("combo-h4", { ...payload, version: 1 });
     expect(result).toMatchObject({ id: "combo-h4", name: "Combo editado", version: 2, availability: { verifiable: false } });
     expect(request.mock.calls.filter(([, init]) => init.method === "PATCH")).toHaveLength(1);
-    expect(request.mock.calls.filter(([, init]) => init.method === "PATCH")).toHaveLength(1);
+    expect(Object.keys(storage).filter(key => key.startsWith("g6:combos:uncertain:v2:"))).toHaveLength(0);
   });
 
   it("COM-H4-05: un repositorio nuevo con la misma identidad rehidrata el bloqueo", async () => {

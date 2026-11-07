@@ -47,6 +47,44 @@ describe("Pricing reconciliation H4", () => {
     expect(observed).toHaveLength(5);
   });
 
+  it("PRI-H4-08: emite programación contractual una vez en cada canal con UUID canónico y no escribe si falta", async () => {
+    const observed: { path: string; request: PricingHttpRequest }[] = [];
+    const instance = repository(async (path, request) => {
+      observed.push({ path, request });
+      if (request.method === "GET") return jsonResponse(200, page([], 0));
+      const channel = JSON.parse(request.body ?? "{}") as { channelId: string | null };
+      return jsonResponse(201, {
+        programacionId: `schedule-${observed.length}`,
+        sku: target.sku,
+        tipoPrecio: "REGULAR",
+        importe: 49.9,
+        moneda: "PEN",
+        channelId: channel.channelId,
+        validFrom: "2026-11-10T14:00:00.000Z",
+        validUntil: "2026-11-11T14:00:00.000Z",
+        estado: "SCHEDULED",
+        priceVersion: 5,
+      });
+    });
+    const cases = [
+      ["global", null], ["retail", channels.retail], ["marketplace", channels.marketplace],
+      ["chatbot", channels.chatbot], ["ventas", channels.ventas],
+    ] as const;
+    for (const [channel, channelId] of cases) {
+      await instance.instance.schedule(target.id, { ...draft, channel }, signal());
+      const post = observed.filter(item => item.request.method === "POST").at(-1)!;
+      expect(post.path).toBe(`/api/v1/precios/skus/${target.sku}/programaciones`);
+      expect(JSON.parse(post.request.body ?? "{}")).toEqual({ tipoPrecio: "REGULAR", importe: 49.9, moneda: "PEN", channelId, validFrom: "2026-11-10T14:00:00.000Z", validUntil: "2026-11-11T14:00:00.000Z", motivoCambio: "Ajuste H4" });
+    }
+    expect(observed.filter(item => item.request.method === "POST")).toHaveLength(5);
+
+    const missing = repository(async (_path, request) => request.method === "GET"
+      ? jsonResponse(200, page([], 0))
+      : jsonResponse(201, {}), { ids: { ...channels, retail: "" } });
+    await expect(missing.instance.schedule(target.id, { ...draft, channel: "retail" }, signal())).rejects.toMatchObject({ kind: "blocked_contract" });
+    expect(missing.request.mock.calls.filter(([, request]) => request.method === "POST")).toHaveLength(0);
+  });
+
   it("PRI-H4-02: PATCH incierto persiste y el segundo PATCH se bloquea antes del transporte", async () => {
     const request = vi.fn(async (_path: string, init: PricingHttpRequest) => init.method === "GET" ? jsonResponse(200, price(null)) : Promise.reject(new Error("timeout posterior al despacho")));
     const { instance } = repository(request);
