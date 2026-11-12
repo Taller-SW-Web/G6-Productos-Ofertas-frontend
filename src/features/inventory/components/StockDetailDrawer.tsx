@@ -153,9 +153,6 @@ export function StockDetailDrawer({
                   <IconCheck size={20} />
                 </ThemeIcon>
               </Group>
-              <Text size="xs" c="dimmed" mt={4}>
-                Saldo disponible en esta ubicación
-              </Text>
             </Paper>
           </SimpleGrid>
         </div>
