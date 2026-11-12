@@ -32,7 +32,9 @@ function EditContent() {
       : context.target?.id;
   const target = {
     targetId: scope === "product" ? (parentId ?? "") : context.query.targetId,
-    channel: scope === "product" && mode !== "api" ? ("global" as const) : context.query.channel,
+    channel: scope === "product" && (mode !== "api" || context.target?.kind === "variant")
+      ? ("global" as const)
+      : context.query.channel,
   };
   const read = useEditableRead(target);
   return (
@@ -41,7 +43,8 @@ function EditContent() {
         label="Alcance del precio"
         value={scope}
         data={[
-          { value: "product", label: "Precio base del producto" },
+          { value: "product", label: context.target?.kind === "product" && target.channel !== "global"
+            ? "Precio del producto en el canal seleccionado" : "Precio base del producto" },
           ...(context.target?.kind === "variant"
             ? [
                 {

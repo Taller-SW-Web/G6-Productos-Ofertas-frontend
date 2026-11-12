@@ -6,6 +6,8 @@ El [handoff del proveedor](https://github.com/Taller-SW-Web/G6-Productos-Ofertas
 
 Backend `7aad0d2` corrigió el fixture de logos de Taxonomía y aprobó la CI obligatoria. El cambio corresponde a la prueba de integración. Los contratos candidatos conservan la misma revisión de implementación. [Ejecución de Backend](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs/43281692189).
 
+La primera CI de esta corrección registró `FAIL` al cambiar de un SKU Retail al precio base del producto. El formulario vuelve a usar Global en ese cambio de alcance. La edición directa del producto en Retail sigue usando la definición exacta. La repetición local pasó los 14 casos de `tests/pricing-audit.spec.ts` y los 7 casos de `npm run test:e2e:pricing`. [Ejecución inicial de Frontend](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/43285545786).
+
 | Flujo | Evidencia de frontend | Aceptación bilateral |
 |---|---|---|
 | Catálogo administrativo | `PASS_LOCAL` en `tests/catalog-http.spec.ts` y el recorrido de borrador de `tests/catalog-http-ui.spec.ts`. Reapertura desde el listado, detalle, versión persistida y conflicto 409. | `BLOQUEADO_ENTORNO` |

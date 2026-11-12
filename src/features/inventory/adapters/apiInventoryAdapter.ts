@@ -638,7 +638,7 @@ export function createHttpInventoryRepository(
   async function readPhysicalStockPage(filters: StockFiltersQuery, page: number, size: number, signal?: AbortSignal): Promise<StockPage> {
     if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(size) || size < 1 || size > PAGE_SIZE)
       throw new InventoryError("VALIDACION", "La página de saldos solicitada no es válida.");
-    const sku = contractFilterValue(filters.search);
+    const sku = filters.search?.trim() || undefined;
     const locationId = contractFilterValue(filters.locationId);
     const status = contractFilterValue(filters.status);
     const params = new URLSearchParams({ tamanio: String(size) });
