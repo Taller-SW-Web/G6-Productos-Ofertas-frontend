@@ -1,12 +1,12 @@
-import { CatalogError, type CatalogRepository, type ProductCreatePayload, type ProductUpdatePayload } from "../services/catalogRepository";
-import { array, blockedCatalog, choice, createCatalogHttp, encoded, integer, object, string, type CatalogHttpTransport } from "./catalogHttp";
-import { mapCommercialAttributes, mapPreparation, mapProduct, mapVariant, requestAttributes, requestPhysical, type CatalogAttributeMetadata } from "./httpCatalogMapper";
+import { CatalogError, type CatalogRepository, type ProductCreatePayload, type ProductUpdatePayload, type ProductView } from "../services/catalogRepository";
+import { array, blockedCatalog, boolean, choice, createCatalogHttp, encoded, integer, object, string, type CatalogHttpTransport } from "./catalogHttp";
+import { mapAdminPhysical, mapCommercialAttributes, mapPreparation, mapProduct, mapVariant, requestAttributes, requestPhysical, type CatalogAttributeMetadata } from "./httpCatalogMapper";
 import { formatAttributeValue } from "../services/catalogPresentation";
 
-/** El listado comercial contiene solo productos publicables; no se usa para gestionar borradores. */
-export function createHttpCatalogRepository(transport: CatalogHttpTransport): CatalogRepository {
+export function createHttpCatalogRepository(transport: CatalogHttpTransport, audience: "admin" | "commercial" = "admin"): CatalogRepository {
   const request = createCatalogHttp(transport);
   const productPath = (id: string) => `/productos/${encoded(id)}`;
+  const adminPath = "/productos/administracion";
   const variantPath = (pid: string, vid?: string) => `${productPath(pid)}/variantes${vid === undefined ? "" : "/" + encoded(vid)}`;
   const preparation = async (id: string, signal?: AbortSignal) => {
     const result = mapPreparation(await request(`${productPath(id)}/preparacion`, "GET", undefined, signal));
@@ -40,7 +40,7 @@ export function createHttpCatalogRepository(transport: CatalogHttpTransport): Ca
     const [prep, schema] = await Promise.all([preparation(id, signal), productSchemas(dto, signal)]);
     return mapProduct(dto, prep, schema);
   };
-  const commercialSummary = (value: unknown) => {
+  const commercialSummary = (value: unknown): ProductView => {
     const dto = object(value);
     const id = string(dto.product_id);
     if (!id.trim()) return blockedCatalog("Catálogo devolvió un producto sin identidad.");
@@ -53,6 +53,18 @@ export function createHttpCatalogRepository(transport: CatalogHttpTransport): Ca
       typeId: string(dto.tipo_producto_id), typeName: string(dto.tipo_producto_id),
       brandId: string(dto.marca_id), brandName: string(dto.marca_id), status: null, commerciallyActive: true,
       preparationSummary: null, imageUrl: images?.[0], catalogVersion: null };
+  };
+  const adminSummary = (value: unknown): ProductView => {
+    const dto = object(value);
+    const id = string(dto.productId);
+    if (!id.trim()) return blockedCatalog("Catálogo devolvió un producto sin identidad.");
+    const categoryId = string(dto.categoriaId);
+    const typeId = string(dto.tipoProductoId);
+    const brandId = string(dto.marcaId);
+    return { id, name: string(dto.nombre), skuBase: string(dto.skuBase), hasVariants: boolean(dto.tieneVariantes),
+      categoryId, categoryName: categoryId, typeId, typeName: typeId, brandId, brandName: brandId,
+      status: choice(dto.estado, ["BORRADOR", "ACTIVO", "INACTIVO"] as const),
+      catalogVersion: integer(dto.catalogVersion), preparationSummary: null };
   };
   const variantResult = async (value: unknown, pid: string, signal?: AbortSignal, expectedId?: string) => {
     const dto = object(value);
@@ -85,34 +97,42 @@ export function createHttpCatalogRepository(transport: CatalogHttpTransport): Ca
       const saleModel = q.saleModel && q.saleModel !== "all" ? q.saleModel : undefined;
       const status = q.status && q.status !== "all" ? q.status : undefined;
       if (typeId || saleModel) return blockedCatalog("Los filtros por tipo y modelo de venta no están publicados para esta consulta.");
-      if (status && status !== "ACTIVO") return blockedCatalog("El resumen comercial sólo publica productos comercialmente activos; no acredita el estado administrativo solicitado.");
+      if (audience === "commercial" && status && status !== "ACTIVO") return blockedCatalog("El resumen comercial sólo publica productos comercialmente activos.");
       const params = new URLSearchParams({ pagina: String(q.page), tamanio: String(q.pageSize) });
       if (q.q) params.set("q", q.q);
       if (categoryId) params.set("categoriaId", categoryId);
       if (status) params.set("estado", status);
-      const dto = object(await request(`/productos?${params}`, "GET", undefined, signal));
-      const items = array(dto.items); const total = integer(dto.total);
-      const page = integer(dto.pagina, 1); const pageSize = integer(dto.tamanio, 1);
+      const dto = object(await request(`${audience === "admin" ? adminPath : "/productos"}?${params}`, "GET", undefined, signal));
+      const meta = audience === "admin" ? object(dto.meta) : dto;
+      const items = array(dto.items); const total = integer(meta.total);
+      const page = integer(meta.pagina, 1); const pageSize = integer(meta.tamanio, 1);
       const totalPages = Math.ceil(total / pageSize);
       if (page !== q.page || pageSize !== q.pageSize || pageSize > 100 || items.length > pageSize ||
-        items.length !== Math.min(pageSize, Math.max(0, total - (page - 1) * pageSize)) || (total === 0 ? totalPages !== 0 : totalPages < page))
-        return blockedCatalog("Catálogo devolvió una página comercial inconsistente.");
-      return { items: items.map(commercialSummary), total, page, pageSize };
+        items.length !== Math.min(pageSize, Math.max(0, total - (page - 1) * pageSize)) ||
+        (audience === "admin" && integer(meta.totalPaginas) !== totalPages))
+        return blockedCatalog("Catálogo devolvió una página inconsistente.");
+      const mapped = items.map(audience === "admin" ? adminSummary : commercialSummary);
+      if (new Set(mapped.map(item => item.id)).size !== mapped.length ||
+        (audience === "admin" && status && mapped.some(item => item.status !== status)))
+        return blockedCatalog("El listado de Catálogo no coincide con las identidades o el estado solicitado.");
+      return { items: mapped, total, page, pageSize };
     },
     async getById(id, _scenario, signal) {
-      // Commercial detail is useful for display and selection. Administrative
-      // state/version/profile remain absent unless a separate DTO publishes them.
       let dto: Record<string, unknown>;
-      try { dto = object(await request(productPath(id), "GET", undefined, signal)); }
+      try { dto = object(await request(audience === "admin" ? `${adminPath}/${encoded(id)}` : productPath(id), "GET", undefined, signal)); }
       catch (error) {
         if (error instanceof CatalogError && error.kind === "not_found")
           return null;
         throw error;
       }
-      const summary = commercialSummary(dto);
-      if (summary.id !== id || !Array.isArray(dto.variants)) return blockedCatalog("El detalle comercial no coincide con la identidad o carece de la lista contractual de variantes.");
-      const prep = await preparation(id, signal);
-      const schemas = await productSchemas(dto, signal);
+      const summary = audience === "admin" ? adminSummary(dto) : commercialSummary(dto);
+      if (summary.id !== id) return blockedCatalog("El detalle no coincide con la identidad solicitada.");
+      const attributes = audience === "admin" ? array(dto.atributos).map(value => {
+        const attr = object(value);
+        return { caracteristica_id: attr.caracteristicaId, nombre: attr.nombre, valor_id: attr.valorId, valor: attr.valor };
+      }) : dto.attributes === undefined ? [] : array(dto.attributes);
+      const [prep, schemas] = await Promise.all([preparation(id, signal), readSchemas(attributes, signal)]);
+      if (prep.hasVariants !== summary.hasVariants) return blockedCatalog("La preparación no coincide con el modelo de venta.");
       const adminVariants: Awaited<ReturnType<CatalogRepository["listVariants"]>> = { items: [], total: 0, page: 1, pageSize: 100 };
       if (summary.hasVariants) {
         const seen = new Set<string>(); let page = 1; let total = -1;
@@ -128,12 +148,17 @@ export function createHttpCatalogRepository(transport: CatalogHttpTransport): Ca
       }
       const statusList = [prep.pricing.status, ...(prep.inventario ? [prep.inventario.status] : []), ...adminVariants.items.filter(v => v.status === "ACTIVA").map(v => v.inventoryPreparationStatus)];
       const preparationSummary = statusList.every(s => s === "COMPLETED") ? "COMPLETED" : statusList.every(s => s === "PENDING") ? "PENDING" : statusList.includes("REJECTED") ? "REJECTED" : "PARTIAL";
-      const images = dto.images === undefined ? [] : array(dto.images).map(string);
-      const attributes = dto.attributes === undefined ? [] : array(dto.attributes);
-      return { ...summary, description: typeof dto.description === "string" ? string(dto.description) : null, images: images.map(url => ({ url })),
-        attributes: mapCommercialAttributes(attributes, schemas), physicalProfile: undefined, preparation: prep,
+      const images = audience === "admin" ? array(dto.imagenes).map(value => {
+        const image = object(value);
+        return { url: string(image.url), principal: boolean(image.principal), posicion: integer(image.posicion) };
+      }) : (dto.images === undefined ? [] : array(dto.images).map(value => ({ url: string(value) })));
+      return { ...summary, description: audience === "admin" ? string(dto.descripcion) : typeof dto.description === "string" ? string(dto.description) : null, images,
+        imageUrl: images.find(image => "principal" in image && image.principal)?.url ?? images[0]?.url,
+        attributes: mapCommercialAttributes(attributes, schemas), physicalProfile: audience === "admin" ? mapAdminPhysical(dto.perfilFisico) : undefined, preparation: prep,
         variants: adminVariants.items.map(v => ({ variantId: v.variantId, sku: v.sku, attributesSummary: v.identifyingAttributes.map(formatAttributeValue).join(" / "), status: v.status, preparationStatus: v.inventoryPreparationStatus, manualRetryAllowed: v.inventoryManualRetryAllowed })),
-        preparationSummary, publishedCommercially: true };
+        preparationSummary, ...(audience === "admin"
+          ? { identifyingCharacteristicIds: array(dto.caracteristicasIdentificadoras).map(string) }
+          : { publishedCommercially: true }) };
     },
     create: (p, _sc, sig) => write("/productos", "POST", productBody(p), sig, value => productResult(value, sig), 201),
     update: (id, p, _sc, sig) => write(productPath(id), "PATCH", productBody(p), sig, value => productResult(value, sig, id)),

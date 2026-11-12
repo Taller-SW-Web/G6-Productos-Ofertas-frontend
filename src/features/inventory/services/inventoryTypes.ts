@@ -22,6 +22,7 @@ export function isTerminalTransferStatus(status: TransferStatus): boolean {
 
 export interface StockItem {
   sku: string;
+  skuActive?: boolean | null;
   productName: string;
   categoryName: string;
   brandName: string;
@@ -124,6 +125,12 @@ export interface StockFiltersQuery {
   brand?: string;
   locationId?: string;
   status?: string;
+}
+
+export interface StockPage {
+  items: StockItem[];
+  total: number;
+  pages: number;
 }
 
 export interface DashboardFiltersQuery {

@@ -89,6 +89,7 @@ export interface ProductView {
 }
 
 export interface ProductDetailView extends ProductView {
+  identifyingCharacteristicIds?: string[];
   description: string | null;
   images: ProductImageRef[];
   attributes: ProductAttributeValue[];

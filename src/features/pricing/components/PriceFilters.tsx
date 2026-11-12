@@ -1,9 +1,11 @@
+import { useContext } from "react";
 import { Button, Select, Text } from "@mantine/core";
 import { IconSearch } from "@tabler/icons-react";
 import { FilterBar } from "../../../components/shared";
 import type { PriceQuery, PriceTarget } from "../services/pricingRepository";
 import { priceChannelLabel } from "../services/pricePresentation";
 import type { PriceChannel } from "../services/pricingRepository";
+import { DataModeContext } from "../../../app/config/DataModeContext";
 const channels: PriceChannel[] = ["global", "retail", "marketplace", "chatbot", "ventas"];
 
 export function PriceFilters({
@@ -19,8 +21,8 @@ export function PriceFilters({
   onChange: (query: PriceQuery) => void;
   onConsult: () => void;
 }) {
-  const product =
-    targets.find((target) => target.id === draft.targetId)?.kind === "product";
+  const mode = useContext(DataModeContext);
+  const globalOnly = mode !== "api" && targets.find((target) => target.id === draft.targetId)?.kind === "product";
   const appliedName = targets.find(
     (target) => target.id === applied.targetId,
   )?.label;
@@ -44,7 +46,7 @@ export function PriceFilters({
           if (target)
             onChange({
               targetId: target.id,
-              channel: target.kind === "product" ? "global" : draft.channel,
+              channel: mode !== "api" && target.kind === "product" ? "global" : draft.channel,
             });
         }}
       />
@@ -52,9 +54,9 @@ export function PriceFilters({
         label="Canal de consulta"
         value={draft.channel}
         data={channels.map(channel => ({ value: channel, label: priceChannelLabel(channel) }))}
-        disabled={product}
+        disabled={globalOnly}
         description={
-          product
+          globalOnly
             ? "La lectura base del producto no admite filtro de canal."
             : "El precio efectivo puede resolver al alcance global."
         }

@@ -9,6 +9,8 @@ import type {
   LocationDistribution,
   ReceiveTransferPayload,
   StockItem,
+  StockFiltersQuery,
+  StockPage,
   ThresholdConfig,
   TransferFiltersQuery,
   TransferItem,
@@ -106,13 +108,8 @@ export interface HttpInventoryRepository extends InventoryRepository {
 
 const PAGE_SIZE = 100;
 const MAX_PAGES = 1000;
-const MAX_STOCK_SKUS_PER_REQUEST = 100;
 
 const BLOCKED_DETAILS = {
-  getStockItems:
-    "productName/categoryName/brandName (Catálogo/Taxonomía), locationName (sin endpoint) y stockVersion/updatedAt no los devuelve consultarDisponibilidad",
-  getStockDetail:
-    "mismos campos sin fuente que getStockItems (consultarDisponibilidad)",
   getDashboardKpisFilter:
     "obtenerDashboardInventario no admite filtrar por texto libre, estado de stock, categoría o marca; quita ese filtro para consultar el agregado",
   getDashboardAlerts:
@@ -170,11 +167,24 @@ export function contractFilterValue(
 function stockObject(value: unknown): Record<string, unknown> { if (!value || typeof value !== "object" || Array.isArray(value)) throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario devolvió un saldo incompatible."); return value as Record<string, unknown>; }
 function stockText(value: unknown): string { if (typeof value !== "string" || !value.trim()) throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario omitió la identidad del SKU o ubicación."); return value; }
 function stockInt(value: unknown): number { if (!Number.isSafeInteger(value) || Number(value) < 0) throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario devolvió una cantidad inválida."); return Number(value); }
-function toStockItem(value: unknown, meta: InventoryCatalogSku, locationId: string): StockItem {
- const dto=stockObject(value); const sku=stockText(dto.sku); if(sku!==meta.sku || (dto.location_id!==null && dto.location_id!==undefined && dto.location_id!==locationId)) throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario devolvió un saldo distinto al solicitado.");
- if(dto.status!=="DISPONIBLE"&&dto.status!=="STOCK_BAJO"&&dto.status!=="AGOTADO") throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario devolvió un estado desconocido.");
- const onHand=stockInt(dto.on_hand),reserved=stockInt(dto.reserved),blockedUnits=stockInt(dto.blocked),available=stockInt(dto.available); if(available!==Math.max(0,onHand-reserved-blockedUnits)) throw new InventoryError("RESPUESTA_INCOMPATIBLE", "El saldo disponible no coincide con las magnitudes publicadas.");
- return {sku,productName:meta.productName,categoryName:meta.categoryName,brandName:meta.brandName,locationId,locationName:`ID ${locationId}`,onHand,reserved,blocked:blockedUnits,available,threshold:typeof dto.threshold==="number"?stockInt(dto.threshold):null,status:dto.status,stockVersion:null,updatedAt:null};
+function toPhysicalStockItem(value: unknown): StockItem {
+  const dto = stockObject(value);
+  const sku = stockText(dto.sku);
+  const location = stockObject(dto.ubicacion);
+  if (dto.estado !== "DISPONIBLE" && dto.estado !== "STOCK_BAJO" && dto.estado !== "AGOTADO")
+    throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario devolvió un estado desconocido.");
+  if (dto.skuActivo !== null && typeof dto.skuActivo !== "boolean")
+    throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario devolvió un ciclo de vida de SKU inválido.");
+  const updatedAt = stockText(dto.actualizadoEn);
+  if (!Number.isFinite(Date.parse(updatedAt)))
+    throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario devolvió una fecha de saldo inválida.");
+  return {
+    sku, skuActive: dto.skuActivo, productName: sku, categoryName: "No disponible", brandName: "No disponible",
+    locationId: stockText(location.locationId), locationName: stockText(location.nombre),
+    onHand: stockInt(dto.onHand), reserved: stockInt(dto.reserved), blocked: stockInt(dto.blocked),
+    available: stockInt(dto.available), threshold: stockInt(dto.umbralEfectivo),
+    status: dto.estado, stockVersion: stockInt(dto.stockVersion), updatedAt,
+  };
 }
 function isAbort(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
@@ -625,6 +635,33 @@ export function createHttpInventoryRepository(
       throw blocked(operation, BLOCKED_DETAILS.getDashboardKpisFilter);
   }
 
+  async function readPhysicalStockPage(filters: StockFiltersQuery, page: number, size: number, signal?: AbortSignal): Promise<StockPage> {
+    if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(size) || size < 1 || size > PAGE_SIZE)
+      throw new InventoryError("VALIDACION", "La página de saldos solicitada no es válida.");
+    const sku = contractFilterValue(filters.search);
+    const locationId = contractFilterValue(filters.locationId);
+    const status = contractFilterValue(filters.status);
+    const params = new URLSearchParams({ tamanio: String(size) });
+    if (sku) params.set("sku", sku);
+    if (locationId) params.set("locationId", locationId);
+    if (status) params.set("estado", status);
+    params.set("pagina", String(page));
+    signal?.throwIfAborted();
+    const response = stockObject(await json(`/api/v1/inventario/administracion/saldos?${params}`, { method: "GET", signal }, false));
+    const meta = stockObject(response.meta);
+    const total = stockInt(meta.total);
+    const pages = Math.ceil(total / size);
+    const expectedLength = page > pages ? 0 : Math.min(size, total - (page - 1) * size);
+    if (!Array.isArray(response.items) || meta.pagina !== page || meta.tamanio !== size ||
+      meta.totalPaginas !== pages || response.items.length !== expectedLength)
+      throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario devolvió una página de saldos físicos inconsistente.");
+    const items = response.items.map(toPhysicalStockItem);
+    if (new Set(items.map(item => JSON.stringify([item.sku, item.locationId]))).size !== items.length ||
+      items.some(item => (sku && sku !== item.sku) || (locationId && locationId !== item.locationId) || (status && status !== item.status)))
+      throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario devolvió un saldo duplicado o ajeno a los filtros.");
+    return { items, total, pages };
+  }
+
   return {
     getThresholdWriteScope: () => currentUserScope() ?? "session-unavailable",
     getThresholds(): Promise<ThresholdConfig> {
@@ -900,34 +937,44 @@ export function createHttpInventoryRepository(
       return presentConfirmed(owner, frozenPayload, traslado);
     },
 
-    async getStockItems(filters?: import("../services/inventoryTypes").StockFiltersQuery, signal?: AbortSignal): Promise<StockItem[]> {
-      if (!dependencies.listCatalogSkus) throw blocked("getStockItems", "Catálogo no proporcionó el universo paginado de SKU activos");
-      const catalog = await dependencies.listCatalogSkus(signal);
-      const search = contractFilterValue(filters?.search)?.toLocaleLowerCase();
-      const selected = catalog.filter(item => (!search || item.sku.toLocaleLowerCase().includes(search) || item.productName.toLocaleLowerCase().includes(search)) && (!contractFilterValue(filters?.category) || item.categoryId === filters?.category) && (!contractFilterValue(filters?.brand) || item.brandId === filters?.brand));
-      const locationId = contractFilterValue(filters?.locationId);
-      const locations = locationId ? [{ locationId }] : (await this.getLocationDistribution()).map(item => ({ locationId: item.locationId }));
-      if (!selected.length || !locations.length) return [];
-      const bySku = new Map(selected.map(item => [item.sku, item])); const output: StockItem[] = [];
-      for (const location of locations) for (let offset = 0; offset < selected.length; offset += MAX_STOCK_SKUS_PER_REQUEST) {
-        signal?.throwIfAborted();
-        const batch = selected.slice(offset, offset + MAX_STOCK_SKUS_PER_REQUEST); const params = new URLSearchParams({ skus: batch.map(item => item.sku).join(","), location_id: location.locationId });
-        const response = stockObject(await json(`/api/v1/inventario/disponibilidad?${params}`, { method: "GET", signal }, false));
-        if (!Array.isArray(response.items)) throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario no devolvió saldos por SKU.");
-        for (const raw of response.items) { const dto = stockObject(raw); const sku = stockText(dto.sku); const meta = bySku.get(sku); if (!meta) throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario devolvió un SKU que no pertenece al lote solicitado."); const item = toStockItem(dto, meta, location.locationId); if (!contractFilterValue(filters?.status) || item.status === filters?.status) output.push(item); }
+    getStockPage: readPhysicalStockPage,
+
+    async getStockItems(filters?: StockFiltersQuery, signal?: AbortSignal): Promise<StockItem[]> {
+      const category = contractFilterValue(filters?.category);
+      const brand = contractFilterValue(filters?.brand);
+      const output: StockItem[] = [];
+      const seen = new Set<string>();
+      let total: number | undefined;
+      for (let page = 1; total === undefined || output.length < total; page++) {
+        if (page > MAX_PAGES) throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario excedió el límite de paginación. Aplica un filtro de saldo.");
+        const result = await readPhysicalStockPage(filters ?? {}, page, PAGE_SIZE, signal);
+        if (total !== undefined && total !== result.total)
+          throw new InventoryError("RESPUESTA_INCOMPATIBLE", "El total de saldos cambió durante la consulta.");
+        total = result.total;
+        for (const item of result.items) {
+          const key = JSON.stringify([item.sku, item.locationId]);
+          if (seen.has(key)) throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario repitió un saldo en páginas distintas.");
+          seen.add(key);
+          output.push(item);
+        }
       }
-      signal?.throwIfAborted();
+      if (category || brand) {
+        if (!dependencies.listCatalogSkus) throw blocked("getStockItems", "Los filtros de categoría y marca necesitan metadatos de Catálogo.");
+        const catalog = new Map((await dependencies.listCatalogSkus(signal)).map(item => [item.sku, item]));
+        return output.flatMap(item => {
+          const metadata = catalog.get(item.sku);
+          return metadata && (!category || category === metadata.categoryId) && (!brand || brand === metadata.brandId)
+            ? [{ ...item, productName: metadata.productName, categoryName: metadata.categoryName, brandName: metadata.brandName }]
+            : [];
+        });
+      }
       return output;
     },
 
     async getStockDetail(sku: string, locationId: string): Promise<StockItem | null> {
       if (!sku.trim() || !locationId.trim()) throw new InventoryError("VALIDACION", "Indica un SKU y el identificador de ubicación.");
-      if (!dependencies.listCatalogSkus) throw blocked("getStockDetail", "Catálogo no proporcionó identidades de SKU");
-      const meta: InventoryCatalogSku = (await dependencies.listCatalogSkus()).find(item => item.sku === sku) ?? { sku, productName: `SKU ${sku} (nombre no disponible en Catálogo)`, categoryId: "", categoryName: "No disponible", brandId: "", brandName: "No disponible" };
-      const params = new URLSearchParams({ skus: sku, location_id: locationId }); const response = stockObject(await json(`/api/v1/inventario/disponibilidad?${params}`, { method: "GET" }, false));
-      if (!Array.isArray(response.items)) throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario no devolvió saldos por SKU.");
-      const found = response.items.find(value => { const dto = stockObject(value); return dto.sku === sku && dto.location_id === locationId; });
-      return found === undefined ? null : toStockItem(found, meta, locationId);
+      const [item] = await this.getStockItems({ search: sku, locationId });
+      return item ?? null;
     },
 
     async getDashboardKpis(

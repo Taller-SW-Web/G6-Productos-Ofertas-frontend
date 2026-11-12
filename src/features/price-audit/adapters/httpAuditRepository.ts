@@ -65,16 +65,21 @@ function mapEntry(value: unknown): AuditEntry {
     throw new AuditFailure("unknown", "Auditoría devolvió un tipo de precio desconocido.");
   if (!["CREACION", "MODIFICACION", "RETIRO_OFERTA"].includes(operation))
     throw new AuditFailure("unknown", "Auditoría devolvió una operación desconocida.");
+  const targetType = requiredText(dto, "target_type");
+  const sku = dto.sku === null ? null : requiredText(dto, "sku");
+  if ((targetType !== "SKU" && targetType !== "PRODUCTO") || (targetType === "SKU") !== (sku !== null))
+    throw new AuditFailure("unknown", "Auditoría devolvió una identidad de objetivo incompatible.");
   return {
     id: requiredText(dto, "id_auditoria"),
-    sku: requiredText(dto, "sku"),
+    sku,
+    targetType,
     productId: requiredText(dto, "product_id"),
     priceType,
     before: nullableMoney(dto, "precio_anterior"),
     after: nullableMoney(dto, "precio_nuevo"),
     variation: nullableNumber(dto, "variacion_porcentual"),
     operation: operation as AuditEntry["operation"],
-    origin: requiredText(dto, "canal_origen"),
+    origin: dto.canal_origen === null ? null : requiredText(dto, "canal_origen"),
     reason: requiredText(dto, "motivo_cambio"),
     batchId: nullableText(dto, "batch_id"),
     actorId: nullableText(dto, "usuario_id"),
@@ -172,7 +177,7 @@ export function createHttpAuditRepository(client: AuthenticatedGatewayClient): A
     async list(query, signal) {
       if (!Number.isSafeInteger(query.page) || query.page < 1 || !Number.isSafeInteger(query.size) || query.size < 1 || query.size > 200)
         throw new AuditFailure("unknown", "La página solicitada no es válida.");
-      const dto = record(await json(`/api/v1/auditoria-precios?${queryString(query)}`, { method: "GET", signal }));
+      const dto = record(await json(`/api/v1/auditoria-precios/administracion?${queryString(query)}`, { method: "GET", signal }));
       if (!Array.isArray(dto.items)) throw new AuditFailure("unknown", "Auditoría no devolvió una lista de registros.");
       const meta = record(dto.meta);
       const page = meta.pagina, size = meta.tamanio, total = meta.total, pages = meta.totalPaginas;
@@ -183,7 +188,11 @@ export function createHttpAuditRepository(client: AuthenticatedGatewayClient): A
     async detail(id, signal) {
       if (!id.trim()) throw new AuditFailure("unknown", "El identificador de auditoría no es válido.");
       const encoded = encodeURIComponent(id);
-      try { return mapEntry(await json(`/api/v1/auditoria-precios/${encoded}`, { method: "GET", signal })); }
+      try {
+        const entry = mapEntry(await json(`/api/v1/auditoria-precios/administracion/${encoded}`, { method: "GET", signal }));
+        if (entry.id !== id) throw new AuditFailure("unknown", "La auditoría recibida pertenece a otro registro.");
+        return entry;
+      }
       catch (error) {
         if (error instanceof AuditFailure && error.kind === "unknown" && error.message.includes("HTTP 404")) return null;
         throw error;

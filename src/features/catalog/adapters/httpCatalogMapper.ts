@@ -42,6 +42,19 @@ function physical(value: unknown): Partial<PhysicalProfile> | null {
   };
   return { pesoKg: measure(dto.pesoKg), largoCm: measure(dims.largo), anchoCm: measure(dims.ancho), altoCm: measure(dims.alto) };
 }
+export function mapAdminPhysical(value: unknown): Partial<PhysicalProfile> | null {
+  if (value === null) return null;
+  const dto = object(value);
+  const dimensions = object(dto.dimensionesCm);
+  const measure = (input: unknown) => {
+    if (input === null) return undefined;
+    if (typeof input !== "number" || !Number.isFinite(input) || input <= 0)
+      return blockedCatalog("Catálogo devolvió una medida física inválida.");
+    return input;
+  };
+  return { pesoKg: measure(dto.pesoKg), largoCm: measure(dimensions.largo),
+    anchoCm: measure(dimensions.ancho), altoCm: measure(dimensions.alto) };
+}
 export type CatalogAttributeMetadata = Pick<AttributeSchema, "caracteristicaId" | "tipo" | "unidad" | "opciones">;
 export function mapCommercialAttributes(value: unknown, schemas: CatalogAttributeMetadata[]): ProductAttributeValue[] {
   return array(value).map(value => {

@@ -9,6 +9,7 @@ import type {
   ReceiveTransferPayload,
   StockFiltersQuery,
   StockItem,
+  StockPage,
   ThresholdConfig,
   TransferFiltersQuery,
   TransferItem,
@@ -21,6 +22,7 @@ import type {
 
 export interface InventoryRepository {
   getStockItems(filters?: StockFiltersQuery, signal?: AbortSignal): Promise<StockItem[]>;
+  getStockPage?(filters: StockFiltersQuery, page: number, size: number, signal?: AbortSignal): Promise<StockPage>;
 
   getStockDetail(
     sku: string,

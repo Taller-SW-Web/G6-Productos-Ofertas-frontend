@@ -360,7 +360,7 @@ export function InventoryDashboardPage() {
         {/* Zona 5: Tabla analítica de inventario */}
         <SectionCard
           title="Inventario analítico por SKU"
-          description="Consulta saldos de SKU comercialmente activos publicados en Catálogo, por ubicación. No incluye SKU fuera del catálogo comercial ni declara una cobertura global de existencias."
+          description="Consulta saldos físicos por SKU y ubicación. Los filtros de categoría y marca usan los metadatos disponibles en Catálogo."
         >
           <Stack gap="md">
             <FilterBar>

@@ -46,10 +46,7 @@ export function ProductFilters({
     { value: "variants", label: "Con variantes" },
   ];
 
-  const statusOptions = mode === "api" ? [
-    { value: "all", label: "Activos comerciales" },
-    { value: "ACTIVO", label: "Activo" },
-  ] : [
+  const statusOptions = [
     { value: "all", label: "Todos los estados" },
     { value: "ACTIVO", label: "Activo" },
     { value: "BORRADOR", label: "Borrador" },
@@ -83,7 +80,7 @@ export function ProductFilters({
         <div style={{ gridColumn: "span 2" }}>
           <SearchField
             label="Búsqueda"
-            placeholder="Buscar por nombre, SKU base o descripción..."
+            placeholder={mode === "api" ? "Buscar por nombre o SKU base..." : "Buscar por nombre, SKU base o descripción..."}
             value={query.q || ""}
             onChange={(val) => onChange({ q: val, page: 1 })}
           />

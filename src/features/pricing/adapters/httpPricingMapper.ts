@@ -198,6 +198,7 @@ export function mapPriceDto(
   target: PriceTarget,
   channelIds: PricingChannelIds = {},
   responseSku?: string,
+  allowProductChannel = false,
 ): PriceView {
   const dto = record(value);
   const productResponse =
@@ -237,8 +238,7 @@ export function mapPriceDto(
   const validUntil = optionalNullableDate(dto, "valid_until");
   if (validUntil !== null && Date.parse(validUntil) <= Date.parse(validFrom))
     return invalidResponse();
-  if (productResponse && channelId !== null) return invalidResponse();
-
+  if (productResponse && !allowProductChannel && channelId !== null) return invalidResponse();
   return {
     id: target.id,
     name: target.label,
@@ -254,6 +254,27 @@ export function mapPriceDto(
     inherited: target.kind === "variant" && origin === "product",
     ...(validityId ? { validityId } : {}),
   };
+}
+
+export function mapEditablePriceDto(value: unknown, target: PriceTarget, channel: PriceChannel): PriceView | null {
+  const dto = record(value);
+  const sku = target.kind === "variant" ? target.sku : target.referenceSku;
+  if (target.kind === "product"
+    ? dto.productId !== target.productId || dto.sku !== null
+    : dto.productId !== null || dto.sku !== target.sku) return invalidResponse();
+  if (dto.channelId !== (channel === "global" ? null : channel.toUpperCase())) return invalidResponse();
+  const priceVersion = version(dto, "priceVersion");
+  if (dto.vigenciaActual === null) return null;
+  const current = record(dto.vigenciaActual);
+  const regular = responseMoney(current.precioRegular);
+  const offer = current.precioOferta === null ? null : responseMoney(current.precioOferta);
+  const currency = requiredString(current, "currency");
+  const validFrom = requiredDate(current, "validFrom");
+  const validUntil = optionalNullableDate(current, "validUntil");
+  if (currency.length !== 3 || (offer !== null && requestMoney(offer) >= requestMoney(regular)) ||
+    (validUntil !== null && Date.parse(validUntil) <= Date.parse(validFrom))) return invalidResponse();
+  return { id: target.id, name: target.label, sku, regular, offer, currency, version: priceVersion,
+    origin: target.kind === "product" ? "product" : "sku", channel, validFrom, validUntil, inherited: false };
 }
 
 export function mapScheduleDto(

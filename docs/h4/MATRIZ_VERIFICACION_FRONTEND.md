@@ -1,5 +1,22 @@
 # Verificación de la demo administrativa H4
 
+## Correcciones de los contratos candidatos de Backend #222
+
+El [handoff del proveedor](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/3ac93b9f16025ce8c50e8d485862fbbb642af1db/docs/hito-4/FRONTEND_HANDOFF.md) y los OpenAPI candidatos identifican las rutas, los campos y el alcance verificados. Los resultados de las suites completas por SHA se consultan en los [checks de Frontend #73](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/73/checks) y [Backend #222](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/pull/222/checks).
+
+Backend `7aad0d2` corrigió el fixture de logos de Taxonomía y aprobó la CI obligatoria. El cambio corresponde a la prueba de integración. Los contratos candidatos conservan la misma revisión de implementación. [Ejecución de Backend](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs/43281692189).
+
+| Flujo | Evidencia de frontend | Aceptación bilateral |
+|---|---|---|
+| Catálogo administrativo | `PASS_LOCAL` en `tests/catalog-http.spec.ts` y el recorrido de borrador de `tests/catalog-http-ui.spec.ts`. Reapertura desde el listado, detalle, versión persistida y conflicto 409. | `BLOQUEADO_ENTORNO` |
+| Definición exacta de Pricing | `PASS_LOCAL` con `npm run test:e2e:pricing`. Global y Retail, ausencia de definición, herencia visible y 409. | `BLOQUEADO_ENTORNO` |
+| Inventario físico | `PASS_LOCAL` en `apiInventoryAdapter.spec.ts`. Saldos fuera del catálogo, ubicaciones múltiples, nulo, cero, filtros y páginas. | `BLOQUEADO_ENTORNO` |
+| Alta recuperable de Combos | `PASS_LOCAL` en `httpCombosRepositoryH4.test.ts`. Pérdida del 201, misma clave y cuerpo, conflicto 409 e intención intacta. | `BLOQUEADO_ENTORNO`. Aplicar la migración de recibos y comprobar permisos runtime. |
+| Auditoría administrativa | `PASS_LOCAL` en `tests/price-audit.spec.ts`. Lecturas de producto y SKU, canal nulo y rechazo de detalle ajeno. | `BLOQUEADO_ENTORNO` |
+| Compatibilidad G7 y despliegue | Requiere decisión conjunta sobre el formato de token G7 y los verificadores RS256 de G6. | `BLOQUEADO_ENTORNO` |
+
+Los resultados siguientes documentan la entrega anterior a Backend #222.
+
 La validación real con Gateway, G7 y los seis upstream queda `BLOQUEADA_POR_ENTORNO`. Las pruebas de loopback y las intercepciones de navegador aportan evidencia contractual local. Los resultados por comando se actualizan al terminar la ejecución.
 
 | Referencia | SHA |

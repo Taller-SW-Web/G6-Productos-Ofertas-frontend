@@ -6,10 +6,11 @@ import { createHttpTaxonomyRepository } from "../adapters/httpTaxonomyRepository
 import { createUnavailableApiCatalogRepository } from "../adapters/unavailableApiCatalogRepository";
 import { createCatalogServices, type CatalogServices } from "./catalogServices";
 
-export function createCatalogHttpServices(transport: CatalogHttpTransport): CatalogServices {
+export function createCatalogHttpServices(transport: CatalogHttpTransport): CatalogServices & { commercialCatalog: CatalogServices["catalog"] } {
   const taxonomy = createHttpTaxonomyRepository(transport);
-  return createCatalogServices("api", { apiTaxonomy: () => taxonomy,
-    apiCatalog: () => createHttpCatalogRepository(transport) });
+  return { ...createCatalogServices("api", { apiTaxonomy: () => taxonomy,
+    apiCatalog: () => createHttpCatalogRepository(transport) }),
+    commercialCatalog: createHttpCatalogRepository(transport, "commercial") };
 }
 
 // Explicit Gateway configuration only; no environment-selected authentication bypass.
@@ -17,7 +18,7 @@ export function createOptionalCatalogHttpServices(
   origin?: string,
   session?: G7Session | null,
   authenticatedClient?: AuthenticatedGatewayClient,
-): CatalogServices | null {
+): (CatalogServices & { commercialCatalog?: CatalogServices["catalog"] }) | null {
   if (!origin) return null;
   try {
     createCatalogFetchTransport(origin);

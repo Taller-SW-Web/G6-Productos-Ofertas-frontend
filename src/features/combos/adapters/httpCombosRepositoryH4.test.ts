@@ -65,15 +65,45 @@ describe("Combos HTTP reconciliation H4", () => {
     expect(request).toHaveBeenCalledTimes(7);
   });
 
-  it("COM-H4-03: alta incierta conserva el marker y no duplica POST", async () => {
-    const request = vi.fn(async (_path: string, init: { method: string }) => init.method === "POST" ? Promise.reject(new Error("timeout")) : jsonResponse(200, available("combo-h4")));
-    const { repository } = setup(request);
-    await expect(repository.create(payload)).rejects.toThrow(/incierto|No se confirmó/);
-    const before = Object.keys(storage).filter(key => key.startsWith("g6:combos:uncertain:v2:")).length;
-    await expect(repository.create(payload)).rejects.toThrow(/reconciliación|no se reenvió/);
-    expect(before).toBe(1);
-    expect(request.mock.calls.filter(([, init]) => init.method === "POST")).toHaveLength(1);
-    expect(Object.keys(storage).filter(key => key.startsWith("g6:combos:uncertain:v2:")).length).toBe(1);
+  it("COM-H4-03: recupera el mismo combo después de perder el 201 con la clave y cuerpo originales", async () => {
+    const receipts = new Map<string, string>();
+    const posts: { key: string; body: string }[] = [];
+    const request: AuthenticatedGatewayClient["request"] = async (path, init) => {
+      if (init.method !== "POST") return jsonResponse(200, available("combo-h4"));
+      expect(path).toBe("/api/v1/combos/administracion");
+      const key = init.headers?.["Idempotency-Key"] ?? "";
+      const body = String(init.body ?? "");
+      expect(key).toMatch(/^[0-9a-f-]{36}$/);
+      posts.push({ key, body });
+      if (receipts.has(key)) return receipts.get(key) === body
+        ? jsonResponse(201, comboDto("combo-h4"))
+        : jsonResponse(409, { code: "IDEMPOTENCY_CONFLICT" });
+      receipts.set(key, body);
+      throw new Error("respuesta perdida tras confirmar el recibo");
+    };
+    await expect(setup(request).repository.create(payload)).rejects.toThrow(/No se confirmó el alta/);
+    expect(Object.keys(storage).filter(key => key.startsWith("g6:combos:uncertain:v2:"))).toHaveLength(1);
+    await expect(setup(request).repository.create(payload)).resolves.toMatchObject({ id: "combo-h4" });
+    expect(posts).toHaveLength(2);
+    expect(posts[1]).toEqual(posts[0]);
+    expect(receipts.size).toBe(1);
+    expect(Object.keys(storage).filter(key => key.startsWith("g6:combos:uncertain:v2:"))).toHaveLength(0);
+  });
+
+  it("COM-H4-07: un 409 de idempotencia conserva la intención y no cambia el cuerpo ni la clave", async () => {
+    const calls: { key?: string; body?: string }[] = [];
+    const conflict = setup(async (_path, init) => {
+      calls.push({ key: init.headers?.["Idempotency-Key"], body: String(init.body ?? "") });
+      return jsonResponse(409, { code: "IDEMPOTENCY_CONFLICT" });
+    });
+    await expect(conflict.repository.create(payload)).rejects.toThrow("HTTP 409 (IDEMPOTENCY_CONFLICT)");
+    await expect(conflict.repository.create(payload)).rejects.toThrow("HTTP 409 (IDEMPOTENCY_CONFLICT)");
+    expect(calls[1]).toEqual(calls[0]);
+    const key = Object.keys(storage).find(item => item.startsWith("g6:combos:uncertain:v2:"))!;
+    const stored = JSON.parse(storage.getItem(key)!);
+    storage.setItem(key, JSON.stringify({ ...stored, body: "{}" }));
+    await expect(conflict.repository.create(payload)).rejects.toThrow(/No se envió/);
+    expect(calls).toHaveLength(2);
   });
 
   it("COM-H4-04: PATCH confirmado sigue confirmado aunque GET de disponibilidad falle", async () => {

@@ -96,7 +96,7 @@ export function ProductPreparationPage() {
     if (prepState.status === "success" && prepState.data?.productId === productId) {
       const confirmedPreparation = prepState.data!;
       return <Stack gap="xl"><PageHeader title="Preparación del producto" breadcrumbs={[{ label: "Catálogo", to: "/productos" }, { label: "Preparación" }]} />
-        <FeedbackAlert semantic="warning" title="Estado administrativo no disponible">La preparación fue consultada para este identificador, pero el contrato comercial no permite confirmar el estado ni la existencia administrativa del producto. Recarga desde el flujo de creación para recuperar el contexto transitorio; no se habilitan acciones de estado.</FeedbackAlert>
+        <FeedbackAlert semantic="warning" title="Estado administrativo no disponible">Catálogo devolvió la preparación para este identificador. Las acciones de estado requieren también un detalle administrativo con versión vigente.</FeedbackAlert>
         <SectionCard title="Preparación confirmada por Catálogo"><Stack gap="sm"><Text>Pricing: {preparationStatusLabel(confirmedPreparation.pricing.status)}</Text>{confirmedPreparation.inventario && <Text>Inventario: {preparationStatusLabel(confirmedPreparation.inventario.status)}</Text>}{confirmedPreparation.variantes.map(v => <Text key={v.variantId}>{v.sku}: {preparationStatusLabel(v.inventario.status)}</Text>)}</Stack></SectionCard>
         <Button component={Link} to="/productos" variant="outline" w="fit-content">Volver a productos</Button></Stack>;
     }
@@ -112,7 +112,7 @@ export function ProductPreparationPage() {
           ]}
         />
         <FeedbackAlert semantic="warning" title="No se pudo confirmar el estado del producto">
-          La lectura comercial no permite distinguir un borrador no publicable de un identificador inexistente. No se habilitan acciones administrativas sin una lectura autorizada de estado y versión.
+          El detalle administrativo no encontró el producto solicitado.
         </FeedbackAlert>
         <Button component={Link} to="/productos" variant="outline" w="fit-content">
           Volver a la lista

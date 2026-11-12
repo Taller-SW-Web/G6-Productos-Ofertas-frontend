@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useContext, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Button, Skeleton, Stack, Text } from "@mantine/core";
 import { EmptyState, FeedbackAlert } from "../../../components/shared";
@@ -10,6 +10,7 @@ import { useCurrentPrice } from "../hooks/useCurrentPrice";
 import { usePricingContext } from "../hooks/usePricingContext";
 import type { PriceQuery } from "../services/pricingRepository";
 import { PricingLinks, PricingPageFrame } from "../components/PricingPageFrame";
+import { DataModeContext } from "../../../app/config/DataModeContext";
 
 export function CurrentPricePage() {
   const context = usePricingContext();
@@ -51,6 +52,7 @@ function CurrentPriceContent({
 }) {
   const context = usePricingContext();
   const [params] = useSearchParams();
+  const mode = useContext(DataModeContext);
   const [draft, setDraft] = useState(query);
   const [revision, setRevision] = useState(0);
   const { state, previous } = useCurrentPrice(query, revision);
@@ -112,7 +114,8 @@ function CurrentPriceContent({
               </FeedbackAlert>
             )}
           <PriceSummary price={snapshot.price} />
-          {fresh && <PricingLinks suffix={`?${params.toString()}`} />}
+          {fresh && <PricingLinks suffix={`?${params.toString()}`} canEdit={mode !== "api" ||
+            (!snapshot.price.inherited && snapshot.price.channel === query.channel)} />}
           <PriceBreakdown rows={snapshot.breakdown} />
         </>
       )}

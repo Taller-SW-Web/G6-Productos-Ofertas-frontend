@@ -1,3 +1,4 @@
+import { withAdminPriceDefinition } from "../../../../tests/fixtures/adminPriceDefinition";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHttpPricingRepository, type PricingHttpRequest } from "./httpPricingRepository";
 import type { PriceTarget } from "../services/pricingRepository";
@@ -5,7 +6,7 @@ import type { ScheduleDraft } from "../services/pricingModels";
 import { createMemoryStorage, deferred, fakeOwnerA, fakeOwnerB, jsonResponse } from "../../../../tests/fixtures/h4Controlled";
 
 const target: PriceTarget = { id: "target-h4", label: "Producto H4, variante", productId: "product-h4", kind: "variant", sku: "SKU-H4-001", productTargetId: "parent-h4" };
-const channels = { retail: "11111111-1111-4111-8111-111111111111", marketplace: "22222222-2222-4222-8222-222222222222", chatbot: "33333333-3333-4333-8333-333333333333", ventas: "44444444-4444-4444-8444-444444444444" };
+const channels = { retail: "RETAIL", marketplace: "MARKETPLACE", chatbot: "CHATBOT", ventas: "VENTAS" };
 const signal = () => new AbortController().signal;
 let owner = fakeOwnerA;
 let storage: Storage;
@@ -13,7 +14,7 @@ beforeEach(() => { owner = fakeOwnerA; storage = createMemoryStorage(); vi.stubG
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 function repository(respond: (path: string, request: PricingHttpRequest) => Promise<Response>, options: { ids?: typeof channels; targets?: PriceTarget[] } = {}) {
-  const request = vi.fn(respond);
+  const request = vi.fn(async (path: string, init: PricingHttpRequest) => withAdminPriceDefinition(path, await respond(path, init)));
   const instance = createHttpPricingRepository({ transport: { request }, scopeId: () => owner, listCatalogTargets: async () => options.targets ?? [target], channelIds: options.ids ?? channels });
   return { instance, request };
 }
@@ -47,7 +48,7 @@ describe("Pricing reconciliation H4", () => {
     expect(observed).toHaveLength(5);
   });
 
-  it("PRI-H4-08: emite programación contractual una vez en cada canal con UUID canónico y no escribe si falta", async () => {
+  it("PRI-H4-08: emite programación contractual una vez en cada canal con el identificador textual canónico", async () => {
     const observed: { path: string; request: PricingHttpRequest }[] = [];
     const instance = repository(async (path, request) => {
       observed.push({ path, request });
@@ -78,11 +79,7 @@ describe("Pricing reconciliation H4", () => {
     }
     expect(observed.filter(item => item.request.method === "POST")).toHaveLength(5);
 
-    const missing = repository(async (_path, request) => request.method === "GET"
-      ? jsonResponse(200, page([], 0))
-      : jsonResponse(201, {}), { ids: { ...channels, retail: "" } });
-    await expect(missing.instance.schedule(target.id, { ...draft, channel: "retail" }, signal())).rejects.toMatchObject({ kind: "blocked_contract" });
-    expect(missing.request.mock.calls.filter(([, request]) => request.method === "POST")).toHaveLength(0);
+
   });
 
   it("PRI-H4-02: PATCH incierto persiste y el segundo PATCH se bloquea antes del transporte", async () => {

@@ -2427,8 +2427,6 @@ describe("apiInventoryAdapter — operaciones sin fuente contractual", () => {
   it("rechaza con CONTRATO_BLOQUEADO las lecturas cuyo modelo no cubre el contrato", async () => {
     const { repository, request } = setup(async () => jsonResponse({}));
     for (const promise of [
-      repository.getStockItems(),
-      repository.getStockDetail("SKU-A", "loc-1"),
       repository.getDashboardAlerts(),
       repository.getCategories(),
       repository.getBrands(),
@@ -2439,6 +2437,44 @@ describe("apiInventoryAdapter — operaciones sin fuente contractual", () => {
     expect(request).not.toHaveBeenCalled();
     await expect(repository.getLocations()).rejects.toMatchObject({ code: "RESPUESTA_INCOMPATIBLE" });
     expect(request.mock.calls[0]?.[0]).toBe("/api/v1/inventario/dashboard");
+  });
+});
+
+describe("saldos físicos administrativos", () => {
+  const locationId = "11111111-1111-4111-8111-111111111111";
+  const otherLocation = "22222222-2222-4222-8222-222222222222";
+  const balance = (sku: string, location: string, available = 0) => ({
+    sku, ubicacion: { locationId: location, nombre: location === locationId ? "Almacén central" : "Tienda Norte", codigo: "LOC", tipo: "ALMACEN", activa: true },
+    skuActivo: null, onHand: available, reserved: 0, blocked: 0, available,
+    stockVersion: 3, umbralEfectivo: 5, estado: available === 0 ? "AGOTADO" : "STOCK_BAJO", actualizadoEn: "2026-11-07T13:00:00Z",
+  });
+
+  it("pagina saldos sin Catálogo y conserva pares SKU/ubicación, ceros y nulos", async () => {
+    const rows = [...Array.from({ length: 99 }, (_, index) => balance(`SKU-${index}`, locationId)),
+      balance("FUERA-CATALOGO", locationId), balance("FUERA-CATALOGO", otherLocation)];
+    const { repository, calls } = setup(async path => {
+      const url = new URL(path, "https://gateway.test");
+      expect(url.pathname).toBe("/api/v1/inventario/administracion/saldos");
+      expect(url.searchParams.get("estado")).toBe("AGOTADO");
+      const pagina = Number(url.searchParams.get("pagina"));
+      return jsonResponse({ items: rows.slice((pagina - 1) * 100, pagina * 100), meta: { pagina, tamanio: 100, total: 101, totalPaginas: 2 } });
+    });
+    const result = await repository.getStockItems({ status: "AGOTADO" });
+    expect(result).toHaveLength(101);
+    expect(result.slice(-2)).toMatchObject([
+      { sku: "FUERA-CATALOGO", locationId, locationName: "Almacén central", skuActive: null, available: 0, stockVersion: 3 },
+      { sku: "FUERA-CATALOGO", locationId: otherLocation, locationName: "Tienda Norte", skuActive: null, threshold: 5 },
+    ]);
+    expect(calls).toHaveLength(2);
+  });
+
+  it("transmite SKU, ubicación y stock bajo y rechaza una identidad fuera de filtro", async () => {
+    const { repository, calls } = setup(async () => jsonResponse({
+      items: [balance("AJENO", locationId, 2)], meta: { pagina: 1, tamanio: 100, total: 1, totalPaginas: 1 },
+    }));
+    await expect(repository.getStockItems({ search: "FISICO", locationId, status: "STOCK_BAJO" }))
+      .rejects.toMatchObject({ code: "RESPUESTA_INCOMPATIBLE" });
+    expect(calls[0]?.path).toBe(`/api/v1/inventario/administracion/saldos?tamanio=100&sku=FISICO&locationId=${locationId}&estado=STOCK_BAJO&pagina=1`);
   });
 });
 

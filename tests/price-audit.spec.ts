@@ -410,6 +410,7 @@ test("MK-014: unknown POST cannot be resubmitted; known job GET retries without 
 
   const knownJobPage = await page.context().newPage();
   await mount(knownJobPage, "/precios/auditoria/exportar/csv");
+  await expect(knownJobPage.getByRole("button", { name: "Solicitar CSV" })).toBeEnabled();
   await knownJobPage.evaluate(() => {
     window.auditControl.readFailure = "unavailable";
   });
@@ -867,14 +868,24 @@ test("MK-014 strict dates: impossible calendar dates and invalid time/zone never
   }
 });
 
-const auditHttpEntryH4 = { id_auditoria: "audit-h4-product", sku: null, product_id: "11111111-1111-4111-8111-111111111111", tipo_precio: "REGULAR", precio_anterior: null, precio_nuevo: 10, variacion_porcentual: null, tipo_operacion: "CREACION", canal_origen: "BACKOFFICE", motivo_cambio: "Fixture contractual H4", batch_id: null, usuario_id: null, usuario_email: null, ip_origen: null, timestamp: "2026-11-07T12:00:00Z", canal: null };
+const auditHttpEntryH4 = { id_auditoria: "audit-h4-product", sku: null, target_type: "PRODUCTO", product_id: "11111111-1111-4111-8111-111111111111", tipo_precio: "REGULAR", precio_anterior: null, precio_nuevo: 10, variacion_porcentual: null, tipo_operacion: "CREACION", canal_origen: null, motivo_cambio: "Fixture contractual H4", batch_id: null, usuario_id: null, usuario_email: null, ip_origen: null, timestamp: "2026-11-07T12:00:00Z", canal: null };
 const auditHttpJobH4 = { export_id: "export-h4-001", formato: "CSV", status: "QUEUED", created_at: "2026-11-07T12:00:00Z", completed_at: null, download_url: null };
 
-test("AUD-H4-01: PRODUCTO sin SKU y canal nulo fallan tipados sin inventar valor o filtro", async () => {
+test("AUD-H4-01: la lista y el detalle conservan SKU y canal nulos y registros SKU normales", async () => {
   const calls: string[] = [];
-  const repository = createHttpAuditRepository({ request: async path => { calls.push(path); return new Response(JSON.stringify({ items: [auditHttpEntryH4], meta: { pagina: 1, tamanio: 10, total: 1, totalPaginas: 1 } }), { status: 200, headers: { "content-type": "application/json" } }); } });
-  await expect(repository.list({ page: 1, size: 10, sku: "", canal: "", desde: "", hasta: "", usuarioId: "", batchId: "" }, new AbortController().signal)).rejects.toMatchObject({ kind: "unknown" });
-  expect(calls).toEqual(["/api/v1/auditoria-precios?pagina=1&tamanio=10"]);
+  const normal = { ...auditHttpEntryH4, id_auditoria: "audit-h4-sku", sku: "SKU-H4", target_type: "SKU", canal_origen: "RETAIL" };
+  const repository = createHttpAuditRepository({ request: async path => {
+    calls.push(path);
+    const dto = path.includes("?") ? { items: [auditHttpEntryH4, normal], meta: { pagina: 1, tamanio: 10, total: 2, totalPaginas: 1 } } : auditHttpEntryH4;
+    return new Response(JSON.stringify(dto), { status: 200, headers: { "content-type": "application/json" } });
+  } });
+  const signal = new AbortController().signal;
+  await expect(repository.list({ page: 1, size: 10, sku: "", canal: "", desde: "", hasta: "", usuarioId: "", batchId: "" }, signal)).resolves.toMatchObject({
+    items: [{ targetType: "PRODUCTO", sku: null, origin: null }, { targetType: "SKU", sku: "SKU-H4", origin: "RETAIL" }],
+  });
+  await expect(repository.detail("audit-h4-product", signal)).resolves.toMatchObject({ sku: null, origin: null });
+  await expect(repository.detail("audit-ajeno", signal)).rejects.toThrow(/otro registro/);
+  expect(calls).toEqual(["/api/v1/auditoria-precios/administracion?pagina=1&tamanio=10", "/api/v1/auditoria-precios/administracion/audit-h4-product", "/api/v1/auditoria-precios/administracion/audit-ajeno"]);
 });
 
 test("AUD-H4-02: respuesta contractual 400 para filtro no publicado no se transforma en éxito", async () => {

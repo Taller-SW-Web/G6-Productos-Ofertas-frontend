@@ -19,6 +19,7 @@ import type {
 } from "../services/pricingRepository";
 import {
   mapBatchDto,
+  mapEditablePriceDto,
   mapPriceDto,
   mapScheduleDto,
   mapSchedulePageDto,
@@ -220,10 +221,7 @@ export function createHttpPricingRepository(
 
   function channelIdFor(channel: PriceChannel): string | null {
     if (channel === "global") return null;
-    if (channelIds[channel]) return channelIds[channel];
-    throw blocked(
-      `El contrato de escritura requiere el channelId canónico de ${channel.toUpperCase()}; Catálogo/Integración todavía no lo proporciona.`,
-    );
+    return channel.toUpperCase();
   }
 
   async function send(
@@ -335,9 +333,10 @@ export function createHttpPricingRepository(
     signal: AbortSignal,
   ): Promise<PriceView | null> {
     if (target.kind === "product" && channel !== "global") {
-      throw blocked(
-        "El GET administrativo de producto no resuelve canal Retail. Se requiere un SKU legítimo o una operación contractual que confirme ese alcance.",
-      );
+      const exact = await readExact(target, channel, signal);
+      if (exact) return exact;
+      const global = await readTarget(target, "global", signal);
+      return global ? { ...global, inherited: true } : null;
     }
     const suffix = target.kind === "variant" && channel !== "global" ? `?canal=${channel.toUpperCase()}` : "";
     const response = await json(
@@ -348,13 +347,21 @@ export function createHttpPricingRepository(
     );
     if (response === null) return null;
     const price = mapPriceDto(response, target, channelIds);
-    if (channel === "global" && price.channel !== "global") {
+    if (price.channel !== "global" && price.channel !== channel) {
       throw new PricingFailure(
         "error",
         "Pricing devolvió un precio de otro canal.",
       );
     }
     return price;
+  }
+
+  async function readExact(target: PriceTarget, channel: PriceChannel, signal: AbortSignal): Promise<PriceView | null> {
+    const path = targetPath(target).replace("/precios/", "/precios/administracion/");
+    const channelId = channelIdFor(channel);
+    const query = channelId === null ? "" : "?" + new URLSearchParams({ channelId });
+    const dto = await json(path + query, { method: "GET", signal }, false, ["PRECIO_NO_ENCONTRADO"]);
+    return dto === null ? null : mapEditablePriceDto(dto, target, channel);
   }
 
   return {
@@ -382,29 +389,14 @@ export function createHttpPricingRepository(
         );
       }
       editableReads.delete(key);
-      if (target.kind === "product" && writeTarget.channel !== "global") {
-        throw blocked(
-          "GET de precio de producto no admite canal. No es posible leer la versión exacta de un precio Retail para editarlo.",
-        );
-      }
-      const price = await readTarget(target, writeTarget.channel, signal);
+      const price = await readExact(target, writeTarget.channel, signal);
       if ((dependencies.scopeId?.() ?? "session-unavailable") !== owner) throw new PricingFailure("unknown", "La sesión cambió durante la lectura de precio; no se reconcilia el propietario anterior.");
-      if (
-        target.kind === "variant" &&
-        price &&
-        (price.inherited ||
-          price.origin !== "sku" ||
-          price.channel !== writeTarget.channel)
-      ) {
-        throw blocked(
-          "El precio consultado es heredado o corresponde a otro canal. Pricing no confirmó una definición propia para editar este alcance.",
-        );
-      }
       const uncertain = uncertainUpdate(key);
       if (uncertain) {
         if (
           !price ||
           uncertain.productId !== target.productId ||
+          uncertain.channelId !== channelIdFor(writeTarget.channel) ||
           !confirmsUpdate(price, uncertain)
         ) {
           setMarkerState(key, "update", "REQUIRES_EXTERNAL_VERIFICATION");
@@ -442,11 +434,6 @@ export function createHttpPricingRepository(
         throw new PricingFailure(
           "conflict",
           "Vuelve a leer el precio exacto de este objetivo y canal antes de guardar.",
-        );
-      }
-      if (target.kind === "product" && change.target.channel !== "global") {
-        throw blocked(
-          "No existe una lectura contractual de precio de producto por canal para verificar la versión antes de editar Retail.",
         );
       }
       if (!Number.isSafeInteger(change.version) || change.version < 1) {
@@ -512,7 +499,7 @@ export function createHttpPricingRepository(
         );
         let after: PriceView;
         try {
-          after = mapPriceDto(response, target, channelIds);
+          after = mapPriceDto(response, target, channelIds, undefined, true);
           if (!confirmsUpdate(after, expected)) {
             throw new Error("Confirmación incompatible");
           }
@@ -616,7 +603,7 @@ export function createHttpPricingRepository(
         if (marker.state !== "valid") throw new PricingFailure("unknown", "Una intención de programación está corrupta o inaccesible; no se permite reenviar.");
         const expected = marker.expected as Record<string, unknown>;
         const expectedChannel = expected.channel as PriceChannel;
-        const expectedChannelId = expectedChannel === "global" ? null : channelIds[expectedChannel as Exclude<PriceChannel, "global">];
+        const expectedChannelId = channelIdFor(expectedChannel as PriceChannel);
         if (expected.channelId !== expectedChannelId) throw new PricingFailure("unknown", "La identidad canónica del canal cambió o falta; no se libera la programación incierta.");
         const matches = allSchedules.filter(item => {
           const value = expected;

@@ -39,6 +39,8 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
   const { catalog, taxonomy } = useCatalogServices();
   const mode = useContext(DataModeContext);
   const promotionSession = useContext(PromotionSessionContext);
+  const identifyingIds = parentProduct?.identifyingCharacteristicIds;
+  const choosingIdentifiers = !isEdit && identifyingIds?.length === 0;
   const [schemaResult, setSchemaResult] = useState<{ typeId: string; repository: typeof taxonomy; schemas: AttributeSchema[]; error: string | null }>();
   const schemaCurrent = schemaResult?.typeId === parentProduct?.typeId && schemaResult?.repository === taxonomy;
   const attributeSchemas = schemaCurrent ? schemaResult.schemas : [];
@@ -90,9 +92,13 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
     const controller = new AbortController();
     const typeId = parentProduct?.typeId;
     if (!typeId) return;
-    taxonomy.getAttributeSchema(typeId, controller.signal).then(schemas => {
+    taxonomy.getAttributeSchema(typeId, controller.signal).then(source => {
       if (controller.signal.aborted) return;
-      if (schemas.some(s => s.esIdentificadora === undefined)) {
+      const schemas = identifyingIds === undefined ? source : source.map(schema => ({
+        ...schema,
+        esIdentificadora: choosingIdentifiers ? undefined : identifyingIds.includes(schema.caracteristicaId),
+      }));
+      if (identifyingIds === undefined && schemas.some(s => s.esIdentificadora === undefined)) {
         throw new Error("El esquema no informa el rol identificador de las características.");
       }
       setSchemaResult({ typeId, repository: taxonomy, schemas, error: null });
@@ -112,7 +118,7 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
               const schema = schemas.find(s => s.caracteristicaId === a.caracteristicaId);
               return schema ? entry(schema, prev.nonIdentifyingAttributes) : a;
             }),
-            ...schemas.filter(s => !s.esIdentificadora && s.obligatorio &&
+            ...schemas.filter(s => s.esIdentificadora === false && s.obligatorio &&
               !prev.nonIdentifyingAttributes.some(a => a.caracteristicaId === s.caracteristicaId))
               .map(s => entry(s, [])),
           ],
@@ -123,7 +129,7 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
         error: err instanceof Error ? err.message : "Error al cargar Taxonomía." });
     });
     return () => controller.abort();
-  }, [parentProduct?.typeId, taxonomy, initialVariant]);
+  }, [parentProduct?.typeId, taxonomy, initialVariant, identifyingIds, choosingIdentifiers]);
 
   const updateField = <K extends keyof VariantFormData>(field: K, value: VariantFormData[K]) => {
     if (isEdit && (field === "sku" || field === "identifyingAttributes")) return;
@@ -134,8 +140,8 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
   const addAttribute = (identity: boolean) => {
     if (schemaLoading || schemaError || (identity && isEdit)) return;
     const field = identity ? "identifyingAttributes" : "nonIdentifyingAttributes";
-    const s = attributeSchemas.find(s => s.esIdentificadora === identity &&
-      !formData[field].some(a => a.caracteristicaId === s.caracteristicaId));
+    const s = attributeSchemas.find(s => (choosingIdentifiers || s.esIdentificadora === identity) &&
+      ![...formData.identifyingAttributes, ...formData.nonIdentifyingAttributes].some(a => a.caracteristicaId === s.caracteristicaId));
     if (!s) return;
     updateField(field, [...formData[field], { key: s.caracteristicaId,
       caracteristicaId: s.caracteristicaId, nombre: s.nombre, tipo: s.tipo,
@@ -153,7 +159,7 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
     const current = entries[index];
     if (!current) return;
     const s = attributeSchemas.find(s => s.caracteristicaId ===
-      (key === "caracteristicaId" ? value : current.caracteristicaId) && s.esIdentificadora === identity);
+      (key === "caracteristicaId" ? value : current.caracteristicaId) && (choosingIdentifiers || s.esIdentificadora === identity));
     if (!s || (key === "caracteristicaId" && entries.some((a, i) =>
       i !== index && a.caracteristicaId === value))) return;
     entries[index] = { key: s.caracteristicaId, caracteristicaId: s.caracteristicaId,
@@ -182,8 +188,11 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
         const s = attributeSchemas.find(s => s.caracteristicaId === a.caracteristicaId);
         return { ...a, valorId: a.valorId ?? s?.opciones?.find(o => o.valor === String(a.valor))?.id };
       }) : formData.identifyingAttributes.map(toAttribute);
+      const schemas = choosingIdentifiers ? attributeSchemas.map(schema => ({
+        ...schema, esIdentificadora: identity.some(attribute => attribute.caracteristicaId === schema.caracteristicaId),
+      })) : attributeSchemas;
       Object.assign(next, validateVariantAttributes(identity,
-        formData.nonIdentifyingAttributes.map(toAttribute), attributeSchemas));
+        formData.nonIdentifyingAttributes.map(toAttribute), schemas));
     }
     if (!isEdit && !formData.imageUrl.trim()) next.imageUrl = "La URL de imagen es obligatoria para la variante (VarianteCreateRequest).";
     if (formData.imageUrl.trim()) {
@@ -226,7 +235,7 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
       else setGeneralError(err instanceof Error ? err.message : "Error inesperado al procesar la solicitud.");
     } finally { setSubmitting(false); }
   };
-  return { formData, attributeSchemas, schemaLoading, schemaError, updateField,
+  return { formData, attributeSchemas, choosingIdentifiers, schemaLoading, schemaError, updateField,
     addIdentifyingAttribute: () => addAttribute(true),
     addNonIdentifyingAttribute: () => addAttribute(false),
     removeIdentifyingAttribute: (index: number) => removeAttribute(true, index),

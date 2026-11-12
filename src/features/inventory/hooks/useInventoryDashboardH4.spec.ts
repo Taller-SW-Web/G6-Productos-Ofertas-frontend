@@ -3,7 +3,7 @@ import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import { useInventoryDashboard } from "./useInventoryDashboard";
 import { resetInventoryRepository } from "../services/inventoryProvider";
 import { deferred } from "../../../../tests/fixtures/h4Controlled";
-import { createHttpInventoryRepository, type InventoryHttpRequest } from "../adapters/apiInventoryAdapter";
+import { createHttpInventoryRepository } from "../adapters/apiInventoryAdapter";
 import { act } from "@testing-library/react";
 import { useProductStateMutation } from "../../catalog/hooks/useProductStateMutation";
 import { CatalogError } from "../../catalog/services/catalogRepository";
@@ -50,17 +50,20 @@ it("CAT-H4-04: una mutación incierta de A queda aislada cuando la sesión cambi
 
 it("INV-H4-04: desmontar un consumidor no cancela el GET compartido del otro", async () => {
   const pending = deferred<Response>();
-  const request = vi.fn(async (path: string, init: InventoryHttpRequest) => { void path; void init; return pending.promise; });
+  const request = vi.fn(async (path: string) =>
+    path === "/api/v1/inventario/dashboard" ? pending.promise :
+      Response.json({ items: [], meta: { pagina: 1, tamanio: 100, total: 0, totalPaginas: 0 } }));
+  const dashboardReads = () => request.mock.calls.filter(([path]) => path === "/api/v1/inventario/dashboard");
   const repository = createHttpInventoryRepository({ transport: { request }, currentUserScope: () => "g7-inventory-owner-a" });
   resetInventoryRepository(repository);
 
   const first = renderHook(() => useInventoryDashboard({}));
   const second = renderHook(() => useInventoryDashboard({}));
-  expect(request).toHaveBeenCalledTimes(1);
+  expect(dashboardReads()).toHaveLength(1);
   first.unmount();
   pending.resolve(new Response(JSON.stringify({ generatedAt: "2026-10-20T00:00:00.000Z", totalSkus: 12, totalOnHand: 150, totalReserved: 20, totalAvailable: 125, skusDisponibles: 9, skusStockBajo: 2, skusAgotados: 1, porUbicacion: [] }), { status: 200, headers: { "content-type": "application/json" } }));
   await waitFor(() => expect(second.result.current.loading).toBe(false));
   expect(second.result.current.kpis?.availableUnits).toBe(125);
-  expect(request).toHaveBeenCalledTimes(1);
+  expect(dashboardReads()).toHaveLength(1);
   second.unmount();
 });

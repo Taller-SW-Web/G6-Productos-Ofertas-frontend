@@ -259,6 +259,7 @@ async function expectLoginInsideViewport(page: Page) {
 test("una sesión administrativa autentica lecturas de los seis módulos", async ({ page }) => {
   const gateway = `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? 5173}`;
   const reads: { path: string; method: string; authorization: string | undefined }[] = [];
+  const stockPages: number[] = [];
   // These repositories also read Vite's mode directly. Match the API mode set in main.tsx by the fixture.
   await page.route(/\/src\/features\/(taxonomy\/services\/taxonomyServices|inventory\/services\/inventoryProvider)\.ts(?:\?|$)/, async route => {
     const response = await route.fetch();
@@ -279,8 +280,24 @@ test("una sesión administrativa autentica lecturas de los seis módulos", async
     if (pathname === "/api/v1/productos") {
       return route.fulfill({ json: { items: [], ...pageInfo } });
     }
+    if (pathname === "/api/v1/productos/administracion") {
+      return route.fulfill({ json: { items: [], meta: { ...pageInfo, totalPaginas: 0 } } });
+    }
     if (pathname === "/api/v1/categorias/arbol") {
       return route.fulfill({ json: [] });
+    }
+    if (pathname === "/api/v1/inventario/administracion/saldos") {
+      const balances = Array.from({ length: 21 }, (_, index) => ({
+        sku: index >= 19 ? "SKU-FISICO" : `SKU-${index}`,
+        ubicacion: { locationId: index === 20 ? "22222222-2222-4222-8222-222222222222" : "11111111-1111-4111-8111-111111111111",
+          nombre: index === 20 ? "Tienda Norte" : "Almacén Central", codigo: "LOC", tipo: "ALMACEN", activa: true },
+        skuActivo: null, onHand: 0, reserved: 0, blocked: 0, available: 0, umbralEfectivo: 5,
+        estado: "AGOTADO", stockVersion: 3, actualizadoEn: "2026-11-07T13:00:00Z",
+      }));
+      if (pageInfo.tamanio === 20) stockPages.push(pageInfo.pagina);
+      const from = (pageInfo.pagina - 1) * pageInfo.tamanio;
+      return route.fulfill({ json: { items: balances.slice(from, from + pageInfo.tamanio),
+        meta: { ...pageInfo, total: balances.length, totalPaginas: Math.ceil(balances.length / pageInfo.tamanio) } } });
     }
     if (["/api/v1/cupones", "/api/v1/combos"].includes(pathname)) {
       return route.fulfill({ json: { items: [], meta: { ...pageInfo, totalPaginas: 0 } } });
@@ -298,7 +315,7 @@ test("una sesión administrativa autentica lecturas de los seis módulos", async
   const navigation = page.getByRole("navigation", { name: "Navegación de la aplicación", exact: true });
   for (const [label, path, operation] of [
     ["Consultar precios", "/precios", "/api/v1/productos"],
-    ["Gestión de productos", "/productos", "/api/v1/productos"],
+    ["Gestión de productos", "/productos", "/api/v1/productos/administracion"],
     ["Categorías", "/categorias", "/api/v1/categorias/arbol"],
     ["Dashboard analítico", "/inventario/dashboard", "/api/v1/inventario/dashboard"],
     ["Gestión de combos", "/combos", "/api/v1/combos"],
@@ -309,6 +326,15 @@ test("una sesión administrativa autentica lecturas de los seis módulos", async
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect.poll(() => reads.slice(readStart).map(read => read.path)).toContain(operation);
   }
+  await navigation.getByRole("link", { name: "Control de stock", exact: true }).click();
+  await expect(page.getByText("21 saldos físicos", { exact: true })).toBeVisible();
+  await expect(page.getByRole("row").filter({ hasText: "SKU-FISICO" })).toContainText("Almacén Central");
+  await page.getByRole("button", { name: "2", exact: true }).click();
+  await expect(page.getByRole("row").filter({ hasText: "SKU-FISICO" })).toContainText("Tienda Norte");
+  await page.getByTitle("Ver detalle de SKU-FISICO en Tienda Norte").click();
+  await expect(page.getByText("Desconocido", { exact: true })).toBeVisible();
+  await expect(page.getByText("v3", { exact: true })).toBeVisible();
+  expect(stockPages).toEqual([1, 2]);
   for (const read of reads) {
     expect(read, read.path).toMatchObject({ method: "GET", authorization: `Bearer ${dto.accessToken}` });
   }

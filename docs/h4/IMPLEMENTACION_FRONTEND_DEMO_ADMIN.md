@@ -12,13 +12,13 @@ El transporte de Gateway restringe origen y ruta, conserva correlación y renuev
 
 | Área | Capacidad compuesta | Límite |
 |---|---|---|
-| Catálogo MK-003/004 | Puerto de Catálogo HTTP y maestros administrativos de Taxonomía | La lista y detalle de producto son comerciales. La edición tras recargar depende de CAT-ADMIN-READ. |
+| Catálogo MK-003/004 | Puerto de Catálogo HTTP y maestros administrativos de Taxonomía | Los administradores leen estado y versión persistidos de las rutas candidatas de Backend #222. Los consumidores comerciales conservan sus rutas. |
 | Taxonomía MK-008–012 | Se reutilizan adapters HTTP de maestros, esquema, asociaciones y SEO. | El seguimiento de bajas conserva el estado asíncrono. Grants por verificar. |
-| Pricing MK-013 | Se inyecta el repositorio HTTP con objetivos paginados de Catálogo. | Las escrituras por canal requieren su UUID autorizado. Un precio global no acredita una versión específica de canal. |
-| Inventario MK-015/016 | Inventario HTTP con universo de SKU vendibles, dashboard, umbrales y traslados. | Cobertura comercial para la tabla de saldos. El agregado solo aplica filtros admitidos por el provider y las ubicaciones conservan su ID. |
-| Combos MK-002 | Repo HTTP con selección de Catálogo y precios de referencia de Pricing. | Disponibilidad informativa y recuperación de altas dependen del contrato. |
+| Pricing MK-013 | Se inyecta el repositorio HTTP con objetivos paginados de Catálogo. | Las escrituras usan canales textuales y la versión de la definición exacta. El precio heredado se usa para consulta. |
+| Inventario MK-015/016 | Inventario HTTP con universo de SKU vendibles, dashboard, umbrales y traslados. | La grilla consulta saldos físicos paginados. El agregado conserva sus filtros propios. |
+| Combos MK-002 | Repo HTTP con selección de Catálogo y precios de referencia de Pricing. | El alta administrativa recupera la intención con la misma clave y cuerpo. La migración y los permisos runtime son requisitos de despliegue. |
 | Promociones MK-005–007 | Runtime administrativo sobre la sesión general, con campañas, cupones y recomendaciones. | La autorización efectiva y los catálogos dependientes requieren Gateway y servicios. |
-| Bulk MK-001 y Auditoría MK-014 | Se preservan sus repositorios H4. Bulk clasifica un POST de resultado incierto y conserva la correlación. | Reanudación Bulk requiere aprobación de protocolo. Auditoría y descarga externa requieren prueba del provider. |
+| Bulk MK-001 y Auditoría MK-014 | Se preservan sus repositorios H4. Bulk clasifica un POST de resultado incierto y conserva la correlación. | La auditoría administrativa conserva SKU y canal nulos. La reanudación Bulk y la descarga externa requieren aceptación del proveedor. |
 
 Las decisiones de formalización y los bloqueos se registran en los archivos de esta carpeta. La habilitación de los adapters no acredita homologación ni despliegue.
 

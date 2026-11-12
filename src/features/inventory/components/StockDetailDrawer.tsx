@@ -154,7 +154,7 @@ export function StockDetailDrawer({
                 </ThemeIcon>
               </Group>
               <Text size="xs" c="dimmed" mt={4}>
-                Apto para venta comercial
+                Saldo disponible en esta ubicación
               </Text>
             </Paper>
           </SimpleGrid>
@@ -181,6 +181,10 @@ export function StockDetailDrawer({
                 {item.stockVersion === null ? "No publicada" : `v${item.stockVersion}`}
               </Text>
             </Grid.Col>
+            {item.skuActive !== undefined && <Grid.Col span={6}>
+              <Text size="xs" c="dimmed">Ciclo de vida del SKU</Text>
+              <Text size="sm" fw={600}>{item.skuActive === null ? "Desconocido" : item.skuActive ? "Activo" : "Inactivo"}</Text>
+            </Grid.Col>}
           </Grid>
         </Paper>
 

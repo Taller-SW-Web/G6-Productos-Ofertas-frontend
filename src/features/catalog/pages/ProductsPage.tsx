@@ -185,7 +185,7 @@ export function ProductsPage() {
               </StatusBadge>
             );
           case null:
-            return <Text size="sm" c="dimmed">No publicada por el resumen comercial</Text>;
+            return <Text size="sm" c="dimmed">Consultar en el detalle</Text>;
           default:
             return (
               <StatusBadge semantic="info" size="sm">
@@ -267,7 +267,6 @@ export function ProductsPage() {
         }
       />
 
-      {mode === "api" && <FeedbackAlert semantic="info" title="Listado comercial de solo lectura">El contrato publica productos comercialmente activos. La lista no incluye versiones administrativas ni estados de preparación; esos datos se consultan por separado cuando existe una operación de detalle.</FeedbackAlert>}
       {taxonomy.loading && <Text size="sm">Cargando filtros de Taxonomía...</Text>}
       {taxonomy.error && <FeedbackAlert semantic="error" title="Error al cargar filtros"
         actions={<Button variant="outline" onClick={handleRetry}>Reintentar filtros</Button>}>

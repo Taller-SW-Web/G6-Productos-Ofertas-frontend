@@ -57,11 +57,11 @@ test("HTTP simulado: éxitos de todas las mutaciones de producto y variante; 202
   expect(await h.catalog.retryVariantPreparation(pid, vid)).toMatchObject({ accepted: true, operationId: vid });
   expect(h.calls.filter(call => call.init.method !== "GET")).toHaveLength(12);
 });
-function harness(respond: (path: string, init: Parameters<CatalogHttpTransport["request"]>[1]) => Response | Promise<Response>) {
+function harness(respond: (path: string, init: Parameters<CatalogHttpTransport["request"]>[1]) => Response | Promise<Response>, audience: "admin" | "commercial" = "admin") {
   const calls: { path: string; init: Parameters<CatalogHttpTransport["request"]>[1] }[] = [];
   const transport: CatalogHttpTransport = { request: async (path, init) => { calls.push({ path, init }); return respond(path, init); } };
   const taxonomy = createHttpTaxonomyRepository(transport);
-  return { catalog: createHttpCatalogRepository(transport), taxonomy, calls, transport };
+  return { catalog: createHttpCatalogRepository(transport, audience), taxonomy, calls, transport };
 }
 
 test("HTTP: alta mapea atributos y perfil anidado; no envía datos de presentación", async () => {
@@ -80,8 +80,8 @@ test("HTTP: las 17 operaciones del puerto usan métodos/rutas publicados y propa
   const h = harness(() => json({ code: "TOKEN_INVALIDO" }, 401));
   const root = `/api/v1/productos/${pid}`; const v = `${root}/variantes/${vid}`;
   const operations: [() => Promise<unknown>, string, string][] = [
-    [() => h.catalog.list({ page: 2, pageSize: 10, categoryId: "category", status: "ACTIVO", q: "text" }), "GET", "/api/v1/productos?pagina=2&tamanio=10&q=text&categoriaId=category&estado=ACTIVO"],
-    [() => h.catalog.getById(pid), "GET", root],
+    [() => h.catalog.list({ page: 2, pageSize: 10, categoryId: "category", status: "ACTIVO", q: "text" }), "GET", "/api/v1/productos/administracion?pagina=2&tamanio=10&q=text&categoriaId=category&estado=ACTIVO"],
+    [() => h.catalog.getById(pid), "GET", `/api/v1/productos/administracion/${pid}`],
     [() => h.catalog.create(payload), "POST", "/api/v1/productos"],
     [() => h.catalog.update(pid, { nombre: "Cambio", descripcion: "Desc", categoriaId: "category", marcaId: "brand", catalogVersion: 8 }), "PATCH", root],
     [() => h.catalog.activate(pid, { catalogVersion: 8 }), "POST", `${root}/activar`],
@@ -123,15 +123,12 @@ test("HTTP: red/timeout de escritura es resultado desconocido; cancelación y re
   expect(h.calls.at(-1)?.init.signal.aborted).toBe(true);
 });
 
-test("HTTP: lecturas comerciales y filtros ausentes no inventan estado, versión ni paginación administrativa", async () => {
-  const h = harness(path => json(path.includes("?") ? { items: [{ product_id: pid, name: "Comercial" }], pagina: 1, tamanio: 20, total: 1 } : { product_id: pid, name: "Comercial" }));
+test("HTTP: el listado administrativo rechaza un DTO comercial y no envía filtros sin contrato", async () => {
+  const h = harness(() => json({ items: [], pagina: 1, tamanio: 20, total: 0 }));
   await expect(h.catalog.list({ page: 1, pageSize: 20 })).rejects.toMatchObject({ kind: "blocked_contract" });
-  await expect(h.catalog.getById(pid)).rejects.toMatchObject({ kind: "blocked_contract" });
   const count = h.calls.length;
   await expect(h.catalog.list({ page: 1, pageSize: 20, typeId: "type" })).rejects.toMatchObject({ kind: "blocked_contract" });
   expect(h.calls).toHaveLength(count);
-  const empty = harness(() => json({ items: [], pagina: 1, tamanio: 20, total: 0 }));
-  expect(await empty.catalog.list({ page: 1, pageSize: 20 })).toEqual({ items: [], total: 0, page: 1, pageSize: 20 });
 });
 
 test("HTTP: preparación conserva manual_retry_allowed y 202 solo admite; 409 no se repite", async () => {
@@ -187,32 +184,53 @@ test("Mapper variante: IDs, schema LISTA, kg/cm y preparación provienen de sus 
   expect(variant).toMatchObject({ variantId: vid, productId: pid, sku: "000-case-SKU", catalogVersion: 9, physicalProfile: { largoCm: 2 }, identifyingAttributes: [{ valorId: "red" }], inventoryStatus: "COMPLETED" });
 });
 
-test("CAT-H4-01: borrador confirmado continúa siendo consultado solo por preparación si GET comercial responde 404", async () => {
-  const h = harness(path => {
-    if (path === "/api/v1/productos") return json(productDto, 201);
-    if (path === `/api/v1/productos/${pid}/preparacion`) return json(prep);
-    if (path === `/api/v1/productos/${pid}`) return json({ code: "PRODUCTO_NO_ENCONTRADO" }, 404);
+test("CAT-H4-01: crea, reabre un borrador, edita su versión persistida y detecta un conflicto", async () => {
+  const root = `/api/v1/productos/${pid}`;
+  const admin = "/api/v1/productos/administracion";
+  let version = 12;
+  let description = "Descripción persistida";
+  let estado = "BORRADOR";
+  const respond: Parameters<typeof harness>[0] = (path, init) => {
+    if (path === "/api/v1/productos" && init.method === "POST") return json(productDto, 201);
+    if (path === root && init.method === "PATCH") {
+      const change = JSON.parse(init.body!);
+      if (change.catalogVersion !== version) return json({ code: "VERSION_CONFLICT" }, 409);
+      version++;
+      description = change.descripcion;
+      return json({ ...productDto, catalog_version: version, description });
+    }
+    if (path === root + "/preparacion") return json(prep);
+    if (path === "/api/v1/caracteristicas/color") return json({ caracteristicaId: "color", tipo: "LISTA", valores: [{ valorId: "red", nombre: "Rojo", estado: "ACTIVO" }] });
+    const summary = { productId: pid, nombre: "Servidor", descripcion: description, estado, catalogVersion: version,
+      categoriaId: "category", marcaId: "brand", tipoProductoId: "type", skuBase: "000-base",
+      slug: "servidor", tieneVariantes: false, publicadoAlgunaVez: null, creadoEn: "2026-11-07T12:00:00Z", actualizadoEn: "2026-11-07T12:00:00Z" };
+    if (path === admin + `?pagina=1&tamanio=20&estado=${estado}`)
+      return json({ items: [summary], meta: { pagina: 1, tamanio: 20, total: 1, totalPaginas: 1 } });
+    if (path === admin + "/" + pid) return json({ ...summary,
+      imagenes: [{ url: "https://example.test/imagen.png", principal: true, posicion: 0 }],
+      atributos: [{ caracteristicaId: "color", nombre: "Color", valorId: "red", valor: "Rojo" }],
+      caracteristicasIdentificadoras: ["color"], perfilFisico: { pesoKg: 2, dimensionesCm: { largo: 5, ancho: null, alto: null }, actualizadoEn: "2026-11-07T12:00:00Z" } });
     throw new Error(`Ruta no prevista: ${path}`);
-  });
-  const created = await h.catalog.create({ ...payload, atributos: [] });
-  expect(created).toMatchObject({ id: pid, status: "BORRADOR", catalogVersion: 12 });
-  await expect(h.catalog.getById(pid)).resolves.toBeNull();
-  expect(h.calls.filter(call => call.init.method === "POST")).toHaveLength(1);
-  expect(h.calls.filter(call => call.path === `/api/v1/productos/${pid}`)).toHaveLength(1);
-  expect(created.status).toBe("BORRADOR");
-  expect(created).not.toHaveProperty("administrativeStatus");
+  };
+  await expect(harness(respond).catalog.create({ ...payload, atributos: [] })).resolves.toMatchObject({ id: pid, catalogVersion: 12 });
+  const { catalog } = harness(respond);
+  await expect(catalog.list({ page: 1, pageSize: 20, status: "BORRADOR" })).resolves.toMatchObject({ items: [{ id: pid, status: "BORRADOR", catalogVersion: 12 }] });
+  const reopened = await catalog.getById(pid);
+  expect(reopened).toMatchObject({ id: pid, catalogVersion: 12, identifyingCharacteristicIds: ["color"],
+    images: [{ url: "https://example.test/imagen.png", principal: true }], attributes: [{ valorId: "red" }], physicalProfile: { pesoKg: 2, largoCm: 5 } });
+  const patch = { nombre: "Servidor", descripcion: "Cambio persistido", categoriaId: "category", marcaId: "brand", catalogVersion: reopened!.catalogVersion! };
+  await expect(catalog.update(pid, patch)).resolves.toMatchObject({ catalogVersion: 13 });
+  await expect(catalog.update(pid, patch)).rejects.toMatchObject({ kind: "version_conflict" });
+  estado = "INACTIVO";
+  await expect(harness(respond).catalog.getById(pid)).resolves.toMatchObject({ id: pid, status: "INACTIVO", catalogVersion: 13, description: "Cambio persistido" });
 });
 
-test("CAT-H4-02: filtros all se omiten y la recarga sin DTO transitorio no inventa estado ni versión", async () => {
-  const h = harness(() => json({ items: [], pagina: 1, tamanio: 20, total: 0 }));
-  await expect(h.catalog.list({ page: 1, pageSize: 20, categoryId: "all", typeId: "all", saleModel: "all", status: "all" })).resolves.toMatchObject({ items: [], total: 0 });
-  expect(h.calls[0]?.path).toBe("/api/v1/productos?pagina=1&tamanio=20");
-  const loaded = harness(path => path.includes("?") ? json({ items: [{ product_id: pid, name: "Comercial", tiene_variantes: false, categoria_id: "cat-h4", marca_id: "brand-h4", tipo_producto_id: "type-h4" }], pagina: 1, tamanio: 20, total: 1 }) : json({ code: "PRODUCTO_NO_ENCONTRADO" }, 404));
-  const page = await loaded.catalog.list({ page: 1, pageSize: 20 });
+test("CAT-H4-02: consumidores comerciales conservan sus rutas y no reciben una versión administrativa", async () => {
+  const loaded = harness(path => path.includes("?") ? json({ items: [{ product_id: pid, name: "Comercial", tiene_variantes: false, categoria_id: "cat-h4", marca_id: "brand-h4", tipo_producto_id: "type-h4" }], pagina: 1, tamanio: 20, total: 1 }) : json({ code: "PRODUCTO_NO_ENCONTRADO" }, 404), "commercial");
+  const page = await loaded.catalog.list({ page: 1, pageSize: 20, categoryId: "all", status: "all" });
   expect(page.items[0]).toMatchObject({ id: pid, status: null, catalogVersion: null, commerciallyActive: true });
-  expect(page.items[0]).not.toHaveProperty("administrativeStatus");
   await expect(loaded.catalog.getById(pid)).resolves.toBeNull();
-  expect(loaded.calls).toHaveLength(2);
+  expect(loaded.calls.map(call => call.path)).toEqual(["/api/v1/productos?pagina=1&tamanio=20", `/api/v1/productos/${pid}`]);
 });
 
 test("CAT-H4-03: variante ausente devuelve null y TEXTO no adquiere maxLength no publicado", async () => {

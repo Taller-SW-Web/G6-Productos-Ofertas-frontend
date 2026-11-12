@@ -11,7 +11,6 @@ import { DataModeContext } from "./app/config/DataModeContext";
 import { PromotionApiContext } from "./app/config/PromotionApiContext";
 import { AuthSessionContext } from "./app/config/AuthSessionContext";
 import { createAuthenticatedGatewayClient } from "./app/config/authenticatedGatewayClient";
-import type { PricingChannelIds } from "./features/pricing/adapters/httpPricingMapper";
 import { createHttpPricingRepository } from "./features/pricing/adapters/httpPricingRepository";
 import { configureInventoryApi } from "./features/inventory/services/inventoryProvider";
 import { createHttpInventoryRepository } from "./features/inventory/adapters/apiInventoryAdapter";
@@ -26,21 +25,6 @@ import { createCombosRuntime } from "./features/combos/services/combosService";
 import { CombosProvider } from "./features/combos/components/CombosProvider";
 import { BulkRepositoryContext } from "./features/bulk/services/BulkRepositoryContext";
 import { createBulkFetchTransport, createHttpBulkRepository } from "./features/bulk/adapters/httpBulkRepository";
-
-function pricingChannelIds(): PricingChannelIds {
-  const configured = {
-    retail: import.meta.env.VITE_PRICING_CHANNEL_ID_RETAIL,
-    marketplace: import.meta.env.VITE_PRICING_CHANNEL_ID_MARKETPLACE,
-    chatbot: import.meta.env.VITE_PRICING_CHANNEL_ID_CHATBOT,
-    ventas: import.meta.env.VITE_PRICING_CHANNEL_ID_VENTAS,
-  };
-  const ids: PricingChannelIds = {};
-  for (const [channel, value] of Object.entries(configured)) {
-    if (typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value))
-      ids[channel as keyof PricingChannelIds] = value.toLowerCase();
-  }
-  return ids;
-}
 
 export async function startApplication(root: Root, mode: "mock" | "api", session: G7Session | null, gatewayOrigin?: string, securityApiBase?: string) {
   let gateway: string | undefined;
@@ -57,9 +41,9 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
     ? createAuthenticatedGatewayClient(gateway, session)
     : null;
   const scopeId = () => session?.snapshot().user?.id ?? null;
-  const catalogServices =
-    (mode === "api" ? createOptionalCatalogHttpServices(gatewayOrigin, session, gatewayClient ?? undefined) : null)
-    ?? getCatalogServices(mode);
+  const httpCatalog = mode === "api" ? createOptionalCatalogHttpServices(gatewayOrigin, session, gatewayClient ?? undefined) : null;
+  const catalogServices = httpCatalog ?? getCatalogServices(mode);
+  const commercialCatalog = httpCatalog?.commercialCatalog ?? catalogServices.catalog;
   const runtime = await createPricingRuntime(mode, {
     ...(mode === "api" && gatewayClient
       ? {
@@ -67,7 +51,6 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
             createHttpPricingRepository({
               transport: gatewayClient,
               scopeId,
-              channelIds: pricingChannelIds(),
               canManagePricing: () => session?.snapshot().user?.roles.includes("GESTOR_COMERCIAL") === true,
               listCatalogTargets: async signal => {
                 const targets = [];
@@ -79,7 +62,7 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
                 const targetIds = new Set<string>();
                 const skus = new Set<string>();
                 do {
-                  const result = await catalogServices.catalog.list({ page, pageSize, status: "all" }, undefined, signal);
+                  const result = await commercialCatalog.list({ page, pageSize, status: "all" }, undefined, signal);
                   if (result.page !== page || result.pageSize !== pageSize || (reportedTotal !== undefined && reportedTotal !== result.total) || result.items.length !== Math.min(pageSize, Math.max(0, result.total - (page - 1) * pageSize))) throw new Error("Paginación de Catálogo incompatible.");
                   reportedTotal = result.total;
                   totalPages = Math.ceil(result.total / pageSize);
@@ -95,7 +78,7 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
                       let variantPages: number;
                       let variantTotal: number | undefined;
                       do {
-                        const variants = await catalogServices.catalog.listVariants(product.id, { page: variantPage, pageSize }, undefined, signal);
+                        const variants = await commercialCatalog.listVariants(product.id, { page: variantPage, pageSize }, undefined, signal);
                         if (variants.page !== variantPage || variants.pageSize !== pageSize || (variantTotal !== undefined && variantTotal !== variants.total) || variants.items.length !== Math.min(pageSize, Math.max(0, variants.total - (variantPage - 1) * pageSize)) || variants.items.some(variant => variant.productId !== product.id)) throw new Error("Paginación o identidad de variantes incompatible.");
                         variantTotal = variants.total;
                         variantPages = Math.ceil(variants.total / pageSize);
@@ -153,7 +136,7 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
       let reportedTotal: number | undefined;
       const productIds = new Set<string>();
       do {
-        const result = await catalogServices.catalog.list({ page, pageSize: 100, status: "all" });
+        const result = await commercialCatalog.list({ page, pageSize: 100, status: "all" });
         if (result.page !== page || result.pageSize !== 100 || (reportedTotal !== undefined && reportedTotal !== result.total) || result.items.length !== Math.min(100, Math.max(0, result.total - (page - 1) * 100))) throw new Error("Paginación de Catálogo incompleta para Inventario.");
         reportedTotal = result.total;
         totalPages = Math.ceil(result.total / 100);
@@ -167,7 +150,7 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
             let variantPages: number;
             let variantTotal: number | undefined;
             do {
-              const variants = await catalogServices.catalog.listVariants(product.id, { page: variantPage, pageSize: 100, status: "all" });
+              const variants = await commercialCatalog.listVariants(product.id, { page: variantPage, pageSize: 100, status: "all" });
               if (variants.page !== variantPage || variants.pageSize !== 100 || (variantTotal !== undefined && variantTotal !== variants.total) || variants.items.length !== Math.min(100, Math.max(0, variants.total - (variantPage - 1) * 100)) || variants.items.some(variant => variant.productId !== product.id)) throw new Error("Paginación o identidad de variantes incompleta para Inventario.");
               variantTotal = variants.total;
               variantPages = Math.ceil(variants.total / 100);
@@ -218,7 +201,7 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
   }
   const combosRuntime = await createCombosRuntime(mode, runtime, {
     gateway: gatewayClient ?? undefined,
-    catalog: catalogServices.catalog,
+    catalog: commercialCatalog,
     scopeId,
   });
   const bulkRepository = mode === "api" && gateway && session

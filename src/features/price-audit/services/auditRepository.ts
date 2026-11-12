@@ -17,14 +17,15 @@ export interface AuditQuery extends AuditFilters {
 }
 export interface AuditEntry {
   id: string;
-  sku: string;
+  sku: string | null;
+  targetType?: "SKU" | "PRODUCTO";
   productId: string;
   priceType: "REGULAR" | "OFERTA";
   before: string | null;
   after: string | null;
   variation: string | null;
   operation: "CREACION" | "MODIFICACION" | "RETIRO_OFERTA";
-  origin: string;
+  origin: string | null;
   reason: string;
   batchId: string | null;
   actorId: string | null;

@@ -1,3 +1,4 @@
+import { withAdminPriceDefinition } from "../../../../tests/fixtures/adminPriceDefinition";
 import { createMemoryStorage } from "../../../../tests/fixtures/h4Controlled";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -61,7 +62,7 @@ function setup(
   respond: (path: string, init: PricingHttpRequest) => Promise<Response>,
   onUpdated = vi.fn(),
 ) {
-  const request = vi.fn(respond);
+  const request = vi.fn(async (path: string, init: PricingHttpRequest) => withAdminPriceDefinition(path, await respond(path, init)));
   const repository = createHttpPricingRepository({
     transport: { request },
     listCatalogTargets: async () => [target],
@@ -361,12 +362,16 @@ describe("Respuestas verificables y sin importes implícitos", () => {
 });
 
 describe("Alcance de lectura y doble envío", () => {
-  it("no consulta precio Retail de producto usando una ruta que solo resuelve global", async () => {
-    const { repository, request } = setup(async () => response(price()));
-    await expect(
-      repository.read({ targetId: target.id, channel: "retail" }, signal()),
-    ).rejects.toMatchObject({ kind: "blocked_contract" });
-    expect(request).not.toHaveBeenCalled();
+  it("consulta la definición Retail antes de mostrar el global heredado", async () => {
+    const { repository, request } = setup(async path => path.includes("/administracion/")
+      ? response({ code: "PRECIO_NO_ENCONTRADO" }, 404)
+      : response(price()));
+    await expect(repository.read({ targetId: target.id, channel: "retail" }, signal()))
+      .resolves.toMatchObject({ price: { channel: "global", inherited: true } });
+    expect(request.mock.calls.map(([path]) => path)).toEqual([
+      "/api/v1/precios/administracion/productos/product?channelId=RETAIL",
+      "/api/v1/precios/productos/product",
+    ]);
   });
 
   it("impide un segundo PATCH mientras el primero está pendiente", async () => {
@@ -416,7 +421,7 @@ describe("La ausencia y la admisión no sustituyen una confirmación", () => {
 describe("Identidad autoritativa y recuperación de escrituras", () => {
   it("exige una nueva lectura si Catálogo cambia el producto de la selección", async () => {
     let selected = { ...target };
-    const request = vi.fn(async () => response(price()));
+    const request = vi.fn(async (path: string) => withAdminPriceDefinition(path, response(price())));
     const repository = createHttpPricingRepository({
       transport: { request },
       listCatalogTargets: async () => [selected],
@@ -439,9 +444,9 @@ describe("Identidad autoritativa y recuperación de escrituras", () => {
         sku: "SKU-1",
         productTargetId: "parent",
       };
-      const request = vi.fn(async () => response(price({
+      const request = vi.fn(async (path: string) => withAdminPriceDefinition(path, response(price({
         sku: "SKU-1", origen: "SKU_OVERRIDE", vigencia_id: "vigencia-1",
-      })));
+      }))));
       const repository = createHttpPricingRepository({
         transport: { request },
         listCatalogTargets: async () => [selected],
@@ -458,7 +463,7 @@ describe("Identidad autoritativa y recuperación de escrituras", () => {
   it("comparte el bloqueo de PATCH incierto entre selecciones del mismo producto", async () => {
     const alias = { ...target, id: "alias" };
     const request = vi.fn(async (_path: string, init: PricingHttpRequest) => {
-      if (init.method === "GET") return response(price());
+      if (init.method === "GET") return withAdminPriceDefinition(_path, response(price()));
       throw new Error("Timeout después del envío");
     });
     const repository = createHttpPricingRepository({

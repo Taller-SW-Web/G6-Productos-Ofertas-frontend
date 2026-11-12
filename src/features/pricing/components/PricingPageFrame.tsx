@@ -90,12 +90,12 @@ export function PricingPageFrame({
     </>
   );
 }
-export function PricingLinks({ suffix }: { suffix: string }) {
+export function PricingLinks({ suffix, canEdit = true }: { suffix: string; canEdit?: boolean }) {
   return (
     <Group gap="sm" aria-label="Tareas de precios">
-      <Button component={Link} to={`/precios/editar${suffix}`}>
+      {canEdit && <Button component={Link} to={`/precios/editar${suffix}`}>
         Editar precio
-      </Button>
+      </Button>}
       <Button
         component={Link}
         to={`/precios/programaciones${suffix}`}

@@ -1,3 +1,4 @@
+import { withAdminPriceDefinition } from "../../../../tests/fixtures/adminPriceDefinition";
 import { createMemoryStorage } from "../../../../tests/fixtures/h4Controlled";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PricingFailure, type PriceChange } from "../services/pricingModels";
@@ -78,7 +79,7 @@ function setup(
   const calls: { path: string; request: PricingHttpRequest }[] = [];
   const request = vi.fn(async (path: string, init: PricingHttpRequest) => {
     calls.push({ path, request: init });
-    return respond(path, init);
+    return withAdminPriceDefinition(path, await respond(path, init));
   });
   const repository = createHttpPricingRepository({
     transport: { request },
@@ -199,20 +200,19 @@ describe("createHttpPricingRepository", () => {
       new AbortController().signal,
     );
 
-    expect(firstCall(calls).path).toBe("/api/v1/precios/skus/SKU%2FA");
+    expect(firstCall(calls).path).toBe("/api/v1/precios/administracion/skus/SKU%2FA");
   });
 
-  it("bloquea la edición de una variante heredada para no crear un override", async () => {
-    const { repository, request } = setup(async () =>
-      jsonResponse(skuPrice({ origen: "PRODUCTO" })),
-    );
-    await expect(
-      repository.readEditable(
-        { targetId: variant.id, channel: "global" },
-        new AbortController().signal,
-      ),
-    ).rejects.toMatchObject({ kind: "blocked_contract" });
-    expect(request).toHaveBeenCalledTimes(1);
+  it("conserva el precio heredado para consulta y rechaza editar sin definición exacta", async () => {
+    const { repository, calls } = setup(async path => path.includes("/administracion/")
+      ? jsonResponse({ code: "PRECIO_NO_ENCONTRADO" }, 404)
+      : jsonResponse(skuPrice({ origen: "PRODUCTO" })));
+    const signal = new AbortController().signal;
+    const target = { targetId: variant.id, channel: "global" as const };
+    await expect(repository.read(target, signal)).resolves.toMatchObject({ price: { inherited: true } });
+    await expect(repository.readEditable(target, signal)).resolves.toBeNull();
+    await expect(repository.update(change(), signal)).rejects.toMatchObject({ kind: "conflict" });
+    expect(calls.map(call => call.request.method)).toEqual(["GET", "GET"]);
   });
 
   it("envía PATCH con PrecioUpdateRequest y no reenvía la mutación", async () => {
@@ -277,19 +277,24 @@ describe("createHttpPricingRepository", () => {
     expect(request).toHaveBeenCalledTimes(2);
   });
 
-  it("no convierte Retail en un channelId inventado", async () => {
-    const { repository, request } = setup(async () =>
-      jsonResponse(skuPrice({ channel_id: "RETAIL" })),
-    );
-    const retailTarget = { targetId: variant.id, channel: "retail" as const };
-    await repository.readEditable(retailTarget, new AbortController().signal);
-    await expect(
-      repository.update(
-        change({ target: retailTarget }),
-        new AbortController().signal,
-      ),
-    ).rejects.toMatchObject({ kind: "blocked_contract" });
-    expect(request).toHaveBeenCalledTimes(1);
+  it("lee y envía Retail textual con la versión exacta del producto; un 409 no se reintenta", async () => {
+    const { repository, calls } = setup(async (path, init) => init.method === "PATCH"
+      ? jsonResponse({ code: "VERSION_CONFLICT" }, 409)
+      : jsonResponse(productPrice({ channel_id: path.endsWith("channelId=RETAIL") ? "RETAIL" : null, price_version: 7 })));
+    const signal = new AbortController().signal;
+    const retailTarget = { targetId: product.id, channel: "retail" as const };
+    await expect(repository.readEditable({ targetId: product.id, channel: "global" }, signal))
+      .resolves.toMatchObject({ channel: "global", version: 7 });
+    await expect(repository.readEditable(retailTarget, signal))
+      .resolves.toMatchObject({ channel: "retail", version: 7, inherited: false });
+    await expect(repository.update(change({ target: retailTarget, version: 7 }), signal))
+      .rejects.toMatchObject({ kind: "conflict" });
+    expect(calls.map(call => call.path)).toEqual([
+      "/api/v1/precios/administracion/productos/product-a",
+      "/api/v1/precios/administracion/productos/product-a?channelId=RETAIL",
+      "/api/v1/precios/productos/product-a",
+    ]);
+    expect(JSON.parse(calls[2]!.request.body!)).toMatchObject({ channelId: "RETAIL", priceVersion: 7 });
   });
 
   it("clasifica errores HTTP y solo interpreta los 404 contractuales como ausencia", async () => {

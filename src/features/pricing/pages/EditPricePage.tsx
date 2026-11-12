@@ -1,3 +1,4 @@
+import { useContext } from "react";
 import { Button, Select, Text } from "@mantine/core";
 import { Link } from "react-router-dom";
 import { EmptyState, FeedbackAlert } from "../../../components/shared";
@@ -5,6 +6,7 @@ import { usePricingContext } from "../hooks/usePricingContext";
 import { useEditableRead } from "../hooks/usePriceEdit";
 import { PricingPageFrame } from "../components/PricingPageFrame";
 import { PriceEditForm } from "../components/PriceEditForm";
+import { DataModeContext } from "../../../app/config/DataModeContext";
 
 export function EditPricePage() {
   return (
@@ -18,6 +20,7 @@ export function EditPricePage() {
 }
 function EditContent() {
   const context = usePricingContext();
+  const mode = useContext(DataModeContext);
   const scope =
     context.target?.kind === "variant" &&
     context.params.get("scope") !== "product"
@@ -29,7 +32,7 @@ function EditContent() {
       : context.target?.id;
   const target = {
     targetId: scope === "product" ? (parentId ?? "") : context.query.targetId,
-    channel: scope === "product" ? ("global" as const) : context.query.channel,
+    channel: scope === "product" && mode !== "api" ? ("global" as const) : context.query.channel,
   };
   const read = useEditableRead(target);
   return (
@@ -78,7 +81,7 @@ function EditContent() {
         ) : (
           <EmptyState
             title="Sin precio para editar"
-            description="Selecciona un objetivo con una lectura disponible."
+            description="El objetivo y canal seleccionados requieren una definición de precio propia y vigente para editar."
             action={
               <Button
                 component={Link}
