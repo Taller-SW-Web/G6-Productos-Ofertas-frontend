@@ -10,10 +10,6 @@ import type {
   PriceView,
 } from "../services/pricingRepository";
 
-export interface PricingChannelIds {
-  retail?: string;
-}
-
 function invalidResponse(): never {
   throw new PricingFailure(
     "error",
@@ -135,13 +131,9 @@ function responseMoney(value: unknown): string {
   return value.toString();
 }
 
-function priceChannel(
-  value: string | null,
-  channelIds: PricingChannelIds,
-): PriceChannel {
+function priceChannel(value: string | null): PriceChannel {
   if (value === null) return "global";
-  if (value === "RETAIL" || (channelIds.retail && value === channelIds.retail))
-    return "retail";
+  if (value === "RETAIL") return "retail";
   return invalidResponse();
 }
 
@@ -193,7 +185,6 @@ export function validatePriceTargets(value: unknown): PriceTarget[] {
 export function mapPriceDto(
   value: unknown,
   target: PriceTarget,
-  channelIds: PricingChannelIds = {},
   responseSku?: string,
 ): PriceView {
   const dto = record(value);
@@ -245,7 +236,7 @@ export function mapPriceDto(
     currency,
     version: version(dto, "price_version"),
     origin,
-    channel: priceChannel(channelId, channelIds),
+    channel: priceChannel(channelId),
     validFrom,
     validUntil,
     inherited: target.kind === "variant" && origin === "product",
@@ -256,7 +247,6 @@ export function mapPriceDto(
 export function mapScheduleDto(
   value: unknown,
   target: PriceTarget,
-  channelIds: PricingChannelIds = {},
 ): ScheduleView {
   const dto = record(value);
   if (
@@ -288,7 +278,7 @@ export function mapScheduleDto(
     kind,
     amount: responseMoney(dto.importe),
     currency,
-    channel: priceChannel(channelId, channelIds),
+    channel: priceChannel(channelId),
     start: validFrom,
     end: validUntil,
     status,
@@ -301,7 +291,6 @@ export function mapSchedulePageDto(
   target: PriceTarget,
   page: number,
   pageSize: number,
-  channelIds: PricingChannelIds = {},
 ) {
   const dto = record(value);
   if (!Array.isArray(dto.items)) return invalidResponse();
@@ -323,7 +312,7 @@ export function mapSchedulePageDto(
   )
     return invalidResponse();
   return {
-    items: dto.items.map((item) => mapScheduleDto(item, target, channelIds)),
+    items: dto.items.map((item) => mapScheduleDto(item, target)),
     page,
     pageSize,
     total,

@@ -24,7 +24,6 @@ import {
   mapSchedulePageDto,
   requestMoney,
   validatePriceTargets,
-  type PricingChannelIds,
 } from "./httpPricingMapper";
 
 export interface PricingHttpRequest {
@@ -42,7 +41,6 @@ export interface PricingHttpTransport {
 export interface HttpPricingRepositoryDependencies {
   transport: PricingHttpTransport;
   listCatalogTargets?: (signal: AbortSignal) => Promise<PriceTarget[]>;
-  channelIds?: PricingChannelIds;
   onUpdated?: (
     target: PriceTarget,
     before: PriceView,
@@ -107,7 +105,6 @@ export function createHttpPricingRepository(
   dependencies: HttpPricingRepositoryDependencies,
 ): PricingRepository {
   const { transport } = dependencies;
-  const channelIds = dependencies.channelIds ?? {};
   const editableReads = new Map<string, { productId: string; price: PriceView }>();
   const uncertainUpdates = new Map<string, UpdateConfirmation>();
   const uncertainSchedules = new Set<string>();
@@ -159,12 +156,8 @@ export function createHttpPricingRepository(
       : `/api/v1/precios/skus/${encoded(target.sku)}${suffix}`;
   }
 
-  function channelIdFor(channel: PriceChannel): string | null {
-    if (channel === "global") return null;
-    if (channelIds.retail) return channelIds.retail;
-    throw blocked(
-      "El contrato de escritura requiere el channelId canónico de Retail; Catálogo/Integración todavía no lo proporciona.",
-    );
+  function channelIdFor(channel: PriceChannel): "RETAIL" | null {
+    return channel === "retail" ? "RETAIL" : null;
   }
 
   async function send(
@@ -271,7 +264,7 @@ export function createHttpPricingRepository(
       ["PRECIO_NO_ENCONTRADO"],
     );
     if (response === null) return null;
-    const price = mapPriceDto(response, target, channelIds);
+    const price = mapPriceDto(response, target);
     if (channel === "global" && price.channel !== "global") {
       throw new PricingFailure(
         "error",
@@ -419,7 +412,7 @@ export function createHttpPricingRepository(
         );
         let after: PriceView;
         try {
-          after = mapPriceDto(response, target, channelIds);
+          after = mapPriceDto(response, target);
           if (!confirmsUpdate(after, expected)) {
             throw new Error("Confirmación incompatible");
           }
@@ -469,7 +462,7 @@ export function createHttpPricingRepository(
           "Pricing no devolvió las programaciones.",
         );
       }
-      return mapSchedulePageDto(response, target, page, pageSize, channelIds);
+      return mapSchedulePageDto(response, target, page, pageSize);
     },
 
     async schedule(
@@ -516,7 +509,7 @@ export function createHttpPricingRepository(
           true,
         );
         try {
-          const created = mapScheduleDto(response, target, channelIds);
+          const created = mapScheduleDto(response, target);
           if (
             created.channel !== draft.channel ||
             created.currency !== draft.currency ||
@@ -572,7 +565,7 @@ export function createHttpPricingRepository(
         ["PRECIO_NO_ENCONTRADO"],
       );
       if (response === null) return null;
-      const price = mapPriceDto(response, target, channelIds, sku);
+      const price = mapPriceDto(response, target, sku);
       const instant = Date.parse(at);
       if (
         (query.channel === "global" && price.channel !== "global") ||
