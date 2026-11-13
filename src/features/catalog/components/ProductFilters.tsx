@@ -9,6 +9,7 @@ import type { DataMode } from "../../../app/config/dataMode";
 
 interface ProductFiltersProps {
   loading?: boolean;
+  categoriesUnavailable?: boolean;
   query: CatalogQuery;
   categories: TaxonomyCategory[];
   productTypes: TaxonomyProductType[];
@@ -21,6 +22,7 @@ interface ProductFiltersProps {
 
 export function ProductFilters({
   loading,
+  categoriesUnavailable,
   query,
   categories,
   productTypes,
@@ -87,7 +89,7 @@ export function ProductFilters({
         </div>
 
         <Select
-          disabled={loading}
+          disabled={loading || categoriesUnavailable}
           label="Categoría"
           data={categoryOptions}
           value={query.categoryId || "all"}

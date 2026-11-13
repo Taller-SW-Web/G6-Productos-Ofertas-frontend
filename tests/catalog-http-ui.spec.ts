@@ -63,6 +63,44 @@ test("UI API: lectura administrativa bloqueada conserva preparación independien
   await page.screenshot({ path: test.info().outputPath("catalogo-preparacion-parcial-1440.png"), fullPage: true });
 });
 
+test("UI API: un 403 de categorías no bloquea los productos y un 403 filtrado permite limpiar la consulta", async ({ page }) => {
+  const reference = "11111111-1111-4111-8111-111111111111";
+  const requests: string[] = [];
+  await page.route("https://gateway.test/api/v1/**", route => {
+    const { pathname, searchParams } = new URL(route.request().url());
+    requests.push(pathname);
+    const headers = { "Access-Control-Allow-Origin": "*" };
+    if (pathname.endsWith("/categorias/administracion") || searchParams.has("categoriaId")) {
+      return route.fulfill({
+        status: 403,
+        headers: { ...headers, "Access-Control-Expose-Headers": "X-Correlation-Id", "X-Correlation-Id": reference },
+        json: { code: "SCOPE_INSUFICIENTE" },
+      });
+    }
+    return route.fulfill({ headers, json: {
+      items: [{
+        productId: reference, nombre: "Producto administrativo QA", skuBase: "QA-FILTROS",
+        categoriaId: "cat-api", marcaId: "brand-api", tipoProductoId: "type-api",
+        tieneVariantes: false, estado: "INACTIVO", catalogVersion: 5,
+      }],
+      meta: { pagina: 1, tamanio: 10, total: 1, totalPaginas: 1 },
+    } });
+  });
+
+  await page.goto("/tests/harness/catalog-http.html?path=%2Fproductos%3FcategoriaId%3Dcat-api");
+  await expect(page.getByText("Acceso denegado", { exact: true })).toBeVisible();
+  await expect(page.getByText(`No se pudo completar la operación (403, SCOPE_INSUFICIENTE). Referencia: ${reference}.`)).toBeVisible();
+  await page.getByRole("button", { name: "Limpiar filtros" }).click();
+  await expect(page).toHaveURL(/\/productos$/);
+  await expect(page.getByRole("link", { name: "Ver detalle de Producto administrativo QA" })).toBeVisible();
+  await expect(page.getByText("Categorías no disponibles", { exact: true })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Categoría", exact: true })).toBeDisabled();
+  await expect(page.getByRole("combobox", { name: "Estado del producto" })).toBeEnabled();
+  expect(requests).toContain("/api/v1/categorias/administracion");
+  expect(requests).not.toContain("/api/v1/tipos-producto");
+  expect(requests).not.toContain("/api/v1/productos");
+});
+
 test("UI API 1440: un borrador reaparece en el listado y se edita con la versión persistida", async ({ page }) => {
   const id = "11111111-1111-4111-8111-111111111111";
   let description = "Descripción original";

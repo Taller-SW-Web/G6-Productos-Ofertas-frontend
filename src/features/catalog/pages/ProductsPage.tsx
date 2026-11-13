@@ -34,7 +34,7 @@ export function ProductsPage() {
     "taxonomy-product-types",
   ]);
   const effectiveRevision = revision + mockRevision;
-  const taxonomy = useTaxonomyFilters(effectiveRevision);
+  const taxonomy = useTaxonomyFilters(effectiveRevision, mode === "mock");
 
   const query: CatalogQuery = {
     q: params.get("q") || undefined,
@@ -239,6 +239,11 @@ export function ProductsPage() {
         <FeedbackAlert
           semantic="error"
           title={state.status === "forbidden" ? "Acceso denegado" : "Sesión expirada"}
+          actions={state.status === "forbidden" && hasSearchOrFilters ? (
+            <Button size="xs" variant="outline" onClick={clearFilters}>
+              Limpiar filtros
+            </Button>
+          ) : undefined}
         >
           {state.error}
         </FeedbackAlert>
@@ -268,12 +273,13 @@ export function ProductsPage() {
       />
 
       {taxonomy.loading && <Text size="sm">Cargando filtros de Taxonomía...</Text>}
-      {taxonomy.error && <FeedbackAlert semantic="error" title="Error al cargar filtros"
+      {taxonomy.error && <FeedbackAlert semantic="error" title={mode === "api" ? "Categorías no disponibles" : "Error al cargar filtros"}
         actions={<Button variant="outline" onClick={handleRetry}>Reintentar filtros</Button>}>
         {taxonomy.error}
       </FeedbackAlert>}
       <ProductFilters
         loading={taxonomy.loading}
+        categoriesUnavailable={Boolean(taxonomy.error)}
         mode={mode}
         query={query}
         categories={taxonomy.categories}
