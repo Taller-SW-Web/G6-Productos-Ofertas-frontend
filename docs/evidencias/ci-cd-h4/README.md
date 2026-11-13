@@ -11,7 +11,7 @@
 - Ambos checks pasaron: `verificacion-despliegue-produccion` a las `10:28:31Z` y `Vercel - g6-productos-ofertas: verificacion-automatizada-production` a las `10:28:37Z`. La API de alias registra el dominio Production apuntando al deployment nuevo y actualización a las `10:28:38.502Z` (`aliasAssigned: 10:28:38.567Z`), después de los dos estados `success`.
 - Resultado: el alias se mantuvo en la versión anterior mientras ambos checks estaban pendientes y pasó al deployment de prueba solo después de completarse correctamente. No se usó Force Promote ni se desactivaron checks, protecciones o aliasado automático.
 - El diagnóstico anterior [run sintético 42362815465](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/42362815465) está separado de esta evidencia: validó el workflow contra el deployment anterior y publicó los contexts para importarlos, pero no fue un evento de Vercel ni se considera prueba de retención.
-- La evidencia de esta prueba se actualiza en una PR documental posterior; no se fusiona para evitar generar un segundo deployment de Production solo por documentación.
+- Esta evidencia documenta la prueba de retención ya completada; no requiere crear otro deployment de prueba ni usar Force Promote.
 
 El mecanismo nativo GitHub–Vercel sigue siendo la única vía de publicación. No se modificó `VITE_DATA_MODE=mock`, no se creó un deployment mediante CLI/API y no se usó Force Promote.
 
