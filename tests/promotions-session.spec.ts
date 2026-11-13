@@ -100,6 +100,7 @@ test("G7: login usa el DTO real, mantiene secretos fuera de la vista y logout us
       body: {
         correo: "isolated@example.test",
         contrasena: "synthetic-password",
+        formatoAcceso: "JWS",
       },
       auth: undefined,
     });
@@ -170,6 +171,7 @@ test("G7: MFA no habilita el API antes de solicitar/verificar el código", async
     expect(calls[2]?.body).toEqual({
       challengeToken: "synthetic-challenge",
       codigo: "123456",
+      formatoAcceso: "JWS",
     });
     expect(await session.getAccessToken(signal())).toBe(dto().accessToken);
   });

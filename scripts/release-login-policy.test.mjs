@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isolatedPricingCatalogRead, releasePolicy, targetUrl, verifyIntegrations, permittedRequest, verifyNoRedirect, verifyPreviewLocation } from "./release-login-policy.mjs";
+import { isolatedPricingCatalogRead, releasePolicy, targetUrl, verifyIntegrations, permittedRequest, verifyNoRedirect, verifyPreviewLocation, verifyPricesContent } from "./release-login-policy.mjs";
 
 const approved = {
   previewUrl: "https://preview.example.test", approvedPreviewOrigin: "https://preview.example.test",
@@ -94,3 +94,13 @@ for (const path of ["/api/v1/productos", "/api/v1/usuarios", "/api/v1/cupones?pa
     assert.equal(permittedRequest(policy, { url: policy.gateway + path, method: "GET", resourceType: "fetch" }), false);
   });
 }
+
+test("Precios acredita la vista nativa o la consulta exacta, sin aceptar otros módulos", () => {
+  const native = { heading: "Gestión de precios", description: "Consulta los precios vigentes de productos y variantes (SKU)." };
+  const readonly = { heading: "Consultas de los módulos", module: "Precios", operation: "Consultar precios vigentes de varios SKU" };
+  assert.doesNotThrow(() => verifyPricesContent(native));
+  assert.doesNotThrow(() => verifyPricesContent(readonly));
+  for (const invalid of [{}, { ...native, description: "Otro contenido" }, { ...readonly, module: "Inventario" }, { ...readonly, operation: "Consultar disponibilidad" }, { heading: readonly.heading }]) {
+    assert.throws(() => verifyPricesContent(invalid), { message: "RELEASE_PRICES_VIEW_NOT_CONFIRMED" });
+  }
+});

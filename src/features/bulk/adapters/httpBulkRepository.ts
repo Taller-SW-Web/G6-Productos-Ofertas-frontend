@@ -122,10 +122,8 @@ export function createBulkFetchTransport(origin: string, fetcher: typeof fetch =
   return { request: (path, init) => fetcher(url.origin + path, { ...init, credentials: "omit", redirect: "error", cache: "no-store" }) };
 }
 
-export function createHttpBulkRepository(transport: BulkHttpTransport, session: AuthSession): BulkRepository {
-  const exportIntentKey = async (format: BulkExportFormat) => {
-    const userId = session.snapshot?.().user?.id;
-    if (!userId) throw new BulkRepositoryError("Inicia sesión para solicitar una exportación.", "configuration");
+export function createHttpBulkRepository(transport: BulkHttpTransport, session: AuthSession, options: { publicReads?: boolean } = {}): BulkRepository {
+  const exportIntentKey = async (format: BulkExportFormat, userId: string) => {
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${userId}\u0000${format}`)));
     return `g6:bulk:export-uncertain:${[...digest].map(byte => byte.toString(16).padStart(2, "0")).join("")}`;
   };
@@ -140,7 +138,7 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
     if (expectedOwner && session.snapshot?.().user?.id !== expectedOwner) throw new BulkRepositoryError("La sesión cambió antes del despacho; no se envió la importación.", "configuration");
     const request = (accessToken: string) => transport.request(path, {
       method, signal: bounded,
-      headers: { Accept: "application/json, text/csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", Authorization: `Bearer ${accessToken}`, "X-Correlation-Id": correlationId, ...(json ? { "Content-Type": "application/json" } : {}) },
+      headers: { Accept: "application/json, text/csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ...(options.publicReads && method === "GET" ? {} : { Authorization: `Bearer ${accessToken}` }), "X-Correlation-Id": correlationId, ...(json ? { "Content-Type": "application/json" } : {}) },
       ...(body === undefined ? {} : { body }),
     });
     let response: Response;
@@ -150,7 +148,7 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
       if (bounded.aborted) throw error;
       throw new BulkRepositoryError("No se pudo conectar con Gateway. Revisa la conexión e inténtalo de nuevo.", "communication");
     }
-    if (await isGatewayTokenInvalid(response)) {
+    if (!(options.publicReads && method === "GET") && await isGatewayTokenInvalid(response)) {
       if (method === "POST") session.invalidateAccessToken(token);
       else {
         const renewed = await session.refreshAccessToken(token, bounded).catch(() => null);
@@ -244,7 +242,9 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
       }
     },
     async createExport(format: BulkExportFormat, signal) {
-      const key = await exportIntentKey(format);
+      const owner = session.snapshot?.().user?.id;
+      if (!owner) throw new BulkRepositoryError("Inicia sesión para solicitar una exportación.", "configuration");
+      const key = await exportIntentKey(format, owner);
       try {
         if (sessionStorage.getItem(key) === "1") throw new BulkRepositoryError("La solicitud anterior de exportación sigue sin resolverse para esta identidad. No se reenvió.", "unknown");
         sessionStorage.setItem(key, "1");
@@ -253,7 +253,8 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
         throw new BulkRepositoryError("No se pudo persistir el bloqueo de exportación; no se envió la solicitud.", "unknown");
       }
       try {
-        const result = mapExport(await json(await send(`${root}/exportaciones`, "POST", signal, JSON.stringify({ formato: format }), true), 202, signal));
+        const result = mapExport(await json(await send(`${root}/exportaciones`, "POST", signal, JSON.stringify({ formato: format }), true, undefined, owner), 202, signal));
+        if (session.snapshot?.().user?.id !== owner) throw new BulkRepositoryError("La sesión cambió antes de confirmar la exportación.", "unknown");
         sessionStorage.removeItem(key);
         return result;
       } catch (error) {

@@ -25,12 +25,16 @@ import { createCombosRuntime } from "./features/combos/services/combosService";
 import { CombosProvider } from "./features/combos/components/CombosProvider";
 import { BulkRepositoryContext } from "./features/bulk/services/BulkRepositoryContext";
 import { createBulkFetchTransport, createHttpBulkRepository } from "./features/bulk/adapters/httpBulkRepository";
+import { GatewayOriginContext } from "./app/config/GatewayOriginContext";
+import { AdminApiContext } from "./app/config/AdminApiContext";
+import { createAuthenticatedInventoryTransport } from "./features/inventory/adapters/authenticatedInventoryTransport";
 
-export async function startApplication(root: Root, mode: "mock" | "api", session: G7Session | null, gatewayOrigin?: string, securityApiBase?: string) {
+export async function startApplication(root: Root, mode: "mock" | "api", session: G7Session | null, gatewayOrigin?: string, securityApiBase?: string, adminApiEnabled = false) {
   let gateway: string | undefined;
   try {
     if (gatewayOrigin) gateway = secureBase(gatewayOrigin, true);
   } catch { /* Each unavailable provider keeps its explicit configuration error. */ }
+
   const promotions =
     mode === "api" && gatewayOrigin && securityApiBase && session
       ? (
@@ -41,11 +45,12 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
     ? createAuthenticatedGatewayClient(gateway, session)
     : null;
   const scopeId = () => session?.snapshot().user?.id ?? null;
-  const httpCatalog = mode === "api" ? createOptionalCatalogHttpServices(gatewayOrigin, session, gatewayClient ?? undefined) : null;
+  const adminApi = adminApiEnabled && gatewayClient !== null;
+  const httpCatalog = mode === "api" ? createOptionalCatalogHttpServices(gatewayOrigin, session, gatewayClient ?? undefined, adminApi) : null;
   const catalogServices = httpCatalog ?? getCatalogServices(mode);
   const commercialCatalog = httpCatalog?.commercialCatalog ?? catalogServices.catalog;
   const runtime = await createPricingRuntime(mode, {
-    ...(mode === "api" && gatewayClient
+    ...(adminApi && gatewayClient
       ? {
           api: async () =>
             createHttpPricingRepository({
@@ -102,7 +107,7 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
       : {}),
   });
   const auditRuntime = await createAuditRuntime(mode, {
-    ...(mode === "api" && gatewayClient
+    ...(adminApi && gatewayClient
       ? { api: async () => createHttpAuditRepository(gatewayClient) }
       : {}),
   });
@@ -172,7 +177,7 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
     inventorySkuCache.set(identity, { items, at: Date.now() });
     return items;
   };
-  if (gatewayClient) {
+  if (gatewayClient && gateway && session) {
     configureTaxonomyGateway({
       scopeId,
       requestWithInit: (path, init) => gatewayClient.request(path, init),
@@ -185,10 +190,12 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
             : {},
         }),
     });
+    const inventoryTransport = createAuthenticatedInventoryTransport(gateway, session);
     configureInventoryApi(() =>
       createHttpInventoryRepository({
-        transport: gatewayClient,
+        transport: inventoryTransport,
         currentUserScope: scopeId,
+        physicalStockEnabled: adminApi,
         listCatalogSkus: listInventoryCatalogSkus,
         getCategories: async () => (await catalogServices.taxonomy.getCategories()).map(item => ({ id: item.id, name: item.nombre, active: item.activo })),
         getBrands: async () => (await catalogServices.taxonomy.getBrands()).map(item => ({ id: item.id, name: item.nombre, active: item.activo })),
@@ -198,9 +205,11 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
         },
       }),
     );
+  } else {
+    configureInventoryApi(null);
   }
   const combosRuntime = await createCombosRuntime(mode, runtime, {
-    gateway: gatewayClient ?? undefined,
+    gateway: adminApi ? gatewayClient ?? undefined : undefined,
     catalog: commercialCatalog,
     scopeId,
   });
@@ -222,7 +231,9 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
                   <AuthSessionContext.Provider value={session}>
                     <PromotionApiContext.Provider value={promotions?.services ?? null}>
                       <CombosProvider mode={mode} runtime={combosRuntime}>
-                        <App />
+                        <GatewayOriginContext.Provider value={gateway}>
+                          <AdminApiContext.Provider value={adminApi}><App /></AdminApiContext.Provider>
+                        </GatewayOriginContext.Provider>
                       </CombosProvider>
                     </PromotionApiContext.Provider>
                   </AuthSessionContext.Provider>

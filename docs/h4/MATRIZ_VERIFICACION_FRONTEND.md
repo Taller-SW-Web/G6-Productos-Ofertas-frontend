@@ -1,5 +1,31 @@
 # Verificación de la demo administrativa H4
 
+## Reconciliación con master e348588
+
+Se conserva JWS de G7 y el flujo de Consultas de #74. La evidencia anterior
+de login, MFA, Promociones, Cupones y lecturas Azure se mantiene vinculada a
+esa revisión. Las pruebas de la reconciliación y sus resultados se consultan
+en los [checks de Frontend #73](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/73/checks).
+
+| Archivos en conflicto | Resolución |
+|---|---|
+| `src/startApplication.tsx`, `src/app/config/CommercialModeGate.tsx` | Una composición conserva todos los proveedores H4, el origen de Consultas y el transporte de Inventario de #75. El flag `VITE_G6_ADMIN_API_ENABLED` activa Backend #222 en un Gateway compatible. Traslados sigue cerrado. |
+| `src/app/routes/AppRoutes.tsx`, `src/app/routes/loginDestination.ts` | La entrada sigue en Productos, con enlaces de Consultas y retorno autenticado a rutas profundas. |
+| `src/features/bulk/adapters/httpBulkRepository.ts`, `src/features/promotions/adapters/httpPromotionServices.ts` | Se conservan la política de Bearer, el aislamiento por identidad y los marcadores de escrituras inciertas. |
+| `scripts/release-login-check.mjs`, `scripts/release-login-policy.test.mjs` | Se verifica el contenido de Precios en loopback y se conserva el alcance de Cupones del gate externo. |
+| `tests/auth-general.spec.ts` | Se comprueban las lecturas de los módulos con un Bearer y las consultas comerciales sin JWT. |
+
+| Módulo | Evidencia de la reconciliación | Aceptación pendiente |
+|---|---|---|
+| G7 | Login, MFA, JWS en login/OTP/refresh, rechazo de JWE, expiración, logout y 401/403 en pruebas de sesión y navegador. | Confirmar grants de las rutas nuevas con la cuenta de integración. |
+| Consultas, Azure y Vercel | Validación de las 58 operaciones GET, rutas y parámetros, enlace de Consultas, build y rewrites de Vercel. | La evidencia del entorno compartido corresponde a #74. |
+| Catálogo | Pruebas HTTP y UI de reapertura, versión persistida y conflicto. | Probar el listado y detalle administrativo del proveedor. |
+| Precios | Pruebas de definición exacta, herencia, canales textuales y versiones. | Probar lecturas exactas y grants en Gateway. |
+| Inventario | Pruebas de composición y transporte, saldos físicos con Bearer, ubicación y paginación. | Verificar permisos de traslados y recepción antes de habilitar las vistas. |
+| Combos | Pruebas de recuperación con clave y cuerpo estables. | Migración de recibos y permisos SELECT/INSERT del rol runtime. |
+| Promociones y Bulk | Pruebas de identidad, permisos y escrituras de resultado incierto. | Confirmar permisos del entorno para cada operación privada. |
+| Auditoría de Precios | Pruebas de SKU/canal nulos, detalle y exportación. | Validar rutas y permisos del Backend #222. |
+
 ## Correcciones de los contratos candidatos de Backend #222
 
 El [handoff del proveedor](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/3ac93b9f16025ce8c50e8d485862fbbb642af1db/docs/hito-4/FRONTEND_HANDOFF.md) y los OpenAPI candidatos identifican las rutas, los campos y el alcance verificados. Los resultados de las suites completas por SHA se consultan en los [checks de Frontend #73](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/73/checks) y [Backend #222](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/pull/222/checks).
@@ -15,7 +41,7 @@ La primera CI de esta corrección registró `FAIL` en Precios e Inventario. Al c
 | Inventario físico | `PASS_LOCAL` en `apiInventoryAdapter.spec.ts`. Saldos fuera del catálogo, ubicaciones múltiples, nulo, cero, filtros y páginas. | `BLOQUEADO_ENTORNO` |
 | Alta recuperable de Combos | `PASS_LOCAL` en `httpCombosRepositoryH4.test.ts`. Pérdida del 201, misma clave y cuerpo, conflicto 409 e intención intacta. | `BLOQUEADO_ENTORNO`. Aplicar la migración de recibos y comprobar permisos runtime. |
 | Auditoría administrativa | `PASS_LOCAL` en `tests/price-audit.spec.ts`. Lecturas de producto y SKU, canal nulo y rechazo de detalle ajeno. | `BLOQUEADO_ENTORNO` |
-| Compatibilidad G7 y despliegue | Requiere decisión conjunta sobre el formato de token G7 y los verificadores RS256 de G6. | `BLOQUEADO_ENTORNO` |
+| Compatibilidad G7 y despliegue | Registro histórico previo a #74. Véase la reconciliación y la evidencia JWS arriba. | `BLOQUEADO_ENTORNO` para las nuevas rutas administrativas |
 
 Los resultados siguientes documentan la entrega anterior a Backend #222.
 

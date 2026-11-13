@@ -6,10 +6,10 @@ import { createHttpTaxonomyRepository } from "../adapters/httpTaxonomyRepository
 import { createUnavailableApiCatalogRepository } from "../adapters/unavailableApiCatalogRepository";
 import { createCatalogServices, type CatalogServices } from "./catalogServices";
 
-export function createCatalogHttpServices(transport: CatalogHttpTransport): CatalogServices & { commercialCatalog: CatalogServices["catalog"] } {
+export function createCatalogHttpServices(transport: CatalogHttpTransport, adminReads = true): CatalogServices & { commercialCatalog: CatalogServices["catalog"] } {
   const taxonomy = createHttpTaxonomyRepository(transport);
   return { ...createCatalogServices("api", { apiTaxonomy: () => taxonomy,
-    apiCatalog: () => createHttpCatalogRepository(transport) }),
+    apiCatalog: () => createHttpCatalogRepository(transport, adminReads ? "admin" : "commercial") }),
     commercialCatalog: createHttpCatalogRepository(transport, "commercial") };
 }
 
@@ -18,6 +18,7 @@ export function createOptionalCatalogHttpServices(
   origin?: string,
   session?: G7Session | null,
   authenticatedClient?: AuthenticatedGatewayClient,
+  adminReads = true,
 ): (CatalogServices & { commercialCatalog?: CatalogServices["catalog"] }) | null {
   if (!origin) return null;
   try {
@@ -32,7 +33,7 @@ export function createOptionalCatalogHttpServices(
           ...(init.body === undefined ? {} : { body: init.body }),
         }),
     };
-    return createCatalogHttpServices(transport);
+    return createCatalogHttpServices(transport, adminReads);
   }
   catch {
     const message = "La configuración de Gateway de Catálogo no es válida. Se requiere un origen HTTPS o loopback HTTP sin credenciales ni ruta.";

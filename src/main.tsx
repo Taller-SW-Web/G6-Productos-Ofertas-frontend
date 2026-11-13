@@ -17,11 +17,13 @@ import { AuthEntry } from "./features/auth/components/AuthEntry";
 import { canAdminister } from "./features/auth/authorization";
 import { setMockIdentity } from "./features/shared/mockIdentity";
 import { loginDestination } from "./app/routes/loginDestination";
+import { resolveGatewayOrigin, resolveG7ApiBase, supportsAdministrativeContracts } from "./app/config/gatewayOrigin";
 
 const root = createRoot(document.getElementById("root")!);
 const mode = resolveDataMode(import.meta.env.VITE_DATA_MODE, import.meta.env.DEV);
-const gatewayOrigin = import.meta.env.VITE_GATEWAY_ORIGIN as string | undefined;
-const securityApiBase = import.meta.env.VITE_G7_API_BASE as string | undefined;
+const gatewayOrigin = resolveGatewayOrigin(import.meta.env.VITE_GATEWAY_ORIGIN as string | undefined, location, import.meta.env.PROD);
+const securityApiBase = resolveG7ApiBase(import.meta.env.VITE_G7_API_BASE as string | undefined, location, import.meta.env.PROD);
+const adminApiEnabled = supportsAdministrativeContracts(import.meta.env.VITE_G6_ADMIN_API_ENABLED === "true", gatewayOrigin, location);
 // Public URLs from the same configuration consumed by the transports. The gate
 // compares these values with independent approvals, then restricts real traffic.
 const integrations = document.createElement("meta");
@@ -41,7 +43,7 @@ let starting = false;
 function start() {
   if (starting) return;
   starting = true;
-  void import("./startApplication").then(module => module.startApplication(root, mode, session, gatewayOrigin, securityApiBase)).catch(() => {
+  void import("./startApplication").then(module => module.startApplication(root, mode, session, gatewayOrigin, securityApiBase, adminApiEnabled)).catch(() => {
     root.render(<p role="alert">No se pudo iniciar la aplicación.</p>);
   });
 }

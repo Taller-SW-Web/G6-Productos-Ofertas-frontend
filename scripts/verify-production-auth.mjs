@@ -15,7 +15,7 @@ const artifacts = await mkdtemp(join(tmpdir(), "g6-auth-compiled-"));
 const browser = await chromium.launch();
 let checks = 0;
 const check = (value, message) => { assert.ok(value, message); checks++; };
-const env = { ...process.env, VITE_G7_API_BASE: fixture.origin + "/g7/api/v1", VITE_GATEWAY_ORIGIN: fixture.origin, VITE_G6_READ_DEMO: "false" };
+const env = { ...process.env, VITE_G7_API_BASE: fixture.origin + "/g7/api/v1", VITE_GATEWAY_ORIGIN: fixture.origin, VITE_G6_READ_DEMO: "false", VITE_G6_ADMIN_API_ENABLED: "true" };
 async function freePort() { const s = createServer(); s.listen(0, "127.0.0.1"); await once(s, "listening"); const port = s.address().port; await new Promise(r => s.close(r)); return port; }
 async function run(args, environment) {
   const child = spawn(process.execPath, args, { env: environment, stdio: "inherit" });
@@ -125,10 +125,13 @@ try {
         for (const [status, code] of [[403, "SCOPE_INSUFICIENTE"], [401, "DESCONOCIDO"], [401, "TOKEN_INVALIDO"]]) {
           fixture.state.gatewayStatus = status; fixture.state.gatewayCode = code;
           const refreshes = fixture.state.calls.filter(c => c.path.endsWith("/auth/refresh")).length;
-          await visit(page, base, "/productos");
+          const deniedRead = page.waitForResponse(response => response.url().startsWith(fixture.origin + "/api/v1/cupones") && response.status() === status);
+          await visit(page, base, "/cupones");
+          await deniedRead;
           if (code === "TOKEN_INVALIDO") {
             await page.waitForURL("**/login");
             await page.waitForFunction(() => performance.getEntriesByType("navigation")[0]?.type === "reload");
+            check(fixture.state.calls.filter(c => c.path.endsWith("/auth/refresh")).length === refreshes + 1, "401 protegido renueva una vez antes de cerrar la sesión");
             await page.getByRole("heading", { name: "Iniciar sesión", exact: true }).waitFor(); checks++;
           }
           else { await page.getByRole("navigation", { name: "Navegación de la aplicación" }).waitFor(); check(fixture.state.calls.filter(c => c.path.endsWith("/auth/refresh")).length === refreshes, "401 desconocido y 403 no renuevan sesión"); }

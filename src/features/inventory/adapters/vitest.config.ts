@@ -7,7 +7,10 @@ import { defineConfig } from "vitest/config";
 // No modifica las suites existentes de la raíz.
 export default defineConfig({
   test: {
-    include: ["src/features/inventory/adapters/*.spec.ts"],
+    include: [
+      "src/features/inventory/adapters/*.spec.ts",
+      "src/features/inventory/adapters/*.spec.tsx",
+    ],
     environment: "node",
     pool: "forks",
     maxWorkers: 1,

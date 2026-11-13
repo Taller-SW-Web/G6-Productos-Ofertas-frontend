@@ -83,6 +83,7 @@ export interface InventoryCatalogSku { sku: string; productName: string; categor
 export interface HttpInventoryRepositoryDependencies {
   transport: InventoryHttpTransport;
   currentUserScope?: () => string | null;
+  physicalStockEnabled?: boolean;
   listCatalogSkus?: (signal?: AbortSignal) => Promise<InventoryCatalogSku[]>;
   getCategories?: () => Promise<{ id: string; name: string; active: boolean }[]>;
   getBrands?: () => Promise<{ id: string; name: string; active: boolean }[]>;
@@ -636,6 +637,8 @@ export function createHttpInventoryRepository(
   }
 
   async function readPhysicalStockPage(filters: StockFiltersQuery, page: number, size: number, signal?: AbortSignal): Promise<StockPage> {
+    if (dependencies.physicalStockEnabled === false)
+      throw blocked("getStockPage", "La consulta administrativa de saldos requiere Backend #222 habilitado.");
     if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(size) || size < 1 || size > PAGE_SIZE)
       throw new InventoryError("VALIDACION", "La página de saldos solicitada no es válida.");
     const sku = filters.search?.trim() || undefined;

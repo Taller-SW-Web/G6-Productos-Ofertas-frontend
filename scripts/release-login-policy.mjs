@@ -74,3 +74,11 @@ export function permittedRequest(policy, { url: value, method, resourceType }, {
 export function verifyNoRedirect(status) {
   if (status >= 300 && status < 400) throw new Error("RELEASE_REDIRECT_NOT_APPROVED");
 }
+
+// Prices has a native administrative view and an explicit API read-only view.
+// A generic heading alone never certifies navigation to the configured module.
+export function verifyPricesContent({ heading, description, module, operation }) {
+  if (heading === "Gestión de precios" && description === "Consulta los precios vigentes de productos y variantes (SKU).") return;
+  if (heading === "Consultas de los módulos" && module === "Precios" && operation === "Consultar precios vigentes de varios SKU") return;
+  throw new Error("RELEASE_PRICES_VIEW_NOT_CONFIRMED");
+}

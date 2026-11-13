@@ -1,6 +1,6 @@
 # Dependencias de la demo administrativa H4
 
-Fuentes verificadas en Docs `aba8d1c` y en los contratos candidatos del [Backend #222](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/pull/222) en `3ac93b9`. La compatibilidad de G7 con los verificadores RS256 de G6, los grants y el despliegue siguen pendientes de aceptación bilateral.
+Fuentes verificadas en Docs `aba8d1c` y en los contratos candidatos de Backend #222 en `3ac93b9`. Frontend #74 solicita JWS conforme a G7 ADR-009 y aporta evidencia de login, MFA y lecturas Azure para su revisión. Los grants de las rutas administrativas nuevas y su despliegue siguen pendientes de aceptación bilateral. [Backend #222](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/pull/222) · [Frontend #74](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/74).
 
 | ID y owner | Evidencia y clasificación | Desbloqueo y prueba de aceptación |
 |---|---|---|

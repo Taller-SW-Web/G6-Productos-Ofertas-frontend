@@ -6,6 +6,7 @@ import { createOptionalAuthSession } from "../../app/config/authSessionRuntime";
 import { createPromotionSessionRuntime } from "../promotions/services/promotionSessionRuntime";
 import { createAuthenticatedCatalogTransport } from "../catalog/adapters/authenticatedCatalogTransport";
 import { canAdminister } from "./authorization";
+import { resolveGatewayOrigin, supportsAdministrativeContracts } from "../../app/config/gatewayOrigin";
 
 afterEach(() => vi.restoreAllMocks());
 describe("una sola sesión transversal", () => {
@@ -22,9 +23,18 @@ describe("retorno a rutas registradas", () => {
   it.each([undefined, null, {}, "https://evil.test", "//evil.test", "/\\evil.test", "/login", "/demo/g6/productos", "/no-existe", "/%2f%2fevil.test"])("rechaza %s", value => {
     expect(loginDestination(value)).toBe("/productos");
   });
-  it.each(["/productos", "/productos/nuevo", "/combos?vista=lista", "/precios/auditoria"])("conserva %s", value => {
+  it.each(["/productos", "/productos/nuevo", "/combos?vista=lista", "/precios/auditoria", "/consultas?operacion=listarProductos"])("conserva %s", value => {
     expect(loginDestination(value)).toBe(value);
   });
+});
+it("los contratos administrativos requieren habilitación y un Gateway ajeno al proxy público", () => {
+  const location = { hostname: "g6.example.vercel.app", origin: "https://g6.example.vercel.app" };
+  const azure = "https://api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io";
+  expect(supportsAdministrativeContracts(true, resolveGatewayOrigin(azure, location, true), location)).toBe(false);
+  expect(supportsAdministrativeContracts(true, azure, location)).toBe(false);
+  expect(supportsAdministrativeContracts(true, undefined, location)).toBe(false);
+  expect(supportsAdministrativeContracts(false, "https://admin.example.test", location)).toBe(false);
+  expect(supportsAdministrativeContracts(true, "https://admin.example.test", location)).toBe(true);
 });
 const dto = (version = 1) => ({
   accessToken: `eyJhbGciOiJSUzI1NiJ9.payload.signature${version}`,

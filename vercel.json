@@ -2,13 +2,25 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
   "installCommand": "npm ci",
-  "buildCommand": "npm run build",
+  "buildCommand": "node scripts/build-vercel.mjs",
   "outputDirectory": "dist",
   "rewrites": [
+    {
+      "source": "/g7/api/v1/:path*",
+      "destination": "https://g7-auth-service.onrender.com/api/v1/:path*"
+    },
+    {
+      "source": "/api/v1/:path*",
+      "destination": "https://api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io/api/v1/:path*"
+    },
     {
       "source": "/(.*)",
       "destination": "/index.html"
     }
+  ],
+  "headers": [
+    { "source": "/api/v1/:path*", "headers": [{ "key": "Cache-Control", "value": "private, no-store" }] },
+    { "source": "/g7/api/v1/:path*", "headers": [{ "key": "Cache-Control", "value": "private, no-store" }] }
   ],
   "git": {
     "deploymentEnabled": {

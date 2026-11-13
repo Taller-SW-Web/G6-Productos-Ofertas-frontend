@@ -228,6 +228,12 @@ No hay credenciales de ejemplo para G7 real. Las bases deben ser HTTPS; HTTP sol
 se admite en loopback. Sin una base G7 válida, el formulario informa que el servicio
 no está configurado y el panel permanece bloqueado. Si Gateway no está configurado,
 el login G7 puede funcionar, pero las integraciones que lo requieren siguen cerradas.
+
+`VITE_G6_ADMIN_API_ENABLED` habilita los contratos de Backend #222 con un Gateway
+configurado para ese entorno. Su valor predeterminado es `false`. El origen Azure
+de consultas y su proxy Vercel quedan excluidos de esta habilitación. La sesión
+G7 y los permisos del Gateway siguen siendo obligatorios. Traslados y recepción
+permanecen bloqueados en modo API hasta verificar sus permisos.
 MFA pendiente no habilita administración. No se ofrecen registro ni recuperación
 de contraseña. La identidad mostrada procede de G7; los permisos efectivos los
 verifican Gateway y cada servicio, sin inferir grants por una ruta del navegador.
