@@ -4,6 +4,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { createServer, type IncomingMessage } from "node:http";
 import { once } from "node:events";
 import { createHttpPromotionServices } from "../src/features/promotions/adapters/httpPromotionServices";
+import { createHttpPromotionCatalog } from "../src/features/promotions/adapters/httpPromotionCatalog";
 
 const simple = {
   product_id: "product-simple",
@@ -491,5 +492,101 @@ test("MK007 HTTP selector: administrative category and recommended products keep
   await page.screenshot({
     path: info.outputPath("catalog-http-recommendation-1440.png"),
     fullPage: true,
+  });
+});
+
+
+test("Catalog HTTP cold start: a read slower than 7.5 seconds still loads the selector", async () => {
+  const server = createServer((_request, response) => {
+    setTimeout(() => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(pageBody([simple], 1, 100, 1)));
+    }, 8100);
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Missing port");
+  try {
+    const products = await apiFor(`http://127.0.0.1:${address.port}`).catalog.products(new AbortController().signal);
+    expect(products.map(product => product.id)).toEqual([simple.product_id]);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>(done => server.close(() => done()));
+  }
+});
+
+test("Catalog HTTP: variant reads use bounded concurrency and preserve product order", async () => {
+  const rows = Array.from({ length: 9 }, (_, index) => ({ ...variable, product_id: `product-${index}` }));
+  let active = 0, peak = 0;
+  const releases: (() => void)[] = [];
+  const catalog = createHttpPromotionCatalog(async (path, signal) => {
+    if (path.startsWith("/productos?")) return pageBody(rows, 1, 100, rows.length);
+    const index = Number(path.match(/product-(\d+)/)?.[1]);
+    active++; peak = Math.max(peak, active);
+    await new Promise<void>((resolve, reject) => {
+      const release = () => { signal.removeEventListener("abort", abort); resolve(); };
+      const abort = () => { signal.removeEventListener("abort", abort); reject(signal.reason); };
+      releases.push(release); signal.addEventListener("abort", abort, { once: true });
+    });
+    active--;
+    return pageBody([{ variant_id: `variant-${index}`, sku: `SKU-${index}`, status: "ACTIVA" }], 1, 100, 1, true);
+  });
+  const controller = new AbortController();
+  const pending = catalog.products(controller.signal);
+  // Attach a handler immediately so cleanup cannot produce an unhandled rejection.
+  const settled = pending.catch(() => null);
+  try {
+    await expect.poll(() => active).toBe(4);
+    expect(peak).toBe(4);
+    releases.splice(0).reverse().forEach(release => release());
+    await expect.poll(() => active).toBe(4);
+    releases.splice(0).reverse().forEach(release => release());
+    await expect.poll(() => releases.length).toBe(1);
+    releases.splice(0).forEach(release => release());
+    const result = await pending;
+    expect(result.map(product => product.id)).toEqual(rows.map(row => row.product_id));
+    expect(result.map(product => product.skus[0]?.sku)).toEqual(rows.map((_, index) => `SKU-${index}`));
+    expect(peak).toBe(4);
+  } finally {
+    controller.abort(); releases.splice(0).forEach(release => release()); await settled;
+  }
+});
+
+
+for (const cause of ["parent-cancel", "upstream-forbidden"]) {
+  test(`Catalog HTTP: ${cause} stops siblings and queued reads without partial results`, async () => {
+    const rows = Array.from({ length: 8 }, (_, index) => ({ ...variable, product_id: `cancel-${index}` }));
+    const calls: string[] = [];
+    let active = 0;
+    let fail: ((error: Error) => void) | undefined;
+    const catalog = createHttpPromotionCatalog(async (path, signal) => {
+      if (path.startsWith("/productos?")) return pageBody(rows, 1, 100, rows.length);
+      calls.push(path); active++;
+      try {
+        return await new Promise<unknown>((_resolve, reject) => {
+          const abort = () => { signal.removeEventListener("abort", abort); reject(signal.reason); };
+          signal.addEventListener("abort", abort, { once: true });
+          if (!fail) fail = error => { signal.removeEventListener("abort", abort); reject(error); };
+        });
+      } finally { active--; }
+    });
+    const controller = new AbortController();
+    const error = new Error(cause === "parent-cancel" ? "OPERATOR_CANCELLED" : "HTTP_403");
+    const pending = catalog.products(controller.signal);
+    const failure = pending.catch(error => error);
+    await expect.poll(() => calls.length).toBe(4);
+    if (cause === "parent-cancel") controller.abort(error);
+    else fail!(error);
+    expect(await failure).toBe(error);
+    expect(active).toBe(0);
+    expect(calls).toHaveLength(4);
+  });
+}
+
+test("Catalog HTTP: a variant 403 keeps its permission error after sibling cancellation", async () => {
+  await fixture(url => url.pathname.includes("/variantes")
+    ? { status: 403 } : { body: pageBody([variable, { ...variable, product_id: "other-variable" }]) }, async origin => {
+    await expect(apiFor(origin).catalog.products(new AbortController().signal)).rejects.toMatchObject({ kind: "forbidden" });
   });
 });

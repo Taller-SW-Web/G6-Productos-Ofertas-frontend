@@ -4,7 +4,7 @@ import type {
   PromotionCatalogRepository,
 } from "../services/catalogRepository";
 
-// OpenAPI 0.6.0-rc.1, Docs e6a8ec2: listarProductos (commercial DTO),
+// OpenAPI 0.6.0-rc.3, Docs aba8d1c: listarProductos (commercial DTO),
 // listarVariantesProducto and listarCategoriasAdmin (administrative DTOs).
 // This is a backoffice USER session adapter, never an inter-service identity.
 export function createHttpPromotionCatalog(
@@ -47,7 +47,10 @@ export function createHttpPromotionCatalog(
 
   return {
     async products(signal, retain) {
-      const bounded = AbortSignal.any([signal, AbortSignal.timeout(7500)]);
+      // Azure services can start from zero. Bound the whole read and stop
+      // sibling requests on cancellation/failure; writes keep their own policy.
+      const batch = new AbortController();
+      const bounded = AbortSignal.any([signal, batch.signal, AbortSignal.timeout(65000)]);
       const retainedIds = new Set(retain?.productIds ?? []);
       const retainedSkus = new Set(retain?.skus ?? []);
       // The commercial DTO omits status. The published backoffice estado
@@ -55,20 +58,23 @@ export function createHttpPromotionCatalog(
       const groups = [{ state: "ACTIVO", rows: await pages("/productos?estado=ACTIVO", false, bounded) }];
       if (retainedIds.size || retainedSkus.size)
         groups.push({ state: "INACTIVO", rows: await pages("/productos?estado=INACTIVO", false, bounded) });
-      const products: CatalogProductChoice[] = [];
+      const candidates = groups.flatMap(group => group.rows.map(value => ({ state: group.state, value })));
+      const products: (CatalogProductChoice | undefined)[] = new Array(candidates.length);
       const ids = new Set<string>();
       const skus = new Set<string>();
-      for (const group of groups) for (const value of group.rows) {
+      let next = 0;
+      let failure: { error: unknown } | undefined;
+      async function loadProduct(group: { state: string; value: unknown }): Promise<CatalogProductChoice | undefined> {
         bounded.throwIfAborted();
-        const row = object(value);
+        const row = object(group.value);
         const id = text(row.product_id);
         const active = group.state === "ACTIVO";
         if (!active && !retainedIds.has(id)) {
-          if (!retainedSkus.size) continue;
+          if (!retainedSkus.size) return undefined;
           // A simple product can only resolve its own published base SKU.
           // Ignore unrelated inactive rows before mapping optional SKU data.
           if (row.tiene_variantes === false &&
-              (typeof row.sku_base !== "string" || !retainedSkus.has(row.sku_base))) continue;
+              (typeof row.sku_base !== "string" || !retainedSkus.has(row.sku_base))) return undefined;
         }
         unique(ids, id);
         const name = text(row.name);
@@ -82,7 +88,7 @@ export function createHttpPromotionCatalog(
         // documented estado filter, not a guessed field/default.
         if (row.status !== undefined) {
           state(row.status, ["BORRADOR", "ACTIVO", "INACTIVO"]);
-          if (row.status !== group.state) continue;
+          if (row.status !== group.state) return undefined;
         }
         const choices: CatalogProductChoice["skus"] = [];
         if (row.tiene_variantes) {
@@ -117,13 +123,30 @@ export function createHttpPromotionCatalog(
           choices.push({ sku, label: name, active });
         }
         if (active || retainedIds.has(id) || choices.some(choice => retainedSkus.has(choice.sku)))
-          products.push({ id, name, categoryId, active, skus: choices });
+          return { id, name, categoryId, active, skus: choices };
       }
+      // Four concurrent product lookups avoid a serial N+1 waterfall, while
+      // pagination within each product and the final display order stay stable.
+      await Promise.all(Array.from({ length: Math.min(4, candidates.length) }, async () => {
+        try {
+          while (next < candidates.length) {
+            bounded.throwIfAborted();
+            const index = next++;
+            products[index] = await loadProduct(candidates[index]!);
+          }
+        } catch (error) {
+          // Preserve the original 401/403/503 instead of a sibling AbortError.
+          failure ??= { error };
+          batch.abort();
+        }
+      }));
+      if (failure) throw failure.error;
       bounded.throwIfAborted();
-      if ([...retainedIds].some(id => !products.some(product => product.id === id)) ||
-          [...retainedSkus].some(sku => !products.some(product => product.skus.some(choice => choice.sku === sku))))
+      const confirmed = products.filter((product): product is CatalogProductChoice => product !== undefined);
+      if ([...retainedIds].some(id => !confirmed.some(product => product.id === id)) ||
+          [...retainedSkus].some(sku => !confirmed.some(product => product.skus.some(choice => choice.sku === sku))))
         throw new Error("RETAINED_CATALOG_REFERENCE_UNAVAILABLE");
-      return products;
+      return confirmed;
     },
     async categories(signal) {
       const bounded = AbortSignal.any([signal, AbortSignal.timeout(7500)]);

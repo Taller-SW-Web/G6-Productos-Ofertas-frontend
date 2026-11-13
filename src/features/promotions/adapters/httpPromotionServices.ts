@@ -302,13 +302,14 @@ export function createHttpPromotionServices(
     signal: AbortSignal,
     method = "GET",
     body?: unknown,
+    timeoutMs = 7500,
   ): Promise<unknown> {
     const version = options.sessionEvents?.version();
     const assertSession = () => {
       if (version !== options.sessionEvents?.version()) throw new HttpFailure(401);
     };
     signal.throwIfAborted();
-    const bounded = AbortSignal.any([signal, AbortSignal.timeout(7500)]);
+    const bounded = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
     async function sessionToken(work: () => Promise<string | null>) {
       let abort = () => {};
       try {
@@ -701,7 +702,11 @@ export function createHttpPromotionServices(
         }
       }).then((r) => r!),
   };
-  const httpCatalog = createHttpPromotionCatalog(request);
+  // Only Catalog reference GETs need a cold-start budget. Administrative
+  // writes retain the existing 7.5-second bound and are never replayed here.
+  const httpCatalog = createHttpPromotionCatalog((path, signal) =>
+    request(path, signal, "GET", undefined, 60000),
+  );
   return {
     dispose: () => { unsubscribe?.(); campaignSnapshots.clear(); ruleSnapshots.clear(); },
     campaigns,
