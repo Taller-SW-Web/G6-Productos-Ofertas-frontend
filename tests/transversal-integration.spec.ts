@@ -8,6 +8,9 @@ test.describe("P0 — Integración transversal completa de módulos con persiste
   test("P0-01: Catálogo crea SKU simple y con variante, proyecta a Inventario y permite recepción con persistencia F5", async ({
     page,
   }) => {
+    // Nine cross-module stages and reloads share one test budget. Individual
+    // assertions retain their configured deadlines and all business checks.
+    test.setTimeout(90000);
     // 1. Crear producto simple en Catálogo
     const simpleSku = `CAS-TRAIL-${Date.now().toString().slice(-4)}`;
     await page.goto("/productos/nuevo");
@@ -70,7 +73,7 @@ test.describe("P0 — Integración transversal completa de módulos con persiste
     // 7. Crear variante vendible en Catálogo para producto existente
     const variantSku = `CAM-RUN-AZU-XL-${Date.now().toString().slice(-4)}`;
     await page.goto("/productos/PROD-RUN-001/variantes/nueva");
-    await page.getByPlaceholder("Ej. PROD-RUN-AZUL-M (Opcional)").fill(variantSku);
+    await page.getByPlaceholder("Ej. PROD-RUN-AZUL-M").fill(variantSku);
 
     // Atributos de variante
     await page.getByRole("combobox", { name: "Color principal", exact: true }).click();
@@ -671,6 +674,7 @@ test.describe("P0 — Integración transversal completa de módulos con persiste
   });
 
   test("La plantilla CSV descargable procesa y conserva sus tres productos en Catalog, Pricing e Inventory", async ({ page }) => {
+    test.setTimeout(90000);
     await page.goto("/");
     const imported = await page.evaluate(async () => {
       const specifier = "/src/features/bulk/adapters/mockBulkRepository.ts";

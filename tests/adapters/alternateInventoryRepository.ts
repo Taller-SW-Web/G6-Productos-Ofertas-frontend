@@ -656,7 +656,7 @@ export class AlternateInventoryRepository implements InventoryRepository {
       }
       d.onHandTotal += item.onHand;
       d.reservedTotal += item.reserved;
-      d.blockedTotal += item.blocked;
+      d.blockedTotal = (d.blockedTotal ?? 0) + item.blocked;
       d.availableTotal += item.available;
       if (item.status === "DISPONIBLE") d.skusAvailableCount++;
       else if (item.status === "STOCK_BAJO") d.skusLowStockCount++;

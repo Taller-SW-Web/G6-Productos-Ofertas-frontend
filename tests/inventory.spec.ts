@@ -89,10 +89,12 @@ test.describe("MK-015: Control de stock, umbrales y traslados (Issue #17)", () =
     await globalInput.fill("12");
     await page.getByRole("button", { name: "Guardar umbral global" }).click();
 
-    await expect(page.getByText("Cambio aplicado")).toBeVisible();
+    await expect(page.getByText("Escritura confirmada")).toBeVisible();
     await expect(
-      page.getByText("Umbral global guardado correctamente."),
+      page.getByText("Umbral global actualizado correctamente."),
     ).toBeVisible();
+    // P1-01: no debe existir una confirmación local duplicada.
+    await expect(page.getByText("Cambio aplicado")).toHaveCount(0);
   });
 
   test("MK-015-S04 y S05: Bandeja de traslados y modal de recepción con aviso de discrepancia", async ({

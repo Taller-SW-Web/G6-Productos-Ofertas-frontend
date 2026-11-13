@@ -17,6 +17,7 @@ import {
   NumberInput,
   Pagination,
   Paper,
+  PasswordInput,
   Radio,
   RadioCard,
   Select,
@@ -63,6 +64,10 @@ export const componentDefaults = {
     styles: { placeholder: { color: tokens.color.secondary } },
   }),
   TextInput: TextInput.extend({ defaultProps: { size: "md" } }),
+  PasswordInput: PasswordInput.extend({
+    defaultProps: { size: "md" },
+    classNames: { innerInput: classes.passwordInnerInput },
+  }),
   FileInput: FileInput.extend({ defaultProps: { size: "md" } }),
   NumberInput: NumberInput.extend({ defaultProps: { size: "md" } }),
   Textarea: Textarea.extend({

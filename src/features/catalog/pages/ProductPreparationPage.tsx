@@ -29,6 +29,7 @@ import {
   StatusBadge,
 } from "../../../components/shared";
 import { useProductDetail } from "../hooks/useProductDetail";
+import { CatalogReadError } from "../components/CatalogReadError";
 import { useProductPreparation } from "../hooks/useProductPreparation";
 import {
   preparationStatusLabel,
@@ -60,6 +61,31 @@ export function ProductPreparationPage() {
     );
   }
 
+  if (["error", "forbidden", "session"].includes(detailState.status)) {
+    const prep = prepState.status === "success" && prepState.data?.productId === productId ? prepState.data : undefined;
+    const dependencies = prep ? [
+      { name: "Pricing", key: "PRICING" as const, state: prep.pricing },
+      ...(prep.inventario ? [{ name: "Inventario", key: "INVENTARIO" as const, state: prep.inventario }] : []),
+    ] : [];
+    return <CatalogReadError error={detailState.error}>
+      {prep ? <SectionCard title="Estado de preparación informado por Catálogo">
+        <Stack gap="md">
+          <Text size="sm">El detalle administrativo no está disponible. Estos estados provienen de la consulta independiente de preparación.</Text>
+          {dependencies.map(({ name, key, state }) => <Stack gap="xs" key={key}>
+            <Text>{name}: {preparationStatusLabel(state.status)}</Text>
+            {state.code && <Text size="sm">Causa: {state.code}</Text>}
+            {state.manualRetryAllowed && state.status !== "COMPLETED" && <Button loading={prepState.retrying} onClick={() => prepState.retry(key)}>Reintentar preparación de {name}</Button>}
+          </Stack>)}
+          {prep.hasVariants && <Text size="sm">El producto padre no tiene preparación física propia.</Text>}
+          {prep.variantes.map(v => <Text key={v.variantId}>{v.sku}: {preparationStatusLabel(v.inventario.status)}{v.inventario.code ? ` · ${v.inventario.code}` : ""}</Text>)}
+          {prepState.retryError && <FeedbackAlert semantic="error" title="No se pudo solicitar el reintento">{prepState.retryError}</FeedbackAlert>}
+          {prepState.retrySuccess && <FeedbackAlert semantic="info" title="Solicitud recibida">{prepState.retrySuccess}</FeedbackAlert>}
+          <Button variant="outline" onClick={() => setRevision(r => r + 1)}>Consultar nuevamente</Button>
+        </Stack>
+      </SectionCard> : <FeedbackAlert semantic="error" title="Preparación no disponible">{prepState.error}</FeedbackAlert>}
+    </CatalogReadError>;
+  }
+
   if (detailState.status === "not_found" || !detailState.product) {
     return (
       <Stack gap="xl">
@@ -83,7 +109,7 @@ export function ProductPreparationPage() {
   }
 
   const p = detailState.product;
-  const prep = prepState.data || p.preparation;
+  const prep = prepState.status === "success" && prepState.data?.productId === p.id ? prepState.data : p.preparation;
 
   const isPricingReady = prep.pricing.status === "COMPLETED";
   const isInventoryReady = p.hasVariants

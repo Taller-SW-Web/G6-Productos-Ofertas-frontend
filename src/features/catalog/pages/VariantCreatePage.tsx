@@ -100,7 +100,7 @@ function VariantCreateForProduct({ productId }: { productId?: string }) {
 
   return (
     <Box p="lg">
-      <form onSubmit={form.handleSubmit}>
+      <form noValidate onSubmit={form.handleSubmit}>
         <PageHeader
           title="Nueva Variante (SKU)"
           breadcrumbs={[

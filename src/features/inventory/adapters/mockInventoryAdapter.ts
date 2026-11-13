@@ -86,6 +86,10 @@ function isTransferRecord(value: unknown): value is TransferItem {
     typeof value.quantityPending === "number" &&
     Number.isFinite(value.quantityPending) &&
     value.quantityPending >= 0 &&
+    (value.missingQuantity === undefined ||
+      (typeof value.missingQuantity === "number" &&
+        Number.isFinite(value.missingQuantity) &&
+        value.missingQuantity >= 0)) &&
     typeof value.status === "string"
   );
 }
@@ -704,19 +708,24 @@ export class MockInventoryAdapter implements InventoryRepository {
 
     if (transfer.quantityPending === 0) {
       transfer.status = "COMPLETADO";
+      transfer.missingQuantity = 0;
     } else if (payload.finalReceipt) {
+      const missing = transfer.quantityPending;
       transfer.status = "COMPLETADO_CON_DISCREPANCIA";
+      transfer.missingQuantity = missing;
+      transfer.quantityPending = 0;
       this.alerts.unshift({
         id: `alt-${Date.now()}`,
         severity: "error",
         title: `Discrepancia en recepción de traslado ${transfer.transferCode}`,
-        message: `Traslado ${transfer.transferCode} cerrado con ${transfer.quantityPending} unidades faltantes no recibidas para SKU ${transfer.sku}.`,
+        message: `Traslado ${transfer.transferCode} cerrado con ${missing} unidades faltantes no recibidas para SKU ${transfer.sku}.`,
         actionLabel: "Ver traslados",
         targetRoute: "/inventario/traslados",
         transferId: transfer.id,
       });
     } else {
       transfer.status = "RECIBIDO_PARCIAL";
+      transfer.missingQuantity = 0;
     }
 
     if (payload.note) {
@@ -845,6 +854,7 @@ export class MockInventoryAdapter implements InventoryRepository {
       transfersInTransit,
       transfersPartiallyReceived,
       transfersWithDiscrepancy,
+      generatedAt: new Date().toISOString(),
     };
   }
 
@@ -964,7 +974,7 @@ export class MockInventoryAdapter implements InventoryRepository {
       }
       dist.onHandTotal += item.onHand;
       dist.reservedTotal += item.reserved;
-      dist.blockedTotal += item.blocked;
+      dist.blockedTotal = (dist.blockedTotal ?? 0) + item.blocked;
       dist.availableTotal += item.available;
       if (item.status === "DISPONIBLE") dist.skusAvailableCount++;
       else if (item.status === "STOCK_BAJO") dist.skusLowStockCount++;

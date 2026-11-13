@@ -64,14 +64,17 @@ export function ProductFormFields({
   const categoryOptions = categories.map((c) => ({
     value: c.id,
     label: c.nombre,
+    disabled: !c.activo,
   }));
   const brandOptions = brands.map((b) => ({
     value: b.id,
     label: b.nombre,
+    disabled: !b.activo,
   }));
   const typeOptions = productTypes.map((t) => ({
     value: t.id,
     label: t.nombre,
+    disabled: !t.activo,
   }));
 
   // SPEC-010 condition Q-06 for type correction in edit mode:

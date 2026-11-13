@@ -564,13 +564,18 @@ test("MK-014: stale filter results are ignored and refresh failure retains only 
   await mount(page);
   await page.evaluate(() => {
     window.auditControl.slowSku = "SLOW";
+    window.auditControl.holdSlow = true;
   });
   const sku = page.getByRole("textbox", { name: "SKU", exact: true });
   await sku.fill("SLOW");
   await page.getByRole("button", { name: "Aplicar filtros" }).click();
+  // The query remounts the keyed filter form. Wait for that read before editing
+  // its replacement; release the old read only after the new result is visible.
+  await expect.poll(() => page.evaluate(() => window.auditControl.queries.some(query => query.sku === "SLOW"))).toBe(true);
   await sku.fill("COF-STEEL-XL");
   await page.getByRole("button", { name: "Aplicar filtros" }).click();
   await expect(page.getByRole("table")).toContainText("COF-STEEL-XL");
+  await page.evaluate(() => window.auditControl.releaseSlow?.());
   await expect
     .poll(() => page.evaluate(() => window.auditControl.slowFinished))
     .toBe(true);

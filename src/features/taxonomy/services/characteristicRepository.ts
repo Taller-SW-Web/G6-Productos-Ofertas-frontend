@@ -43,6 +43,12 @@ export interface CharacteristicRepository {
     id: string,
     signal?: AbortSignal,
   ): Promise<CharacteristicValue[] | null>;
+  renombrarValor(
+    id: string,
+    valorId: string,
+    nombre: string,
+    signal?: AbortSignal,
+  ): Promise<CharacteristicValue>;
   agregarValor(
     id: string,
     nombre: string,

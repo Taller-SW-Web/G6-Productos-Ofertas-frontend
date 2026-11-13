@@ -48,7 +48,7 @@ history.replaceState(
   "",
   params.get("path") ?? "/precios?target=http-test",
 );
-const { App } = await import("../../../app/App");
+const { FeatureTestApp: App } = await import("../../../../tests/harness/FeatureTestApp");
 const element = document.getElementById("root");
 if (!element) throw new Error("Falta el contenedor de pruebas.");
 createRoot(element).render(

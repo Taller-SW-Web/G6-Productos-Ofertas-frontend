@@ -29,7 +29,7 @@ interface BulkUploadContextValue {
   setSelectedFile: (file: File | null) => Promise<void>;
   clearSelection: () => void;
   admissionStatus: AdmissionStatus;
-  beginAdmission: (file: File) => AdmissionTask<File> | null;
+  beginAdmission: (file: File, retryUncertain?: boolean) => AdmissionTask<File> | null;
   finishAdmission: (
     task: AdmissionTask<File>,
     status: "ready" | "accepted" | "uncertain",
@@ -103,8 +103,8 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
     setAdmissionStatus("idle");
   }, []);
 
-  const beginAdmission = useCallback((file: File) => {
-    const task = admissionCoordinatorRef.current?.begin(file) ?? null;
+  const beginAdmission = useCallback((file: File, retryUncertain = false) => {
+    const task = admissionCoordinatorRef.current?.begin(file, retryUncertain) ?? null;
     if (task) setAdmissionStatus(admissionCoordinatorRef.current?.status ?? "idle");
     return task;
   }, []);

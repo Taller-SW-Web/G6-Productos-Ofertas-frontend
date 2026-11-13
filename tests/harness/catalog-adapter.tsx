@@ -86,7 +86,7 @@ const taxonomy: TaxonomyRepository = {
 const services = createCatalogServices("api", { apiCatalog: () => catalog, apiTaxonomy: () => taxonomy });
 const runtime = await createPricingRuntime("api");
 history.replaceState(null, "", params.get("path") ?? "/productos/external-product/variantes/nueva");
-const { App } = await import("../../src/app/App");
+const { FeatureTestApp: App } = await import("./FeatureTestApp");
 function RouteLinks() {
   return <div style={{ position: "fixed", top: 8, right: 20, zIndex: 1000, display: "flex", gap: 16 }}><Link to="/productos/second-product/variantes/nueva">Cambiar producto</Link><Link to="/productos/failed-product/variantes/nueva">Producto con error</Link></div>;
 }

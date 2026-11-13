@@ -96,7 +96,7 @@ export function ProductActivationDialog({
           </Text>
           <Group gap="xs" mt={2}>
             <Text size="xs" c="dimmed">
-              SKU Base: <strong>{product.skuBase}</strong>
+              SKU Base: <strong>{product.skuBase ?? "Sin SKU base"}</strong>
             </Text>
             <Badge size="xs" variant="outline" color="gray">
               {product.hasVariants ? "Con variantes" : "Simple"}

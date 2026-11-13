@@ -5,6 +5,7 @@ export default defineConfig({
     include: [
       "src/features/combos/**/*.test.ts",
       "src/features/promotions/**/*.test.tsx",
+      "src/features/auth/**/*.test.ts",
     ],
     environment: "node",
     pool: "forks",

@@ -37,6 +37,7 @@ export function CouponDetailPage({
   const [revision, setRevision] = useState(0);
   const [dialogOpened, setDialogOpened] = useState(false);
   const [stateUpdated, setStateUpdated] = useState(false);
+  const [relatedDataUnavailable, setRelatedDataUnavailable] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
@@ -101,6 +102,13 @@ export function CouponDetailPage({
         {stateUpdated && (
           <FeedbackAlert semantic="success" title="Estado actualizado">
             El nuevo estado fue confirmado. Los usos registrados se conservan.
+          </FeedbackAlert>
+        )}
+        {relatedDataUnavailable && (
+          <FeedbackAlert semantic="warning" title="Datos relacionados no disponibles">
+            El backend confirmó el cambio del cupón. No se pudieron consultar
+            los datos actuales de su promoción. Puedes volver a consultar el
+            detalle; no es necesario reenviar el cambio.
           </FeedbackAlert>
         )}
         {state.status === "loading" && !coupon && (
@@ -176,7 +184,9 @@ export function CouponDetailPage({
               confirmedRepository={confirmedServices.coupons}
               opened={dialogOpened || changeState}
               onCancel={closeState}
-              onConfirmed={() => {
+              onConfirmed={(confirmed) => {
+                setCachedCoupon(confirmed);
+                setRelatedDataUnavailable(confirmed.relatedDataUnavailable === true);
                 setRevision((value) => value + 1);
                 setStateUpdated(true);
                 closeState();

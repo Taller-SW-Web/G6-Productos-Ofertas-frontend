@@ -1,0 +1,12 @@
+catalog.spec.ts
+g6-mock-persistence.spec.ts
+g6-mock-projections.spec.ts
+inventory-idempotency.spec.ts
+inventory.spec.ts
+pricing-audit.spec.ts
+pricing.spec.ts
+promotions-adapters.spec.ts
+promotions-states.spec.ts
+promotions-visual.spec.ts
+taxonomy-mk010.spec.ts
+taxonomy.spec.ts

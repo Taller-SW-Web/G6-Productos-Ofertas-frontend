@@ -70,14 +70,15 @@ export function BulkReviewPage() {
     );
   }
 
-  const handleConfirmImport = async () => {
+  const handleConfirmImport = async (retryUncertain = false) => {
     if (admissionStatus === "pending") return;
-    const task = beginAdmission(selectedFile);
+    const task = beginAdmission(selectedFile, retryUncertain);
     if (!task) return;
     await runSingleFlight(isSubmittingRef, async () => {
       try {
         const batch = await bulkRepository.createImport(selectedFile, {
           detectedRows: fileCheck.detectedRows,
+          correlationId: task.correlationId,
         });
         const isCurrentAdmission = finishAdmission(task, "accepted");
         if (isCurrentAdmission && pageIsActiveRef.current && task.isCurrent()) {
@@ -127,7 +128,7 @@ export function BulkReviewPage() {
             </Button>
             <Button
               leftSection={<IconCheck size={18} stroke={2} aria-hidden="true" />}
-              onClick={handleConfirmImport}
+              onClick={() => void handleConfirmImport()}
               loading={admissionPending}
               disabled={admissionBlocked || hasBlockingErrors}
             >
@@ -153,7 +154,12 @@ export function BulkReviewPage() {
           >
             {submissionError.message}
             {admissionUncertain && (
-              <div>No se confirmó el resultado. Consulta el estado antes de iniciar otra operación.</div>
+              <>
+                <div>No se confirmó el resultado. Un reintento explícito conservará la correlación de esta intención.</div>
+                <Button mt="xs" variant="outline" onClick={() => void handleConfirmImport(true)}>
+                  Reintentar esta importación
+                </Button>
+              </>
             )}
           </FeedbackAlert>
         )}
@@ -177,7 +183,7 @@ export function BulkReviewPage() {
           </Button>
           <Button
             leftSection={<IconCheck size={18} stroke={2} aria-hidden="true" />}
-            onClick={handleConfirmImport}
+            onClick={() => void handleConfirmImport()}
             loading={admissionPending}
             disabled={admissionBlocked || hasBlockingErrors}
           >

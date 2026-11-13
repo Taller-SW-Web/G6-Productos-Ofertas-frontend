@@ -71,7 +71,7 @@ export function useProductForm({
         categoriaId: initialProduct.categoryId,
         tipoProductoId: initialProduct.typeId,
         marcaId: initialProduct.brandId,
-        skuBase: initialProduct.skuBase,
+        skuBase: initialProduct.skuBase ?? "",
         tieneVariantes: initialProduct.hasVariants,
         precioBaseInicial: initialProduct.priceInitial || 0,
         imageUrl: initialProduct.imageUrl || "",
@@ -131,9 +131,9 @@ export function useProductForm({
         }
         setLoadingMasters(false);
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!active) return;
-        setGeneralError("Error al cargar los datos maestros de Taxonomía.");
+        setGeneralError(error instanceof Error ? error.message : "Error al cargar los datos maestros de Taxonomía.");
         setLoadingMasters(false);
       });
 
@@ -164,8 +164,8 @@ export function useProductForm({
           return { ...previous, atributos };
         });
       })
-      .catch(() => {
-        if (active) setSchemaResult({ typeId: formData.tipoProductoId, service: taxonomyService, error: "No se pudo confirmar el esquema de Taxonomía. Tus atributos se conservan; reintenta antes de guardar." });
+      .catch((error: unknown) => {
+        if (active) setSchemaResult({ typeId: formData.tipoProductoId, service: taxonomyService, error: error instanceof Error ? error.message : "No se pudo confirmar el esquema de Taxonomía. Tus atributos se conservan; reintenta antes de guardar." });
       });
     return () => {
       active = false;

@@ -1,0 +1,13 @@
+catalog-http-ui.spec.ts
+catalog-injection.spec.ts
+catalog-regressions.spec.ts
+combos/combos.smoke.spec.ts
+coupon-write.spec.ts
+foundation.spec.ts
+g6-mock-cross-module.spec.ts
+g6-mock-regressions.spec.ts
+inventory-adapter.spec.ts
+promotions-session.spec.ts
+taxonomy-ui.spec.ts
+vera-integration.spec.ts
+visual-castilla.spec.ts

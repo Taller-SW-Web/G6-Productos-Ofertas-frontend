@@ -146,6 +146,7 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
   };
   const validate = () => {
     const next: Record<string, string> = {};
+    if (!isEdit && !formData.sku.trim()) next.sku = "El SKU es obligatorio; ingrese un código único.";
     if (schemaLoading || schemaError || !parentProduct) {
       next.attributes = "No se puede guardar sin un esquema de Taxonomía válido.";
     } else {
@@ -182,7 +183,7 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
           imageUrl: formData.imageUrl.trim() || undefined, physicalProfile, catalogVersion: initialVariant.catalogVersion };
         result = await catalog.updateVariant(parentProduct.id, initialVariant.variantId, payload, scenario);
       } else {
-        const payload: VariantCreatePayload = { sku: formData.sku.trim() || undefined,
+        const payload: VariantCreatePayload = { sku: formData.sku.trim(),
           identifyingAttributes: formData.identifyingAttributes.filter(a => a.valor.trim()).map(toAttribute),
           nonIdentifyingAttributes, imageUrl: formData.imageUrl.trim() || undefined, physicalProfile };
         result = await catalog.createVariant(parentProduct.id, payload, scenario);

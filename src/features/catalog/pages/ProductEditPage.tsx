@@ -8,6 +8,7 @@ import {
   PageHeader,
 } from "../../../components/shared";
 import { useProductDetail } from "../hooks/useProductDetail";
+import { CatalogReadError } from "../components/CatalogReadError";
 import { useProductForm } from "../hooks/useProductForm";
 import { ProductFormFields } from "../components/ProductFormFields";
 import { readCatalogScenario } from "../services/catalogPresentation";
@@ -30,6 +31,8 @@ export function ProductEditPage() {
       </Stack>
     );
   }
+
+  if (["error", "forbidden", "session"].includes(detailState.status)) return <CatalogReadError error={detailState.error} />;
 
   if (detailState.status === "not_found" || !detailState.product) {
     return (

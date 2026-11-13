@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Button, Group, Loader, Stack, Text } from "@mantine/core";
-import { IconPlus, IconPower } from "@tabler/icons-react";
+import { Button, Group, Loader, Stack, Switch, Text } from "@mantine/core";
+import { IconPlus, IconPower, IconRefresh } from "@tabler/icons-react";
 import {
   ConfirmDialog,
   EntityTable,
@@ -13,9 +13,11 @@ import {
   type TableState,
 } from "../../../components/shared";
 import { CampoDato } from "../components/CampoDato";
+import { useActualizarObligatoriedad } from "../hooks/useActualizarObligatoriedad";
 import { useDesactivarTipoProducto } from "../hooks/useDesactivarTipoProducto";
 import { useDesasociarCaracteristica } from "../hooks/useDesasociarCaracteristica";
 import { useProductTypeDetail } from "../hooks/useProductTypeDetail";
+import { useReactivarTipoProducto } from "../hooks/useReactivarTipoProducto";
 import { estadoCaracteristicaSemantic } from "../services/estadoSemantic";
 import type { ProductTypeAssociation } from "../types";
 
@@ -40,10 +42,16 @@ function ProductTypeDetailContent({ id }: { id: string }) {
   const desactivar = useDesactivarTipoProducto(id, (result) => {
     if (result.resultado === "exito") reload();
   });
+  const obligatoriedad = useActualizarObligatoriedad(id, () => reload());
+  const reactivar = useReactivarTipoProducto(id, () => reload());
   const [confirmDesactivar, setConfirmDesactivar] = useState(false);
+  const [confirmReactivar, setConfirmReactivar] = useState(false);
   const [confirmDesasociar, setConfirmDesasociar] = useState<string | null>(
     null,
   );
+
+  const detalle = state.status === "success" ? state.detalle : undefined;
+  const tipoActivo = detalle?.estado === "Activo";
 
   const confirmarDesasociar = () => {
     if (!confirmDesasociar) return;
@@ -54,6 +62,11 @@ function ProductTypeDetailContent({ id }: { id: string }) {
   const confirmarDesactivar = () => {
     setConfirmDesactivar(false);
     desactivar.enviar();
+  };
+
+  const confirmarReactivar = () => {
+    setConfirmReactivar(false);
+    reactivar.enviar();
   };
 
   const columnasAsociaciones: TableColumn<ProductTypeAssociation>[] = [
@@ -98,27 +111,50 @@ function ProductTypeDetailContent({ id }: { id: string }) {
     {
       key: "obligatoria",
       header: "Condición",
-      width: 140,
-      render: (asoc) => (asoc.obligatoria ? "Obligatoria" : "Opcional"),
+      width: 210,
+      render: (asoc) => (
+        <Group gap="xs" wrap="nowrap">
+          <Switch
+            aria-label={`Condición obligatoria de ${asoc.caracteristica.nombre}`}
+            checked={asoc.obligatoria}
+            disabled={
+              !tipoActivo || obligatoriedad.state.status === "enviando"
+            }
+            onChange={(event) =>
+              obligatoriedad.enviar(
+                asoc.caracteristicaId,
+                event.currentTarget.checked,
+              )
+            }
+          />
+          <Text size="sm">
+            {asoc.obligatoria ? "Obligatoria" : "Opcional"}
+          </Text>
+        </Group>
+      ),
     },
     {
       key: "acciones",
       header: "Acciones",
       width: 120,
       align: "right",
-      render: (asoc) => (
-        <Button
-          variant="outline"
-          size="xs"
-          onClick={() => setConfirmDesasociar(asoc.caracteristicaId)}
-        >
-          Desasociar
-        </Button>
-      ),
+      render: (asoc) =>
+        tipoActivo ? (
+          <Button
+            variant="outline"
+            size="xs"
+            onClick={() => setConfirmDesasociar(asoc.caracteristicaId)}
+          >
+            Desasociar
+          </Button>
+        ) : (
+          <Text size="sm" c="dimmed">
+            —
+          </Text>
+        ),
     },
   ];
 
-  const detalle = state.status === "success" ? state.detalle : undefined;
   const filas = detalle?.asociadas ?? [];
   const tablaState: TableState = { status: "success" };
   const desasociarPendiente =
@@ -131,6 +167,14 @@ function ProductTypeDetailContent({ id }: { id: string }) {
     desactivar.state.result.resultado === "pendiente"
       ? desactivar.state.result.operacionId
       : undefined;
+  const obligatoriedadSuccess =
+    obligatoriedad.state.status === "success" ? obligatoriedad.state : undefined;
+  const caracteristicaActualizada = obligatoriedadSuccess
+    ? obligatoriedadSuccess.detalle.asociadas.find(
+        (asoc) =>
+          asoc.caracteristicaId === obligatoriedadSuccess.caracteristicaId,
+      )?.caracteristica.nombre
+    : undefined;
 
   // La alerta de «solicitud admitida» (estado success + resultado pendiente) solo
   // se muestra mientras el seguimiento no ha resuelto un estado. Cuando la
@@ -406,6 +450,89 @@ function ProductTypeDetailContent({ id }: { id: string }) {
           </FeedbackAlert>
         )}
 
+        {obligatoriedad.state.status === "enviando" && (
+          <FeedbackAlert
+            semantic="warning"
+            title="Actualizando condición"
+            actions={
+              <Button variant="outline" onClick={obligatoriedad.reiniciar}>
+                Cancelar comprobación
+              </Button>
+            }
+          >
+            Estamos guardando la nueva condición del esquema. La versión solo
+            aumenta cuando el cambio se confirma.
+          </FeedbackAlert>
+        )}
+        {obligatoriedadSuccess && (
+          <FeedbackAlert
+            semantic="success"
+            title="Condición actualizada"
+            actions={
+              <Button onClick={obligatoriedad.reiniciar}>Entendido</Button>
+            }
+          >
+            La condición de {caracteristicaActualizada ?? "la característica"}{" "}
+            ahora es{" "}
+            {obligatoriedadSuccess.obligatoria ? "Obligatoria" : "Opcional"}.
+            Versión del esquema actualizada a v
+            {obligatoriedadSuccess.detalle.schemaVersion}. No se desactivan
+            productos existentes: la exigencia se aplica al editar, guardar o
+            reactivar cada producto.
+          </FeedbackAlert>
+        )}
+        {obligatoriedad.state.status === "error" && (
+          <FeedbackAlert
+            semantic="error"
+            title="No se pudo cambiar la condición"
+            actions={
+              <Button variant="outline" onClick={obligatoriedad.reiniciar}>
+                Cerrar
+              </Button>
+            }
+          >
+            {obligatoriedad.state.message}
+          </FeedbackAlert>
+        )}
+        {reactivar.state.status === "enviando" && (
+          <FeedbackAlert
+            semantic="warning"
+            title="Reactivando tipo de producto"
+            actions={
+              <Button variant="outline" onClick={reactivar.reiniciar}>
+                Cancelar comprobación
+              </Button>
+            }
+          >
+            Estamos reactivando el mismo tipo y conservando su identificador,
+            asociaciones y versión de esquema.
+          </FeedbackAlert>
+        )}
+        {reactivar.state.status === "success" && (
+          <FeedbackAlert
+            semantic="success"
+            title="Tipo de producto reactivado"
+            actions={<Button onClick={reactivar.reiniciar}>Entendido</Button>}
+          >
+            Se reactivó el tipo {reactivar.state.detalle.nombre} con el mismo
+            identificador {reactivar.state.detalle.tipoProductoId} y su esquema
+            v{reactivar.state.detalle.schemaVersion}. No se creó un tipo nuevo.
+          </FeedbackAlert>
+        )}
+        {reactivar.state.status === "error" && (
+          <FeedbackAlert
+            semantic="error"
+            title="No se pudo reactivar el tipo"
+            actions={
+              <Button variant="outline" onClick={reactivar.reiniciar}>
+                Cerrar
+              </Button>
+            }
+          >
+            {reactivar.state.message}
+          </FeedbackAlert>
+        )}
+
         {state.status === "loading" && (
           <Group gap="sm" role="status">
             <Loader size="sm" />
@@ -444,26 +571,45 @@ function ProductTypeDetailContent({ id }: { id: string }) {
             title="Ficha del tipo de producto"
             actions={
               <Group gap="sm">
-                <Button
-                  variant="outline"
-                  leftSection={<IconPlus size={16} stroke={2} aria-hidden="true" />}
-                  onClick={() =>
-                    navigate(`/tipos-producto/${detalle.tipoProductoId}/asociar`)
-                  }
-                  disabled={
-                    detalle.caracteristicasAsignadas >=
-                    detalle.limiteCaracteristicas
-                  }
-                >
-                  Asociar característica
-                </Button>
-                {detalle.estado === "Activo" && (
+                <StatusBadge semantic="neutral">
+                  v{detalle.schemaVersion}
+                </StatusBadge>
+                {tipoActivo && (
                   <Button
                     variant="outline"
-                    leftSection={<IconPower size={16} stroke={2} aria-hidden="true" />}
+                    leftSection={
+                      <IconPlus size={16} stroke={2} aria-hidden="true" />
+                    }
+                    onClick={() =>
+                      navigate(`/tipos-producto/${detalle.tipoProductoId}/asociar`)
+                    }
+                    disabled={
+                      detalle.caracteristicasAsignadas >=
+                      detalle.limiteCaracteristicas
+                    }
+                  >
+                    Asociar característica
+                  </Button>
+                )}
+                {tipoActivo ? (
+                  <Button
+                    variant="outline"
+                    leftSection={
+                      <IconPower size={16} stroke={2} aria-hidden="true" />
+                    }
                     onClick={() => setConfirmDesactivar(true)}
                   >
                     Desactivar tipo
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    leftSection={
+                      <IconRefresh size={16} stroke={2} aria-hidden="true" />
+                    }
+                    onClick={() => setConfirmReactivar(true)}
+                  >
+                    Reactivar tipo
                   </Button>
                 )}
               </Group>
@@ -474,7 +620,7 @@ function ProductTypeDetailContent({ id }: { id: string }) {
               <CampoDato etiqueta="Estado">
                 <StatusBadge semantic="neutral">{detalle.estado}</StatusBadge>
               </CampoDato>
-              <CampoDato etiqueta="Schema version">
+              <CampoDato etiqueta="Versión del esquema">
                 {detalle.schemaVersion}
               </CampoDato>
               <CampoDato etiqueta="Características asignadas">
@@ -514,8 +660,8 @@ function ProductTypeDetailContent({ id }: { id: string }) {
             <Text size="sm">
               Antes de retirar esta característica debemos comprobar que el
               cambio no deje productos o variantes activos en un estado
-              incompatible. Las asociaciones obligatorias requieren verificación
-              con Catálogo antes de confirmarse.
+              incompatible. Toda desasociación, sea obligatoria u opcional,
+              requiere verificación con Catálogo antes de confirmarse.
             </Text>
           </Stack>
         </ConfirmDialog>
@@ -533,6 +679,28 @@ function ProductTypeDetailContent({ id }: { id: string }) {
               Antes de desactivar este tipo debemos comprobar que no tenga
               productos activos que dependan de él. La solicitud puede quedar en
               verificación con Catálogo.
+            </Text>
+          </Stack>
+        </ConfirmDialog>
+
+        <ConfirmDialog
+          opened={confirmReactivar}
+          title="Reactivar tipo de producto"
+          confirmLabel="Reactivar"
+          onCancel={() => setConfirmReactivar(false)}
+          onConfirm={confirmarReactivar}
+          submitting={reactivar.state.status === "enviando"}
+          error={
+            reactivar.state.status === "error" ? (
+              <Text size="sm">{reactivar.state.message}</Text>
+            ) : undefined
+          }
+        >
+          <Stack gap="sm">
+            <Text size="sm">
+              Se conservará el identificador «{id}», sus asociaciones y la
+              versión de esquema actual. No se crea un tipo nuevo ni se
+              reescribe el historial.
             </Text>
           </Stack>
         </ConfirmDialog>

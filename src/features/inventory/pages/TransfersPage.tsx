@@ -23,6 +23,10 @@ import { DevScenarioSelector } from "../dev/DevScenarioSelector";
 import { useTransfers } from "../hooks/useTransfers";
 import { useInventoryFilterOptions } from "../hooks/useInventoryFilterOptions";
 import {
+  getConfirmedTransferReceptionAwaitingRefresh,
+  getUncertainTransferReception,
+} from "../services/transferReceptionAttempt";
+import {
   isTerminalTransferStatus,
   type ReceiveTransferPayload,
   type TransferFiltersQuery,
@@ -46,10 +50,12 @@ export function TransfersPage() {
     submitting,
     error,
     submitError,
+    presentationError,
     successMessage,
     receive,
     refetch,
     clearSubmitError,
+    clearPresentationError,
     clearFeedback,
   } = useTransfers(filters);
 
@@ -76,6 +82,7 @@ export function TransfersPage() {
   // previa para no mostrar el fallo de un traslado distinto.
   const handleOpenReceptionModal = (row: TransferItem) => {
     clearSubmitError();
+    clearPresentationError();
     setActiveTransfer(row);
   };
 
@@ -155,13 +162,31 @@ export function TransfersPage() {
     {
       key: "pending",
       header: "Pendiente",
-      width: 100,
+      width: 130,
       align: "right",
-      render: (row) => (
-        <Text size="sm" c={row.quantityPending > 0 ? undefined : "dimmed"} fw={700}>
-          {row.quantityPending}
-        </Text>
-      ),
+      render: (row) => {
+        if (row.status === "COMPLETADO_CON_DISCREPANCIA") {
+          const missing =
+            row.missingQuantity !== undefined
+              ? row.missingQuantity
+              : Math.max(row.quantityShipped - row.quantityReceived, 0);
+          return (
+            <div>
+              <Text size="sm" c="dimmed" fw={600}>
+                0 pend.
+              </Text>
+              <Text size="xs" c="red.7" fw={700}>
+                {missing} faltante{missing === 1 ? "" : "s"}
+              </Text>
+            </div>
+          );
+        }
+        return (
+          <Text size="sm" c={row.quantityPending > 0 ? undefined : "dimmed"} fw={700}>
+            {row.quantityPending}
+          </Text>
+        );
+      },
     },
     {
       key: "status",
@@ -199,21 +224,34 @@ export function TransfersPage() {
       width: 180,
       align: "right",
       render: (row) => {
-        const receivable = !isTerminalTransferStatus(row.status);
+        const uncertain = getUncertainTransferReception(row.id);
+        const confirmedAwaiting =
+          getConfirmedTransferReceptionAwaitingRefresh(row.id);
+        const canReconcile = uncertain !== null;
+        const receivable =
+          !isTerminalTransferStatus(row.status) || canReconcile;
+        const isConfirmedAwaitingLocked = confirmedAwaiting !== null;
+        const label = isTerminalTransferStatus(row.status) && canReconcile
+          ? "Reconciliar recepción"
+          : receivable
+            ? "Recepcionar"
+            : "Cerrado";
         return (
           <Button
             size="sm"
-            variant={receivable ? "filled" : "outline"}
+            variant={receivable && !isConfirmedAwaitingLocked ? "filled" : "outline"}
             disabled={!receivable}
             leftSection={<IconChecklist size={16} />}
             aria-label={
-              receivable
-                ? `Recepcionar traslado ${row.transferCode}`
-                : `Traslado ${row.transferCode} cerrado`
+              isTerminalTransferStatus(row.status) && canReconcile
+                ? `Reconciliar recepción del traslado ${row.transferCode}`
+                : receivable
+                  ? `Recepcionar traslado ${row.transferCode}`
+                  : `Traslado ${row.transferCode} cerrado`
             }
             onClick={() => handleOpenReceptionModal(row)}
           >
-            {receivable ? "Recepcionar" : "Cerrado"}
+            {label}
           </Button>
         );
       },
@@ -276,6 +314,24 @@ export function TransfersPage() {
           </FeedbackAlert>
         )}
 
+
+        {presentationError && (
+          <FeedbackAlert
+            semantic="warning"
+            title="Recepción registrada — vista pendiente de actualizar"
+            actions={
+              <Button
+                size="xs"
+                variant="subtle"
+                onClick={clearPresentationError}
+              >
+                Cerrar
+              </Button>
+            }
+          >
+            {presentationError}
+          </FeedbackAlert>
+        )}
 
         {isRevisionMode && <DevScenarioSelector />}
 

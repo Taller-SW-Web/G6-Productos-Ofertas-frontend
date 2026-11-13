@@ -71,7 +71,7 @@ export function VariantActivationDialog({
             </Badge>
           </Group>
           <Text size="xs" c="dimmed" mt={2}>
-            Producto Padre: <strong>{product.name}</strong> ({product.skuBase})
+            Producto Padre: <strong>{product.name}</strong> ({product.skuBase ?? "Sin SKU base"})
           </Text>
         </div>
 

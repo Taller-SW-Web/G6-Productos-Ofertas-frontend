@@ -202,7 +202,7 @@ export function VariantDetailPage() {
                 p={0}
                 fw={600}
               >
-                {product.name} ({product.skuBase})
+                {product.name} ({product.skuBase ?? "Sin SKU base"})
               </Button>
             </Paper>
           </Group>

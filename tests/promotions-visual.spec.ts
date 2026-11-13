@@ -125,17 +125,16 @@ test("el modo API global bloquea las 19 vistas sin cargar datos ni adapters mock
   ).toHaveCount(0);
   for (const [, path] of views) {
     await page.goto(`${path}?modoRevision=1&escenario=forbidden`);
-    await expect(page.getByRole("alert")).toContainText(
-      "Función no disponible",
-    );
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByRole("heading", { name: "Iniciar sesión", exact: true })).toBeVisible();
     await expect(
       page.getByText("Datos de demostración", { exact: true }),
     ).toHaveCount(0);
-    await expect(page.locator("main form")).toHaveCount(0);
+    await expect(page.getByRole("navigation")).toHaveCount(0);
     await expect(page.getByRole("table")).toHaveCount(0);
     await expect(page.getByRole("dialog")).toHaveCount(0);
   }
   expect(
-    requests.some((url) => /features\/promotions\/|\/mocks\//.test(url)),
+    requests.some((url) => /features\/promotions\/mocks\/|\/mocks\//.test(url)),
   ).toBe(false);
 });

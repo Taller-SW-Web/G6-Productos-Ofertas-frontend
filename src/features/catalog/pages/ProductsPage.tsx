@@ -144,7 +144,7 @@ export function ProductsPage() {
       width: 160,
       render: (row) => (
         <Text size="sm" ff="monospace" fw={500} c="dimmed">
-          {row.skuBase}
+          {row.skuBase ?? "Sin SKU base"}
         </Text>
       ),
     },

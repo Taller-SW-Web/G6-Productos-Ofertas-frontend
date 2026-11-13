@@ -1,0 +1,12 @@
+campaigns.spec.ts
+catalog-issue35.spec.ts
+g6-demo-adapter.spec.ts
+g6-mock-integration.spec.ts
+inventory-dashboard.spec.ts
+pricing-workflows.spec.ts
+promotions-catalog-http.spec.ts
+promotions-catalog-integration.spec.ts
+promotions-history-ui.spec.ts
+promotions-session-ui.spec.ts
+transversal-integration.spec.ts
+variants.spec.ts

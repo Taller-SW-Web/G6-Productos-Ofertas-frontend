@@ -31,14 +31,17 @@ function resolveSource(): InventorySource {
   );
 }
 
-// Repositorio lazy que falla bajo demanda en modo API sin adapter implementado
+// Repositorio lazy que falla bajo demanda en modo API sin cliente configurado.
+// No hay fallback al mock: el composition root debe inyectar el transporte del
+// cliente compartido mediante `configureInventoryApi`.
 class ApiPendingRepository implements InventoryRepository {
   private error: Error;
 
   constructor() {
     this.error = new Error(
-      "[inventory] ApiInventoryAdapter no está implementado. " +
-        "Configura VITE_DATA_MODE=mock hasta completar la integración HTTP.",
+      "[inventory] El adaptador HTTP de inventario no está configurado. " +
+        "Inyecta el transporte del cliente compartido (#109) con " +
+        "configureInventoryApi, o usa VITE_DATA_MODE=mock.",
     );
   }
 
@@ -62,6 +65,18 @@ class ApiPendingRepository implements InventoryRepository {
 }
 
 let repository: InventoryRepository | null = null;
+let apiFactory: (() => InventoryRepository) | null = null;
+
+// Punto exacto de integración para el composition root compartido (#45/#109):
+// debe inyectar aquí el transporte del cliente HTTP común y, si corresponde, el
+// resolvedor autoritativo de presentación de traslados. No crea un segundo
+// transporte productivo ni un cliente propio de inventario.
+export function configureInventoryApi(
+  factory: (() => InventoryRepository) | null,
+): void {
+  apiFactory = factory;
+  repository = null;
+}
 
 export function getInventoryRepository(): InventoryRepository {
   if (!repository) {
@@ -69,11 +84,10 @@ export function getInventoryRepository(): InventoryRepository {
 
     let base: InventoryRepository;
     if (source === "api") {
-      // ApiInventoryAdapter: BLOCKED_CONTRACT hasta integración formal.
-      // Devolvemos un repo que falla BAJO DEMANDA (lazy) al invocar métodos,
-      // no al instanciar. Esto permite que la app arranque y los hooks rendericen
-      // el error controlado en modo API.
-      base = new ApiPendingRepository();
+      // Sin cliente inyectado, el repo falla BAJO DEMANDA (lazy) al invocar
+      // métodos, no al instanciar: la app arranca y los hooks renderizan el
+      // error controlado en modo API. Nunca se cae silenciosamente al mock.
+      base = apiFactory ? apiFactory() : new ApiPendingRepository();
     } else {
       base = new MockInventoryAdapter({ persist: true });
     }

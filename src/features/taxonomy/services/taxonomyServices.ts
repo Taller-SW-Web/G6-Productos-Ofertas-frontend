@@ -1,3 +1,5 @@
+import { createHttpProductTypeAdapter } from "../adapters/httpProductTypeAdapter";
+import { getTaxonomyGateway } from "./taxonomyGatewayRuntime";
 import type { DataMode } from "../../../app/config/dataMode";
 import { resolveDataMode } from "../../../app/config/dataMode";
 import { mockBrandAdapter } from "../adapters/mockBrandAdapter";
@@ -25,9 +27,25 @@ export interface TaxonomyServices {
 // Composition boundary for the whole Taxonomy module. The adapter set is chosen from
 // the global data mode; in api mode there is no automatic fallback to mocks and the
 // resolution fails explicitly instead of serving simulated data.
+const unavailable = new Proxy(
+  {},
+  {
+    get: () => async () => {
+      throw new Error(TAXONOMY_API_UNAVAILABLE_MESSAGE);
+    },
+  },
+);
 export function createTaxonomyServices(mode: DataMode): TaxonomyServices {
   if (mode === "api") {
-    throw new Error(TAXONOMY_API_UNAVAILABLE_MESSAGE);
+    const gateway = getTaxonomyGateway();
+    if (!gateway) throw new Error(TAXONOMY_API_UNAVAILABLE_MESSAGE);
+    return {
+      category: unavailable as CategoryRepository,
+      brand: unavailable as BrandRepository,
+      productType: createHttpProductTypeAdapter(gateway),
+      seo: unavailable as SeoRepository,
+      characteristic: unavailable as CharacteristicRepository,
+    };
   }
   return {
     category: mockCategoryAdapter,

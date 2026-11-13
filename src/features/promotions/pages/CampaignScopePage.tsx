@@ -37,6 +37,12 @@ export function CampaignScopePage() {
       .toLocaleLowerCase("es")
       .includes(search.toLocaleLowerCase("es")),
   );
+  const historicalProducts = selection.productIds.filter(
+    id => !products.find(item => item.id === id)?.active,
+  );
+  const historicalSkus = selection.skus.filter(
+    sku => !products.some(item => item.active && item.skus.some(choice => choice.sku === sku && choice.active)),
+  );
   return (
     <>
       <PageHeader
@@ -55,6 +61,30 @@ export function CampaignScopePage() {
           <FeedbackAlert semantic="error" title="Catálogo no disponible">
             {catalogError} La selección anterior se conserva.
           </FeedbackAlert>
+        )}
+        {!!(historicalProducts.length || historicalSkus.length) && (
+          <SectionCard title="Asociaciones históricas">
+            <Text size="sm">
+              Estas asociaciones se conservan. Puedes quitarlas explícitamente;
+              una referencia inactiva no se ofrece como una nueva selección.
+            </Text>
+            {historicalProducts.map(id => (
+              <Checkbox
+                key={`retained-product:${id}`}
+                label={`Conservar producto: ${products.find(item => item.id === id)?.name ?? id}`}
+                checked
+                onChange={() => toggle("productIds", id, false)}
+              />
+            ))}
+            {historicalSkus.map(sku => (
+              <Checkbox
+                key={`retained-sku:${sku}`}
+                label={`Conservar SKU: ${sku}`}
+                checked
+                onChange={() => toggle("skus", sku, false)}
+              />
+            ))}
+          </SectionCard>
         )}
         {!catalogLoading && !catalogError && !filtered.length && (
           <EmptyState

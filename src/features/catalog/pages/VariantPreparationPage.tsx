@@ -171,7 +171,7 @@ export function VariantPreparationPage() {
                 Producto Padre:
               </Text>
               <Text size="sm" fw={600}>
-                {product?.name} ({product?.skuBase})
+                {product?.name} ({product?.skuBase ?? "Sin SKU base"})
               </Text>
             </Paper>
           </Group>

@@ -207,29 +207,38 @@ test.describe("P1: Reintentos reales, idempotencia y estado del modal", () => {
       dialog.getByText("No se pudo registrar la recepción"),
     ).toBeVisible();
 
-    // Reintento identico: debe conservar la identidad de idempotencia
+    // Reintento identico: debe conservar operationId y receivedAt inmutables
+    await page.waitForTimeout(20);
     await confirm.click();
 
     // Nueva intencion (cantidad 8): debe generar una identidad distinta
     await qty.fill("8");
     await confirm.click();
 
-    const ids = await page.evaluate(() => {
+    const payloads = await page.evaluate(() => {
       const audit = (
         window as unknown as {
           inventoryAudit: {
-            calls: { operation: string; args?: { operationId?: string } }[];
+            calls: {
+              operation: string;
+              args?: {
+                operationId?: string;
+                receivedAt?: string;
+                quantityReceived?: number;
+              };
+            }[];
           };
         }
       ).inventoryAudit;
       return audit.calls
         .filter((call) => call.operation === "receiveTransfer")
-        .map((call) => call.args?.operationId);
+        .map((call) => call.args);
     });
 
-    expect(ids).toHaveLength(3);
-    expect(ids[0]).toBe(ids[1]); // mismo intent -> misma identidad
-    expect(ids[2]).not.toBe(ids[1]); // intent distinto -> nueva identidad
+    expect(payloads).toHaveLength(3);
+    expect(payloads[0]?.operationId).toBe(payloads[1]?.operationId); // mismo intent -> misma identidad
+    expect(payloads[0]?.receivedAt).toBe(payloads[1]?.receivedAt); // TAC-P0-01: mismo timestamp en reintento
+    expect(payloads[2]?.operationId).not.toBe(payloads[1]?.operationId); // intent distinto -> nueva identidad
   });
 
   test("El error de una recepcion previa se limpia al cerrar y reabrir el modal", async ({

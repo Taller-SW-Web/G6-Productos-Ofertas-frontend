@@ -1,4 +1,4 @@
-name: Frontend Foundation
+name: Integración continua del frontend
 
 on:
   pull_request:
@@ -14,123 +14,190 @@ permissions:
   contents: read
 
 jobs:
-  quick:
+  clasificar_cambios:
+    name: Clasificar alcance de cambios
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      clasificacion: ${{ steps.clasificacion.outputs.clasificacion }}
+    steps:
+      - name: Obtener código para comparar cambios
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Clasificar cambios con criterio documental estricto
+        id: clasificacion
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/clasificar-cambios-ci.mjs
+
+  revision_estilo:
+    name: Revisión de estilo
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      VITE_DATA_MODE: mock
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-node@v7.1.0
+      - name: Obtener código
+        uses: actions/checkout@v7.0.1
+      - name: Preparar Node.js
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: '22'
           cache: npm
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run test
-      - run: npm run build
+      - name: Instalar dependencias
+        run: npm ci
+      - name: Analizar estilo del código
+        run: npm run lint
+      - name: Validar comando y entorno del build de Vercel
+        run: node --test scripts/build-vercel.test.mjs
+      - name: Probar vigencia del despliegue de producción
+        run: node --test scripts/verificar-despliegue-vercel.test.mjs scripts/verificar-vigencia-vercel.test.mjs scripts/registrar-estado-vercel.test.mjs scripts/vercel-smoke.test.mjs scripts/verificacion-despliegue-vercel.test.mjs
+      - name: Probar clasificación segura de cambios
+        run: node --test scripts/clasificar-cambios-ci.test.mjs
+      - name: Probar cobertura completa de fragmentos E2E
+        run: node --test scripts/ejecutar-e2e-balanceado.test.mjs
 
-  smoke:
+  comprobacion_tipos:
+    name: Comprobación de tipos
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      VITE_DATA_MODE: mock
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-node@v7.1.0
+      - name: Obtener código
+        uses: actions/checkout@v7.0.1
+      - name: Preparar Node.js
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: '22'
           cache: npm
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - name: Ejecutar smoke Playwright
-        run: npx playwright test --grep "@smoke" --workers=1
-      - name: Conservar evidencias smoke
-        if: always()
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: playwright-smoke
-          path: |
-            test-results/
-            playwright-report/
-          if-no-files-found: ignore
-          retention-days: 7
+      - name: Instalar dependencias
+        run: npm ci
+      - name: Comprobar tipos de TypeScript
+        run: npm run typecheck
 
-  e2e:
+  unitarias_combos:
+    name: Pruebas unitarias - Combos
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      VITE_DATA_MODE: mock
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3]
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-node@v7.1.0
+      - name: Obtener código
+        uses: actions/checkout@v7.0.1
+      - name: Preparar Node.js
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: '22'
           cache: npm
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - name: Ejecutar shard ${{ matrix.shard }} de 3
-        run: npx playwright test --shard=${{ matrix.shard }}/3 --workers=1 --reporter=blob
-      - name: Conservar evidencias del shard
-        if: always()
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: playwright-shard-${{ matrix.shard }}
-          path: |
-            blob-report/
-            test-results/
-            playwright-report/
-            docs/evidencias/
-          if-no-files-found: ignore
-          retention-days: 7
+      - name: Instalar dependencias
+        run: npm ci
+      - name: Ejecutar pruebas unitarias de Combos
+        run: npm run test:unit:combos
 
-  modes:
+  unitarias_carga_masiva:
+    name: Pruebas unitarias - Carga masiva
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Obtener código
+        uses: actions/checkout@v7.0.1
+      - name: Preparar Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Instalar dependencias
+        run: npm ci
+      - name: Ejecutar pruebas unitarias de Carga masiva
+        run: npm run test:unit:bulk
+
+  unitarias_inventario:
+    name: Pruebas unitarias - Inventario
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Obtener código
+        uses: actions/checkout@v7.0.1
+      - name: Preparar Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Instalar dependencias
+        run: npm ci
+      - name: Ejecutar pruebas unitarias de Inventario
+        run: npm run test:unit:inventory
+
+  unitarias_precios:
+    name: Pruebas unitarias - Precios
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Obtener código
+        uses: actions/checkout@v7.0.1
+      - name: Preparar Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Instalar dependencias
+        run: npm ci
+      - name: Ejecutar pruebas unitarias de Precios
+        run: npm run test:unit:pricing
+
+  compilacion_demostracion:
+    name: Compilación - Datos de demostración
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      VITE_DATA_MODE: mock
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-node@v7.1.0
+      - name: Obtener código
+        uses: actions/checkout@v7.0.1
+      - name: Preparar Node.js
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: '22'
           cache: npm
-      - run: npm ci
-      - name: Instalar Chromium para verificaciones de preview
+      - name: Instalar dependencias
+        run: npm ci
+      - name: Compilar interfaz de demostración
+        run: npm run build
+      - name: Guardar compilación de demostración
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: compilacion-demostracion
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  compilacion_api:
+    name: Compilación - Integración con API
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VITE_DATA_MODE: api
+    steps:
+      - name: Obtener código
+        uses: actions/checkout@v7.0.1
+      - name: Preparar Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Instalar dependencias
+        run: npm ci
+      - name: Instalar Chromium para la verificación API
         run: npx playwright install --with-deps chromium
-      - name: Compilar modo mock
-        env:
-          VITE_DATA_MODE: mock
+      - name: Probar límites del verificador antes de introducir credenciales
+        run: npm run test:release:boundary
+      - name: Probar panel compilado con G7 y Gateway contractuales aislados (no homologación real)
+        run: npm run test:production:auth
+      - name: Compilar interfaz para integración con API
         run: npm run build
-      - name: Verificar build y preview mock
-        env:
-          VITE_DATA_MODE: mock
+      - name: Verificar compilación API sin retorno a datos de demostración
+        shell: bash
         run: |
-          node node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 5174 --strictPort > preview-mock.log 2>&1 &
-          preview_pid=$!
-          cleanup() {
-            kill "$preview_pid" 2>/dev/null || true
-            wait "$preview_pid" 2>/dev/null || true
-          }
-          trap cleanup EXIT
-          ready=false
-          for attempt in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:5174/ > /dev/null; then ready=true; break; fi
-            sleep 1
-          done
-          test "$ready" = true
-          node scripts/verify-production.mjs mock
-          node scripts/vercel-smoke.mjs http://127.0.0.1:5174
-      - name: Compilar modo API
-        env:
-          VITE_DATA_MODE: api
-        run: npm run build
-      - name: Verificar build y preview API sin fallback a mocks
-        env:
-          VITE_DATA_MODE: api
-        run: |
+          set -euo pipefail
           node node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 5174 --strictPort > preview-api.log 2>&1 &
           preview_pid=$!
           cleanup() {
@@ -143,37 +210,221 @@ jobs:
             if curl --fail --silent http://127.0.0.1:5174/ > /dev/null; then ready=true; break; fi
             sleep 1
           done
-          test "$ready" = true
+          if [ "$ready" != true ]; then
+            echo "::error::La vista previa del modo API no respondió a tiempo."
+            exit 1
+          fi
           node scripts/verify-production.mjs api
-      - name: Conservar logs de modos
+      - name: Conservar evidencia de la compilación API
         if: always()
         uses: actions/upload-artifact@v7.0.2
         with:
-          name: frontend-modes-evidence
+          name: evidencia-compilacion-api
           path: |
-            preview-mock.log
             preview-api.log
             docs/evidencias/
           if-no-files-found: ignore
           retention-days: 7
 
-  validate:
-    if: always()
-    needs: [quick, smoke, e2e, modes]
+  verificacion_compilacion:
+    name: Verificación de compilación local
+    needs: [compilacion_demostracion]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VITE_DATA_MODE: mock
     steps:
-      - name: Exigir éxito de todas las validaciones
-        env:
-          QUICK_RESULT: ${{ needs.quick.result }}
-          SMOKE_RESULT: ${{ needs.smoke.result }}
-          E2E_RESULT: ${{ needs.e2e.result }}
-          MODES_RESULT: ${{ needs.modes.result }}
+      - name: Obtener código
+        uses: actions/checkout@v7.0.1
+      - name: Preparar Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Instalar dependencias de verificación
+        run: npm ci
+      - name: Instalar Chromium para la vista previa
+        run: npx playwright install --with-deps chromium
+      - name: Descargar compilación de demostración
+        uses: actions/download-artifact@v7.0.0
+        with:
+          name: compilacion-demostracion
+          path: dist/
+      - name: Verificar compilación y vista previa de demostración
+        shell: bash
         run: |
-          for job in QUICK SMOKE E2E MODES; do
-            result_var="${job}_RESULT"
-            result="${!result_var}"
-            echo "$job: $result"
-            if [ "$result" != "success" ]; then
+          set -euo pipefail
+          node node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 5174 --strictPort > preview-demostracion.log 2>&1 &
+          preview_pid=$!
+          cleanup() {
+            kill "$preview_pid" 2>/dev/null || true
+            wait "$preview_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          ready=false
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:5174/ > /dev/null; then ready=true; break; fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then
+            echo "::error::La vista previa de demostración no respondió a tiempo."
+            exit 1
+          fi
+          node scripts/verify-production.mjs mock
+          node scripts/vercel-smoke.mjs http://127.0.0.1:5174
+      - name: Conservar evidencia de la compilación local
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: evidencia-compilacion-local
+          path: |
+            preview-demostracion.log
+            docs/evidencias/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  pruebas_rapidas_interfaz:
+    name: Pruebas rápidas de interfaz
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VITE_DATA_MODE: mock
+      CI: 'true'
+    steps:
+      - name: Obtener código
+        uses: actions/checkout@v7.0.1
+      - name: Preparar Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Instalar dependencias
+        run: npm ci
+      - name: Instalar Chromium para Playwright
+        run: npx playwright install --with-deps chromium
+      - name: Ejecutar pruebas rápidas de interfaz
+        run: npx playwright test --grep '@smoke' --workers=1
+      - name: Conservar resultados de pruebas rápidas
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: resultados-pruebas-rapidas
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  pruebas_extremo_a_extremo:
+    name: Pruebas de extremo a extremo (parte ${{ matrix.parte }} de 4)
+    needs: [clasificar_cambios]
+    if: >-
+      always() &&
+      (needs.clasificar_cambios.result != 'success' ||
+       needs.clasificar_cambios.outputs.clasificacion != 'solo_documentacion')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VITE_DATA_MODE: mock
+      CI: 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        parte: [1, 2, 3, 4]
+    steps:
+      - name: Obtener código
+        uses: actions/checkout@v7.0.1
+      - name: Preparar Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Instalar dependencias
+        run: npm ci
+      - name: Instalar Chromium para Playwright
+        run: npx playwright install --with-deps chromium
+      - name: Ejecutar pruebas de extremo a extremo
+        run: node scripts/ejecutar-e2e-balanceado.mjs ${{ matrix.parte }} 4
+      - name: Conservar resultados de extremo a extremo
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: resultados-extremo-a-extremo-parte-${{ matrix.parte }}
+          path: |
+            blob-report/
+            test-results/
+            playwright-report/
+            docs/evidencias/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  validacion_integral:
+    # La protección real de master exige el contexto de GitHub Actions `validate`.
+    name: validate
+    if: always()
+    needs:
+      - revision_estilo
+      - clasificar_cambios
+      - comprobacion_tipos
+      - unitarias_combos
+      - unitarias_carga_masiva
+      - unitarias_inventario
+      - unitarias_precios
+      - compilacion_demostracion
+      - compilacion_api
+      - verificacion_compilacion
+      - pruebas_rapidas_interfaz
+      - pruebas_extremo_a_extremo
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Exigir éxito de todas las comprobaciones
+        env:
+          REVISION_ESTILO: ${{ needs.revision_estilo.result }}
+          CLASIFICADOR_RESULTADO: ${{ needs.clasificar_cambios.result }}
+          CLASIFICACION: ${{ needs.clasificar_cambios.outputs.clasificacion }}
+          COMPROBACION_TIPOS: ${{ needs.comprobacion_tipos.result }}
+          UNITARIAS_COMBOS: ${{ needs.unitarias_combos.result }}
+          UNITARIAS_CARGA_MASIVA: ${{ needs.unitarias_carga_masiva.result }}
+          UNITARIAS_INVENTARIO: ${{ needs.unitarias_inventario.result }}
+          UNITARIAS_PRECIOS: ${{ needs.unitarias_precios.result }}
+          COMPILACION_DEMOSTRACION: ${{ needs.compilacion_demostracion.result }}
+          COMPILACION_API: ${{ needs.compilacion_api.result }}
+          VERIFICACION_COMPILACION: ${{ needs.verificacion_compilacion.result }}
+          PRUEBAS_RAPIDAS: ${{ needs.pruebas_rapidas_interfaz.result }}
+          PRUEBAS_EXTREMO_A_EXTREMO: ${{ needs.pruebas_extremo_a_extremo.result }}
+        run: |
+          for resultado in \
+            "Revisión de estilo:$REVISION_ESTILO" \
+            "Comprobación de tipos:$COMPROBACION_TIPOS" \
+            "Pruebas unitarias - Combos:$UNITARIAS_COMBOS" \
+            "Pruebas unitarias - Carga masiva:$UNITARIAS_CARGA_MASIVA" \
+            "Pruebas unitarias - Inventario:$UNITARIAS_INVENTARIO" \
+            "Pruebas unitarias - Precios:$UNITARIAS_PRECIOS" \
+            "Compilación - Datos de demostración:$COMPILACION_DEMOSTRACION" \
+            "Compilación - Integración con API:$COMPILACION_API" \
+            "Verificación de compilación local:$VERIFICACION_COMPILACION" \
+            "Pruebas rápidas de interfaz:$PRUEBAS_RAPIDAS"; do
+            nombre="${resultado%%:*}"
+            estado="${resultado#*:}"
+            echo "$nombre: $estado"
+            if [ "$estado" != 'success' ]; then
+              echo "::error::La comprobación '$nombre' terminó con '$estado'; la validación integral no puede aprobarse."
               exit 1
             fi
           done
+          resultado_e2e="$PRUEBAS_EXTREMO_A_EXTREMO"
+          if [ "$CLASIFICADOR_RESULTADO" = 'success' ] && [ "$CLASIFICACION" = 'solo_documentacion' ]; then
+            echo "Clasificación documental confirmada; pruebas E2E: $resultado_e2e"
+            if [ "$resultado_e2e" != 'success' ] && [ "$resultado_e2e" != 'skipped' ]; then
+              echo '::error::Las pruebas E2E documentales solo pueden aprobarse si pasaron o se omitieron deliberadamente.'
+              exit 1
+            fi
+          else
+            echo "Clasificación no concluyente o con cambios funcionales; pruebas E2E completas: $resultado_e2e"
+            if [ "$resultado_e2e" != 'success' ]; then
+              echo '::error::Una clasificación no documental exige que todas las pruebas E2E pasen.'
+              exit 1
+            fi
+          fi
+          echo "Todas las comprobaciones obligatorias finalizaron correctamente."
