@@ -30,12 +30,19 @@ export class TaxonomySessionRequiredError extends Error {
   }
 }
 
+export class TaxonomyNetworkError extends Error {
+  constructor(cause: unknown) {
+    super("No se pudo conectar con Taxonomía. Comprueba la conexión.", { cause });
+    this.name = "TaxonomyNetworkError";
+  }
+}
+
 export class TaxonomyGatewayError extends Error {
   constructor(
     readonly status: number,
     readonly code?: string,
   ) {
-    super(`No se pudieron cargar los tipos de producto (HTTP ${status}).`);
+    super(`No se pudo completar la consulta de Taxonomía (HTTP ${status}).`);
     this.name = "TaxonomyGatewayError";
   }
 }
@@ -48,7 +55,11 @@ export function createAuthenticatedTaxonomyGateway(
 ): TaxonomyGatewayTransport {
   const origin = secureGatewayOrigin(gatewayOrigin);
   return {
-    async request(path, signal, correlationId) {
+    async request(path, signal, correlationId, requestOptions) {
+      const method = requestOptions?.method ?? "GET";
+      const body = requestOptions?.body;
+      const multipart = body instanceof FormData;
+      const publicRead = options.publicReads && method === "GET" && !requestOptions?.authenticated;
       signal.throwIfAborted();
       const token = await session.getAccessToken(signal);
       signal.throwIfAborted();
@@ -56,30 +67,45 @@ export function createAuthenticatedTaxonomyGateway(
       const requestId = correlationId ?? crypto.randomUUID();
       const send = (accessToken: string) =>
         fetcher(origin + path, {
-          method: "GET",
+          method,
+          ...(body === undefined ? {} : { body: multipart ? body : JSON.stringify(body) }),
           signal,
           credentials: "omit",
           redirect: "error",
           cache: "no-store",
           headers: {
-            ...(options.publicReads ? {} : { Authorization: `Bearer ${accessToken}` }),
+            ...(publicRead ? {} : { Authorization: `Bearer ${accessToken}` }),
+            ...(body !== undefined && !multipart ? { "Content-Type": "application/json" } : {}),
             "X-Correlation-Id": requestId,
           },
         });
-      let response = await send(token);
+      const safeSend = async (accessToken: string) => {
+        try { return await send(accessToken); } catch (error) {
+          if (signal.aborted) throw signal.reason;
+          throw new TaxonomyNetworkError(error);
+        }
+      };
+      let response = await safeSend(token);
       signal.throwIfAborted();
-      if (!options.publicReads && await isGatewayTokenInvalid(response)) {
+      if (method === "GET" && !publicRead && await isGatewayTokenInvalid(response)) {
         const renewed = await session.refreshAccessToken(token, signal);
         signal.throwIfAborted();
         if (!renewed) {
           session.invalidateAccessToken(token);
           throw new TaxonomyGatewayError(401, "TOKEN_INVALIDO");
         }
-        response = await send(renewed);
+        response = await safeSend(renewed);
         signal.throwIfAborted();
         if (await isGatewayTokenInvalid(response)) session.invalidateAccessToken(renewed);
       }
-      if (!response.ok) throw new TaxonomyGatewayError(response.status);
+      if (!response.ok) {
+        let code: string | undefined;
+        try {
+          const problem: unknown = await response.clone().json();
+          if (problem && typeof problem === "object" && "code" in problem && typeof problem.code === "string") code = problem.code;
+        } catch { /* El código del problema es opcional. */ }
+        throw new TaxonomyGatewayError(response.status, code);
+      }
       return response;
     },
   };

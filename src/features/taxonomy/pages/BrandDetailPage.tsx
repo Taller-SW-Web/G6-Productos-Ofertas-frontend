@@ -165,7 +165,7 @@ function BrandDetailContent({
               : "Enviando solicitud de baja…"
           }
         >
-          La marca permanece Activa hasta que la verificación concluya.
+          La solicitud está en curso; consulta el estado antes de volver a intentar.
         </FeedbackAlert>
       )}
       {baja.state.status === "error" && (
@@ -182,7 +182,7 @@ function BrandDetailContent({
       {resultado !== null && (
         <AlertaResultadoBaja
           result={resultado}
-          onConsultar={baja.consultar}
+          onConsultar={baja.seguimientoAutomatico ? undefined : baja.consultar}
           onCerrar={cerrar}
         />
       )}
@@ -208,8 +208,8 @@ function BrandDetailContent({
             {`¿Confirmas que deseas solicitar la desactivación de «${detalle.nombre}»?`}
           </Text>
           <Text size="sm" c="dimmed">
-            La marca permanecerá Activa mientras se verifican dependencias con
-            Catálogo. Solo una confirmación vigente completa la baja.
+            Mientras se verifican dependencias, la baja queda pendiente. Solo una
+            confirmación vigente completa la baja.
           </Text>
         </Stack>
       </ConfirmDialog>
@@ -223,7 +223,7 @@ function AlertaResultadoBaja({
   onCerrar,
 }: {
   result: BrandBajaResult;
-  onConsultar: () => void;
+  onConsultar?: () => void;
   onCerrar: () => void;
 }) {
   if (result.resultado === "exito") {
@@ -244,16 +244,15 @@ function AlertaResultadoBaja({
         semantic="warning"
         title="Solicitud admitida (202 Accepted)"
         actions={
-          <Button onClick={onConsultar}>
+          onConsultar ? <Button onClick={onConsultar}>
             Consultar resultado de la verificación
-          </Button>
+          </Button> : undefined
         }
       >
         <Stack gap="sm">
           <Text size="sm">{result.mensaje}</Text>
           <Text size="sm" c="dimmed">
-            Solo la confirmación de Catálogo completa la baja. La marca
-            permanece Activa mientras se verifica.
+            Solo la confirmación de Catálogo completa la baja. La operación se consulta automáticamente mientras se verifica.
           </Text>
         </Stack>
       </FeedbackAlert>
@@ -271,7 +270,7 @@ function AlertaResultadoBaja({
           <Text size="sm">{result.mensaje}</Text>
           {result.bloqueos && <ListaBloqueos bloqueos={result.bloqueos} />}
           <Text size="sm" c="dimmed">
-            La marca conserva su estado activo y sigue disponible.
+            Consulta el estado actual de la marca antes de realizar otra operación.
           </Text>
         </Stack>
       </FeedbackAlert>

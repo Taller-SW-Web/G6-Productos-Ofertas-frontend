@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { brandService } from "../services/brandService";
 import type { BrandBajaResult } from "../types";
+import { getTaxonomyGateway } from "../services/taxonomyGatewayRuntime";
+import { resolveDataMode } from "../../../app/config/dataMode";
+import { solicitarBajaHttp } from "../adapters/httpTaxonomyDeactivationAdapter";
+import { useTaxonomyOperationPolling } from "./useTaxonomyOperationPolling";
 
 export type SolicitarBajaMarcaFase = "solicitud" | "verificacion";
 
@@ -14,9 +18,19 @@ export function useSolicitarBajaMarca(
   id: string,
   onSuccess?: (result: BrandBajaResult) => void,
 ) {
-  const [state, setState] = useState<SolicitarBajaMarcaState>({
+  const api = resolveDataMode(import.meta.env?.VITE_DATA_MODE, import.meta.env?.DEV ?? true) === "api";
+  const [operationId, setOperationId] = useState<string | null>(null);
+  const polling = useTaxonomyOperationPolling(api ? getTaxonomyGateway() : undefined, operationId);
+  const [baseState, setState] = useState<SolicitarBajaMarcaState>({
     status: "idle",
   });
+  const callbackRef = useRef(onSuccess);
+  useEffect(() => { callbackRef.current = onSuccess; }, [onSuccess]);
+  useEffect(() => {
+    if (api && operationId && polling.status === "completed") {
+      callbackRef.current?.({ resultado: "exito", mensaje: "La baja fue confirmada.", operacionId: operationId });
+    }
+  }, [api, operationId, polling]);
   const controllerRef = useRef<AbortController | null>(null);
   const operacionIdRef = useRef<string | null>(null);
 
@@ -45,7 +59,11 @@ export function useSolicitarBajaMarca(
     const controller = new AbortController();
     controllerRef.current = controller;
     setState({ status: "enviando", fase: "solicitud" });
-    void brandService.solicitarBaja(id, controller.signal).then(
+    const gateway = api ? getTaxonomyGateway() : undefined;
+    const solicitud = api
+      ? gateway ? solicitarBajaHttp(gateway, "marcas", id, controller.signal).then((operacionId): BrandBajaResult => { setOperationId(operacionId); return { resultado: "pendiente", mensaje: "Solicitud admitida; esperando resultado.", operacionId }; }) : Promise.reject(new Error("La baja de marca no está configurada."))
+      : brandService.solicitarBaja(id, controller.signal);
+    void solicitud.then(
       (result) => {
         if (controller.signal.aborted) return;
         resolver(result);
@@ -55,6 +73,7 @@ export function useSolicitarBajaMarca(
   };
 
   const consultar = () => {
+    if (api) return;
     const operacionId = operacionIdRef.current;
     if (!operacionId) return;
     controllerRef.current?.abort();
@@ -73,8 +92,18 @@ export function useSolicitarBajaMarca(
   const reiniciar = () => {
     controllerRef.current?.abort();
     operacionIdRef.current = null;
+    setOperationId(null);
     setState({ status: "idle" });
   };
 
-  return { state, solicitar, consultar, reiniciar };
+  let state: SolicitarBajaMarcaState = baseState;
+  if (api && operationId && polling.status !== "idle") {
+    if (polling.status === "error") state = { status: "error", message: polling.message };
+    else {
+      const resultado = polling.status === "completed" ? "exito" : polling.status === "rejected" ? "rechazada" : polling.status === "unconfirmed" ? "no-concluyente" : "pendiente";
+      const mensaje = resultado === "exito" ? "La baja fue confirmada." : resultado === "rechazada" ? "La baja fue rechazada; consulta el estado de la marca." : resultado === "no-concluyente" ? "No se recibió confirmación dentro del plazo. Consulta la operación antes de reintentar." : "Solicitud admitida; esperando resultado.";
+      state = { status: "success", result: { resultado, mensaje, operacionId: operationId } };
+    }
+  }
+  return { state, solicitar, consultar, reiniciar, seguimientoAutomatico: api };
 }

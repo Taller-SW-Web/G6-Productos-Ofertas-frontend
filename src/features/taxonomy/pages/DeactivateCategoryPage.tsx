@@ -76,8 +76,8 @@ function DeactivateCategoryLoader({ id }: { id: string }) {
 
 function DeactivateCategoryContent({ detalle }: { detalle: CategoryDetail }) {
   const navigate = useNavigate();
-  const { state, seguimiento, solicitar, consultarEstado, reiniciar } =
-    useSolicitarBaja(detalle.id);
+  const { state, seguimiento, solicitar, consultarEstado, reiniciar, seguimientoAutomatico } =
+    useSolicitarBaja(detalle.id, detalle);
   const [confirmar, setConfirmar] = useState(false);
 
   const cerrarDialogo = () => {
@@ -131,10 +131,10 @@ function DeactivateCategoryContent({ detalle }: { detalle: CategoryDetail }) {
         <Stack gap="lg">
           <FeedbackAlert
             semantic="warning"
-            title="Verificando baja"
+            title={seguimiento.status === "success" && seguimiento.result.estado !== "pendiente" ? "Solicitud de baja" : "Verificando baja"}
             actions={
               <Group gap="sm">
-                {resultado.operacionId && (
+                {resultado.operacionId && !seguimientoAutomatico && (
                   <Button
                     loading={seguimiento.status === "consultando"}
                     onClick={() =>

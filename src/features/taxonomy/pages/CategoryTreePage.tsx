@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useContext, useMemo, useState } from "react";
+import { DataModeContext } from "../../../app/config/DataModeContext";
 import { useNavigate } from "react-router-dom";
 import {
   ActionIcon,
@@ -34,6 +35,7 @@ import type { CategoryNode } from "../types";
 // MK-008-S01: listado / árbol de categorías en `/categorias`.
 export function CategoryTreePage() {
   const navigate = useNavigate();
+  const mode = useContext(DataModeContext);
   const { state } = useCategoryTree();
   const [busqueda, setBusqueda] = useState<string>("");
   const [colapsados, setColapsados] = useState<string[]>([]);
@@ -129,6 +131,7 @@ export function CategoryTreePage() {
       render: (nodo) => (
         <Group gap="xs" justify="flex-end" wrap="nowrap">
           <ActionIcon
+            disabled={mode === "api"}
             aria-label={`Ver detalle de ${nodo.nombre}`}
             title="Ver detalle"
             onClick={() => navigate(`/categorias/${nodo.id}`)}
@@ -138,6 +141,7 @@ export function CategoryTreePage() {
           <Menu position="bottom-end" shadow="md">
             <Menu.Target>
               <ActionIcon
+                disabled={mode === "api"}
                 aria-label={`Más acciones de ${nodo.nombre}`}
                 title="Más acciones"
               >
@@ -198,6 +202,7 @@ export function CategoryTreePage() {
         breadcrumbs={[{ label: "Taxonomía" }, { label: "Categorías" }]}
         actions={
           <Button
+            disabled={mode === "api"}
             leftSection={<IconPlus size={16} stroke={2} aria-hidden="true" />}
             onClick={() => navigate("/categorias/nueva")}
           >
@@ -206,6 +211,7 @@ export function CategoryTreePage() {
         }
       />
       <Stack gap="lg">
+        {mode === "api" && <Text size="sm">La edición y el detalle de categorías aún no están disponibles en modo API.</Text>}
         <FilterBar summary={`${filas.length} categorías visibles`}>
           <Box w={320}>
             <SearchField

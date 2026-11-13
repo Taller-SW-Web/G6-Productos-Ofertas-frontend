@@ -7,6 +7,7 @@ export interface TaxonomyGatewayTransport {
     path: string,
     signal: AbortSignal,
     correlationId?: string,
+    options?: { method?: "GET" | "POST" | "PATCH"; body?: unknown; authenticated?: boolean },
   ): Promise<Response>;
 }
 

@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { MantineProvider } from "@mantine/core";
 import { DataModeContext } from "../../../app/config/DataModeContext";
 import { configureTaxonomyGateway } from "../services/taxonomyGatewayRuntime";
+import { CategoryTreePage } from "../pages/CategoryTreePage";
 import { ProductTypeListPage } from "../pages/ProductTypeListPage";
 import { ProductTypeSchemaPage } from "../pages/ProductTypeSchemaPage";
 import { TaxonomyModeGate } from "../../../app/config/TaxonomyModeGate";
@@ -146,7 +147,6 @@ it("presenta HTTP 404 como tipo no encontrado sin recurrir a datos mock", async 
 });
 
 it.each([
-  "/categorias",
   "/caracteristicas",
   "/tipos-producto/nuevo",
   "/tipos-producto/type-1",
@@ -185,4 +185,21 @@ it("identifica el mock de Taxonomía como datos simulados", () => {
   );
   expect(screen.getByText("Datos simulados")).toBeTruthy();
   expect(screen.getByText("contenido mock")).toBeTruthy();
+});
+
+it.each([200, 403])("muestra el árbol de categorías o el error HTTP %s sin mock", async status => {
+  const request = vi.fn().mockResolvedValue(status === 200
+    ? Response.json([{ categoria: { categoriaId: "cat-1", nombre: "Categoría HTTP", estado: "ACTIVO", version: 1 }, hijos: [] }])
+    : new Response(null, { status }));
+  configureTaxonomyGateway({ request });
+  render(<MantineProvider><DataModeContext.Provider value="api"><MemoryRouter initialEntries={["/categorias"]}><TaxonomyModeGate><CategoryTreePage /></TaxonomyModeGate></MemoryRouter></DataModeContext.Provider></MantineProvider>);
+  if (status === 200) {
+    expect(await screen.findByText("Categoría HTTP")).toBeTruthy();
+    expect((screen.getByRole("button", { name: /Crear categoría/i }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /Ver detalle de Categoría HTTP/i }) as HTMLButtonElement).disabled).toBe(true);
+  } else {
+    expect(await screen.findByText(/HTTP 403/)).toBeTruthy();
+    expect(screen.queryByText("Categoría HTTP")).toBeNull();
+  }
+  expect(request).toHaveBeenCalledTimes(1);
 });
