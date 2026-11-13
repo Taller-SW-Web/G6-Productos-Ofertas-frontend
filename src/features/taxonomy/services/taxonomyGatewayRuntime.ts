@@ -35,7 +35,7 @@ export class TaxonomyGatewayError extends Error {
     readonly status: number,
     readonly code?: string,
   ) {
-    super(`No se pudieron cargar los tipos de producto (HTTP ${status}).`);
+    super(`No se pudo completar la consulta de Taxonomía (HTTP ${status}).`);
     this.name = "TaxonomyGatewayError";
   }
 }
