@@ -10,8 +10,21 @@ import {
   secureBase,
 } from "../src/features/promotions/adapters/g7Session";
 import { createHttpPromotionServices } from "../src/features/promotions/adapters/httpPromotionServices";
+import { createAuthenticatedGatewayClient } from "../src/app/config/authenticatedGatewayClient";
 
 const signal = () => new AbortController().signal;
+type LocalSpy<T extends (...args: never[]) => unknown> = T & { mock: { calls: Parameters<T>[] } };
+function spy<T extends (...args: never[]) => unknown>(implementation?: T): LocalSpy<T> {
+  const calls: Parameters<T>[] = [];
+  const wrapped = ((...args: Parameters<T>) => { calls.push(args); return implementation?.(...args); }) as LocalSpy<T>;
+  wrapped.mock = { calls };
+  return wrapped;
+}
+function replaceGlobal(key: PropertyKey, value: unknown): () => void {
+  const original = Object.getOwnPropertyDescriptor(globalThis, key);
+  Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+  return () => original ? Object.defineProperty(globalThis, key, original) : Reflect.deleteProperty(globalThis, key);
+}
 const dto = (version = 1) => ({
   accessToken: `eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJzeW50aGV0aWMifQ.signature${version}`,
   refreshToken: `synthetic-refresh-${version}`,
@@ -87,6 +100,7 @@ test("G7: login usa el DTO real, mantiene secretos fuera de la vista y logout us
       body: {
         correo: "isolated@example.test",
         contrasena: "synthetic-password",
+        formatoAcceso: "JWS",
       },
       auth: undefined,
     });
@@ -157,6 +171,7 @@ test("G7: MFA no habilita el API antes de solicitar/verificar el código", async
     expect(calls[2]?.body).toEqual({
       challengeToken: "synthetic-challenge",
       codigo: "123456",
+      formatoAcceso: "JWS",
     });
     expect(await session.getAccessToken(signal())).toBe(dto().accessToken);
   });
@@ -360,7 +375,14 @@ test("Gateway: un 403 o un 401 desconocido no dispara renovación", async () => 
   });
 });
 test("Gateway: no reenvía una escritura rechazada ni reusa la sesión invalidada", async () => {
-  await fixture(async (origin, calls, set) => {
+  const values = new Map<string, string>();
+  const restore = replaceGlobal("sessionStorage", {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
+  });
+  try {
+    await fixture(async (origin, calls, set) => {
     let refreshed = false,
       invalidated = false;
     set((_r, response) => {
@@ -370,6 +392,7 @@ test("Gateway: no reenvía una escritura rechazada ni reusa la sesión invalidad
     const api = createHttpPromotionServices({
       gatewayOrigin: origin,
       getAccessToken: async () => dto().accessToken,
+      scopeId: () => dto().usuario.id,
       refreshAccessToken: async () => {
         refreshed = true;
         return dto(2).accessToken;
@@ -384,5 +407,106 @@ test("Gateway: no reenvía una escritura rechazada ni reusa la sesión invalidad
     expect(refreshed).toBe(false);
     expect(invalidated).toBe(true);
     expect(calls).toHaveLength(1);
+    });
+  } finally {
+    restore();
+  }
+});
+
+test("SEC-H4-01: GET 401 TOKEN_INVALIDO renueva y reintenta exactamente una vez", async () => {
+  let token = "h4.fake.access.a";
+  const refresh = spy<() => Promise<string>>(async () => { token = "h4.fake.access.b"; return token; });
+  const invalidate = spy<(...args: [string]) => void>(() => {});
+  const calls: { method: string; authorization: string | undefined }[] = [];
+  const fetcher = spy<typeof fetch>(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({ method: init?.method ?? "GET", authorization: new Headers(init?.headers).get("Authorization") ?? undefined });
+    return calls.length === 1
+      ? new Response(JSON.stringify({ status: 401, code: "TOKEN_INVALIDO" }), { status: 401, headers: { "content-type": "application/problem+json" } })
+      : new Response(JSON.stringify({ items: [], meta: { pagina: 1, tamanio: 10, total: 0, totalPaginas: 0 } }), { status: 200, headers: { "content-type": "application/json" } });
   });
+  const client = createAuthenticatedGatewayClient("http://127.0.0.1:9000", { getAccessToken: async () => token, refreshAccessToken: refresh, invalidateAccessToken: invalidate }, fetcher);
+  const response = await client.request("/api/v1/promociones", { method: "GET", signal: new AbortController().signal });
+  expect(response.status).toBe(200);
+  expect(fetcher.mock.calls).toHaveLength(2);
+  expect(refresh.mock.calls).toHaveLength(1);
+  expect(calls.map(call => call.authorization)).toEqual(["Bearer h4.fake.access.a", "Bearer h4.fake.access.b"]);
+  expect(invalidate.mock.calls).toHaveLength(0);
+});
+
+test("SEC-H4-02: POST 401 invalida la sesión y no reenvía la mutación", async () => {
+  const fetcher = spy<typeof fetch>(async () => new Response(JSON.stringify({ status: 401, code: "TOKEN_INVALIDO" }), { status: 401, headers: { "content-type": "application/problem+json" } }));
+  const refresh = spy<() => Promise<string>>(async () => "h4.fake.new");
+  const invalidate = spy<(...args: [string]) => void>(() => {});
+  const client = createAuthenticatedGatewayClient("http://127.0.0.1:9000", { getAccessToken: async () => "h4.fake.old", refreshAccessToken: refresh, invalidateAccessToken: invalidate }, fetcher);
+  const response = await client.request("/api/v1/promociones", { method: "POST", body: "{}", signal: new AbortController().signal });
+  expect(response.status).toBe(401);
+  expect(fetcher.mock.calls).toHaveLength(1);
+  expect(refresh.mock.calls).toHaveLength(0);
+  expect(invalidate.mock.calls).toHaveLength(1);
+});
+
+test("SEC-H4-03: rutas con prefijo ajeno o segmento peligroso no llegan a fetch", async () => {
+  const fetcher = spy();
+  const client = createAuthenticatedGatewayClient("http://127.0.0.1:9000", { getAccessToken: async () => "h4.fake.access", refreshAccessToken: async () => null, invalidateAccessToken: spy<(...args: [string]) => void>(() => {}) }, fetcher as unknown as typeof fetch);
+  for (const path of ["/g7/api/v1/auth/login", "/api/v1/../admin", "/api/v1/%252fadmin", "/api/v1/%5cadmin", "//evil.invalid/api/v1/x"]) {
+    await expect(client.request(path, { method: "GET", signal: new AbortController().signal })).rejects.toThrow();
+  }
+  expect(fetcher.mock.calls).toHaveLength(0);
+});
+
+test("SEC-H4-04: una respuesta GET de A que llega después del cambio de sesión no se consume bajo B", async () => {
+  let owner = "g7-security-owner-a";
+  let release: ServerResponse | null = null;
+  let arrived!: () => void;
+  const requestArrived = new Promise<void>(resolve => { arrived = resolve; });
+  await fixture(async (origin, calls, set) => {
+    set((_request, response) => { release = response; arrived(); });
+    const api = createHttpPromotionServices({ gatewayOrigin: origin, getAccessToken: async () => "h4.fake.token", scopeId: () => owner });
+    const read = api.campaigns.read("promo-owner-a", new AbortController().signal);
+    await requestArrived;
+    owner = "g7-security-owner-b";
+    release!.end(JSON.stringify({ promotionId: "promo-owner-a", nombre: "Campaña A", estado: "ACTIVO", puedeCambiarModalidad: true, modalidad: "CUPON", tipoDescuento: "PORCENTAJE", valor: 10, prioridad: 1, validFrom: "2026-11-08T05:00:00Z", validUntil: "2026-11-10T05:00:00Z", alcance: { productIds: [], skus: [] }, canalesHabilitados: ["RETAIL"], politicaCombinacion: { ofertaPricing: false, promocionAutomatica: false, cupon: true } }));
+    await expect(read).rejects.toMatchObject({ kind: "session" });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.auth).toBe("Bearer h4.fake.token");
+  });
+});
+
+test("SEC-H4-05: storage inaccesible bloquea la persistencia comercial antes de fetch", async () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+  const fetcher = spy<typeof fetch>(async () => new Response("{}", { status: 201 }));
+  const restoreFetch = replaceGlobal("fetch", fetcher);
+  Object.defineProperty(globalThis, "sessionStorage", { configurable: true, get() { throw new Error("storage denied"); } });
+  try {
+    const api = createHttpPromotionServices({ gatewayOrigin: "http://127.0.0.1:9000", getAccessToken: async () => "h4.fake.token", scopeId: () => "g7-storage-owner" });
+    await expect(api.campaigns.save(null, { name: "Campaña storage", mode: "coupon", status: "active", discountType: "percentage", benefit: "10", priority: "1", validFrom: "2026-11-08T00:00", validUntil: "2026-11-10T00:00", channels: ["retail"], productIds: [], skus: [], combination: { pricing: false, automatic: false, coupon: true } }, new AbortController().signal)).rejects.toMatchObject({ kind: "unknown" });
+    expect(fetcher.mock.calls).toHaveLength(0);
+  } finally {
+    restoreFetch();
+    if (original) Object.defineProperty(globalThis, "sessionStorage", original);
+    else Reflect.deleteProperty(globalThis, "sessionStorage");
+  }
+});
+
+test("SEC-H4-06: PATCH 2xx con ID de campaña ajeno no se acepta como confirmación", async () => {
+  const values = new Map<string, string>();
+  const restoreStorage = replaceGlobal("sessionStorage", { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); } });
+  try {
+  await fixture(async (origin, calls, set) => {
+    set((request, response, raw) => {
+      if (request.path.endsWith("/promociones/promo-expected")) {
+        const id = raw.method === "PATCH" ? "promo-other" : "promo-expected";
+        response.end(JSON.stringify({ promotionId: id, nombre: "Campaña", estado: "ACTIVO", puedeCambiarModalidad: true, modalidad: "CUPON", tipoDescuento: "PORCENTAJE", valor: 10, prioridad: 1, validFrom: "2026-11-08T05:00:00Z", validUntil: "2026-11-10T05:00:00Z", alcance: { productIds: [], skus: [] }, canalesHabilitados: ["RETAIL"], politicaCombinacion: { ofertaPricing: false, promocionAutomatica: false, cupon: true } }));
+        return;
+      }
+      response.statusCode = 404; response.end(JSON.stringify({ status: 404, code: "NO_ENCONTRADO" }));
+    });
+    const api = createHttpPromotionServices({ gatewayOrigin: origin, getAccessToken: async () => "h4.fake.token", scopeId: () => "g7-h4-owner-a" });
+    await api.campaigns.read("promo-expected", new AbortController().signal);
+    const before = calls.length;
+    await expect(api.campaigns.save("promo-expected", { name: "Campaña editada", mode: "coupon", status: "active", discountType: "percentage", benefit: "10", priority: "1", validFrom: "2026-11-08T00:00", validUntil: "2026-11-10T00:00", channels: ["retail"], productIds: [], skus: [], combination: { pricing: false, automatic: false, coupon: true } }, new AbortController().signal)).rejects.toBeDefined();
+    expect(calls.length - before).toBe(1);
+    expect(calls.filter(call => call.path.endsWith("/promociones/promo-expected") && call.auth === "Bearer h4.fake.token")).toHaveLength(2);
+  });
+  } finally { restoreStorage(); }
 });

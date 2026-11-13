@@ -23,8 +23,9 @@ export async function authContractFixture() {
     res.setHeader("Access-Control-Expose-Headers", "Content-Disposition");
     if (req.method === "OPTIONS") { res.writeHead(204).end(); return; }
     let raw = ""; for await (const chunk of req) raw += chunk;
-    const path = new URL(req.url, "http://fixture.test").pathname;
-    state.calls.push({ method: req.method, path });
+    const url = new URL(req.url, "http://fixture.test");
+    const path = url.pathname;
+    state.calls.push({ method: req.method, path, search: url.search });
     const send = (status, body) => { res.writeHead(status, { "Content-Type": "application/json" }); res.end(JSON.stringify(body)); };
     if (path.startsWith("/g7/api/v1/auth/")) {
       const body = JSON.parse(raw || "{}");
@@ -49,8 +50,11 @@ export async function authContractFixture() {
     if (!state.roles.includes("GESTOR_COMERCIAL")) { send(403, { code: "SCOPE_INSUFICIENTE" }); return; }
     if (path === "/api/v1/productos") {
       if (req.method === "POST") { send(409, { code: "SKU_DUPLICADO" }); return; }
-      send(200, { items: [], pagina: 1, tamanio: 25, total: 0, totalPaginas: 0 }); return;
+      send(200, { items: [], pagina: Number(url.searchParams.get("pagina") ?? 1), tamanio: Number(url.searchParams.get("tamanio") ?? 25), total: 0, totalPaginas: 0 }); return;
     }
+    const masterMeta = { pagina: 1, tamanio: 200, total: 1, totalPaginas: 1 };
+    if (path === "/api/v1/categorias/administracion") { send(200, { items: [{ categoriaId: "cat-api", nombre: "Categoría HTTP", estado: "ACTIVA" }], meta: masterMeta }); return; }
+    if (path === "/api/v1/marcas/administracion") { send(200, { items: [{ marcaId: "brand-api", nombre: "Marca HTTP", estado: "ACTIVA" }], meta: masterMeta }); return; }
     if (path === "/api/v1/categorias") { send(200, { categories: [{ categoria_id: "cat-api", name: "Categoría HTTP", status: "ACTIVA" }] }); return; }
     if (path === "/api/v1/marcas") { send(200, { brands: [{ marca_id: "brand-api", name: "Marca HTTP", status: "ACTIVA" }] }); return; }
     if (path === "/api/v1/tipos-producto") { send(200, { items: [{ tipoProductoId: "type-api", nombre: "Tipo HTTP", estado: "ACTIVO" }], meta: { pagina: 1, tamanio: 100, total: 1, totalPaginas: 1 } }); return; }

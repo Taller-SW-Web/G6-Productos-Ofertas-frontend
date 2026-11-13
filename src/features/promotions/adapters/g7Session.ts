@@ -1,4 +1,5 @@
-// G7 OpenAPI bf819dd, SPEC-06 / H-11: memory only, one refresh in flight,
+// G7 ADR-009 / develop@44f7d29: external G6 consumers request RS256 JWS.
+// G7 SPEC-06 / H-11: memory only, one refresh in flight,
 // rotation without automatic retries after an unknown result. No service token.
 export interface SessionUser {
   id: string;
@@ -224,7 +225,7 @@ export class G7Session {
       const generation = this.#generation;
       const started = this.clock();
       const dto = object(
-        await this.#post("/auth/login", { correo, contrasena }),
+        await this.#post("/auth/login", { correo, contrasena, formatoAcceso: "JWS" }),
       );
       if (generation !== this.#generation) return;
       if (dto.mfaRequerido === true) {
@@ -269,6 +270,7 @@ export class G7Session {
       const dto = await this.#post("/auth/otp/verificar", {
         challengeToken: this.#challengeToken(),
         codigo,
+        formatoAcceso: "JWS",
       });
       if (generation === this.#generation) this.#accept(dto);
     });
@@ -280,7 +282,7 @@ export class G7Session {
       generation = this.#generation;
     const work = (async () => {
       try {
-        const dto = await this.#post("/auth/refresh", { refreshToken: token });
+        const dto = await this.#post("/auth/refresh", { refreshToken: token, formatoAcceso: "JWS" });
         if (generation !== this.#generation) return null;
         const rotated = object(dto);
         if (object(rotated.usuario).id !== this.#view.user?.id)

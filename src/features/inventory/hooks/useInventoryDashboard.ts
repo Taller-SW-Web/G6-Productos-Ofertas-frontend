@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
+import { DataModeContext } from "../../../app/config/DataModeContext";
 import { InventoryError } from "../services/inventoryErrors";
 import { getInventoryRepository } from "../services/inventoryProvider";
 import { useInventoryChangeSignal } from "./useInventoryChangeSignal";
@@ -61,12 +62,14 @@ function fulfilled<T>(result: PromiseSettledResult<T>, fallback: T): T {
 }
 
 export function useInventoryDashboard(filters: DashboardFiltersQuery) {
+  const mode = useContext(DataModeContext);
   const revision = useInventoryChangeSignal();
   const { search, category, brand, locationId, status } = filters;
 
   // Token de recarga explícito para reintentos reales sin alterar los filtros.
   const [reloadToken, setReloadToken] = useState(0);
   const requestKey = JSON.stringify([
+    mode,
     search,
     category,
     brand,
@@ -88,9 +91,11 @@ export function useInventoryDashboard(filters: DashboardFiltersQuery) {
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
 
     // Filtros contractuales admitidos por obtenerDashboardInventario (agregado)
-    const aggregateFilters: DashboardFiltersQuery = { category, brand, locationId };
+    const aggregateFilters: DashboardFiltersQuery =
+      mode === "mock" ? { category, brand, locationId } : { locationId };
     // Filtros de tabla y búsqueda detallada por SKU
     const tableFilters: DashboardFiltersQuery = {
       search,
@@ -108,7 +113,7 @@ export function useInventoryDashboard(filters: DashboardFiltersQuery) {
       repository.getDashboardKpis(aggregateFilters),
       repository.getDashboardAlerts(tableFilters),
       repository.getLocationDistribution(aggregateFilters),
-      repository.getStockItems(tableFilters),
+      repository.getStockItems(tableFilters, controller.signal),
     ]).then(([kpiResult, alertsResult, distResult, stockResult]) => {
       if (cancelled) return;
       const kpis = fulfilled(kpiResult, null);
@@ -142,8 +147,9 @@ export function useInventoryDashboard(filters: DashboardFiltersQuery) {
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [search, category, brand, locationId, status, requestKey]);
+  }, [mode, search, category, brand, locationId, status, requestKey]);
 
   const isCurrent = response?.requestKey === requestKey;
   const loading = !isCurrent;

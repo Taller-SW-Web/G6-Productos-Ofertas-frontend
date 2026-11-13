@@ -1,3 +1,5 @@
+import { AuthSessionContext } from "../../src/app/config/AuthSessionContext";
+import { createCatalogFixtureSession } from "./catalogSession";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, Link, RouterProvider } from "react-router-dom";
 import { ApplicationShell } from "../../src/app/layout/ApplicationShell";
@@ -95,10 +97,12 @@ const app = params.has("navigation") ? <RouterProvider router={createBrowserRout
 ])} /> : <App />;
 createRoot(document.getElementById("root")!).render(
   <MantineProvider theme={theme} cssVariablesResolver={cssVariablesResolver}>
+    <AuthSessionContext.Provider value={createCatalogFixtureSession()}>
     <DataModeContext.Provider value="api">
       <CatalogServicesContext.Provider value={services}>
         <PricingProvider runtime={runtime}>{app}</PricingProvider>
       </CatalogServicesContext.Provider>
     </DataModeContext.Provider>
+    </AuthSessionContext.Provider>
   </MantineProvider>,
 );

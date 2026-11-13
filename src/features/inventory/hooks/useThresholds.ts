@@ -163,11 +163,24 @@ export async function updateSkuThresholdWithReconciliation(
   };
 }
 
+async function removeSkuThresholdOverrideWithReconciliation(sku: string, repository: InventoryRepository): Promise<ThresholdMutationSuccess> {
+  if (!repository.removeSkuThresholdOverride) throw new InventoryError("CONTRATO_BLOQUEADO", "Backend no implementa la eliminación contractual del override.");
+  try { await repository.removeSkuThresholdOverride(sku); }
+  catch (error) {
+    if (!(error instanceof InventoryError && error.code === "RESULTADO_INCIERTO")) throw error;
+  }
+  let config: ThresholdConfig;
+  try { config = await repository.getThresholds(); }
+  catch { throw new InventoryError("RESULTADO_INCIERTO", "La eliminación del override no pudo verificarse con GET /umbrales; conserva el bloqueo y no reenvíes."); }
+  if (Object.hasOwn(config.skuOverrides, sku)) throw new InventoryError("RESULTADO_INCIERTO", "La lectura autoritativa aún muestra el override; no se repetirá la eliminación.");
+  return { status: "VERIFIED", config, message: "La lectura autoritativa confirma que el SKU hereda el umbral global." };
+}
+
 // Identifica la escritura propia cuya notificación provocó la recarga en curso.
 // Sirve para que esa recarga no pueda degradar el resultado ya confirmado.
 interface OwnMutationReload {
-  kind: "global" | "sku";
-  value: number;
+  kind: "SET_GLOBAL" | "SET_SKU" | "DELETE_SKU";
+  value?: number;
   sku?: string;
 }
 
@@ -175,14 +188,16 @@ function serverReflectsOwnMutation(
   data: ThresholdConfig,
   pending: OwnMutationReload,
 ): boolean {
-  if (pending.kind === "global") return data.globalThreshold === pending.value;
+  if (pending.kind === "SET_GLOBAL") return data.globalThreshold === pending.value;
   if (pending.sku === undefined) return false;
+  if (pending.kind === "DELETE_SKU") return !Object.hasOwn(data.skuOverrides, pending.sku);
   return data.skuOverrides[pending.sku] === pending.value;
 }
 
 export function useThresholds() {
   const revision = useInventoryChangeSignal();
-  const requestKey = JSON.stringify([revision]);
+  const repositoryScope = (getInventoryRepository() as InventoryRepository & { getThresholdWriteScope?: () => string }).getThresholdWriteScope?.() ?? "session-unavailable";
+  const requestKey = JSON.stringify([repositoryScope, revision]);
 
   const [response, setResponse] = useState<{
     requestKey: string;
@@ -194,12 +209,23 @@ export function useThresholds() {
   // escritura confirmada). Una recarga fallida NO la invalida.
   const confirmedConfigRef = useRef<ThresholdConfig | null>(null);
   const ownMutationReloadRef = useRef<OwnMutationReload | null>(null);
+  const previousScopeRef = useRef(repositoryScope);
 
   const [saving, setSaving] = useState<boolean>(false);
   const [feedback, setFeedback] = useState<ThresholdFeedback | null>(null);
   const [refreshWarning, setRefreshWarning] = useState<string | null>(null);
+  const thresholdIntentKey = (kind: OwnMutationReload["kind"], sku?: string) => {
+    const repo = getInventoryRepository() as InventoryRepository & { getThresholdWriteScope?: () => string };
+    const storageKind = kind === "SET_GLOBAL" ? "global" : "sku";
+    return `g6:inventory:threshold:${encodeURIComponent(repo.getThresholdWriteScope?.() ?? "session-unavailable")}:${storageKind}:${encodeURIComponent(sku ?? "")}`;
+  };
 
   useEffect(() => {
+    if (previousScopeRef.current !== repositoryScope) {
+      previousScopeRef.current = repositoryScope;
+      confirmedConfigRef.current = null;
+      ownMutationReloadRef.current = null;
+    }
     let cancelled = false;
 
     getInventoryRepository()
@@ -226,6 +252,16 @@ export function useThresholds() {
         }
 
         confirmedConfigRef.current = data;
+        for (const storageKind of ["global", "sku"] as const) {
+          try {
+            const prefix = `g6:inventory:threshold:${encodeURIComponent((getInventoryRepository() as InventoryRepository & { getThresholdWriteScope?: () => string }).getThresholdWriteScope?.() ?? "session-unavailable")}:${storageKind}:`;
+            for (const key of Object.keys(sessionStorage).filter(item => item.startsWith(prefix))) {
+              const intent = JSON.parse(sessionStorage.getItem(key) ?? "null") as OwnMutationReload | null;
+              const confirmed = intent?.kind === "SET_GLOBAL" ? data.globalThreshold === intent.value : intent?.kind === "DELETE_SKU" ? Boolean(intent.sku && !Object.hasOwn(data.skuOverrides, intent.sku)) : intent?.kind === "SET_SKU" && Boolean(intent.sku && data.skuOverrides[intent.sku] === intent.value);
+              if (confirmed) sessionStorage.removeItem(key);
+            }
+          } catch { /* unresolved marker remains fail-closed */ }
+        }
         setRefreshWarning(null);
         setResponse({ requestKey, thresholds: data, error: null });
       })
@@ -249,7 +285,7 @@ export function useThresholds() {
     return () => {
       cancelled = true;
     };
-  }, [requestKey]);
+  }, [requestKey, repositoryScope]);
 
   const applyMutation = async (
     mutate: () => Promise<ThresholdMutationSuccess>,
@@ -259,8 +295,24 @@ export function useThresholds() {
     setSaving(true);
     setFeedback(null);
     setRefreshWarning(null);
+    const intentKey = thresholdIntentKey(pending.kind, pending.sku);
+    try {
+      if (sessionStorage.getItem(intentKey)) {
+        throw new InventoryError("RESULTADO_INCIERTO", "Hay una escritura previa de este umbral pendiente de conciliación.");
+      }
+      sessionStorage.setItem(intentKey, JSON.stringify(pending));
+    } catch (error) {
+      const cause = error instanceof InventoryError ? error : new InventoryError(
+        "OPERATIVO",
+        "El almacenamiento de sesión no está disponible. No se envió el cambio de umbral.",
+      );
+      setFeedback(describeThresholdMutationError(cause, fallbackError));
+      setSaving(false);
+      return false;
+    }
     try {
       const result = await mutate();
+      try { sessionStorage.removeItem(intentKey); } catch { /* verified from server on next read */ }
       confirmedConfigRef.current = result.config;
       setResponse({
         requestKey,
@@ -274,6 +326,7 @@ export function useThresholds() {
       notifyInventoryChanged();
       return true;
     } catch (err: unknown) {
+      if (!(err instanceof InventoryError && err.code === "RESULTADO_INCIERTO")) { try { sessionStorage.removeItem(intentKey); } catch { /* retain fail-closed */ } }
       setFeedback(describeThresholdMutationError(err, fallbackError));
       return false;
     } finally {
@@ -284,16 +337,22 @@ export function useThresholds() {
   const updateGlobal = (val: number) =>
     applyMutation(
       () => updateGlobalThresholdWithReconciliation(val),
-      { kind: "global", value: val },
+      { kind: "SET_GLOBAL", value: val },
       "Error al actualizar umbral global.",
     );
 
   const updateSku = (sku: string, val: number) =>
     applyMutation(
       () => updateSkuThresholdWithReconciliation(sku, val),
-      { kind: "sku", value: val, sku },
+      { kind: "SET_SKU", value: val, sku },
       "Error al actualizar umbral.",
     );
+
+  const removeSkuOverride = (sku: string) => applyMutation(
+    () => removeSkuThresholdOverrideWithReconciliation(sku, getInventoryRepository()),
+    { kind: "DELETE_SKU", sku },
+    "No se pudo recuperar la herencia del umbral global.",
+  );
 
   const isCurrent = response?.requestKey === requestKey;
   const loading = !isCurrent;
@@ -309,6 +368,8 @@ export function useThresholds() {
     refreshWarning,
     updateGlobal,
     updateSku,
+    removeSkuOverride,
+    canRemoveSkuOverride: typeof (getInventoryRepository() as InventoryRepository).removeSkuThresholdOverride === "function",
     clearFeedback: () => {
       setFeedback(null);
     },

@@ -27,10 +27,11 @@ export function ProductDeactivationDialog({
     deactivate,
     reconcile,
     clearError,
+    isUnknown,
   } = useProductStateMutation();
 
   const handleConfirm = async () => {
-    if (isUnknownError) {
+    if (isUnknownError || isUnknown(product.id)) {
       const ok = await reconcile(product.id, "INACTIVO");
       if (ok) {
         onSuccess({ ...product, status: "INACTIVO" });
@@ -53,7 +54,7 @@ export function ProductDeactivationDialog({
     <ConfirmDialog
       opened={opened}
       title="Desactivar Producto"
-      confirmLabel={isUnknownError ? "Consultar estado" : "Desactivar Producto"}
+      confirmLabel={isUnknownError || isUnknown(product.id) ? "Consultar estado" : "Desactivar Producto"}
       destructive
       submitting={submitting || reconciling}
       onCancel={handleClose}

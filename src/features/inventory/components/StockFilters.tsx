@@ -8,6 +8,7 @@ interface StockFiltersProps {
   filters: StockFiltersQuery;
   locations?: InventoryLocationOption[];
   loading?: boolean;
+  exactSku?: boolean;
   onChange: (next: StockFiltersQuery) => void;
   onReset: () => void;
 }
@@ -16,6 +17,7 @@ export function StockFilters({
   filters,
   locations = [],
   loading = false,
+  exactSku = false,
   onChange,
   onReset,
 }: StockFiltersProps) {
@@ -30,14 +32,14 @@ export function StockFilters({
   return (
     <FilterBar>
       <TextInput
-        placeholder="Buscar SKU o producto..."
+        placeholder={exactSku ? "Buscar por SKU exacto..." : "Buscar SKU o producto..."}
         leftSection={<IconSearch size={16} />}
         value={filters.search ?? ""}
         onChange={(e) =>
           onChange({ ...filters, search: e.currentTarget.value })
         }
         style={{ flex: 1, minWidth: 240 }}
-        aria-label="Buscar SKU o producto"
+        aria-label={exactSku ? "Buscar por SKU exacto" : "Buscar SKU o producto"}
       />
       <Select
         placeholder="Ubicación"

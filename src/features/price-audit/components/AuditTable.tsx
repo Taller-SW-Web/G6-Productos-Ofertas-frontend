@@ -37,7 +37,7 @@ export function AuditTable({
       width: 180,
       render: (entry) => dateLabel(entry.at),
     },
-    { key: "sku", header: "SKU", width: 120, render: (entry) => entry.sku },
+    { key: "sku", header: "SKU", width: 120, render: (entry) => entry.sku ?? "Producto · sin SKU" },
     {
       key: "operation",
       header: "Operación y tipo",

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   InventoryError,
   isInventoryPresentationFailure,
@@ -13,6 +13,7 @@ import {
   resetConfirmedTransferReceptionsAwaitingRefresh,
   resetUncertainTransferReceptions,
   setInFlightTransferReception,
+  setTransferReceptionScope,
   setUncertainTransferReception,
 } from "../services/transferReceptionAttempt";
 import type {
@@ -29,11 +30,19 @@ import {
   type TransferPresentationResolver,
   type TrasladoInventarioDto,
 } from "../services/inventoryMappers";
+import { createMemoryStorage, deferred } from "../../../../tests/fixtures/h4Controlled";
+import { resetInventoryRepository } from "../services/inventoryProvider";
+
+let currentOwner = "g7-inventory-owner-a";
 
 beforeEach(() => {
+  currentOwner = "g7-inventory-owner-a";
+  vi.stubGlobal("sessionStorage", createMemoryStorage());
+  setTransferReceptionScope(currentOwner);
   resetUncertainTransferReceptions();
   resetConfirmedTransferReceptionsAwaitingRefresh();
 });
+afterEach(() => { vi.unstubAllGlobals(); resetInventoryRepository(); });
 
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
@@ -134,6 +143,7 @@ function setup(
     : (options.resolver ?? (async () => PRESENTATION));
   const repository = createHttpInventoryRepository({
     transport,
+    currentUserScope: () => currentOwner,
     ...(resolver ? { resolveTransferPresentation: resolver } : {}),
   });
   return { repository, request, calls };
@@ -150,6 +160,19 @@ async function rejection(promise: Promise<unknown>): Promise<InventoryError> {
 }
 
 describe("apiInventoryAdapter — umbrales (mapeo total)", () => {
+  it("INV-H4-01: rechaza umbral decimal antes de despachar una escritura", async () => {
+    const { repository, request } = setup(async () => jsonResponse(UMBRALES));
+    await expect(rejection(repository.updateSkuThreshold("SKU-A", 2.5))).resolves.toMatchObject({ code: "VALIDACION" });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("INV-H4-02: DELETE 204 del override se emite exactamente una vez y no requiere DTO", async () => {
+    const { repository, calls } = setup(async () => new Response(null, { status: 204 }));
+    await expect(repository.removeSkuThresholdOverride?.("SKU-A")).resolves.toBeUndefined();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ path: "/api/v1/inventario/umbrales/skus/SKU-A", request: { method: "DELETE" } });
+  });
+
   it("getThresholds consulta el contract y mapea UmbralInventario", async () => {
     const { repository, calls } = setup(async () => jsonResponse(UMBRALES));
     await expect(repository.getThresholds()).resolves.toEqual({
@@ -1458,7 +1481,7 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
       delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
     });
 
-    it("TAC-P0-06-R2: una operación UNCERTAIN persiste tras recarga con snapshot inmutable exacto", async () => {
+    it("INV-H4-08 / TAC-P0-06-R2: recarga conserva intención, rechaza payload incompatible y no reenvía automáticamente", async () => {
       const storage = createMockStorage();
       globalThis.sessionStorage = storage;
       resetUncertainTransferReceptions();
@@ -1569,7 +1592,7 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
       expect(calls).toHaveLength(1);
 
       // 2. En storage no quedó un estado vacío: conserva el snapshot IN_FLIGHT previo
-      const rawInStorage = storage.getItem("inventory.transferReceptionAttempts.v1");
+      const rawInStorage = storage.getItem("inventory.transferReceptionAttempts.v1:g7-inventory-owner-a");
       expect(rawInStorage).not.toBeNull();
       expect(rawInStorage).toContain(RECEPCION_PAYLOAD.operationId);
 
@@ -1610,6 +1633,53 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
 
       delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
     });
+  });
+
+  it("INV-H4-07: recepción de A que responde durante B queda almacenada bajo A y no se presenta a B", async () => {
+    const memory = new Map<string, string>();
+    const storage: Storage = {
+      get length() { return memory.size; }, clear: () => memory.clear(),
+      getItem: key => memory.get(key) ?? null, key: index => [...memory.keys()][index] ?? null,
+      removeItem: key => { memory.delete(key); }, setItem: (key, value) => { memory.set(key, value); },
+    };
+    vi.stubGlobal("sessionStorage", storage);
+    currentOwner = "g7-inventory-owner-a";
+    const gate = deferred<Response>();
+    const { repository, calls } = setup(async (_path, request) => request.method === "POST" ? gate.promise : jsonResponse({ items: [], pagina: 1, tamanio: 100, total: 0 }));
+    const reception = repository.receiveTransfer(RECEPCION_PAYLOAD);
+    expect(calls.filter(call => call.request.method === "POST")).toHaveLength(1);
+    currentOwner = "g7-inventory-owner-b";
+    gate.resolve(jsonResponse(RECEPCION_OK));
+    await expect(reception).rejects.toMatchObject({ code: "NO_AUTENTICADO" });
+    expect(repository.getTransferWriteRecord("t-1")).toBeNull();
+    currentOwner = "g7-inventory-owner-a";
+    expect(repository.getTransferWriteRecord("t-1")).toMatchObject({ state: "RECONCILED", payload: { operationId: RECEPCION_PAYLOAD.operationId } });
+    expect(calls.filter(call => call.request.method === "POST")).toHaveLength(1);
+    const keyA = "inventory.transferReceptionAttempts.v1:g7-inventory-owner-a";
+    const keyB = "inventory.transferReceptionAttempts.v1:g7-inventory-owner-b";
+    expect(keyA).toContain("g7-inventory-owner-a");
+    const persistedA = JSON.parse(memory.get(keyA) ?? "null") as {
+      uncertain?: unknown[];
+      inFlight?: unknown[];
+      confirmedAwaitingWithDto?: { payload: ReceiveTransferPayload; dto: TrasladoInventarioDto }[];
+    } | null;
+    expect(persistedA?.uncertain).toEqual([]);
+    expect(persistedA?.inFlight).toEqual([]);
+    expect(persistedA?.confirmedAwaitingWithDto).toContainEqual({
+      payload: expect.objectContaining({
+        ...RECEPCION_PAYLOAD,
+        operationId: RECEPCION_PAYLOAD.operationId,
+        transferId: RECEPCION_PAYLOAD.transferId,
+      }),
+      dto: expect.objectContaining({ traslado_id: RECEPCION_PAYLOAD.transferId }),
+    });
+    expect(memory.has(keyB)).toBe(false);
+    currentOwner = "g7-inventory-owner-b";
+    expect(repository.getTransferWriteRecord("t-1")).toBeNull();
+    currentOwner = "g7-inventory-owner-a";
+    rehydrateTransferReceptionsForTesting();
+    expect(repository.getTransferWriteRecord("t-1")).toMatchObject({ payload: RECEPCION_PAYLOAD });
+    expect(calls.filter(call => call.request.method === "POST")).toHaveLength(1);
   });
 
   describe("TAC-P0-11: aborto del transporte durante la recepción", () => {
@@ -1939,10 +2009,10 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
       globalThis.sessionStorage = storage;
       resetUncertainTransferReceptions();
       setUncertainTransferReception(RECEPCION_PAYLOAD);
-      const raw = storage.getItem("inventory.transferReceptionAttempts.v1");
+      const raw = storage.getItem("inventory.transferReceptionAttempts.v1:g7-inventory-owner-a");
       expect(raw).toContain(RECEPCION_PAYLOAD.operationId);
       resetUncertainTransferReceptions();
-      expect(storage.getItem("inventory.transferReceptionAttempts.v1")).toBeNull();
+      expect(storage.getItem("inventory.transferReceptionAttempts.v1:g7-inventory-owner-a")).toBeNull();
       delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
     });
 
@@ -1961,7 +2031,7 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
 
       // Guardar un estado inicial válido (lastGoodPersistedState)
       setUncertainTransferReception(RECEPCION_PAYLOAD);
-      const initialPersisted = storage.getItem("inventory.transferReceptionAttempts.v1");
+      const initialPersisted = storage.getItem("inventory.transferReceptionAttempts.v1:g7-inventory-owner-a");
       expect(initialPersisted).not.toBeNull();
 
       const { repository, calls } = setup(async () => jsonResponse(RECEPCION_OK));
@@ -2038,14 +2108,14 @@ describe("apiInventoryAdapter — recepción de traslado (escritura idempotente)
         inFlight: [],
         confirmedAwaiting: [],
       };
-      storage.setItem("inventory.transferReceptionAttempts.v1", JSON.stringify(corruptState));
+      storage.setItem("inventory.transferReceptionAttempts.v1:g7-inventory-owner-a", JSON.stringify(corruptState));
 
       // Primera recarga: detecta corrupción y bloquea el traslado
       rehydrateTransferReceptionsForTesting();
       expect(isTransferReceptionStorageBlocked("t-corrupt")).toBe(true);
 
       // Verifica que NO se eliminó silenciosamente el registro corrupto de storage
-      const rawAfterFirst = storage.getItem("inventory.transferReceptionAttempts.v1");
+      const rawAfterFirst = storage.getItem("inventory.transferReceptionAttempts.v1:g7-inventory-owner-a");
       expect(rawAfterFirst).toContain("t-corrupt");
 
       // Segunda recarga: el bloqueo se mantiene gracias a que no se limpió silenciosamente
@@ -2208,6 +2278,22 @@ describe("apiInventoryAdapter — dashboard KPIs (obtenerDashboardInventario)", 
     ],
   };
 
+  it("INV-H4-03: identidad A comparte el GET pendiente y B realiza su propia consulta", async () => {
+    const pendingA = deferred<Response>();
+    const pendingB = deferred<Response>();
+    const request = vi.fn(async () => request.mock.calls.length === 1 ? pendingA.promise : pendingB.promise);
+    const { repository } = setup(request);
+    const firstA = repository.getDashboardKpis();
+    const secondA = repository.getDashboardKpis();
+    expect(request).toHaveBeenCalledTimes(1);
+    currentOwner = "g7-inventory-owner-b";
+    const readB = repository.getDashboardKpis();
+    expect(request).toHaveBeenCalledTimes(2);
+    pendingA.resolve(jsonResponse(DASHBOARD_DTO));
+    pendingB.resolve(jsonResponse({ ...DASHBOARD_DTO, totalAvailable: 90 }));
+    await expect(Promise.all([firstA, secondA, readB])).resolves.toHaveLength(3);
+  });
+
   it("mapea KPIs autoritativos de DashboardInventario e informa null en métricas no publicadas", async () => {
     const { repository, calls } = setup(async () => jsonResponse(DASHBOARD_DTO));
     await expect(
@@ -2302,21 +2388,20 @@ describe("apiInventoryAdapter — dashboard KPIs (obtenerDashboardInventario)", 
     expect(kpis.transfersWithDiscrepancy).toBeNull();
   });
 
-  it("admite filtros contractuales del agregado (category, brand, locationId)", async () => {
+  it("admite ubicación y bloquea los filtros de Catálogo que el provider rechaza", async () => {
     const { repository, calls } = setup(async () => jsonResponse(DASHBOARD_DTO));
-    await repository.getDashboardKpis({ category: "cat-1", brand: "brand-1", locationId: "loc-1" });
-    expect(calls[0]?.path).toContain("categoriaId=cat-1");
-    expect(calls[0]?.path).toContain("marcaId=brand-1");
-    expect(calls[0]?.path).toContain("locationId=loc-1");
+    for (const filters of [{ category: "cat-1" }, { brand: "brand-1" }]) {
+      await expect(repository.getDashboardKpis(filters)).rejects.toMatchObject({ code: "CONTRATO_BLOQUEADO" });
+    }
+    expect(calls).toHaveLength(0);
+    await repository.getDashboardKpis({ locationId: "loc-1" });
+    expect(calls[0]?.path).toBe("/api/v1/inventario/dashboard?locationId=loc-1");
   });
 
   it("separación de filtros del dashboard: una búsqueda por SKU en tabla no bloquea consulta agregada", async () => {
     const { repository } = setup(async () => jsonResponse(DASHBOARD_DTO));
     const filters = { search: "SKU-99", category: "cat-1", status: "AGOTADO", locationId: "loc-1" };
-    const aggregateFilters = {
-      category: filters.category,
-      locationId: filters.locationId,
-    };
+    const aggregateFilters = { locationId: filters.locationId };
     const kpis = await repository.getDashboardKpis(aggregateFilters);
     expect(kpis.availableUnits).toBe(125);
     const dist = await repository.getLocationDistribution(aggregateFilters);
@@ -2342,17 +2427,54 @@ describe("apiInventoryAdapter — operaciones sin fuente contractual", () => {
   it("rechaza con CONTRATO_BLOQUEADO las lecturas cuyo modelo no cubre el contrato", async () => {
     const { repository, request } = setup(async () => jsonResponse({}));
     for (const promise of [
-      repository.getStockItems(),
-      repository.getStockDetail("SKU-A", "loc-1"),
       repository.getDashboardAlerts(),
       repository.getCategories(),
       repository.getBrands(),
-      repository.getLocations(),
     ]) {
       const error = await rejection(promise);
       expect(error.code).toBe("CONTRATO_BLOQUEADO");
     }
     expect(request).not.toHaveBeenCalled();
+    await expect(repository.getLocations()).rejects.toMatchObject({ code: "RESPUESTA_INCOMPATIBLE" });
+    expect(request.mock.calls[0]?.[0]).toBe("/api/v1/inventario/dashboard");
+  });
+});
+
+describe("saldos físicos administrativos", () => {
+  const locationId = "11111111-1111-4111-8111-111111111111";
+  const otherLocation = "22222222-2222-4222-8222-222222222222";
+  const balance = (sku: string, location: string, available = 0) => ({
+    sku, ubicacion: { locationId: location, nombre: location === locationId ? "Almacén central" : "Tienda Norte", codigo: "LOC", tipo: "ALMACEN", activa: true },
+    skuActivo: null, onHand: available, reserved: 0, blocked: 0, available,
+    stockVersion: 3, umbralEfectivo: 5, estado: available === 0 ? "AGOTADO" : "STOCK_BAJO", actualizadoEn: "2026-11-07T13:00:00Z",
+  });
+
+  it("pagina saldos sin Catálogo y conserva pares SKU/ubicación, ceros y nulos", async () => {
+    const rows = [...Array.from({ length: 99 }, (_, index) => balance(`SKU-${index}`, locationId)),
+      balance("FUERA-CATALOGO", locationId), balance("FUERA-CATALOGO", otherLocation)];
+    const { repository, calls } = setup(async path => {
+      const url = new URL(path, "https://gateway.test");
+      expect(url.pathname).toBe("/api/v1/inventario/administracion/saldos");
+      expect(url.searchParams.get("estado")).toBe("AGOTADO");
+      const pagina = Number(url.searchParams.get("pagina"));
+      return jsonResponse({ items: rows.slice((pagina - 1) * 100, pagina * 100), meta: { pagina, tamanio: 100, total: 101, totalPaginas: 2 } });
+    });
+    const result = await repository.getStockItems({ status: "AGOTADO" });
+    expect(result).toHaveLength(101);
+    expect(result.slice(-2)).toMatchObject([
+      { sku: "FUERA-CATALOGO", locationId, locationName: "Almacén central", skuActive: null, available: 0, stockVersion: 3 },
+      { sku: "FUERA-CATALOGO", locationId: otherLocation, locationName: "Tienda Norte", skuActive: null, threshold: 5 },
+    ]);
+    expect(calls).toHaveLength(2);
+  });
+
+  it("transmite SKU, ubicación y stock bajo y rechaza una identidad fuera de filtro", async () => {
+    const { repository, calls } = setup(async () => jsonResponse({
+      items: [balance("AJENO", locationId, 2)], meta: { pagina: 1, tamanio: 100, total: 1, totalPaginas: 1 },
+    }));
+    await expect(repository.getStockItems({ search: "FISICO", locationId, status: "STOCK_BAJO" }))
+      .rejects.toMatchObject({ code: "RESPUESTA_INCOMPATIBLE" });
+    expect(calls[0]?.path).toBe(`/api/v1/inventario/administracion/saldos?tamanio=100&sku=FISICO&locationId=${locationId}&estado=STOCK_BAJO&pagina=1`);
   });
 });
 

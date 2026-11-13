@@ -1,11 +1,25 @@
 # Inventario — integración HTTP (MK-015 / MK-016, issue #104)
 
-Estado: **PARTIAL**. El adaptador HTTP está implementado y probado contra el
-contrato vigente con un transporte inyectado. La aplicación **no** está
-conectada al Gateway porque el composition root compartido (#45/#109) y su
-cliente todavía no existen, y `CommercialModeGate` mantiene `/inventario`
-bloqueado en modo API (`TAC-P0-03`). Ninguna operación se declara integrada de
-extremo a extremo.
+Estado: **GATEWAY_CONNECTED (HABILITACIÓN SELECTIVA)**. El adaptador HTTP de inventario está conectado al
+API Gateway en el composition root (`src/startApplication.tsx`) a través de
+`authenticatedInventoryTransport.ts`, soportando sesión autenticada con G7
+(rotación y verificación) y modo demo sin autenticación.
+
+> [!IMPORTANT]
+> **Distinción entre transporte conectado y funcionalidad completa (Habilitación selectiva):**
+> En este PR (#75), en `CommercialModeGate.tsx` se habilitan **únicamente** las pantallas de lectura/configuración administrativa soportadas:
+> - `/inventario/umbrales`
+> - `/inventario/dashboard`
+>
+> Las siguientes rutas se conservan **explícitamente bloqueadas** en modo API:
+> - `/inventario` (pantalla principal de stock general: el adaptador HTTP aún rechaza operaciones directas de stock).
+> - `/inventario/traslados` (requiere el resolvedor de catálogo para presentar traslados existentes de forma desacoplada).
+>
+> Ambas rutas bloqueadas presentan el mensaje explicativo de limitación y el enlace directo hacia "Consultas de los módulos" (`/consultas`).
+
+> [!WARNING]
+> **Estado de homologación con infraestructura compartida:**
+> El transporte autenticado y los adaptadores están probados exhaustivamente a nivel unitario, de integración y de composition root. Sin embargo, **no se ha homologado de extremo a extremo contra instancias reales de G7 ni API Gateway desplegadas en el entorno compartido / Oracle Cloud**. La integración permanece verificada mediante contratos OpenAPI y mocks contractuales de transporte.
 
 Corte **Hito 4 (2026-10-20, iteración 2)**: además de la sincronización con
 `master` (`6e0448a`), la normalización de `"all"`, la carga parcial del

@@ -11,8 +11,8 @@ test("UI API 1440: POST contractual, error 409 visible, datos conservados y sin 
       posts++; status = 409; body = { code: "SKU_DUPLICADO" };
       expect(request.postDataJSON()).toMatchObject({ nombre: "Producto HTTP", skuBase: "000-SKU", categoriaId: "cat-api", tipoProductoId: "type-api", marcaId: "brand-api" });
       expect(request.headers()).not.toHaveProperty("authorization");
-    } else if (url.pathname.endsWith("/categorias")) body = { categories: [{ categoria_id: "cat-api", name: "Categoría HTTP", status: "ACTIVA" }] };
-    else if (url.pathname.endsWith("/marcas")) body = { brands: [{ marca_id: "brand-api", name: "Marca HTTP", status: "ACTIVA" }] };
+    } else if (url.pathname.endsWith("/categorias/administracion")) body = { items: [{ categoriaId: "cat-api", nombre: "Categoría HTTP", estado: "ACTIVO" }], meta: { pagina: 1, tamanio: 200, total: 1, totalPaginas: 1 } };
+    else if (url.pathname.endsWith("/marcas/administracion")) body = { items: [{ marcaId: "brand-api", nombre: "Marca HTTP", estado: "ACTIVO" }], meta: { pagina: 1, tamanio: 200, total: 1, totalPaginas: 1 } };
     else if (url.pathname.endsWith("/tipos-producto")) body = { items: [{ tipoProductoId: "type-api", nombre: "Tipo HTTP", estado: "ACTIVO" }], meta: { pagina: 1, tamanio: 100, total: 1, totalPaginas: 1 } };
     else body = { tipoProducto: { tipoProductoId: "type-api" }, schemaVersion: 1, caracteristicas: [] };
     await route.fulfill({ status, contentType: "application/json", headers: { "Access-Control-Allow-Origin": "*" }, body: JSON.stringify(body) });
@@ -54,10 +54,124 @@ test("UI API: lectura administrativa bloqueada conserva preparación independien
     } : { code: "PRODUCTO_NO_ENCONTRADO" }) });
   });
   await page.goto("/tests/harness/catalog-http.html?path=/productos/product/preparacion");
-  await expect(page.getByRole("heading", { name: "Información del producto no disponible" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Preparación del producto" })).toBeVisible();
+  await expect(page.getByText("Estado administrativo no disponible", { exact: true })).toBeVisible();
   await expect(page.getByText("Pricing: En preparación", { exact: true })).toBeVisible();
   await expect(page.getByText("Inventario: Rechazado", { exact: true })).toBeVisible();
   await expect(page.getByText("404 - Producto inexistente", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Reintentar preparación/ })).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath("catalogo-preparacion-parcial-1440.png"), fullPage: true });
+});
+
+test("UI API: un 403 de categorías no bloquea los productos y un 403 filtrado permite limpiar la consulta", async ({ page }) => {
+  const reference = "11111111-1111-4111-8111-111111111111";
+  const requests: string[] = [];
+  await page.route("https://gateway.test/api/v1/**", route => {
+    const { pathname, searchParams } = new URL(route.request().url());
+    requests.push(pathname);
+    const headers = { "Access-Control-Allow-Origin": "*" };
+    if (pathname.endsWith("/categorias/administracion") || searchParams.has("categoriaId")) {
+      return route.fulfill({
+        status: 403,
+        headers: { ...headers, "Access-Control-Expose-Headers": "X-Correlation-Id", "X-Correlation-Id": reference },
+        json: { code: "SCOPE_INSUFICIENTE" },
+      });
+    }
+    return route.fulfill({ headers, json: {
+      items: [{
+        productId: reference, nombre: "Producto administrativo QA", skuBase: "QA-FILTROS",
+        categoriaId: "cat-api", marcaId: "brand-api", tipoProductoId: "type-api",
+        tieneVariantes: false, estado: "INACTIVO", catalogVersion: 5,
+      }],
+      meta: { pagina: 1, tamanio: 10, total: 1, totalPaginas: 1 },
+    } });
+  });
+
+  await page.goto("/tests/harness/catalog-http.html?path=%2Fproductos%3FcategoriaId%3Dcat-api");
+  await expect(page.getByText("Acceso denegado", { exact: true })).toBeVisible();
+  await expect(page.getByText(`No se pudo completar la operación (403, SCOPE_INSUFICIENTE). Referencia: ${reference}.`)).toBeVisible();
+  await page.getByRole("button", { name: "Limpiar filtros" }).click();
+  await expect(page).toHaveURL(/\/productos$/);
+  await expect(page.getByRole("link", { name: "Ver detalle de Producto administrativo QA" })).toBeVisible();
+  await expect(page.getByText("Categorías no disponibles", { exact: true })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Categoría", exact: true })).toBeDisabled();
+  await expect(page.getByRole("combobox", { name: "Estado del producto" })).toBeEnabled();
+  expect(requests).toContain("/api/v1/categorias/administracion");
+  expect(requests).not.toContain("/api/v1/tipos-producto");
+  expect(requests).not.toContain("/api/v1/productos");
+});
+
+test("UI API 1440: un borrador reaparece en el listado y se edita con la versión persistida", async ({ page }) => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  let description = "Descripción original";
+  let version = 4;
+  let created = false;
+  const sentVersions: number[] = [];
+  const productWrite = () => ({
+    product_id: id, status: "BORRADOR", catalog_version: version, name: "Borrador H4", description,
+    sku_base: "H4-DRAFT", categoria_id: "cat-api", marca_id: "brand-api", tipo_producto_id: "type-api",
+    tiene_variantes: false, images: [], attributes: [], variants: [], perfil_fisico: null,
+  });
+  const summary = () => ({
+    productId: id, estado: "BORRADOR", catalogVersion: version, nombre: "Borrador H4", descripcion: description,
+    skuBase: "H4-DRAFT", categoriaId: "cat-api", marcaId: "brand-api", tipoProductoId: "type-api", tieneVariantes: false,
+    slug: "borrador-h4", publicadoAlgunaVez: false, creadoEn: "2026-11-07T13:00:00Z", actualizadoEn: "2026-11-07T13:00:00Z",
+  });
+  await page.route("https://gateway.test/api/v1/**", async route => {
+    const request = route.request();
+    const { pathname, searchParams } = new URL(request.url());
+    const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*", "Access-Control-Allow-Methods": "GET, POST, PATCH" };
+    const respond = (json: unknown, status = 200) => route.fulfill({ json, status, headers });
+    if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers });
+    if (pathname.endsWith("/preparacion")) return respond({
+      product_id: id, tiene_variantes: false, pricing: { status: "PENDING", manual_retry_allowed: false },
+      inventario: { status: "PENDING", manual_retry_allowed: false }, variantes: [],
+    });
+    if (pathname === "/api/v1/productos" && request.method() === "POST") {
+      expect(request.postDataJSON()).toMatchObject({ nombre: "Borrador H4", skuBase: "H4-DRAFT" });
+      created = true;
+      return respond(productWrite(), 201);
+    }
+    if (pathname === `/api/v1/productos/${id}` && request.method() === "PATCH") {
+      const body = request.postDataJSON();
+      sentVersions.push(body.catalogVersion);
+      if (body.catalogVersion !== version) return respond({ code: "VERSION_CONFLICT" }, 409);
+      version++;
+      description = body.descripcion;
+      return respond(productWrite());
+    }
+    if (pathname === "/api/v1/productos/administracion") return respond({
+      items: created ? [summary()] : [],
+      meta: { pagina: Number(searchParams.get("pagina")), tamanio: Number(searchParams.get("tamanio")), total: Number(created), totalPaginas: Number(created) },
+    });
+    if (pathname === `/api/v1/productos/administracion/${id}` && created)
+      return respond({ ...summary(), imagenes: [], atributos: [], caracteristicasIdentificadoras: [], perfilFisico: null });
+    if (pathname.endsWith("/categorias/administracion") || pathname.endsWith("/marcas/administracion") || pathname.endsWith("/tipos-producto")) {
+      const item = pathname.includes("categorias") ? { categoriaId: "cat-api", nombre: "Categoría HTTP" }
+        : pathname.includes("marcas") ? { marcaId: "brand-api", nombre: "Marca HTTP" }
+          : { tipoProductoId: "type-api", nombre: "Tipo HTTP" };
+      return respond({ items: [{ ...item, estado: "ACTIVO" }], meta: { pagina: 1, tamanio: Number(searchParams.get("tamanio")), total: 1, totalPaginas: 1 } });
+    }
+    if (pathname === "/api/v1/tipos-producto/type-api/caracteristicas")
+      return respond({ tipoProducto: { tipoProductoId: "type-api" }, schemaVersion: 1, caracteristicas: [] });
+    return respond({ code: "PRODUCTO_NO_ENCONTRADO" }, 404);
+  });
+
+  await page.goto("/tests/harness/catalog-http.html");
+  await page.getByLabel("Nombre del producto").fill("Borrador H4");
+  await page.getByLabel("Descripción comercial").fill(description);
+  await page.getByLabel("SKU Base").fill("H4-DRAFT");
+  await page.getByLabel("Precio base inicial (S/.)").fill("20");
+  await page.getByRole("button", { name: "Guardar borrador", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/productos/${id}/preparacion`));
+
+  await page.goto("/tests/harness/catalog-http.html?path=/productos");
+  await page.getByRole("link", { name: "Ver detalle de Borrador H4" }).click();
+  await page.getByRole("link", { name: "Editar", exact: true }).click();
+  await expect(page.getByLabel("Descripción comercial")).toHaveValue("Descripción original");
+  await page.getByLabel("Descripción comercial").fill("Descripción corregida");
+  await page.getByRole("button", { name: "Guardar cambios", exact: true }).click();
+  await expect(page.getByText("Descripción corregida", { exact: true })).toBeVisible();
+  expect(sentVersions).toEqual([4]);
+  await expect(page.getByText("v5", { exact: true })).toBeVisible();
 });

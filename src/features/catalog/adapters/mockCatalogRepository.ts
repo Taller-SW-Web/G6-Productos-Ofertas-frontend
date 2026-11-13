@@ -2,6 +2,7 @@ import type {
   CatalogPageResult,
   CatalogQuery,
   CatalogRepository,
+  ProductStatus,
   ProductCreatePayload,
   ProductDetailView,
   ProductPreparationView,
@@ -451,7 +452,7 @@ export class MockCatalogRepository implements CatalogRepository {
         (p) =>
           p.name.toLowerCase().includes(term) ||
           p.skuBase?.toLowerCase().includes(term) ||
-          p.description.toLowerCase().includes(term),
+          (p.description ?? "").toLowerCase().includes(term),
       );
     }
 
@@ -817,6 +818,7 @@ export class MockCatalogRepository implements CatalogRepository {
       current.physicalProfile = normalizePhysicalProfile(payload.perfilFisico);
     }
 
+    if (current.catalogVersion === null) throw new CatalogError("blocked_contract", "No se puede actualizar un producto sin versión administrativa.");
     current.catalogVersion += 1;
     this.products[idx] = current;
     this.changed();
@@ -917,6 +919,7 @@ export class MockCatalogRepository implements CatalogRepository {
     }
 
     product.status = "ACTIVO";
+    if (product.catalogVersion === null) throw new CatalogError("blocked_contract", "No se puede mutar el estado sin versión administrativa.");
     product.catalogVersion += 1;
     this.changed();
     return JSON.parse(JSON.stringify(product));
@@ -941,6 +944,7 @@ export class MockCatalogRepository implements CatalogRepository {
     if (!product) throw new CatalogError("not_found", "Producto no encontrado.");
 
     product.status = "INACTIVO";
+    if (product.catalogVersion === null) throw new CatalogError("blocked_contract", "No se puede mutar el estado sin versión administrativa.");
     product.catalogVersion += 1;
     this.changed();
     // Note: variants keep their individual statuses!
@@ -1496,7 +1500,7 @@ export class MockCatalogRepository implements CatalogRepository {
     // "Si era la última variante activa y el padre estaba activo, se inactiva al padre;
     // si estaba en borrador o inactivo, conserva su estado."
     let parentStatusChanged = false;
-    let parentNewStatus: typeof parent.status | undefined;
+    let parentNewStatus: ProductStatus | undefined;
 
     const remainingActiveVariants = this.variants.filter(
       (v) => v.productId === productId && v.variantId !== variantId && v.status === "ACTIVA",

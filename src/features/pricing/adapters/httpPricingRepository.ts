@@ -19,6 +19,7 @@ import type {
 } from "../services/pricingRepository";
 import {
   mapBatchDto,
+  mapEditablePriceDto,
   mapPriceDto,
   mapScheduleDto,
   mapSchedulePageDto,
@@ -41,7 +42,9 @@ export interface PricingHttpTransport {
 
 export interface HttpPricingRepositoryDependencies {
   transport: PricingHttpTransport;
+  scopeId?: () => string | null;
   listCatalogTargets?: (signal: AbortSignal) => Promise<PriceTarget[]>;
+  canManagePricing?: () => boolean;
   channelIds?: PricingChannelIds;
   onUpdated?: (
     target: PriceTarget,
@@ -55,18 +58,31 @@ const pageSize = 20;
 
 type UpdateConfirmation = Pick<
   PriceView,
-  "version" | "regular" | "offer" | "currency" | "channel" | "origin"
-> & { productId: string };
+  "id" | "sku" | "version" | "regular" | "offer" | "currency" | "channel" | "origin"
+> & { productId: string; owner: string; targetKind: PriceTarget["kind"]; channelId: string | null };
 
 function confirmsUpdate(price: PriceView, expected: UpdateConfirmation): boolean {
   return (
+    price.id === expected.id && price.sku === expected.sku &&
     price.version > expected.version &&
-    price.regular === expected.regular &&
-    price.offer === expected.offer &&
+    sameMoney(price.regular, expected.regular) &&
+    (price.offer === null || expected.offer === null ? price.offer === expected.offer : sameMoney(price.offer, expected.offer)) &&
     price.currency === expected.currency &&
     price.channel === expected.channel &&
     price.origin === expected.origin
   );
+}
+
+function sameMoney(left: string, right: string): boolean {
+  try {
+    const toCents = (value: string) => {
+      if (!/^\d+(?:\.\d{1,2})?$/.test(value)) return null;
+      const [whole = "0", fraction = ""] = value.split(".");
+      return BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
+    };
+    const a = toCents(left), b = toCents(right);
+    return a !== null && b !== null && a === b;
+  } catch { return false; }
 }
 
 function blocked(message: string): PricingFailure {
@@ -112,9 +128,53 @@ export function createHttpPricingRepository(
   const uncertainUpdates = new Map<string, UpdateConfirmation>();
   const uncertainSchedules = new Set<string>();
   const pendingWrites = new Set<string>();
+  const markerPrefix = "g6:pricing:pending:v1:";
+  const markerKey = (key: string, operation: "update" | "schedule") =>
+    markerPrefix + operation + ":" + encodeURIComponent(key);
+  const persistMarker = (key: string, operation: "update" | "schedule", expected: unknown) => {
+    try { sessionStorage.setItem(markerKey(key, operation), JSON.stringify({ key, operation, expected, state: "IN_FLIGHT" })); }
+    catch { throw new PricingFailure("unknown", "No se pudo persistir de forma segura la intención de Pricing; no se envió la escritura."); }
+  };
+  const setMarkerState = (key: string, operation: "update" | "schedule", state: "PENDING_RECONCILIATION" | "REQUIRES_EXTERNAL_VERIFICATION") => {
+    try { const storageKey = markerKey(key, operation); const marker = JSON.parse(sessionStorage.getItem(storageKey) ?? "null") as Record<string, unknown> | null; if (marker?.key === key && marker.operation === operation) sessionStorage.setItem(storageKey, JSON.stringify({ ...marker, state })); } catch { /* an unreadable marker remains fail-closed */ }
+  };
+  const readMarker = (key: string, operation: "update" | "schedule"):
+    | { state: "absent" }
+    | { state: "valid"; expected: UpdateConfirmation | Record<string, unknown> }
+    | { state: "corrupt" | "inaccessible" } => {
+    let raw: string | null;
+    try { raw = sessionStorage.getItem(markerKey(key, operation)); }
+    catch { return { state: "inaccessible" }; }
+    if (raw === null) return { state: "absent" };
+    try {
+      const marker = JSON.parse(raw) as { key?: unknown; operation?: unknown; expected?: unknown; state?: unknown };
+      if (marker.key !== key || marker.operation !== operation || !marker.expected || typeof marker.expected !== "object" || !["IN_FLIGHT", "PENDING_RECONCILIATION", "REQUIRES_EXTERNAL_VERIFICATION"].includes(String(marker.state))) return { state: "corrupt" };
+      const expected = marker.expected as Record<string, unknown>;
+      if (operation === "update" && (typeof expected.productId !== "string" || typeof expected.id !== "string" || typeof expected.owner !== "string" || expected.owner !== (dependencies.scopeId?.() ?? "session-unavailable") || (expected.targetKind !== "product" && expected.targetKind !== "variant") || !(typeof expected.channelId === "string" || expected.channelId === null) || typeof expected.version !== "number" || typeof expected.regular !== "string" || ![null, "string"].includes(typeof expected.offer) && expected.offer !== null || typeof expected.currency !== "string" || typeof expected.channel !== "string" || typeof expected.origin !== "string" || (expected.sku !== undefined && typeof expected.sku !== "string"))) return { state: "corrupt" };
+      if (operation === "schedule" && (typeof expected.owner !== "string" || expected.owner !== (dependencies.scopeId?.() ?? "session-unavailable") || typeof expected.targetId !== "string" || (expected.targetKind !== "product" && expected.targetKind !== "variant") || !(typeof expected.channelId === "string" || expected.channelId === null) || typeof expected.channel !== "string" || typeof expected.kind !== "string" || typeof expected.amount !== "string" || typeof expected.currency !== "string" || typeof expected.start !== "number" || !(typeof expected.end === "number" || expected.end === null) || !Array.isArray(expected.baselineIds) || expected.baselineIds.some(id => typeof id !== "string"))) return { state: "corrupt" };
+      return { state: "valid", expected: expected as UpdateConfirmation | Record<string, unknown> };
+    } catch { return { state: "corrupt" }; }
+  };
+  const clearMarker = (key: string, operation: "update" | "schedule") => { try { sessionStorage.removeItem(markerKey(key, operation)); } catch { /* uncertain marker remains fail-closed */ } };
 
-  function scopeKey(target: PriceTarget, channel: PriceChannel): string {
-    return `${targetPath(target)}:${channel}`;
+  function scopeKey(target: PriceTarget, channel: PriceChannel, owner = dependencies.scopeId?.() ?? "session-unavailable"): string {
+    return `${targetPath(target)}:${channel}:${encodeURIComponent(owner)}`;
+  }
+
+  function uncertainUpdate(key: string): UpdateConfirmation | undefined {
+    const value = uncertainUpdates.get(key);
+    if (value) return value;
+    const marker = readMarker(key, "update");
+    if (marker.state === "absent") return undefined;
+    if (marker.state !== "valid") throw new PricingFailure("unknown", "El marcador de una escritura previa está corrupto o inaccesible; se bloquea el reenvío por seguridad.");
+    uncertainUpdates.set(key, marker.expected as UpdateConfirmation);
+    return marker.expected as UpdateConfirmation;
+  }
+  function hasUncertainSchedule(key: string): boolean {
+    if (uncertainSchedules.has(key)) return true;
+    const marker = readMarker(key, "schedule");
+    if (marker.state !== "absent") uncertainSchedules.add(key);
+    return marker.state !== "absent";
   }
 
   async function catalogTargets(signal: AbortSignal): Promise<PriceTarget[]> {
@@ -161,10 +221,7 @@ export function createHttpPricingRepository(
 
   function channelIdFor(channel: PriceChannel): string | null {
     if (channel === "global") return null;
-    if (channelIds.retail) return channelIds.retail;
-    throw blocked(
-      "El contrato de escritura requiere el channelId canónico de Retail; Catálogo/Integración todavía no lo proporciona.",
-    );
+    return channel.toUpperCase();
   }
 
   async function send(
@@ -210,7 +267,7 @@ export function createHttpPricingRepository(
             ? code === "VIGENCIA_SUPERPUESTA"
               ? "overlap"
               : "conflict"
-            : write && response.status >= 500
+            : write && (response.status >= 500 || response.status === 408)
               ? "unknown"
               : "error";
     const message =
@@ -222,7 +279,7 @@ export function createHttpPricingRepository(
             ? code === "VIGENCIA_SUPERPUESTA"
               ? "La vigencia se superpone con otra del mismo objetivo y canal."
               : "El precio cambió desde la lectura. Conserva la propuesta y vuelve a consultar."
-            : write && response.status >= 500
+            : write && (response.status >= 500 || response.status === 408)
               ? "Pricing no confirmó el resultado. Consulta el estado antes de intentar otra vez."
               : response.status === 400 || response.status === 422
                 ? "Pricing rechazó los datos enviados. Revisa el formulario."
@@ -252,18 +309,36 @@ export function createHttpPricingRepository(
     }
   }
 
+  async function readAllSchedules(target: PriceTarget, signal: AbortSignal): Promise<ScheduleView[]> {
+    const first = await json(targetPath(target, `/programaciones?pagina=1&tamanio=${pageSize}`), { method: "GET", signal }, false);
+    if (first === null) throw new PricingFailure("unknown", "No se pudo capturar la línea base de programaciones.");
+    const initial = mapSchedulePageDto(first, target, 1, pageSize, channelIds);
+    const pages = Math.ceil(initial.total / pageSize);
+    if (pages > 1000) throw new PricingFailure("unknown", "La línea base supera el límite de paginación; no se envía la programación sin evidencia reconciliable.");
+    const items = [...initial.items];
+    for (let page = 2; page <= pages; page++) {
+      const value = await json(targetPath(target, `/programaciones?pagina=${page}&tamanio=${pageSize}`), { method: "GET", signal }, false);
+      if (value === null) throw new PricingFailure("unknown", "La línea base quedó incompleta; no se envía la programación.");
+      const mapped = mapSchedulePageDto(value, target, page, pageSize, channelIds);
+      if (mapped.total !== initial.total) throw new PricingFailure("unknown", "El total cambió al capturar la línea base; no se envía la programación.");
+      items.push(...mapped.items);
+    }
+    if (items.length !== initial.total) throw new PricingFailure("unknown", "La paginación de línea base está incompleta; no se envía la programación.");
+    return items;
+  }
+
   async function readTarget(
     target: PriceTarget,
     channel: PriceChannel,
     signal: AbortSignal,
   ): Promise<PriceView | null> {
-    if (target.kind === "product" && channel === "retail") {
-      throw blocked(
-        "El GET administrativo de producto no resuelve canal Retail. Se requiere un SKU legítimo o una operación contractual que confirme ese alcance.",
-      );
+    if (target.kind === "product" && channel !== "global") {
+      const exact = await readExact(target, channel, signal);
+      if (exact) return exact;
+      const global = await readTarget(target, "global", signal);
+      return global ? { ...global, inherited: true } : null;
     }
-    const suffix =
-      target.kind === "variant" && channel === "retail" ? "?canal=RETAIL" : "";
+    const suffix = target.kind === "variant" && channel !== "global" ? `?canal=${channel.toUpperCase()}` : "";
     const response = await json(
       targetPath(target, suffix),
       { method: "GET", signal },
@@ -272,7 +347,7 @@ export function createHttpPricingRepository(
     );
     if (response === null) return null;
     const price = mapPriceDto(response, target, channelIds);
-    if (channel === "global" && price.channel !== "global") {
+    if (price.channel !== "global" && price.channel !== channel) {
       throw new PricingFailure(
         "error",
         "Pricing devolvió un precio de otro canal.",
@@ -281,20 +356,32 @@ export function createHttpPricingRepository(
     return price;
   }
 
+  async function readExact(target: PriceTarget, channel: PriceChannel, signal: AbortSignal): Promise<PriceView | null> {
+    const path = targetPath(target).replace("/precios/", "/precios/administracion/");
+    const channelId = channelIdFor(channel);
+    const query = channelId === null ? "" : "?" + new URLSearchParams({ channelId });
+    const dto = await json(path + query, { method: "GET", signal }, false, ["PRECIO_NO_ENCONTRADO"]);
+    return dto === null ? null : mapEditablePriceDto(dto, target, channel);
+  }
+
   return {
     async listTargets(signal) {
       return catalogTargets(signal);
     },
 
     async read(query: PriceQuery, signal) {
+      const owner = dependencies.scopeId?.();
       const target = await targetById(query.targetId, signal);
       const price = await readTarget(target, query.channel, signal);
+      if (dependencies.scopeId?.() !== owner) throw new PricingFailure("unknown", "La sesión cambió durante la lectura de Pricing.");
       return price ? { price, breakdown: [] } : null;
     },
 
     async readEditable(writeTarget: WriteTarget, signal) {
+      const owner = dependencies.scopeId?.() ?? "session-unavailable";
       const target = await targetById(writeTarget.targetId, signal);
-      const key = scopeKey(target, writeTarget.channel);
+      if ((dependencies.scopeId?.() ?? "session-unavailable") !== owner) throw new PricingFailure("unknown", "La sesión cambió durante la lectura de Pricing.");
+      const key = scopeKey(target, writeTarget.channel, owner);
       if (pendingWrites.has("update:" + key)) {
         throw new PricingFailure(
           "unknown",
@@ -302,36 +389,24 @@ export function createHttpPricingRepository(
         );
       }
       editableReads.delete(key);
-      if (target.kind === "product" && writeTarget.channel === "retail") {
-        throw blocked(
-          "GET de precio de producto no admite canal. No es posible leer la versión exacta de un precio Retail para editarlo.",
-        );
-      }
-      const price = await readTarget(target, writeTarget.channel, signal);
-      if (
-        target.kind === "variant" &&
-        price &&
-        (price.inherited ||
-          price.origin !== "sku" ||
-          price.channel !== writeTarget.channel)
-      ) {
-        throw blocked(
-          "El precio consultado es heredado o corresponde a otro canal. Pricing no confirmó una definición propia para editar este alcance.",
-        );
-      }
-      const uncertain = uncertainUpdates.get(key);
+      const price = await readExact(target, writeTarget.channel, signal);
+      if ((dependencies.scopeId?.() ?? "session-unavailable") !== owner) throw new PricingFailure("unknown", "La sesión cambió durante la lectura de precio; no se reconcilia el propietario anterior.");
+      const uncertain = uncertainUpdate(key);
       if (uncertain) {
         if (
           !price ||
           uncertain.productId !== target.productId ||
+          uncertain.channelId !== channelIdFor(writeTarget.channel) ||
           !confirmsUpdate(price, uncertain)
         ) {
+          setMarkerState(key, "update", "REQUIRES_EXTERNAL_VERIFICATION");
           throw new PricingFailure(
             "unknown",
             "El cambio sigue pendiente de verificación. La lectura no confirma una versión superior con los valores solicitados; no se permite reenviarlo.",
           );
         }
         uncertainUpdates.delete(key);
+        clearMarker(key, "update");
       }
       if (price) {
         editableReads.set(key, { productId: target.productId, price });
@@ -340,9 +415,13 @@ export function createHttpPricingRepository(
     },
 
     async update(change: PriceChange, signal) {
+      const owner = dependencies.scopeId?.() ?? "session-unavailable";
+      if (dependencies.canManagePricing && !dependencies.canManagePricing())
+        throw new PricingFailure("forbidden", "Tu cuenta no tiene el rol GESTOR_COMERCIAL requerido para modificar precios.");
       const target = await targetById(change.target.targetId, signal);
-      const key = scopeKey(target, change.target.channel);
-      if (uncertainUpdates.has(key)) {
+      if ((dependencies.scopeId?.() ?? "session-unavailable") !== owner) throw new PricingFailure("unknown", "La sesión cambió antes de despachar el cambio de precio.");
+      const key = scopeKey(target, change.target.channel, owner);
+      if (uncertainUpdate(key)) {
         throw new PricingFailure(
           "unknown",
           "El resultado anterior sigue pendiente de verificación. Releer solo desbloquea este alcance si Pricing confirma una versión superior con los valores solicitados.",
@@ -355,11 +434,6 @@ export function createHttpPricingRepository(
         throw new PricingFailure(
           "conflict",
           "Vuelve a leer el precio exacto de este objetivo y canal antes de guardar.",
-        );
-      }
-      if (target.kind === "product" && change.target.channel === "retail") {
-        throw blocked(
-          "No existe una lectura contractual de precio de producto por canal para verificar la versión antes de editar Retail.",
         );
       }
       if (!Number.isSafeInteger(change.version) || change.version < 1) {
@@ -385,7 +459,12 @@ export function createHttpPricingRepository(
         body.precioOferta = requestMoney(change.draft.offer);
       if (change.draft.offerAction === "ELIMINAR") body.precioOferta = null;
       const expected: UpdateConfirmation = {
+        id: target.id,
+        sku: target.kind === "variant" ? target.sku : target.referenceSku,
         productId: target.productId,
+        owner,
+        targetKind: target.kind,
+        channelId: body.channelId,
         version: before.version,
         regular: String(body.precioRegular),
         offer:
@@ -405,6 +484,7 @@ export function createHttpPricingRepository(
           "Hay un cambio pendiente de confirmación para este objetivo y canal.",
         );
       }
+      persistMarker(key, "update", expected);
       pendingWrites.add(pendingKey);
       try {
         const response = await json(
@@ -419,7 +499,7 @@ export function createHttpPricingRepository(
         );
         let after: PriceView;
         try {
-          after = mapPriceDto(response, target, channelIds);
+          after = mapPriceDto(response, target, channelIds, undefined, true);
           if (!confirmsUpdate(after, expected)) {
             throw new Error("Confirmación incompatible");
           }
@@ -430,6 +510,9 @@ export function createHttpPricingRepository(
           );
         }
         editableReads.set(key, { productId: target.productId, price: after });
+        if ((dependencies.scopeId?.() ?? "session-unavailable") !== owner) throw new PricingFailure("unknown", "El cambio fue confirmado bajo la identidad original; no se presenta en la sesión actual.");
+        clearMarker(key, "update");
+        uncertainUpdates.delete(key);
         try {
           await dependencies.onUpdated?.(
             target,
@@ -444,8 +527,10 @@ export function createHttpPricingRepository(
         }
         return after;
       } catch (error) {
-        if (error instanceof PricingFailure && error.kind === "unknown")
+        if (error instanceof PricingFailure && error.kind === "unknown") {
           uncertainUpdates.set(key, expected);
+          setMarkerState(key, "update", "PENDING_RECONCILIATION");
+        } else clearMarker(key, "update");
         throw error;
       } finally {
         pendingWrites.delete(pendingKey);
@@ -453,23 +538,84 @@ export function createHttpPricingRepository(
     },
 
     async listSchedules(targetId, page, signal): Promise<SchedulePage> {
+      const owner = dependencies.scopeId?.() ?? "session-unavailable";
+      const assertOwner = () => {
+        if ((dependencies.scopeId?.() ?? "session-unavailable") !== owner)
+          throw new PricingFailure("unknown", "La sesión cambió durante la lectura de programaciones; la respuesta y la conciliación se descartan.");
+      };
       if (!Number.isSafeInteger(page) || page < 1) {
         throw new PricingFailure("error", "La página solicitada no es válida.");
       }
-      const target = await targetById(targetId, signal);
+      let target: PriceTarget;
+      try { target = await targetById(targetId, signal); }
+      catch (error) { assertOwner(); throw error; }
+      if ((dependencies.scopeId?.() ?? "session-unavailable") !== owner) throw new PricingFailure("unknown", "La sesión cambió durante la lectura de programaciones.");
       const suffix = `/programaciones?pagina=${page}&tamanio=${pageSize}`;
-      const response = await json(
-        targetPath(target, suffix),
-        { method: "GET", signal },
-        false,
-      );
+      let response: unknown;
+      try { response = await json(targetPath(target, suffix), { method: "GET", signal }, false); }
+      catch (error) { assertOwner(); throw error; }
+      assertOwner();
       if (response === null) {
         throw new PricingFailure(
           "error",
           "Pricing no devolvió las programaciones.",
         );
       }
-      return mapSchedulePageDto(response, target, page, pageSize, channelIds);
+      const result = mapSchedulePageDto(response, target, page, pageSize, channelIds);
+      assertOwner();
+      const scopeSuffix = `:${encodeURIComponent(owner)}`;
+      const targetPrefix = `${targetPath(target)}:`;
+      let needsReconciliation = [...uncertainSchedules].some(key => key.startsWith(targetPrefix) && key.endsWith(scopeSuffix));
+      try {
+        const scopePrefix = markerPrefix + "schedule:";
+        for (const storageKey of Object.keys(sessionStorage).filter(item => item.startsWith(scopePrefix))) {
+          let storedIntent: string;
+          try { storedIntent = decodeURIComponent(storageKey.slice(scopePrefix.length)); } catch { continue; }
+          if (!storedIntent.startsWith(targetPrefix) || !storedIntent.endsWith(scopeSuffix)) continue;
+          const entry = JSON.parse(sessionStorage.getItem(storageKey) ?? "null") as { key?: string; operation?: string; expected?: unknown } | null;
+          if (!entry || entry.operation !== "schedule" || !entry.key || !entry.expected || entry.key !== storedIntent) throw new Error("Corrupt pricing marker");
+          uncertainSchedules.add(entry.key);
+          needsReconciliation = true;
+        }
+      } catch { throw new PricingFailure("unknown", "Hay un marcador de programación ilegible o inaccesible; no se libera ninguna intención."); }
+      if (!needsReconciliation) { assertOwner(); return result; }
+      const allSchedules = [...result.items];
+      const pages = Math.ceil(result.total / pageSize);
+      if (pages > 1000) throw new PricingFailure("unknown", "La paginación excede el límite defensivo; no se liberan intenciones de programación.");
+      for (let current = 1; current <= pages; current++) {
+        if (current === page) continue;
+        let pageValue: unknown;
+        try { pageValue = await json(targetPath(target, `/programaciones?pagina=${current}&tamanio=${pageSize}`), { method: "GET", signal }, false); }
+        catch (error) { assertOwner(); throw error; }
+        assertOwner();
+        if (pageValue === null) throw new PricingFailure("unknown", "La lectura paginada quedó incompleta; se conservan los bloqueos.");
+        const mapped = mapSchedulePageDto(pageValue, target, current, pageSize, channelIds);
+        assertOwner();
+        if (mapped.total !== result.total) throw new PricingFailure("unknown", "El total cambió durante la reconciliación; se conservan los bloqueos.");
+        allSchedules.push(...mapped.items);
+      }
+      assertOwner();
+      for (const key of [...uncertainSchedules]) {
+        assertOwner();
+        if (!key.startsWith(targetPrefix) || !key.endsWith(scopeSuffix)) continue;
+        const marker = readMarker(key, "schedule");
+        if (marker.state === "absent") continue;
+        if (marker.state !== "valid") throw new PricingFailure("unknown", "Una intención de programación está corrupta o inaccesible; no se permite reenviar.");
+        const expected = marker.expected as Record<string, unknown>;
+        const expectedChannel = expected.channel as PriceChannel;
+        const expectedChannelId = channelIdFor(expectedChannel as PriceChannel);
+        if (expected.channelId !== expectedChannelId) throw new PricingFailure("unknown", "La identidad canónica del canal cambió o falta; no se libera la programación incierta.");
+        const matches = allSchedules.filter(item => {
+          const value = expected;
+          return item.targetId === value.targetId && item.channel === value.channel && item.kind === value.kind && sameMoney(item.amount, String(value.amount)) && item.currency === value.currency && Date.parse(item.start) === value.start && (item.end === null ? null : Date.parse(item.end)) === value.end;
+        });
+        const baselineIds = expected.baselineIds as string[];
+        const newMatches = matches.filter(item => !baselineIds.includes(item.id));
+        if (newMatches.length === 1) { clearMarker(key, "schedule"); uncertainSchedules.delete(key); }
+        else setMarkerState(key, "schedule", "REQUIRES_EXTERNAL_VERIFICATION");
+      }
+      assertOwner();
+      return result;
     },
 
     async schedule(
@@ -477,7 +623,11 @@ export function createHttpPricingRepository(
       draft: ScheduleDraft,
       signal,
     ): Promise<ScheduleView> {
+      if (dependencies.canManagePricing && !dependencies.canManagePricing())
+        throw new PricingFailure("forbidden", "Tu cuenta no tiene el rol GESTOR_COMERCIAL requerido para programar precios.");
+      const owner = dependencies.scopeId?.() ?? "session-unavailable";
       const target = await targetById(targetId, signal);
+      if ((dependencies.scopeId?.() ?? "session-unavailable") !== owner) throw new PricingFailure("unknown", "La sesión cambió antes de despachar la programación.");
       const validFrom = localInstant(draft.start);
       const validUntil = draft.end ? localInstant(draft.end) : null;
       if (!validFrom || (draft.end && !validUntil)) {
@@ -495,14 +645,18 @@ export function createHttpPricingRepository(
         validUntil,
         motivoCambio: draft.reason,
       };
-      const key = scopeKey(target, draft.channel);
+      const key = scopeKey(target, draft.channel, owner);
       const pendingKey = "schedule:" + key;
-      if (uncertainSchedules.has(key) || pendingWrites.has(pendingKey)) {
+      if (hasUncertainSchedule(key) || pendingWrites.has(pendingKey)) {
         throw new PricingFailure(
           "unknown",
           "Hay una programación pendiente de verificación. Consulta las programaciones antes de realizar otra escritura.",
         );
       }
+      const baselineSchedules = await readAllSchedules(target, signal);
+      if ((dependencies.scopeId?.() ?? "session-unavailable") !== owner) throw new PricingFailure("unknown", "La sesión cambió al capturar la línea base; no se envió la programación.");
+      const expectedSchedule = { owner, targetId: target.id, targetKind: target.kind, channelId: body.channelId, channel: draft.channel, kind: draft.kind, amount: String(body.importe), currency: draft.currency, start: Date.parse(body.validFrom), end: validUntil === null ? null : Date.parse(validUntil), baselineIds: baselineSchedules.filter(item => item.targetId === target.id && item.channel === draft.channel && item.kind === draft.kind && sameMoney(item.amount, String(body.importe)) && item.currency === draft.currency && Date.parse(item.start) === Date.parse(body.validFrom) && (item.end === null ? null : Date.parse(item.end)) === (validUntil === null ? null : Date.parse(validUntil))).map(item => item.id) };
+      persistMarker(key, "schedule", expectedSchedule);
       pendingWrites.add(pendingKey);
       try {
         const response = await json(
@@ -528,6 +682,8 @@ export function createHttpPricingRepository(
           ) {
             throw new Error("Confirmación incompatible");
           }
+          if ((dependencies.scopeId?.() ?? "session-unavailable") !== owner) throw new PricingFailure("unknown", "La programación fue confirmada bajo la identidad original; no se presenta en la sesión actual.");
+          clearMarker(key, "schedule"); uncertainSchedules.delete(key);
           return created;
         } catch {
           throw new PricingFailure(
@@ -536,8 +692,10 @@ export function createHttpPricingRepository(
           );
         }
       } catch (error) {
-        if (error instanceof PricingFailure && error.kind === "unknown")
+        if (error instanceof PricingFailure && error.kind === "unknown") {
           uncertainSchedules.add(key);
+          setMarkerState(key, "schedule", "PENDING_RECONCILIATION");
+        } else clearMarker(key, "schedule");
         throw error;
       } finally {
         pendingWrites.delete(pendingKey);
@@ -564,7 +722,7 @@ export function createHttpPricingRepository(
         );
       }
       const params = new URLSearchParams({ at });
-      if (query.channel === "retail") params.set("canal", "RETAIL");
+      if (query.channel !== "global") params.set("canal", query.channel.toUpperCase());
       const response = await json(
         `/api/v1/precios/skus/${encoded(sku)}?${params.toString()}`,
         { method: "GET", signal },

@@ -33,18 +33,10 @@ export function TaxonomyModeGate({ children }: { children: ReactNode }) {
         {children}
       </>
     );
-  const productTypeSchemaPath = /^\/tipos-producto\/[^/]+\/esquema$/.test(pathname);
-  if (
-    mode === "api" &&
-    (pathname === "/tipos-producto" || productTypeSchemaPath) &&
-    isTaxonomyGatewayConfigured()
-  )
-    return children;
-  if (mode === "api")
-    return (
-      <FeedbackAlert semantic="error" title="Función no disponible">
-        Esta función no está disponible en el modo actual.
-      </FeedbackAlert>
-    );
-  return children;
+  if (mode === "api" && isTaxonomyGatewayConfigured()) return children;
+  return (
+    <FeedbackAlert semantic="error" title="Función no disponible">
+      Se requiere sesión G7 y un origen Gateway configurado para esta operación.
+    </FeedbackAlert>
+  );
 }

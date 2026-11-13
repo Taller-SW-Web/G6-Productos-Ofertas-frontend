@@ -50,7 +50,7 @@ de herramientas del plan Starter. No se declara verificación de Figma.
   al entrar y al vencer el acceso. La navegación de una sesión ya validada conserva
   el shell montado; no se reinicia la validación por cada location.key.
 - El retorno admite únicamente rutas administrativas registradas; URLs externas,
-  rutas desconocidas, login y demo pública vuelven a `/precios`. No se infieren
+  rutas desconocidas, login y demo pública vuelven a `/productos`. No se infieren
   grants. La entrada al panel exige el rol publicado `GESTOR_COMERCIAL`
   (Arquitectura §21); cada operación sigue autorizándose en sus providers.
 - El encabezado muestra la identidad recibida y ofrece logout en todos los módulos.
@@ -299,3 +299,19 @@ Archivos de código de esta corrección: `src/app/routes/RequireSession.tsx`,
 y `src/features/auth/pages/login.module.css`. Se actualizan las pruebas de
 `tests/auth-general.spec.ts`, README, este informe y tres capturas del login/MFA.
 Estado de esta corrección: UI_COMPLETE; solo ámbito de autenticación.
+
+## Integracion Azure y formato de acceso — 12/11/2026
+
+El consumidor G6 solicita explícitamente `formatoAcceso: "JWS"` en login,
+verificación MFA y renovación, conforme a ADR-009 y los DTO de G7 Backend
+`develop@44f7d2953b4e8727c4f566a3be849ab25171c66a`. La sesión conserva el
+access token RS256 de tres segmentos y rechaza respuestas JWE; no se descifra
+ni relaja la validación del backend. Los tokens siguen solo en memoria.
+
+Los adapters administrativos de Catalog, Taxonomy, Promotions y Bulk usan
+Bearer también en GET, manteniendo refresh acotado y sin repetir escrituras.
+`/consultas` y las entradas explícitas de lectura siguen usando su cliente
+anónimo separado para las operaciones públicas aprobadas. Una consulta
+comercial no se transforma en DTO administrativo: las lecturas de gestión de
+Catalog que siguen sin contrato permanecen bloqueadas; esta integración no
+las inventa ni habilita flujos asíncronos pendientes.

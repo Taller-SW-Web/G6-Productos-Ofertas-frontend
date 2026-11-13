@@ -16,6 +16,7 @@ import {
   useSolicitarBajaMarca,
 } from "../hooks/useSolicitarBajaMarca";
 import { estadoSemantic } from "../services/estadoSemantic";
+import { brandService } from "../services/brandService";
 import type { BrandBajaResult, BrandDetail } from "../types";
 
 export function BrandDetailPage() {
@@ -78,7 +79,7 @@ function BrandDetailLoader({ id }: { id: string }) {
           </FeedbackAlert>
         )}
         {state.status === "success" && (
-          <BrandDetailContent detalle={state.detalle} baja={baja} />
+          <BrandDetailContent detalle={state.detalle} baja={baja} onReload={reload} />
         )}
       </Stack>
     </>
@@ -88,12 +89,16 @@ function BrandDetailLoader({ id }: { id: string }) {
 function BrandDetailContent({
   detalle,
   baja,
+  onReload,
 }: {
   detalle: BrandDetail;
   baja: ReturnType<typeof useSolicitarBajaMarca>;
+  onReload: () => void;
 }) {
   const navigate = useNavigate();
   const [confirmar, setConfirmar] = useState(false);
+  const [reactivando, setReactivando] = useState(false);
+  const [reactivacionError, setReactivacionError] = useState<string | null>(null);
   const resultado = baja.state.status === "success" ? baja.state.result : null;
 
   const cerrar = () => {
@@ -113,6 +118,7 @@ function BrandDetailContent({
             >
               Editar
             </Button>
+            {detalle.estado === "Inactivo" && <Button variant="outline" loading={reactivando} onClick={() => { setReactivando(true); setReactivacionError(null); void brandService.reactivar(detalle.marcaId).then(result => { if (!result) throw new Error("Marca no encontrada (404)."); onReload(); }).catch(error => setReactivacionError(error instanceof Error ? error.message : "No se pudo reactivar la marca.")).finally(() => setReactivando(false)); }}>Reactivar</Button>}
             {detalle.estado === "Activo" && baja.state.status === "idle" && (
               <Button variant="outline" onClick={() => setConfirmar(true)}>
                 Solicitar desactivación
@@ -156,6 +162,7 @@ function BrandDetailContent({
         </Stack>
       </SectionCard>
 
+      {reactivacionError && <FeedbackAlert semantic="error" title="No se pudo reactivar la marca">{reactivacionError}</FeedbackAlert>}
       {baja.state.status === "enviando" && (
         <FeedbackAlert
           semantic="info"

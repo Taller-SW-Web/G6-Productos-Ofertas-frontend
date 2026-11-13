@@ -38,7 +38,8 @@ export function CampaignDetailPage({
   } = usePromotionServices();
   const [revision, setRevision] = useState(0),
     [opened, setOpened] = useState(false),
-    [updated, setUpdated] = useState(false);
+    [updated, setUpdated] = useState(false),
+    [statusReconciled, setStatusReconciled] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null),
     location = useLocation(),
     navigate = useNavigate();
@@ -57,7 +58,7 @@ export function CampaignDetailPage({
     setPrevResult(state.result);
     setCachedRecord(state.result);
   }
-  const record = state.status === "success" ? state.result : cachedRecord;
+  const record = state.status === "success" ? state.result : cachedRecord?.id === promotionId ? cachedRecord : null;
   const catalogRead = useCallback(
     (signal: AbortSignal) => confirmedServices.catalog.products(signal, record
       ? { productIds: record.configuration.productIds, skus: record.configuration.skus }
@@ -94,14 +95,14 @@ export function CampaignDetailPage({
       <Stack gap="lg">
         <PromotionDataNotice kind="campaign-detail" />
         {location.state?.saved && (
-          <FeedbackAlert semantic="success" title="Promoción guardada">
-            La configuración fue confirmada.
-          </FeedbackAlert>
+          location.state?.reconciled
+            ? <FeedbackAlert semantic="warning" title="Estado final conciliado">La lectura administrativa coincide con los campos esperados. Esto acredita el estado observado, no que la solicitud anterior haya sido su causa.</FeedbackAlert>
+            : <FeedbackAlert semantic="success" title="Promoción guardada">La configuración fue confirmada.</FeedbackAlert>
         )}
         {updated && (
-          <FeedbackAlert semantic="success" title="Estado actualizado">
-            El cambio fue confirmado. Los pedidos históricos no se modifican.
-          </FeedbackAlert>
+          statusReconciled
+            ? <FeedbackAlert semantic="warning" title="Estado final conciliado">El estado solicitado se observa en la lectura administrativa; no se atribuye a la petición original. Los pedidos históricos no se modifican.</FeedbackAlert>
+            : <FeedbackAlert semantic="success" title="Estado actualizado">El cambio fue confirmado. Los pedidos históricos no se modifican.</FeedbackAlert>
         )}
         {state.status === "loading" && !record && (
           <Text role="status">Consultando promoción…</Text>
@@ -225,13 +226,12 @@ export function CampaignDetailPage({
                   signal,
                 )
               }
-              read={(signal) =>
-                confirmedServices.campaigns.read(promotionId, signal)
-              }
+              reconcile={(signal) => confirmedServices.campaigns.reconcilePending?.(promotionId, signal) ?? Promise.resolve({ status: "not_accredited" as const })}
               onCancel={close}
-              onConfirmed={() => {
+              onConfirmed={(outcome) => {
                 close();
                 setUpdated(true);
+                setStatusReconciled(outcome === "RECONCILED");
                 setRevision((value) => value + 1);
               }}
             />

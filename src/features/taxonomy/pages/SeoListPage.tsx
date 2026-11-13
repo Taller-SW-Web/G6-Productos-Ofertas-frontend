@@ -4,6 +4,7 @@ import { ActionIcon, Box, Button, Stack, Text } from "@mantine/core";
 import { IconPlus, IconSettings } from "@tabler/icons-react";
 import {
   EntityTable,
+  FeedbackAlert,
   FilterBar,
   PageHeader,
   SearchField,
@@ -77,6 +78,7 @@ export function SeoListPage() {
             <SearchField label="Buscar" value={busqueda} onChange={setBusqueda} placeholder="Categoría o slug" />
           </Box>
         </FilterBar>
+        {(resultado?.enrichmentUnavailable ?? 0) > 0 && <FeedbackAlert semantic="warning" title="Enriquecimiento SEO parcial">No se pudieron consultar los metadatos SEO de {resultado?.enrichmentUnavailable} categorías; las demás se mantienen disponibles.</FeedbackAlert>}
         <EntityTable caption="Listado de SEO y metadatos" columns={columnas} rows={filas} rowKey={(i) => i.id} state={tablaState} minWidth={720} empty={vacio} />
       </Stack>
     </>

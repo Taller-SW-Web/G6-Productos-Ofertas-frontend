@@ -65,14 +65,16 @@ export interface CategoryCreateResult {
 export interface CategoryDetail {
   id: string;
   nombre: string;
-  slug: string;
-  nivel: number;
-  orden: number;
+  slug: string | null;
+  nivel: number | null;
+  orden: number | null;
+  version: number;
   estado: CategoryNode["estado"];
   descripcion?: string;
   padreId?: string;
   padreNombre?: string;
   hijas: CategoryNode[];
+  actualizadaSinLectura?: boolean;
 }
 
 export interface CategoryUpdateInput {
@@ -151,12 +153,12 @@ export interface CharacteristicListItem {
   tipo: CharacteristicType;
   estado: CharacteristicStatus;
   unidad?: string;
-  valoresActivos: number;
+  valoresActivos: number | null;
 }
 
 export interface CharacteristicCatalogConfig {
-  maxTexto: number;
-  maxValoresLista: number;
+  maxTexto: number | null;
+  maxValoresLista: number | null;
 }
 
 // S02 (Crear característica) — presentation models. The type is chosen at creation
@@ -184,7 +186,8 @@ export interface CharacteristicDetail {
   tipo: CharacteristicType;
   estado: CharacteristicStatus;
   unidad?: string;
-  valoresActivos: number;
+  valoresActivos: number | null;
+  version?: number;
   valores?: CharacteristicValue[];
 }
 
@@ -223,7 +226,7 @@ export interface ProductTypeAssociationCharacteristic {
   tipo: CharacteristicType;
   estado: CharacteristicStatus;
   unidad?: string;
-  valoresActivos: number;
+  valoresActivos: number | null;
 }
 
 export interface ProductTypeAssociation {
@@ -231,7 +234,7 @@ export interface ProductTypeAssociation {
   obligatoria: boolean;
   estado: CharacteristicStatus;
   schemaVersion: number;
-  caracteristica: ProductTypeAssociationCharacteristic;
+  caracteristica: ProductTypeAssociationCharacteristic | null;
 }
 
 export interface ProductTypeDetail {
@@ -239,7 +242,7 @@ export interface ProductTypeDetail {
   nombre: string;
   estado: ProductTypeStatus;
   schemaVersion: number;
-  limiteCaracteristicas: number;
+  limiteCaracteristicas: number | null;
   caracteristicasAsignadas: number;
   asociadas: ProductTypeAssociation[];
 }
@@ -298,12 +301,14 @@ export interface BrandDetail {
 
 export interface BrandCreateInput {
   nombre: string;
+  logoFile?: File | null;
   descripcion?: string | null;
   paisOrigenIso?: string | null;
 }
 
 export interface BrandUpdateInput {
   marcaId: string;
+  logoFile?: File | null;
   nombre: string;
   descripcion?: string | null;
   paisOrigenIso?: string | null;

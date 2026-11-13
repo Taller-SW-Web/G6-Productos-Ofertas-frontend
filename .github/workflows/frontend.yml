@@ -50,6 +50,8 @@ jobs:
         run: npm ci
       - name: Analizar estilo del código
         run: npm run lint
+      - name: Validar comando y entorno del build de Vercel
+        run: node --test scripts/build-vercel.test.mjs
       - name: Probar vigencia del despliegue de producción
         run: node --test scripts/verificar-despliegue-vercel.test.mjs scripts/verificar-vigencia-vercel.test.mjs scripts/registrar-estado-vercel.test.mjs scripts/vercel-smoke.test.mjs scripts/verificacion-despliegue-vercel.test.mjs
       - name: Probar clasificación segura de cambios

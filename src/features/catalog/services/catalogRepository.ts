@@ -17,7 +17,10 @@ export interface ProductAttributeValue {
   caracteristicaId: string;
   nombre: string;
   tipo: "TEXTO" | "NUMERO" | "LISTA";
-  valor: string | number;
+  valor: string | number | boolean | null;
+  /** False when an open-contract value could not be safely interpreted. */
+  valorDisponible?: boolean;
+  valorReferenciaId?: string;
   valorId?: string;
   unidad?: string;
 }
@@ -76,18 +79,21 @@ export interface ProductView {
   typeName: string;
   brandId: string;
   brandName: string;
-  status: ProductStatus;
-  preparationSummary: "COMPLETED" | "PENDING" | "REJECTED" | "PARTIAL";
+  status: ProductStatus | null;
+  /** The consumer endpoint guarantees commercial publication, not admin state. */
+  commerciallyActive?: boolean;
+  preparationSummary: "COMPLETED" | "PENDING" | "REJECTED" | "PARTIAL" | null;
   imageUrl?: string;
-  catalogVersion: number;
+  catalogVersion: number | null;
   priceInitial?: number;
 }
 
 export interface ProductDetailView extends ProductView {
-  description: string;
+  identifyingCharacteristicIds?: string[];
+  description: string | null;
   images: ProductImageRef[];
   attributes: ProductAttributeValue[];
-  physicalProfile: Partial<PhysicalProfile> | null;
+  physicalProfile: Partial<PhysicalProfile> | null | undefined;
   preparation: ProductPreparationView;
   variants: VariantSummaryView[];
   publishedCommercially?: boolean;

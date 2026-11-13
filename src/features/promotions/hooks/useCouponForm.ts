@@ -9,7 +9,6 @@ import {
 } from "../services/couponRepository";
 import {
   couponDraftFromRecord,
-  couponMatchesInput,
   emptyCouponDraft,
   validateCouponDraft,
   type CouponDraft,
@@ -88,19 +87,10 @@ export function useCouponForm(
     setChecking(true);
     try {
       const controller = new AbortController();
-      const result = initial
-        ? await confirmedRepository.read(initial.id, controller.signal)
-        : (
-            await confirmedRepository.list(
-              { status: "all", page: 1, pageSize: 100 },
-              controller.signal,
-            )
-          ).items.find((item) => item.code === proposal.code);
-      if (result && couponMatchesInput(result, proposal)) setConfirmed(result);
-      else
-        setRecoveryMessage(
-          "La consulta no confirma tu propuesta. Conservamos el borrador; revisa el registro antes de iniciar otro guardado.",
-        );
+      if (!confirmedRepository.reconcilePending) { setRecoveryMessage("El repositorio no expone conciliación de intenciones pendientes."); return; }
+      const result = await confirmedRepository.reconcilePending(initial?.id ?? null, initial ? null : proposal.code, controller.signal);
+      if (result.status === "reconciled") setConfirmed(result.value);
+      else setRecoveryMessage(result.status === "access_denied" ? "No tienes permiso para consultar la intención pendiente." : result.status === "unavailable" ? "La conciliación no está disponible; se conserva la intención bloqueada." : "La lectura no acredita la mutación. Conservamos el borrador y la intención bloqueada.");
     } catch {
       setRecoveryMessage(
         "No se pudo consultar el resultado. El guardado no se volverá a enviar automáticamente.",

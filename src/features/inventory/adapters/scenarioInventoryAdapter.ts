@@ -43,9 +43,13 @@ function pending<T>(): Promise<T> {
 }
 
 export class ScenarioInventoryAdapter implements InventoryRepository {
-  constructor(private readonly delegate: InventoryRepository) {}
+  constructor(private readonly delegate: InventoryRepository) {
+    this.getStockPage = delegate.getStockPage?.bind(delegate);
+  }
 
-  async getStockItems(filters?: StockFiltersQuery): Promise<StockItem[]> {
+  getStockPage: InventoryRepository["getStockPage"];
+
+  async getStockItems(filters?: StockFiltersQuery, signal?: AbortSignal): Promise<StockItem[]> {
     switch (getInventoryScenario()) {
       case "loading":
         return pending();
@@ -58,7 +62,7 @@ export class ScenarioInventoryAdapter implements InventoryRepository {
       case "empty":
         return [];
       default:
-        return this.delegate.getStockItems(filters);
+        return this.delegate.getStockItems(filters, signal);
     }
   }
 

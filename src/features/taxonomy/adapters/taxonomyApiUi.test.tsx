@@ -46,8 +46,8 @@ it("muestra 403 en la interfaz sin sustituir la respuesta por fixtures", async (
   expect(request).toHaveBeenCalledTimes(1);
 });
 
-it("el gate abre solo la pantalla con adaptador HTTP y mantiene las demás bloqueadas", () => {
-  configureTaxonomyGateway({ request: vi.fn() });
+it("el gate abre las secciones administrativas con transporte configurado", () => {
+  configureTaxonomyGateway({ request: vi.fn(), requestWithInit: vi.fn() });
   const view = render(
     <MantineProvider>
       <DataModeContext.Provider value="api">
@@ -59,9 +59,7 @@ it("el gate abre solo la pantalla con adaptador HTTP y mantiene las demás bloqu
       </DataModeContext.Provider>
     </MantineProvider>,
   );
-  expect(
-    screen.getByText("Esta función no está disponible en el modo actual."),
-  ).toBeTruthy();
+  expect(screen.getByText("contenido habilitado")).toBeTruthy();
   view.unmount();
   render(
     <MantineProvider>
@@ -152,8 +150,7 @@ it.each([
   "/tipos-producto/type-1",
   "/marcas",
   "/seo",
-])("mantiene la ruta administrativa %s bloqueada en modo API", (path) => {
-  configureTaxonomyGateway({ request: vi.fn() });
+])("mantiene la ruta administrativa %s bloqueada sin Gateway", (path) => {
   render(
     <MantineProvider>
       <DataModeContext.Provider value="api">
@@ -166,7 +163,7 @@ it.each([
     </MantineProvider>,
   );
   expect(
-    screen.getByText("Esta función no está disponible en el modo actual."),
+    screen.getByText(/Se requiere sesión G7 y un origen Gateway/),
   ).toBeTruthy();
   expect(screen.queryByText("acción administrativa disponible")).toBeNull();
 });

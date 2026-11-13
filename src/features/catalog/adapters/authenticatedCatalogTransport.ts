@@ -3,15 +3,18 @@ import { isGatewayTokenInvalid } from "../../shared/isGatewayTokenInvalid";
 import { createCatalogFetchTransport, type CatalogHttpTransport } from "./catalogHttp";
 
 // Keep the public read demo on its existing transport. Administration uses G7.
-export function createAuthenticatedCatalogTransport(origin: string, session: G7Session): CatalogHttpTransport {
+export function createAuthenticatedCatalogTransport(origin: string, session: G7Session, options: { publicReads?: boolean } = {}): CatalogHttpTransport {
   const transport = createCatalogFetchTransport(origin);
   return {
     async request(path, init) {
       const token = await session.getAccessToken(init.signal);
       if (!token) throw new Error("Inicia sesión para continuar.");
-      const send = (accessToken: string) => transport.request(path, { ...init, headers: { ...init.headers, Authorization: `Bearer ${accessToken}` } });
+      const publicRead = options.publicReads && init.method === "GET";
+      const send = (accessToken: string) => transport.request(path, { ...init, headers: publicRead
+        ? Object.fromEntries(Object.entries(init.headers).filter(([name]) => name.toLowerCase() !== "authorization"))
+        : { ...init.headers, Authorization: `Bearer ${accessToken}` } });
       const response = await send(token);
-      if (!(await isGatewayTokenInvalid(response))) return response;
+      if (publicRead || !(await isGatewayTokenInvalid(response))) return response;
       if (init.method === "GET") {
         const renewed = await session.refreshAccessToken(token, init.signal);
         if (renewed) {
