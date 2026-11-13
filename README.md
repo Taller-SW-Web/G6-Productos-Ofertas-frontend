@@ -101,6 +101,8 @@ Esta persistencia es **local a este navegador**: no sincroniza entre dispositivo
 
 El [cierre H4](docs/h4/IMPLEMENTACION_FRONTEND_DEMO_ADMIN.md) describe el arranque con sesión G7 compartida. Consulta sus [dependencias de Backend](docs/h4/DEPENDENCIAS_BACKEND_PARA_DEMO.md) y la [matriz de verificación](docs/h4/MATRIZ_VERIFICACION_FRONTEND.md) antes de preparar la demo administrativa.
 
+La [especificación frontend de Catálogo administrativo](docs/h4/ESPECIFICACION_FRONTEND_CATALOGO_ADMIN.md) reúne las rutas, DTO, permisos y pasos de aceptación en Azure para listar, crear y editar productos.
+
 La tabla resume lo que muestran el código y la configuración de esta rama; la demostración no equivale a persistencia o API integrada.
 
 | Área | Estado en el frontend |
