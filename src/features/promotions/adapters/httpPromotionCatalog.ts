@@ -4,6 +4,8 @@ import type {
   PromotionCatalogRepository,
 } from "../services/catalogRepository";
 
+const CATALOG_READ_BATCH_TIMEOUT_MS = 65_000;
+
 export class PromotionCatalogAccessError extends Error {
   constructor(readonly status: 401 | 403) { super(status === 401 ? "Sesión no autorizada para consultar Catálogo." : "Permiso denegado al consultar Catálogo."); this.name = "PromotionCatalogAccessError"; }
 }
@@ -62,7 +64,7 @@ export function createHttpPromotionCatalog(
       // Azure services can start from zero. Bound the whole read and stop
       // sibling requests on cancellation/failure; writes keep their own policy.
       const batch = new AbortController();
-      const bounded = AbortSignal.any([signal, batch.signal, AbortSignal.timeout(65000)]);
+      const bounded = AbortSignal.any([signal, batch.signal, AbortSignal.timeout(CATALOG_READ_BATCH_TIMEOUT_MS)]);
       const retainedIds = new Set(retain?.productIds ?? []);
       const retainedSkus = new Set(retain?.skus ?? []);
       // The commercial DTO omits status. The published backoffice estado
@@ -161,7 +163,7 @@ export function createHttpPromotionCatalog(
       return confirmed;
     },
     async categories(signal) {
-      const bounded = AbortSignal.any([signal, AbortSignal.timeout(7500)]);
+      const bounded = AbortSignal.any([signal, AbortSignal.timeout(CATALOG_READ_BATCH_TIMEOUT_MS)]);
       const rows = await pages(
         "/categorias/administracion?estado=ACTIVO",
         true,
