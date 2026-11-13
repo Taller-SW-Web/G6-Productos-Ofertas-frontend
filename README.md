@@ -232,9 +232,10 @@ no está configurado y el panel permanece bloqueado. Si Gateway no está configu
 el login G7 puede funcionar, pero las integraciones que lo requieren siguen cerradas.
 
 `VITE_G6_ADMIN_API_ENABLED` habilita los contratos de Backend #222 con un Gateway
-configurado para ese entorno. Su valor predeterminado es `false`. El origen Azure
-de consultas y su proxy Vercel quedan excluidos de esta habilitación. La sesión
-G7 y los permisos del Gateway siguen siendo obligatorios. Traslados y recepción
+configurado para ese entorno. Su valor predeterminado es `false`. Azure y su proxy
+fijo Vercel admiten el opt-in después de desplegar y comprobar los contratos
+administrativos compatibles. El flag no descubre capacidades ni concede permisos.
+La sesión G7 y los permisos del Gateway siguen siendo obligatorios. Traslados y recepción
 permanecen bloqueados en modo API hasta verificar sus permisos.
 MFA pendiente no habilita administración. No se ofrecen registro ni recuperación
 de contraseña. La identidad mostrada procede de G7; los permisos efectivos los

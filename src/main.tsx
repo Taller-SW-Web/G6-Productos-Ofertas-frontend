@@ -23,7 +23,7 @@ const root = createRoot(document.getElementById("root")!);
 const mode = resolveDataMode(import.meta.env.VITE_DATA_MODE, import.meta.env.DEV);
 const gatewayOrigin = resolveGatewayOrigin(import.meta.env.VITE_GATEWAY_ORIGIN as string | undefined, location, import.meta.env.PROD);
 const securityApiBase = resolveG7ApiBase(import.meta.env.VITE_G7_API_BASE as string | undefined, location, import.meta.env.PROD);
-const adminApiEnabled = supportsAdministrativeContracts(import.meta.env.VITE_G6_ADMIN_API_ENABLED === "true", gatewayOrigin, location);
+const adminApiEnabled = supportsAdministrativeContracts(import.meta.env.VITE_G6_ADMIN_API_ENABLED === "true", gatewayOrigin);
 // Public URLs from the same configuration consumed by the transports. The gate
 // compares these values with independent approvals, then restricts real traffic.
 const integrations = document.createElement("meta");

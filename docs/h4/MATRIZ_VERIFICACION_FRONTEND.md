@@ -1,5 +1,27 @@
 # Verificación de la demo administrativa H4
 
+## Reconciliación con master aa8448e y corrección de #73
+
+Se incorpora `master@aa8448ecb713ed9120d15a271cfff27a5a95d5ad` mediante merge normal,
+conservando los commits previos de #73 y la corrección desplegada de #76. Los dos
+conflictos corresponden a los adaptadores de Promociones, sin cambios de layout.
+
+| Frontera | Resolución y comprobación |
+|---|---|
+| Selector de Promociones | Se conserva el presupuesto de 60 s por GET de referencias y 65 s para el lote de productos, con cuatro consultas simultáneas, orden estable y cancelación de hermanas y pendientes. Permanece la clasificación 401/403 de #73. Las escrituras conservan 7,5 s y no se repiten automáticamente. |
+| Sesión y resultados inciertos | Se conservan el propietario y la generación de sesión, los marcadores de #73 y la conciliación; un resultado de una identidad anterior no se consume bajo otra. |
+| Habilitación administrativa | `VITE_G6_ADMIN_API_ENABLED=false` sigue siendo el valor por defecto. Un origen válido de Azure o su proxy fijo de Vercel puede recibir opt-in después de desplegar y comprobar Backend #222. El flag no descubre compatibilidad ni concede permisos G7. No se cambia ningún destino de rewrite. |
+| Prueba de seis módulos | El arnés fija el modo API tanto si Vite omite una variable local sin definir como si CI la define en mock. Se mantienen las aserciones de rutas HTTP, Bearer, paginación y bloqueo de traslados; no se aceptan datos mock como evidencia HTTP. |
+
+Las regresiones incluyen lecturas de 8,1 s, concurrencia/orden, cancelación, rechazo
+403, administración de Catálogo, sesión JWS/MFA/renovación y consultas públicas.
+Los resultados por SHA se consultan en los [checks de #73](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/73/checks).
+La prueba inicial de seis módulos falló por la configuración del arnés sin variable
+local; la corrección conserva la exigencia de HTTP autenticado y su repetición se
+registra por separado. No se ejecutó aceptación administrativa en Azure del contrato
+candidato de #222 ni se activó el flag en Vercel. Integración, imágenes oficiales,
+configuración y homologación siguen siendo pasos independientes.
+
 ## Reconciliación con master e348588
 
 Se conserva JWS de G7 y el flujo de Consultas de #74. La evidencia anterior

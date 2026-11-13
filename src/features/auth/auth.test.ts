@@ -27,14 +27,22 @@ describe("retorno a rutas registradas", () => {
     expect(loginDestination(value)).toBe(value);
   });
 });
-it("los contratos administrativos requieren habilitación y un Gateway ajeno al proxy público", () => {
+describe("habilitación administrativa explícita para un backend compatible", () => {
   const location = { hostname: "g6.example.vercel.app", origin: "https://g6.example.vercel.app" };
   const azure = "https://api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io";
-  expect(supportsAdministrativeContracts(true, resolveGatewayOrigin(azure, location, true), location)).toBe(false);
-  expect(supportsAdministrativeContracts(true, azure, location)).toBe(false);
-  expect(supportsAdministrativeContracts(true, undefined, location)).toBe(false);
-  expect(supportsAdministrativeContracts(false, "https://admin.example.test", location)).toBe(false);
-  expect(supportsAdministrativeContracts(true, "https://admin.example.test", location)).toBe(true);
+  it.each([azure, location.origin, "https://admin.example.test", "http://127.0.0.1:5197"])("permite el origen validado %s solo con opt-in", gateway => {
+    expect(supportsAdministrativeContracts(false, gateway)).toBe(false);
+    expect(supportsAdministrativeContracts(true, gateway)).toBe(true);
+  });
+  it("conserva el proxy fijo de Vercel sin alterar su destino", () => {
+    const proxy = resolveGatewayOrigin(azure, location, true);
+    expect(proxy).toBe(location.origin);
+    expect(supportsAdministrativeContracts(false, proxy)).toBe(false);
+    expect(supportsAdministrativeContracts(true, proxy)).toBe(true);
+  });
+  it.each([undefined, "", "invalid", "http://remote.test", "https://user:secret@admin.test", "https://admin.test/api/v1", "https://admin.test?other=1", "https://admin.test#fragment"])("rechaza configuración %s incluso con opt-in", gateway => {
+    expect(supportsAdministrativeContracts(true, gateway)).toBe(false);
+  });
 });
 const dto = (version = 1) => ({
   accessToken: `eyJhbGciOiJSUzI1NiJ9.payload.signature${version}`,

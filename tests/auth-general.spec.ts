@@ -266,7 +266,11 @@ test("una sesión administrativa autentica lecturas de los seis módulos", async
   // These repositories also read Vite's mode directly. Match the API mode set in main.tsx by the fixture.
   await page.route(/\/src\/features\/(taxonomy\/services\/taxonomyServices|inventory\/services\/inventoryProvider)\.ts(?:\?|$)/, async route => {
     const response = await route.fetch();
-    const body = (await response.text()).replace(/"VITE_DATA_MODE":\s*"[^"]*"/g, '"VITE_DATA_MODE":"api"');
+    const source = await response.text();
+    // Vite omits an unset variable locally; CI defines it as mock. Set the
+    // fixture mode in both cases instead of silently leaving one provider mock.
+    const body = source.replace(/import\.meta\.env\s*=\s*(\{[^\r\n]*?\});/, 'import.meta.env = Object.assign($1, { VITE_DATA_MODE: "api" });');
+    expect(body).not.toBe(source);
     await route.fulfill({ response, body });
   });
   await page.route(`${gateway}/api/v1/**`, route => {
