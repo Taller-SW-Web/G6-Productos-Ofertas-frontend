@@ -143,7 +143,14 @@ export function couponMatchesInput(coupon: CouponView, input: CouponInput) {
     coupon.status === input.status &&
     coupon.globalLimit === input.globalLimit &&
     coupon.customerLimit === input.customerLimit &&
-    coupon.minimumAmount === input.minimumAmount &&
+    normalizeDecimal(coupon.minimumAmount) === normalizeDecimal(input.minimumAmount) &&
     coupon.cancellationPolicy === input.cancellationPolicy
   );
+}
+function normalizeDecimal(value: string | null | undefined): string | null {
+  if (value == null || value.trim() === "") return null;
+  const normalized = value.trim().replace(",", ".");
+  if (!/^\d+(?:\.\d+)?$/.test(normalized)) return normalized;
+  const [whole, fraction = ""] = normalized.split(".");
+  return `${whole!.replace(/^0+(?=\d)/, "")}.${fraction.replace(/0+$/, "") || "0"}`;
 }

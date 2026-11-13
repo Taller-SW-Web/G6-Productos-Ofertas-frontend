@@ -8,13 +8,14 @@ import { join } from "node:path";
 import { chromium } from "playwright";
 import { authContractFixture } from "./auth-contract-fixture.mjs";
 import { verifyAuthenticatedMock } from "./verify-authenticated-mock.mjs";
+import { isolatedPricingCatalogRead } from "./release-login-policy.mjs";
 
 const fixture = await authContractFixture();
 const artifacts = await mkdtemp(join(tmpdir(), "g6-auth-compiled-"));
 const browser = await chromium.launch();
 let checks = 0;
 const check = (value, message) => { assert.ok(value, message); checks++; };
-const env = { ...process.env, VITE_G7_API_BASE: fixture.origin + "/g7/api/v1", VITE_GATEWAY_ORIGIN: fixture.origin, VITE_G6_READ_DEMO: "false" };
+const env = { ...process.env, VITE_G7_API_BASE: fixture.origin + "/g7/api/v1", VITE_GATEWAY_ORIGIN: fixture.origin, VITE_G6_READ_DEMO: "false", VITE_G6_ADMIN_API_ENABLED: "true" };
 async function freePort() { const s = createServer(); s.listen(0, "127.0.0.1"); await once(s, "listening"); const port = s.address().port; await new Promise(r => s.close(r)); return port; }
 async function run(args, environment) {
   const child = spawn(process.execPath, args, { env: environment, stdio: "inherit" });
@@ -124,8 +125,6 @@ try {
         for (const [status, code] of [[403, "SCOPE_INSUFICIENTE"], [401, "DESCONOCIDO"], [401, "TOKEN_INVALIDO"]]) {
           fixture.state.gatewayStatus = status; fixture.state.gatewayCode = code;
           const refreshes = fixture.state.calls.filter(c => c.path.endsWith("/auth/refresh")).length;
-          // /productos is an explicit public-read view in the Azure deployment.
-          // Exercise JWT rejection on a native authenticated administrative GET.
           const deniedRead = page.waitForResponse(response => response.url().startsWith(fixture.origin + "/api/v1/cupones") && response.status() === status);
           await visit(page, base, "/cupones");
           await deniedRead;
@@ -138,9 +137,13 @@ try {
           else { await page.getByRole("navigation", { name: "Navegación de la aplicación" }).waitFor(); check(fixture.state.calls.filter(c => c.path.endsWith("/auth/refresh")).length === refreshes, "401 desconocido y 403 no renuevan sesión"); }
         }
         fixture.state.gatewayStatus = 200; fixture.state.mfa = false;
+        const beforeIsolatedRelease = fixture.state.calls.length;
         await run(["scripts/testing/verify-isolated-release.mjs"], { ...env,
           G6_ISOLATED_PREVIEW_URL: base, G6_ISOLATED_G7_API_BASE: fixture.origin + "/g7/api/v1",
           G6_ISOLATED_GATEWAY_ORIGIN: fixture.origin }); checks++;
+        check(fixture.state.calls.slice(beforeIsolatedRelease).some(call =>
+          call.method === "GET" && call.path + call.search === isolatedPricingCatalogRead
+        ), "Precios consulta la primera página comercial dentro del entorno aislado");
       }
       check(errors.length === 0, "sin errores JavaScript");
       check(!/fixture-refresh|eyJhbGci|isolated-fixture-password/.test(await page.evaluate(() => JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage }, cookie: document.cookie }))), "sin secretos persistidos");

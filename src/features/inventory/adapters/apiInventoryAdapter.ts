@@ -9,6 +9,8 @@ import type {
   LocationDistribution,
   ReceiveTransferPayload,
   StockItem,
+  StockFiltersQuery,
+  StockPage,
   ThresholdConfig,
   TransferFiltersQuery,
   TransferItem,
@@ -39,6 +41,7 @@ import {
   transitionToConfirmedAwaitingRefreshWithDto,
   setInFlightTransferReception,
   setUncertainTransferReception,
+  setTransferReceptionScope,
   type TransferReceptionPresentationRefresh,
   type TransferReceptionWriteRecord,
 } from "../services/transferReceptionAttempt";
@@ -64,7 +67,7 @@ import {
 // transporte productivo ni conecta el singleton de selección por sí mismo.
 
 export interface InventoryHttpRequest {
-  method: "GET" | "PUT" | "POST";
+  method: "GET" | "PUT" | "POST" | "DELETE";
   signal?: AbortSignal;
   headers?: Readonly<Record<string, string>>;
   body?: string;
@@ -75,8 +78,15 @@ export interface InventoryHttpTransport {
   request(path: string, request: InventoryHttpRequest): Promise<Response>;
 }
 
+export interface InventoryCatalogSku { sku: string; productName: string; categoryId: string; categoryName: string; brandId: string; brandName: string; }
+
 export interface HttpInventoryRepositoryDependencies {
   transport: InventoryHttpTransport;
+  currentUserScope?: () => string | null;
+  physicalStockEnabled?: boolean;
+  listCatalogSkus?: (signal?: AbortSignal) => Promise<InventoryCatalogSku[]>;
+  getCategories?: () => Promise<{ id: string; name: string; active: boolean }[]>;
+  getBrands?: () => Promise<{ id: string; name: string; active: boolean }[]>;
   // Aporta código legible, nombre de producto y nombres de ubicación desde su
   // owner autoritativo (Catálogo/ubicaciones). Si falta, los métodos de
   // traslados fallan con CONTRATO_BLOQUEADO en lugar de simular datos.
@@ -84,6 +94,7 @@ export interface HttpInventoryRepositoryDependencies {
 }
 
 export interface HttpInventoryRepository extends InventoryRepository {
+  getThresholdWriteScope(): string;
   // TAC-P0-11: señal opcional para distinguir una cancelación anterior al
   // despacho HTTP de un AbortError lanzado después de invocar al transporte.
   // No forma parte del contrato OpenAPI ni del repositorio de negocio.
@@ -100,16 +111,12 @@ const PAGE_SIZE = 100;
 const MAX_PAGES = 1000;
 
 const BLOCKED_DETAILS = {
-  getStockItems:
-    "productName/categoryName/brandName (Catálogo/Taxonomía), locationName (sin endpoint) y stockVersion/updatedAt no los devuelve consultarDisponibilidad",
-  getStockDetail:
-    "mismos campos sin fuente que getStockItems (consultarDisponibilidad)",
   getDashboardKpisFilter:
-    "obtenerDashboardInventario no admite filtrar por texto libre ni por estado de stock; quita ese filtro para consultar el agregado",
+    "obtenerDashboardInventario no admite filtrar por texto libre, estado de stock, categoría o marca; quita ese filtro para consultar el agregado",
   getDashboardAlerts:
     "no existe operación de alertas en el contrato de Inventario",
   getLocationDistribution:
-    "obtenerDashboardInventario no admite filtrar por texto libre ni por estado de stock",
+    "obtenerDashboardInventario no admite filtrar por texto libre, estado de stock, categoría o marca",
   getCategories:
     "operación de Catálogo (no de Inventario); destino de la integración de filtros pendiente de definición (paginación)",
   getBrands:
@@ -158,6 +165,28 @@ export function contractFilterValue(
   return normalized;
 }
 
+function stockObject(value: unknown): Record<string, unknown> { if (!value || typeof value !== "object" || Array.isArray(value)) throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario devolvió un saldo incompatible."); return value as Record<string, unknown>; }
+function stockText(value: unknown): string { if (typeof value !== "string" || !value.trim()) throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario omitió la identidad del SKU o ubicación."); return value; }
+function stockInt(value: unknown): number { if (!Number.isSafeInteger(value) || Number(value) < 0) throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario devolvió una cantidad inválida."); return Number(value); }
+function toPhysicalStockItem(value: unknown): StockItem {
+  const dto = stockObject(value);
+  const sku = stockText(dto.sku);
+  const location = stockObject(dto.ubicacion);
+  if (dto.estado !== "DISPONIBLE" && dto.estado !== "STOCK_BAJO" && dto.estado !== "AGOTADO")
+    throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario devolvió un estado desconocido.");
+  if (dto.skuActivo !== null && typeof dto.skuActivo !== "boolean")
+    throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario devolvió un ciclo de vida de SKU inválido.");
+  const updatedAt = stockText(dto.actualizadoEn);
+  if (!Number.isFinite(Date.parse(updatedAt)))
+    throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario devolvió una fecha de saldo inválida.");
+  return {
+    sku, skuActive: dto.skuActivo, productName: sku, categoryName: "No disponible", brandName: "No disponible",
+    locationId: stockText(location.locationId), locationName: stockText(location.nombre),
+    onHand: stockInt(dto.onHand), reserved: stockInt(dto.reserved), blocked: stockInt(dto.blocked),
+    available: stockInt(dto.available), threshold: stockInt(dto.umbralEfectivo),
+    status: dto.estado, stockVersion: stockInt(dto.stockVersion), updatedAt,
+  };
+}
 function isAbort(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
@@ -182,6 +211,7 @@ async function problemCode(response: Response): Promise<string | undefined> {
 // (TAC-P0-09). La identidad sola (`operationId`) NO es suficiente para
 // reutilizarla: primero se compara el fingerprint completo.
 interface ConfirmedReceptionRecord {
+  readonly owner: string;
   readonly payload: Readonly<ReceiveTransferPayload>;
   readonly dto: TrasladoInventarioDto;
 }
@@ -190,6 +220,9 @@ export function createHttpInventoryRepository(
   dependencies: HttpInventoryRepositoryDependencies,
 ): HttpInventoryRepository {
   const { transport, resolveTransferPresentation } = dependencies;
+  const currentUserScope = dependencies.currentUserScope ?? (() => null);
+  const stateKey = (owner: string, id: string) => `${encodeURIComponent(owner)}\u0000${id}`;
+  setTransferReceptionScope(currentUserScope());
   // TAC-P0-02: separación explícita de tres estados de escritura por traslado:
   //   - IN_FLIGHT: escritura en curso sin respuesta recibida aún.
   //   - UNCERTAIN: respuesta perdida o fallo >=500; conserva el snapshot
@@ -209,7 +242,7 @@ export function createHttpInventoryRepository(
 
   // Hidratación desde almacenamiento persistido tras refresh/recreación del repositorio.
   for (const payload of getAllUncertainTransferReceptions()) {
-    transferWrites.set(payload.transferId, {
+    transferWrites.set(stateKey(currentUserScope() ?? "session-unavailable", payload.transferId), {
       state: "UNCERTAIN",
       payload: freezeReceiveTransferPayload(payload),
       reconciliation: "UNVERIFIABLE_BY_LIST_CONTRACT",
@@ -217,13 +250,15 @@ export function createHttpInventoryRepository(
     });
   }
   for (const record of getAllConfirmedTransferReceptionsAwaitingRefreshWithDto()) {
-    if (!confirmedReceptions.has(record.payload.operationId)) {
-      confirmedReceptions.set(record.payload.operationId, {
+    const owner = currentUserScope() ?? "session-unavailable";
+    if (!confirmedReceptions.has(stateKey(owner, record.payload.operationId))) {
+      confirmedReceptions.set(stateKey(owner, record.payload.operationId), {
+        owner,
         payload: freezeReceiveTransferPayload(record.payload),
         dto: record.dto,
       });
     }
-    transferWrites.set(record.payload.transferId, {
+    transferWrites.set(stateKey(currentUserScope() ?? "session-unavailable", record.payload.transferId), {
       state: "RECONCILED",
       payload: freezeReceiveTransferPayload(record.payload),
       reconciliation: "CONFIRMED_BY_IDEMPOTENT_RETRY",
@@ -235,7 +270,7 @@ export function createHttpInventoryRepository(
     if (getAllConfirmedTransferReceptionsAwaitingRefreshWithDto().some((r) => r.payload.transferId === payload.transferId)) {
       continue;
     }
-    transferWrites.set(payload.transferId, {
+    transferWrites.set(stateKey(currentUserScope() ?? "session-unavailable", payload.transferId), {
       state: "RECONCILED",
       payload: freezeReceiveTransferPayload(payload),
       reconciliation: "CONFIRMED_BY_IDEMPOTENT_RETRY",
@@ -245,12 +280,25 @@ export function createHttpInventoryRepository(
   }
 
   function setPresentationRefresh(
+    owner: string,
     transferId: string,
     status: TransferReceptionPresentationRefresh,
   ): void {
-    const record = transferWrites.get(transferId);
+    const key = stateKey(owner, transferId);
+    const record = transferWrites.get(key);
     if (!record || record.presentationRefresh === status) return;
-    transferWrites.set(transferId, { ...record, presentationRefresh: status });
+    transferWrites.set(key, { ...record, presentationRefresh: status });
+  }
+
+  function hydrateOwnerState(owner: string): void {
+    for (const payload of getAllUncertainTransferReceptions()) {
+      transferWrites.set(stateKey(owner, payload.transferId), { state: "UNCERTAIN", payload: freezeReceiveTransferPayload(payload), reconciliation: "UNVERIFIABLE_BY_LIST_CONTRACT", updatedAt: payload.receivedAt });
+    }
+    for (const record of getAllConfirmedTransferReceptionsAwaitingRefreshWithDto()) {
+      const operationKey = stateKey(owner, record.payload.operationId);
+      if (!confirmedReceptions.has(operationKey)) confirmedReceptions.set(operationKey, { owner, payload: freezeReceiveTransferPayload(record.payload), dto: record.dto });
+      transferWrites.set(stateKey(owner, record.payload.transferId), { state: "RECONCILED", payload: freezeReceiveTransferPayload(record.payload), reconciliation: "CONFIRMED_BY_IDEMPOTENT_RETRY", updatedAt: record.dto.updated_at, presentationRefresh: "AWAITING" });
+    }
   }
 
   function uncertainWriteMessage(writeKind: "reception" | "threshold"): string {
@@ -290,6 +338,8 @@ export function createHttpInventoryRepository(
       );
     }
 
+    const thresholdDelete204 = write && writeKind === "threshold" && request.method === "DELETE" && response.status === 204;
+    if (thresholdDelete204) return response;
     if (response.ok) {
       if (response.status !== 200)
         throw new InventoryError(
@@ -399,15 +449,18 @@ export function createHttpInventoryRepository(
   // error tipado (`InventoryPresentationFailedError`) para que hook y formulario
   // bloqueen nuevas intenciones y refresquen la vista sin repetir el POST.
   async function presentConfirmed(
+    owner: string,
     payload: Readonly<ReceiveTransferPayload>,
     dto: TrasladoInventarioDto,
   ): Promise<TransferItem> {
     try {
-      return await present(dto);
+      const item = await present(dto);
+      if ((currentUserScope() ?? "session-unavailable") !== owner) throw new InventoryError("NO_AUTENTICADO", "La sesión cambió durante el enriquecimiento; no se presenta la recepción anterior.");
+      return item;
     } catch (error) {
       // TAC-P1-10: deja constancia de que la confirmación existe pero la vista
       // todavía no tiene evidencia de frescura. No libera el bloqueo.
-      setPresentationRefresh(payload.transferId, "AWAITING");
+      setPresentationRefresh(owner, payload.transferId, "AWAITING");
       throw new InventoryPresentationFailedError(
         payload.transferId,
         payload.operationId,
@@ -433,6 +486,9 @@ export function createHttpInventoryRepository(
   async function readTransfers(
     filters: TransferFiltersQuery | undefined,
   ): Promise<TransferItem[]> {
+    const owner = currentUserScope() ?? "session-unavailable";
+    setTransferReceptionScope(owner);
+    hydrateOwnerState(owner);
     const collected: TrasladoInventarioDto[] = [];
     const seenTransferIds = new Set<string>();
     let pagina = 1;
@@ -443,6 +499,8 @@ export function createHttpInventoryRepository(
         { method: "GET" },
         false,
       );
+      if ((currentUserScope() ?? "session-unavailable") !== owner) throw new InventoryError("NO_AUTENTICADO", "La sesión cambió durante la lectura de traslados; la respuesta no se aplica a la sesión actual.");
+      if ((currentUserScope() ?? "session-unavailable") !== owner) throw new InventoryError("NO_AUTENTICADO", "La sesión cambió durante la lectura de traslados; la respuesta anterior no se aplicó al usuario actual.");
       const page = validateTrasladoListDto(body);
       if (page.pagina !== pagina)
         throw new InventoryError(
@@ -489,9 +547,10 @@ export function createHttpInventoryRepository(
     // `operationId`; deja constancia explícita de que la conciliación por
     // listado no es concluyente.
     for (const dto of collected) {
-      const current = transferWrites.get(dto.traslado_id);
+      setTransferReceptionScope(owner);
+      const current = transferWrites.get(stateKey(owner, dto.traslado_id));
       if (current?.state === "UNCERTAIN") {
-        transferWrites.set(dto.traslado_id, {
+        transferWrites.set(stateKey(owner, dto.traslado_id), {
           ...current,
           reconciliation: "UNVERIFIABLE_BY_LIST_CONTRACT",
           updatedAt: dto.updated_at,
@@ -499,6 +558,7 @@ export function createHttpInventoryRepository(
       }
     }
     const items = await Promise.all(collected.map((dto) => present(dto)));
+    if ((currentUserScope() ?? "session-unavailable") !== owner) throw new InventoryError("NO_AUTENTICADO", "La sesión cambió durante la lectura; los datos anteriores no se presentan.");
     // TAC-P1-10: solo un listado COMPLETO, presentable y con el agregado
     // coherente con la confirmación libera el bloqueo. Un HTTP 200 con saldo
     // anterior no demuestra que la recepción esté reflejada; en ese caso el
@@ -510,21 +570,23 @@ export function createHttpInventoryRepository(
         dto.traslado_id,
       );
       if (!awaiting) continue;
-      let confirmed = confirmedReceptions.get(awaiting.operationId);
+      let confirmed = confirmedReceptions.get(stateKey(owner, awaiting.operationId));
       if (!confirmed) {
         const persistedWithDto = getAllConfirmedTransferReceptionsAwaitingRefreshWithDto().find(
           (record) => record.payload.transferId === dto.traslado_id && record.payload.operationId === awaiting.operationId,
         );
         if (persistedWithDto) {
-          confirmed = { payload: persistedWithDto.payload, dto: persistedWithDto.dto };
-          confirmedReceptions.set(persistedWithDto.payload.operationId, confirmed);
+          confirmed = { owner, payload: persistedWithDto.payload, dto: persistedWithDto.dto };
+          confirmedReceptions.set(stateKey(owner, persistedWithDto.payload.operationId), confirmed);
         }
       }
       if (confirmed && sameTransferAggregate(confirmed.dto, dto)) {
+        setTransferReceptionScope(owner);
         clearConfirmedTransferReceptionAwaitingRefresh(dto.traslado_id);
-        setPresentationRefresh(dto.traslado_id, "REFRESHED");
+        setPresentationRefresh(owner, dto.traslado_id, "REFRESHED");
       } else {
         setPresentationRefresh(
+          owner,
           dto.traslado_id,
           "UNVERIFIABLE_BY_AGGREGATE",
         );
@@ -533,14 +595,24 @@ export function createHttpInventoryRepository(
     return items;
   }
 
+  const dashboardReads = new Map<string, Promise<unknown>>();
+  function readDashboard(filters: DashboardFiltersQuery | undefined): Promise<unknown> {
+    const path = dashboardPath(filters);
+    const identity = currentUserScope();
+    const key = `${identity ?? "anonymous"}:${path}`;
+    const existing = dashboardReads.get(key);
+    if (existing) return existing;
+    const pending = json(path, { method: "GET" }, false).finally(() => {
+      if (dashboardReads.get(key) === pending) dashboardReads.delete(key);
+    });
+    dashboardReads.set(key, pending);
+    return pending;
+  }
+
   function dashboardPath(filters: DashboardFiltersQuery | undefined): string {
     const params = new URLSearchParams();
     const locationId = contractFilterValue(filters?.locationId);
-    const categoriaId = contractFilterValue(filters?.category);
-    const marcaId = contractFilterValue(filters?.brand);
     if (locationId) params.set("locationId", locationId);
-    if (categoriaId) params.set("categoriaId", categoriaId);
-    if (marcaId) params.set("marcaId", marcaId);
     const query = params.toString();
     return query
       ? `/api/v1/inventario/dashboard?${query}`
@@ -557,18 +629,52 @@ export function createHttpInventoryRepository(
     // como si correspondieran a la selección.
     const search = contractFilterValue(filters?.search);
     const status = contractFilterValue(filters?.status);
-    if (search || status)
+    // OpenAPI enumera categoría y marca, pero el provider actual rechaza ambos.
+    const category = contractFilterValue(filters?.category);
+    const brand = contractFilterValue(filters?.brand);
+    if (search || status || category || brand)
       throw blocked(operation, BLOCKED_DETAILS.getDashboardKpisFilter);
   }
 
+  async function readPhysicalStockPage(filters: StockFiltersQuery, page: number, size: number, signal?: AbortSignal): Promise<StockPage> {
+    if (dependencies.physicalStockEnabled === false)
+      throw blocked("getStockPage", "La consulta administrativa de saldos requiere Backend #222 habilitado.");
+    if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(size) || size < 1 || size > PAGE_SIZE)
+      throw new InventoryError("VALIDACION", "La página de saldos solicitada no es válida.");
+    const sku = filters.search?.trim() || undefined;
+    const locationId = contractFilterValue(filters.locationId);
+    const status = contractFilterValue(filters.status);
+    const params = new URLSearchParams({ tamanio: String(size) });
+    if (sku) params.set("sku", sku);
+    if (locationId) params.set("locationId", locationId);
+    if (status) params.set("estado", status);
+    params.set("pagina", String(page));
+    signal?.throwIfAborted();
+    const response = stockObject(await json(`/api/v1/inventario/administracion/saldos?${params}`, { method: "GET", signal }, false));
+    const meta = stockObject(response.meta);
+    const total = stockInt(meta.total);
+    const pages = Math.ceil(total / size);
+    const expectedLength = page > pages ? 0 : Math.min(size, total - (page - 1) * size);
+    if (!Array.isArray(response.items) || meta.pagina !== page || meta.tamanio !== size ||
+      meta.totalPaginas !== pages || response.items.length !== expectedLength)
+      throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario devolvió una página de saldos físicos inconsistente.");
+    const items = response.items.map(toPhysicalStockItem);
+    if (new Set(items.map(item => JSON.stringify([item.sku, item.locationId]))).size !== items.length ||
+      items.some(item => (sku && sku !== item.sku) || (locationId && locationId !== item.locationId) || (status && status !== item.status)))
+      throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario devolvió un saldo duplicado o ajeno a los filtros.");
+    return { items, total, pages };
+  }
+
   return {
+    getThresholdWriteScope: () => currentUserScope() ?? "session-unavailable",
     getThresholds(): Promise<ThresholdConfig> {
       return json("/api/v1/inventario/umbrales", { method: "GET" }, false).then(
         toThresholdConfig,
       );
     },
 
-    updateGlobalThreshold(threshold: number): Promise<ThresholdConfig> {
+    async updateGlobalThreshold(threshold: number): Promise<ThresholdConfig> {
+      if (!Number.isSafeInteger(threshold) || threshold < 0) throw new InventoryError("VALIDACION", "El umbral debe ser un entero no negativo.");
       return json(
         "/api/v1/inventario/umbrales/global",
         {
@@ -590,10 +696,11 @@ export function createHttpInventoryRepository(
       });
     },
 
-    updateSkuThreshold(
+    async updateSkuThreshold(
       sku: string,
       threshold: number,
     ): Promise<ThresholdConfig> {
+      if (!sku.trim() || !Number.isSafeInteger(threshold) || threshold < 0) throw new InventoryError("VALIDACION", "El SKU debe existir y el umbral debe ser un entero no negativo.");
       return json(
         `/api/v1/inventario/umbrales/skus/${encodeURIComponent(sku)}`,
         {
@@ -615,10 +722,18 @@ export function createHttpInventoryRepository(
       });
     },
 
+    async removeSkuThresholdOverride(sku: string): Promise<void> {
+      if (!sku.trim()) throw new InventoryError("VALIDACION", "El SKU debe existir.");
+      await send(`/api/v1/inventario/umbrales/skus/${encodeURIComponent(sku)}`, { method: "DELETE" }, true, "threshold");
+    },
+
     getTransferWriteRecord(
       transferId: string,
     ): TransferReceptionWriteRecord | null {
-      return transferWrites.get(transferId) ?? null;
+      setTransferReceptionScope(currentUserScope());
+      const owner = currentUserScope() ?? "session-unavailable";
+      setTransferReceptionScope(owner);
+      return transferWrites.get(stateKey(owner, transferId)) ?? null;
     },
 
     getTransfers(filters?: TransferFiltersQuery): Promise<TransferItem[]> {
@@ -629,9 +744,14 @@ export function createHttpInventoryRepository(
       payload,
       signal?: AbortSignal,
     ): Promise<TransferItem> {
+      const owner = currentUserScope() ?? "session-unavailable";
+      setTransferReceptionScope(owner);
+      hydrateOwnerState(owner);
       const key = payload.transferId;
+      const scopedTransferKey = stateKey(owner, key);
+      const scopedOperationKey = stateKey(owner, payload.operationId);
       const frozenPayload = freezeReceiveTransferPayload(payload);
-      const currentRecord = transferWrites.get(key);
+      const currentRecord = transferWrites.get(scopedTransferKey);
       const wasUncertainRetry = currentRecord?.state === "UNCERTAIN";
 
       if (currentRecord?.state === "IN_FLIGHT") {
@@ -646,7 +766,7 @@ export function createHttpInventoryRepository(
       // (transferId, cantidad, disposición, cierre final, fecha y nota). Una
       // identidad reutilizada con otra intención nunca devuelve la confirmación
       // anterior: se rechaza como conflicto de idempotencia.
-      const confirmed = confirmedReceptions.get(frozenPayload.operationId);
+      const confirmed = confirmedReceptions.get(scopedOperationKey);
       if (confirmed) {
         if (
           confirmed.dto.traslado_id !== frozenPayload.transferId ||
@@ -657,7 +777,8 @@ export function createHttpInventoryRepository(
             "La identidad de esta recepción ya fue confirmada con otra intención (traslado, cantidad, disposición, cierre final, fecha o nota). No se devuelve un resultado ajeno a la solicitud.",
           );
         }
-        return presentConfirmed(frozenPayload, confirmed.dto);
+        if ((currentUserScope() ?? "session-unavailable") !== owner) throw new InventoryError("NO_AUTENTICADO", "La sesión cambió; no se presenta la confirmación de otro usuario.");
+        return presentConfirmed(owner, frozenPayload, confirmed.dto);
       }
 
       const confirmedAwaitingPayload = getConfirmedTransferReceptionAwaitingRefresh(key);
@@ -705,7 +826,7 @@ export function createHttpInventoryRepository(
       // no se despacha el POST.
       setInFlightTransferReception(frozenPayload);
 
-      transferWrites.set(key, {
+      transferWrites.set(scopedTransferKey, {
         state: "IN_FLIGHT",
         payload: frozenPayload,
         reconciliation: priorReconciliation,
@@ -730,13 +851,14 @@ export function createHttpInventoryRepository(
           true,
         );
       } catch (error) {
+        setTransferReceptionScope(owner);
         // TAC-P1-07: estando en UNCERTAIN, ningún error (red, 5xx, 4xx incluido
         // 409 IDEMPOTENCY_CONFLICT) libera el bloqueo; solo lo hace un 200 con
         // DTO válido. En primer intento, un error incierto conserva UNCERTAIN y
         // un 4xx definitivo limpia el registro.
         if (wasUncertainRetry) {
           setUncertainTransferReception(frozenPayload);
-          transferWrites.set(key, {
+          transferWrites.set(scopedTransferKey, {
             state: "UNCERTAIN",
             payload: frozenPayload,
             reconciliation: priorReconciliation,
@@ -747,7 +869,7 @@ export function createHttpInventoryRepository(
           error.code === "RESULTADO_INCIERTO"
         ) {
           setUncertainTransferReception(frozenPayload);
-          transferWrites.set(key, {
+          transferWrites.set(scopedTransferKey, {
             state: "UNCERTAIN",
             payload: frozenPayload,
             reconciliation: "NONE",
@@ -755,11 +877,12 @@ export function createHttpInventoryRepository(
           });
         } else {
           clearUncertainTransferReception(key, frozenPayload.operationId);
-          transferWrites.delete(key);
+          transferWrites.delete(scopedTransferKey);
         }
         clearInFlightTransferReception(key, frozenPayload.operationId);
         throw error;
       }
+      setTransferReceptionScope(owner);
 
       // Fase B — validar el DTO de confirmación. Si es incompatible, el resultado
       // no se puede determinar: la mutación pudo aplicarse, se preserva UNCERTAIN.
@@ -782,8 +905,9 @@ export function createHttpInventoryRepository(
         }
         traslado = confirmation.traslado;
       } catch (error) {
+        setTransferReceptionScope(owner);
         setUncertainTransferReception(frozenPayload);
-        transferWrites.set(key, {
+        transferWrites.set(scopedTransferKey, {
           state: "UNCERTAIN",
           payload: frozenPayload,
           reconciliation: priorReconciliation,
@@ -796,41 +920,71 @@ export function createHttpInventoryRepository(
       // de presentación (TAC-P0-05 / TAC-P0-09). Transición única persistente
       // de IN_FLIGHT/UNCERTAIN a confirmación pendiente de refresco.
       // NO se eliminan ni persisten estados intermedios vacíos que dejen al traslado sin identidad.
-      confirmedReceptions.set(frozenPayload.operationId, {
+      confirmedReceptions.set(scopedOperationKey, {
+        owner,
         payload: frozenPayload,
         dto: traslado,
       });
-      transferWrites.set(key, {
+      transferWrites.set(scopedTransferKey, {
         state: "RECONCILED",
         payload: frozenPayload,
         reconciliation: "CONFIRMED_BY_IDEMPOTENT_RETRY",
         updatedAt: traslado.updated_at,
       });
       transitionToConfirmedAwaitingRefreshWithDto(frozenPayload, traslado);
+      if ((currentUserScope() ?? "session-unavailable") !== owner) throw new InventoryError("NO_AUTENTICADO", "La recepción quedó confirmada bajo su propietario original; la sesión cambió y no se muestra en la sesión actual.");
 
       // Fase D — enriquecimiento de presentación (no autoritativo). Si falla, la
       // mutación YA está confirmada y el estado permanece RECONCILED; el POST no
       // se repite (el reintento con la misma identidad devuelve el cache).
-      return presentConfirmed(frozenPayload, traslado);
+      return presentConfirmed(owner, frozenPayload, traslado);
     },
 
-    getStockItems(): Promise<StockItem[]> {
-      return Promise.reject(
-        blocked("getStockItems", BLOCKED_DETAILS.getStockItems),
-      );
+    getStockPage: readPhysicalStockPage,
+
+    async getStockItems(filters?: StockFiltersQuery, signal?: AbortSignal): Promise<StockItem[]> {
+      const category = contractFilterValue(filters?.category);
+      const brand = contractFilterValue(filters?.brand);
+      const output: StockItem[] = [];
+      const seen = new Set<string>();
+      let total: number | undefined;
+      for (let page = 1; total === undefined || output.length < total; page++) {
+        if (page > MAX_PAGES) throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario excedió el límite de paginación. Aplica un filtro de saldo.");
+        const result = await readPhysicalStockPage(filters ?? {}, page, PAGE_SIZE, signal);
+        if (total !== undefined && total !== result.total)
+          throw new InventoryError("RESPUESTA_INCOMPATIBLE", "El total de saldos cambió durante la consulta.");
+        total = result.total;
+        for (const item of result.items) {
+          const key = JSON.stringify([item.sku, item.locationId]);
+          if (seen.has(key)) throw new InventoryError("RESPUESTA_INCOMPATIBLE", "Inventario repitió un saldo en páginas distintas.");
+          seen.add(key);
+          output.push(item);
+        }
+      }
+      if (category || brand) {
+        if (!dependencies.listCatalogSkus) throw blocked("getStockItems", "Los filtros de categoría y marca necesitan metadatos de Catálogo.");
+        const catalog = new Map((await dependencies.listCatalogSkus(signal)).map(item => [item.sku, item]));
+        return output.flatMap(item => {
+          const metadata = catalog.get(item.sku);
+          return metadata && (!category || category === metadata.categoryId) && (!brand || brand === metadata.brandId)
+            ? [{ ...item, productName: metadata.productName, categoryName: metadata.categoryName, brandName: metadata.brandName }]
+            : [];
+        });
+      }
+      return output;
     },
 
-    getStockDetail(): Promise<StockItem | null> {
-      return Promise.reject(
-        blocked("getStockDetail", BLOCKED_DETAILS.getStockDetail),
-      );
+    async getStockDetail(sku: string, locationId: string): Promise<StockItem | null> {
+      if (!sku.trim() || !locationId.trim()) throw new InventoryError("VALIDACION", "Indica un SKU y el identificador de ubicación.");
+      const [item] = await this.getStockItems({ search: sku, locationId });
+      return item ?? null;
     },
 
     async getDashboardKpis(
       filters?: DashboardFiltersQuery,
     ): Promise<InventoryKpiSummary> {
       assertDashboardFiltersSupported("getDashboardKpis", filters);
-      return json(dashboardPath(filters), { method: "GET" }, false).then(
+      return readDashboard(filters).then(
         toDashboardKpiSummary,
       );
     },
@@ -848,23 +1002,15 @@ export function createHttpInventoryRepository(
       // `porUbicacion` de obtenerDashboardInventario es la fuente autoritativa
       // de saldos por ubicación. No publica nombre de ubicación ni unidades
       // bloqueadas: esos campos se exponen como `null`, nunca como cero.
-      return json(dashboardPath(filters), { method: "GET" }, false).then(
+      return readDashboard(filters).then(
         toLocationDistributionList,
       );
     },
 
-    getCategories() {
-      return Promise.reject(
-        blocked("getCategories", BLOCKED_DETAILS.getCategories),
-      );
-    },
+    async getCategories() { if (!dependencies.getCategories) throw blocked("getCategories", "Catálogo no proporcionó categorías administrativas"); return dependencies.getCategories(); },
 
-    getBrands() {
-      return Promise.reject(blocked("getBrands", BLOCKED_DETAILS.getBrands));
-    },
+    async getBrands() { if (!dependencies.getBrands) throw blocked("getBrands", "Catálogo no proporcionó marcas administrativas"); return dependencies.getBrands(); },
 
-    getLocations() {
-      return Promise.reject(blocked("getLocations", BLOCKED_DETAILS.getLocations));
-    },
+    async getLocations() { return (await this.getLocationDistribution()).map(item => ({ id: item.locationId, name: `ID ${item.locationId}`, active: true })); },
   };
 }

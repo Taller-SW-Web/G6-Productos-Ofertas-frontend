@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { MantineProvider } from "@mantine/core";
 import { CommercialModeGate } from "../../../app/config/CommercialModeGate";
 import { DataModeContext } from "../../../app/config/DataModeContext";
+import { AdminApiContext } from "../../../app/config/AdminApiContext";
 import {
   configureInventoryApi,
   getInventoryRepository,
@@ -36,14 +37,14 @@ afterEach(() => {
   cleanup();
 });
 
-function renderWithGate(path: string, mode: "mock" | "api") {
+function renderWithGate(path: string, mode: "mock" | "api", adminApi = false) {
   return render(
     <MantineProvider>
       <DataModeContext.Provider value={mode}>
         <MemoryRouter initialEntries={[path]}>
-          <CommercialModeGate>
+          <AdminApiContext.Provider value={adminApi}><CommercialModeGate>
             <div data-testid="target-content">Contenido Permitido</div>
-          </CommercialModeGate>
+          </CommercialModeGate></AdminApiContext.Provider>
         </MemoryRouter>
       </DataModeContext.Provider>
     </MantineProvider>,
@@ -193,11 +194,16 @@ describe("Composition Root & Regresiones de Inventario", () => {
     });
 
     it("bloquea /inventario/traslados en modo API mostrando mensaje de limitación y enlace a Consultas", () => {
-      renderWithGate("/inventario/traslados", "api");
+      renderWithGate("/inventario/traslados", "api", true);
       expect(screen.queryByTestId("target-content")).toBeNull();
       expect(screen.getByText(/Función no disponible/i)).toBeTruthy();
       const link = screen.getByRole("link", { name: /Abrir en Consultas de los módulos/i });
       expect(link.getAttribute("href")).toBe("/consultas?operacion=listarTrasladosInventario");
+    });
+
+    it("habilita saldos físicos cuando se declara disponible el contrato administrativo", () => {
+      renderWithGate("/inventario", "api", true);
+      expect(screen.queryByTestId("target-content")).toBeTruthy();
     });
 
     it("permite todas las rutas de inventario en modo Mock", () => {

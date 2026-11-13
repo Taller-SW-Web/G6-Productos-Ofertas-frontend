@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, Group, Radio, Stack } from "@mantine/core";
 import {
   IconArrowLeft,
@@ -15,7 +15,7 @@ import { useBulkDownloads } from "../hooks/useBulkFlow";
 import type { BulkExportFormat } from "../types/bulk";
 
 export function BulkDownloadsPage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const initialExportId = searchParams.get("export_id") ?? undefined;
   const [templateFormat, setTemplateFormat] = useState<BulkExportFormat>("CSV");
 
@@ -36,6 +36,13 @@ export function BulkDownloadsPage() {
     downloadExportFile,
     downloadTemplate,
   } = useBulkDownloads(initialExportId);
+
+  useEffect(() => {
+    if (!exportJob?.export_id || searchParams.get("export_id") === exportJob.export_id) return;
+    const next = new URLSearchParams(searchParams);
+    next.set("export_id", exportJob.export_id);
+    setSearchParams(next, { replace: true });
+  }, [exportJob?.export_id, searchParams, setSearchParams]);
 
   return (
     <>

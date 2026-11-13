@@ -7,6 +7,7 @@ import {
   PageHeader,
 } from "../../../components/shared";
 import { usePricingContext } from "../hooks/usePricingContext";
+import { priceChannelLabel } from "../services/pricePresentation";
 import {
   usePricingRuntime,
   useRetryPricingCatalog,
@@ -89,12 +90,12 @@ export function PricingPageFrame({
     </>
   );
 }
-export function PricingLinks({ suffix }: { suffix: string }) {
+export function PricingLinks({ suffix, canEdit = true }: { suffix: string; canEdit?: boolean }) {
   return (
     <Group gap="sm" aria-label="Tareas de precios">
-      <Button component={Link} to={`/precios/editar${suffix}`}>
+      {canEdit && <Button component={Link} to={`/precios/editar${suffix}`}>
         Editar precio
-      </Button>
+      </Button>}
       <Button
         component={Link}
         to={`/precios/programaciones${suffix}`}
@@ -119,9 +120,11 @@ export function PricingContextLabel({
   label: string;
   channel: string;
 }) {
+  const channelLabel = channel === "global" || channel === "retail" || channel === "marketplace" || channel === "chatbot" || channel === "ventas"
+    ? priceChannelLabel(channel) : "Global";
   return (
     <Text size="sm" fw={600}>
-      {label} · Canal solicitado: {channel === "retail" ? "Retail" : "Global"}
+      {label} · Canal solicitado: {channelLabel}
     </Text>
   );
 }

@@ -153,9 +153,6 @@ export function StockDetailDrawer({
                   <IconCheck size={20} />
                 </ThemeIcon>
               </Group>
-              <Text size="xs" c="dimmed" mt={4}>
-                Apto para venta comercial
-              </Text>
             </Paper>
           </SimpleGrid>
         </div>
@@ -170,7 +167,7 @@ export function StockDetailDrawer({
                 Umbral de stock bajo resuelto:
               </Text>
               <Text size="sm" fw={600}>
-                {item.threshold} unidades
+                {item.threshold === null ? "No publicado" : `${item.threshold} unidades`}
               </Text>
             </Grid.Col>
             <Grid.Col span={6}>
@@ -178,9 +175,13 @@ export function StockDetailDrawer({
                 Versión de stock:
               </Text>
               <Text size="sm" fw={600}>
-                v{item.stockVersion}
+                {item.stockVersion === null ? "No publicada" : `v${item.stockVersion}`}
               </Text>
             </Grid.Col>
+            {item.skuActive !== undefined && <Grid.Col span={6}>
+              <Text size="xs" c="dimmed">Ciclo de vida del SKU</Text>
+              <Text size="sm" fw={600}>{item.skuActive === null ? "Desconocido" : item.skuActive ? "Activo" : "Inactivo"}</Text>
+            </Grid.Col>}
           </Grid>
         </Paper>
 

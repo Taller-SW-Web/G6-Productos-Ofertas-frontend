@@ -54,7 +54,7 @@ export function createCatalogHttp(transport: CatalogHttpTransport) {
         headers: { Accept: "application/json", "X-Correlation-Id": correlation, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     } catch (error) {
-      if (signal?.aborted) throw error;
+      if (signal?.aborted && method === "GET") throw error;
       throw new CatalogError(method === "GET" ? "server" : "write_unknown", method === "GET"
         ? "No se pudo consultar el servicio. Intente consultar nuevamente."
         : "No se pudo confirmar la escritura. Conserve los datos y consulte el resultado antes de volver a enviarla.");
@@ -63,9 +63,12 @@ export function createCatalogHttp(transport: CatalogHttpTransport) {
       let problem: Record<string, unknown> = {};
       try { problem = object(await response.json()); } catch { /* HTTP status still authoritative. */ }
       const code = typeof problem.code === "string" && /^[A-Z_0-9]+$/.test(problem.code) ? problem.code : "ERROR_HTTP";
+      const ref = response.headers.get("X-Correlation-Id") ?? correlation;
+      if (method !== "GET" && (response.status === 408 || response.status >= 500)) {
+        throw new CatalogError("write_unknown", `No se confirmó la escritura (${response.status}, ${code}). Consulte antes de repetirla. Referencia: ${ref}.`, { code, status: String(response.status), correlationId: ref });
+      }
       const kind = response.status === 401 ? "session" : response.status === 403 ? "forbidden" : kinds[code]
         ?? (response.status === 404 ? "not_found" : response.status === 409 ? "conflict" : response.status >= 500 ? "server" : "validation");
-      const ref = response.headers.get("X-Correlation-Id") ?? correlation;
       throw new CatalogError(kind, `No se pudo completar la operación (${response.status}, ${code}). Referencia: ${ref}.`, { code, status: String(response.status), correlationId: ref });
     }
     if (response.status !== expected || !response.headers.get("content-type")?.includes("application/json")) {

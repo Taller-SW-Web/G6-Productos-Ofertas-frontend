@@ -15,6 +15,7 @@ import { productRoutes } from "./productRoutes";
 import { RequireSession } from "./RequireSession";
 import { LoginPage } from "../../features/auth/pages/LoginPage";
 import { DataModeContext } from "../config/DataModeContext";
+import { AdminApiContext } from "../config/AdminApiContext";
 import { consultaEntries, consultaHref } from "./publicReadEntries";
 
 const G6ReadDemoApp = lazy(() =>
@@ -30,13 +31,14 @@ const ReadOnlyPage = lazy(() =>
 
 function PublicReadEntry({ children }: { children: ReactNode }) {
   const mode = useContext(DataModeContext);
+  const adminApi = useContext(AdminApiContext);
   const { pathname } = useLocation();
   const entry = consultaEntries[pathname];
   if (mode !== "api" || !entry) return children;
   return (
     <Stack gap="md">
-      <ContextNote title="Limitación del contrato administrativo:">
-        {entry.limitation}{" "}
+      <ContextNote title={adminApi ? "Consulta pública disponible" : "Limitación del contrato administrativo:"}>
+        {!adminApi && `${entry.limitation} `}
         <Anchor component={Link} to={consultaHref(entry.operationId)}>
           Abrir en Consultas de los módulos
         </Anchor>
@@ -67,7 +69,7 @@ const router = createBrowserRouter([
       {
         element: <ApplicationShell />,
         children: [
-          { path: "/", element: <Navigate to="/precios" replace /> },
+          { path: "/", element: <Navigate to="/productos" replace /> },
           ...productRoutes.map((route) => ({
             ...route,
             element: <PublicReadEntry>{route.element}</PublicReadEntry>,

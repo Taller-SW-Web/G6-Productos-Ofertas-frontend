@@ -1,8 +1,10 @@
 // Presentation models for administrative reading; these are not HTTP DTOs.
 export type CouponStatus = "active" | "inactive";
 export interface CouponView {
+  writeOutcome?: "RECONCILED";
   // Presentation warning after a confirmed write; never a backend state.
   relatedDataUnavailable?: boolean;
+  relatedDataAccess?: "session" | "forbidden";
   id: string;
   promotionId: string;
   code: string;
@@ -55,6 +57,7 @@ export interface CouponRepository {
   ): Promise<CouponView>;
   list(query: CouponQuery, signal: AbortSignal): Promise<CouponListResult>;
   read(id: string, signal: AbortSignal): Promise<CouponView | null>;
+  reconcilePending?(id: string | null, code: string | null, signal: AbortSignal): Promise<import("./administration").PromotionReconciliation<CouponView>>;
 }
 
 export interface CouponPromotion {

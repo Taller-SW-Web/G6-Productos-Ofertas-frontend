@@ -7,11 +7,11 @@ import { createCatalogServices } from "../src/features/catalog/services/catalogS
 test("failed physical validation leaves every product field and version unchanged", async () => {
   const repository = new MockCatalogRepository();
   const before = await repository.create({ nombre: "Original", descripcion: "Original", categoriaId: "CAT-ROPA", tipoProductoId: "TIP-CAMISETA", marcaId: "BRD-INKA", skuBase: "ATOMIC", tieneVariantes: false, precioBaseInicial: 20, atributos: [] });
-  await expect(repository.update(before.id, { nombre: "Changed", descripcion: "Changed", categoriaId: "different", marcaId: "different", tipoProductoId: "different", atributos: [], imagenes: [{ url: "https://example.com/changed.png", principal: true }], perfilFisico: { pesoKg: -1 }, catalogVersion: before.catalogVersion })).rejects.toThrow();
+  await expect(repository.update(before.id, { nombre: "Changed", descripcion: "Changed", categoriaId: "different", marcaId: "different", tipoProductoId: "different", atributos: [], imagenes: [{ url: "https://example.com/changed.png", principal: true }], perfilFisico: { pesoKg: -1 }, catalogVersion: before.catalogVersion! })).rejects.toThrow();
   expect(await repository.getById(before.id)).toEqual(before);
-  const after = await repository.update(before.id, { nombre: "Saved", descripcion: "Saved", categoriaId: before.categoryId, marcaId: before.brandId, catalogVersion: before.catalogVersion, perfilFisico: { pesoKg: 1 } });
+  const after = await repository.update(before.id, { nombre: "Saved", descripcion: "Saved", categoriaId: before.categoryId, marcaId: before.brandId, catalogVersion: before.catalogVersion!, perfilFisico: { pesoKg: 1 } });
   expect(after.name).toBe("Saved");
-  expect(after.catalogVersion).toBe(before.catalogVersion + 1);
+  expect(after.catalogVersion).toBe(before.catalogVersion! + 1);
 });
 
 test("consecutive product and variant creates remain unique with a frozen clock", async () => {

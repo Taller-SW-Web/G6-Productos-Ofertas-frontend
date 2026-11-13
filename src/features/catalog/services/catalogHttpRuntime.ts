@@ -1,19 +1,40 @@
+import type { AuthenticatedGatewayClient } from "../../../app/config/authenticatedGatewayClient";
+import type { G7Session } from "../../promotions/adapters/g7Session";
 import { createCatalogFetchTransport, type CatalogHttpTransport } from "../adapters/catalogHttp";
 import { createHttpCatalogRepository } from "../adapters/httpCatalogRepository";
 import { createHttpTaxonomyRepository } from "../adapters/httpTaxonomyRepository";
 import { createUnavailableApiCatalogRepository } from "../adapters/unavailableApiCatalogRepository";
 import { createCatalogServices, type CatalogServices } from "./catalogServices";
 
-export function createCatalogHttpServices(transport: CatalogHttpTransport): CatalogServices {
+export function createCatalogHttpServices(transport: CatalogHttpTransport, adminReads = true): CatalogServices & { commercialCatalog: CatalogServices["catalog"] } {
   const taxonomy = createHttpTaxonomyRepository(transport);
-  return createCatalogServices("api", { apiTaxonomy: () => taxonomy,
-    apiCatalog: () => createHttpCatalogRepository(transport) });
+  return { ...createCatalogServices("api", { apiTaxonomy: () => taxonomy,
+    apiCatalog: () => createHttpCatalogRepository(transport, adminReads ? "admin" : "commercial") }),
+    commercialCatalog: createHttpCatalogRepository(transport, "commercial") };
 }
 
 // Explicit Gateway configuration only; no environment-selected authentication bypass.
-export function createOptionalCatalogHttpServices(origin?: string): CatalogServices | null {
+export function createOptionalCatalogHttpServices(
+  origin?: string,
+  session?: G7Session | null,
+  authenticatedClient?: AuthenticatedGatewayClient,
+  adminReads = true,
+): (CatalogServices & { commercialCatalog?: CatalogServices["catalog"] }) | null {
   if (!origin) return null;
-  try { return createCatalogHttpServices(createCatalogFetchTransport(origin)); }
+  try {
+    createCatalogFetchTransport(origin);
+    if (!session || !authenticatedClient) return null;
+    const transport: CatalogHttpTransport = {
+      request: (path, init) =>
+        authenticatedClient.request(path, {
+          method: init.method,
+          signal: init.signal,
+          headers: init.headers,
+          ...(init.body === undefined ? {} : { body: init.body }),
+        }),
+    };
+    return createCatalogHttpServices(transport, adminReads);
+  }
   catch {
     const message = "La configuración de Gateway de Catálogo no es válida. Se requiere un origen HTTPS o loopback HTTP sin credenciales ni ruta.";
     const unavailable = async (): Promise<never> => { throw new Error(message); };

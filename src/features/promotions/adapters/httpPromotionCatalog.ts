@@ -4,12 +4,26 @@ import type {
   PromotionCatalogRepository,
 } from "../services/catalogRepository";
 
+const CATALOG_READ_BATCH_TIMEOUT_MS = 65_000;
+
+export class PromotionCatalogAccessError extends Error {
+  constructor(readonly status: 401 | 403) { super(status === 401 ? "Sesión no autorizada para consultar Catálogo." : "Permiso denegado al consultar Catálogo."); this.name = "PromotionCatalogAccessError"; }
+}
+
 // OpenAPI 0.6.0-rc.3, Docs aba8d1c: listarProductos (commercial DTO),
 // listarVariantesProducto and listarCategoriasAdmin (administrative DTOs).
 // This is a backoffice USER session adapter, never an inter-service identity.
 export function createHttpPromotionCatalog(
   request: (path: string, signal: AbortSignal) => Promise<unknown>,
 ): PromotionCatalogRepository {
+  const checkedRequest = async (path: string, signal: AbortSignal) => {
+    try { return await request(path, signal); }
+    catch (error) {
+      const status = error && typeof error === "object" && "status" in error ? Number((error as { status: unknown }).status) : NaN;
+      if (status === 401 || status === 403) throw new PromotionCatalogAccessError(status);
+      throw error;
+    }
+  };
   async function pages(path: string, nested: boolean, signal: AbortSignal) {
     const rows: unknown[] = [];
     let expectedTotal: number | undefined;
@@ -17,7 +31,7 @@ export function createHttpPromotionCatalog(
     for (let current = 1; current <= 1000; current++) {
       signal.throwIfAborted();
       const response = object(
-        await request(`${path}&pagina=${current}&tamanio=100`, signal),
+        await checkedRequest(`${path}&pagina=${current}&tamanio=100`, signal),
       );
       signal.throwIfAborted();
       const meta = nested ? object(response.meta) : response;
@@ -50,7 +64,7 @@ export function createHttpPromotionCatalog(
       // Azure services can start from zero. Bound the whole read and stop
       // sibling requests on cancellation/failure; writes keep their own policy.
       const batch = new AbortController();
-      const bounded = AbortSignal.any([signal, batch.signal, AbortSignal.timeout(65000)]);
+      const bounded = AbortSignal.any([signal, batch.signal, AbortSignal.timeout(CATALOG_READ_BATCH_TIMEOUT_MS)]);
       const retainedIds = new Set(retain?.productIds ?? []);
       const retainedSkus = new Set(retain?.skus ?? []);
       // The commercial DTO omits status. The published backoffice estado
@@ -149,7 +163,7 @@ export function createHttpPromotionCatalog(
       return confirmed;
     },
     async categories(signal) {
-      const bounded = AbortSignal.any([signal, AbortSignal.timeout(7500)]);
+      const bounded = AbortSignal.any([signal, AbortSignal.timeout(CATALOG_READ_BATCH_TIMEOUT_MS)]);
       const rows = await pages(
         "/categorias/administracion?estado=ACTIVO",
         true,

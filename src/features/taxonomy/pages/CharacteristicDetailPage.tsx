@@ -177,7 +177,7 @@ function CharacteristicDetailLoader({ id }: { id: string }) {
             )}
             {esLista && (
               <CampoDato etiqueta="Valores activos">
-                {detalle.valoresActivos}
+                {detalle.valoresActivos ?? "No disponible"}
               </CampoDato>
             )}
           </Stack>

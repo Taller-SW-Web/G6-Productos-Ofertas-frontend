@@ -21,6 +21,8 @@ import {
 } from "../services/pricingValidation";
 import { PricingPageFrame } from "../components/PricingPageFrame";
 import { PriceSummary } from "../components/PriceSummary";
+import { priceChannelLabel } from "../services/pricePresentation";
+import type { PriceQuery } from "../services/pricingRepository";
 
 export function HistoricalPricePage() {
   const context = usePricingContext(true);
@@ -96,16 +98,8 @@ function HistoricalContent() {
             <Select
               label="Canal histórico"
               value={draft.channel}
-              data={[
-                { value: "global", label: "Global" },
-                { value: "retail", label: "Retail" },
-              ]}
-              onChange={(value) =>
-                setDraft({
-                  ...draft,
-                  channel: value === "retail" ? "retail" : "global",
-                })
-              }
+              data={["global", "retail", "marketplace", "chatbot", "ventas"].map(value => ({ value, label: priceChannelLabel(value as PriceQuery["channel"]) }))}
+              onChange={(value) => { if (value === "global" || value === "retail" || value === "marketplace" || value === "chatbot" || value === "ventas") setDraft({ ...draft, channel: value }); }}
             />
             <TextInput
               type="datetime-local"
@@ -173,9 +167,9 @@ function HistoricalContent() {
                 >
                   Este precio corresponde al instante aplicado; no se presenta
                   como precio vigente hoy.{" "}
-                  {context.query.channel === "retail" &&
+                  {context.query.channel !== "global" &&
                     response.state.result.price.channel === "global" &&
-                    "El canal Retail solicitado resolvió al precio global efectivo."}
+                    `El canal ${priceChannelLabel(context.query.channel)} solicitado resolvió al precio global efectivo.`}
                 </FeedbackAlert>
                 <PriceSummary price={response.state.result.price} historical />
                 <Text size="sm">

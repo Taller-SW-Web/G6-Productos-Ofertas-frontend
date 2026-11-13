@@ -38,8 +38,8 @@ import type {
 import { useMockStateRevision } from "../../shared/useMockStateRevision";
 
 const configVacia: CharacteristicCatalogConfig = {
-  maxTexto: 0,
-  maxValoresLista: 0,
+  maxTexto: null,
+  maxValoresLista: null,
 };
 
 export function CharacteristicListPage() {

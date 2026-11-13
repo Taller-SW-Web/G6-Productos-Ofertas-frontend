@@ -31,6 +31,7 @@ export function createPromotionSessionRuntime(
       getAccessToken: session.getAccessToken,
       refreshAccessToken: session.refreshAccessToken,
       invalidateAccessToken: session.invalidateAccessToken,
+      scopeId: () => session.snapshot().user?.id ?? null,
       sessionEvents: { version: session.getSessionVersion, subscribe: session.subscribe },
     }),
   };

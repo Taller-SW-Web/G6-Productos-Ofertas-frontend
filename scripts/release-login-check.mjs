@@ -10,6 +10,7 @@ export async function verifyReleaseLogin(policy, { email, password, manualMfa = 
   const context = await browser.newContext({ serviceWorkers: "block", acceptDownloads: false });
   const evidence = new ReleaseSessionEvidence({ email, password });
   let violation = false;
+  let checkingIsolatedPricing = false;
   let rejectBoundary;
   const blocked = new Promise((_, reject) => { rejectBoundary = reject; });
   void blocked.catch(() => undefined);
@@ -20,7 +21,7 @@ export async function verifyReleaseLogin(policy, { email, password, manualMfa = 
     // allow a 307/308 to forward credentials. No automatic network retries.
     await context.route("**/*", async route => {
       const request = route.request();
-      if (!permittedRequest(policy, { url: request.url(), method: request.method(), resourceType: request.resourceType() }, evidence) || request.redirectedFrom()) {
+      if (!permittedRequest(policy, { url: request.url(), method: request.method(), resourceType: request.resourceType() }, { promotionIds: evidence.promotionIds, checkingIsolatedPricing }) || request.redirectedFrom()) {
         deny(); await route.abort(); return;
       }
       let stamp;
@@ -92,17 +93,22 @@ export async function verifyReleaseLogin(policy, { email, password, manualMfa = 
     // Wait for the coupon view to settle, including parent enrichment, before
     // navigating away and aborting a legitimate pending read.
     await page.getByText("Todavía no hay cupones", { exact: true }).or(page.locator("caption", { hasText: "Cupones de descuento" })).first().waitFor();
-    await page.getByRole("link", { name: "Consultar precios", exact: true }).click();
-    await page.waitForURL(policy.preview + "/precios");
-    const nativePrices = page.getByRole("heading", { name: "Gestión de precios", exact: true, level: 1 });
-    const readOnlyPrices = page.getByRole("heading", { name: "Consultas de los módulos", exact: true, level: 1 });
-    await nativePrices.or(readOnlyPrices).waitFor();
-    if (await nativePrices.isVisible()) {
-      const description = page.getByText("Consulta los precios vigentes de productos y variantes (SKU).", { exact: true });
-      await description.waitFor();
-      verifyPricesContent({ heading: (await nativePrices.textContent())?.trim(), description: (await description.textContent())?.trim() });
-    } else {
-      verifyPricesContent({ heading: (await readOnlyPrices.textContent())?.trim(), module: await page.getByRole("combobox", { name: "Módulo", exact: true }).inputValue(), operation: await page.getByRole("combobox", { name: "Consulta", exact: true }).inputValue() });
+    if (policy.isolatedFixture) {
+      checkingIsolatedPricing = true;
+      await page.getByRole("link", { name: "Consultar precios", exact: true }).click();
+      await page.waitForURL(policy.preview + "/precios");
+      const nativePrices = page.getByRole("heading", { name: "Gestión de precios", exact: true, level: 1 });
+      const readOnlyPrices = page.getByRole("heading", { name: "Consultas de los módulos", exact: true, level: 1 });
+      await nativePrices.or(readOnlyPrices).waitFor();
+      if (await nativePrices.isVisible()) {
+        const description = page.getByText("Consulta los precios vigentes de productos y variantes (SKU).", { exact: true });
+        await description.waitFor();
+        verifyPricesContent({ heading: (await nativePrices.textContent())?.trim(), description: (await description.textContent())?.trim() });
+      } else {
+        verifyPricesContent({ heading: (await readOnlyPrices.textContent())?.trim(), module: await page.getByRole("combobox", { name: "Módulo", exact: true }).inputValue(), operation: await page.getByRole("combobox", { name: "Consulta", exact: true }).inputValue() });
+      }
+      await page.waitForLoadState("networkidle");
+      checkingIsolatedPricing = false;
     }
     healthy(); verifyPreviewLocation(policy, page.url());
     await page.getByRole("button", { name: "Cerrar sesión", exact: true }).click();

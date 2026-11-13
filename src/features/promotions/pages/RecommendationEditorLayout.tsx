@@ -144,7 +144,7 @@ function RecommendationEditorProvider({
       <Navigate
         replace
         to={`/recomendaciones/${form.confirmed.id}?${next}`}
-        state={{ saved: true }}
+        state={{ saved: true, reconciled: form.confirmed.writeOutcome === "RECONCILED" }}
       />
     );
   }

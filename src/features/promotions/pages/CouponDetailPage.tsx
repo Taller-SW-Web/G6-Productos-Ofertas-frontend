@@ -48,7 +48,7 @@ export function CouponDetailPage({
     setPrevResult(state.result);
     setCachedCoupon(state.result);
   }
-  const coupon = state.status === "success" ? state.result : cachedCoupon;
+  const coupon = state.status === "success" ? state.result : cachedCoupon?.id === couponId ? cachedCoupon : null;
   const suffix = params.size ? `?${params.toString()}` : "";
   useEffect(() => {
     if (coupon && (location.state?.focusState || stateUpdated))

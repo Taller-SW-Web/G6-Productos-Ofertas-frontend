@@ -10,6 +10,7 @@ let provider: Server;
 let base: string;
 let mfa: boolean;
 let forceJwe: boolean;
+let adminApi: boolean;
 let failure: string;
 let expiry: number;
 let roles: string[];
@@ -24,7 +25,7 @@ const dto = {
   usuario: { id: "11111111-1111-4111-8111-111111111111", nombreCompleto: "Gestora de prueba", correo: "isolated@example.test", roles: ["GESTOR_COMERCIAL"] },
 };
 test.beforeEach(async ({ page }) => {
-  forceJwe = false; mfa = false; failure = ""; expiry = 900; calls = []; roles = ["GESTOR_COMERCIAL"]; demo = false; fullName = dto.usuario.nombreCompleto; holdRefresh = false; releaseRefresh = undefined;
+  forceJwe = false; adminApi = false; mfa = false; failure = ""; expiry = 900; calls = []; roles = ["GESTOR_COMERCIAL"]; demo = false; fullName = dto.usuario.nombreCompleto; holdRefresh = false; releaseRefresh = undefined;
   provider = createServer(async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? 5173}`);
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -51,7 +52,7 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/src/main.tsx*", async route => {
     const response = await route.fetch();
     let body = await response.text();
-    for (const [key, value] of [["VITE_G6_READ_DEMO", demo ? "true" : "false"], ["VITE_DATA_MODE", "api"], ["VITE_GATEWAY_ORIGIN", `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? 5173}`], ["VITE_G7_API_BASE", base]]) {
+    for (const [key, value] of [["VITE_G6_READ_DEMO", demo ? "true" : "false"], ["VITE_G6_ADMIN_API_ENABLED", String(adminApi)], ["VITE_DATA_MODE", "api"], ["VITE_GATEWAY_ORIGIN", `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? 5173}`], ["VITE_G7_API_BASE", base]]) {
       body = body.replaceAll(`import.meta.env.${key}`, JSON.stringify(value));
     }
     await route.fulfill({ response, body });
@@ -77,8 +78,8 @@ async function draftBeforeRefresh(page: Page) {
   expiry = 120;
   await page.route(`http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? 5173}/api/v1/**`, route => {
     const path = new URL(route.request().url()).pathname;
-    const body = path.endsWith("/categorias") ? { categories: [{ categoria_id: "cat-api", name: "Categoría", status: "ACTIVA" }] }
-      : path.endsWith("/marcas") ? { brands: [{ marca_id: "brand-api", name: "Marca", status: "ACTIVA" }] }
+    const body = path.endsWith("/categorias/administracion") ? { items: [{ categoriaId: "cat-api", nombre: "Categoría", estado: "ACTIVA" }], meta: { pagina: 1, tamanio: 200, total: 1, totalPaginas: 1 } }
+      : path.endsWith("/marcas/administracion") ? { items: [{ marcaId: "brand-api", nombre: "Marca", estado: "ACTIVA" }], meta: { pagina: 1, tamanio: 200, total: 1, totalPaginas: 1 } }
       : path.endsWith("/tipos-producto") ? { items: [{ tipoProductoId: "type-api", nombre: "Tipo", estado: "ACTIVO" }], meta: { pagina: 1, tamanio: 100, total: 1, totalPaginas: 1 } }
       : { tipoProducto: { tipoProductoId: "type-api" }, schemaVersion: 1, caracteristicas: [] };
     return route.fulfill({ json: body });
@@ -257,6 +258,100 @@ async function expectLoginInsideViewport(page: Page) {
     expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height);
   }
 }
+test("una sesión administrativa autentica lecturas de los seis módulos", async ({ page }) => {
+  adminApi = true;
+  const gateway = `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? 5173}`;
+  const reads: { path: string; method: string; authorization: string | undefined }[] = [];
+  const stockPages: number[] = [];
+  // These repositories also read Vite's mode directly. Match the API mode set in main.tsx by the fixture.
+  await page.route(/\/src\/features\/(taxonomy\/services\/taxonomyServices|inventory\/services\/inventoryProvider)\.ts(?:\?|$)/, async route => {
+    const response = await route.fetch();
+    const source = await response.text();
+    // Vite omits an unset variable locally; CI defines it as mock. Set the
+    // fixture mode in both cases instead of silently leaving one provider mock.
+    const body = source.replace(/import\.meta\.env\s*=\s*(\{[^\r\n]*?\});/, 'import.meta.env = Object.assign($1, { VITE_DATA_MODE: "api" });');
+    expect(body).not.toBe(source);
+    await route.fulfill({ response, body });
+  });
+  await page.route(`${gateway}/api/v1/**`, route => {
+    const request = route.request();
+    const { pathname, searchParams } = new URL(request.url());
+    const authorization = request.headers().authorization;
+    reads.push({ path: pathname, method: request.method(), authorization });
+
+    const pageInfo = {
+      pagina: Number(searchParams.get("pagina")),
+      tamanio: Number(searchParams.get("tamanio")),
+      total: 0,
+    };
+    if (pathname === "/api/v1/productos") {
+      return route.fulfill({ json: { items: [], ...pageInfo } });
+    }
+    if (pathname === "/api/v1/productos/administracion") {
+      return route.fulfill({ json: { items: [], meta: { ...pageInfo, totalPaginas: 0 } } });
+    }
+    if (pathname === "/api/v1/categorias/arbol") {
+      return route.fulfill({ json: [] });
+    }
+    if (pathname === "/api/v1/inventario/administracion/saldos") {
+      const balances = Array.from({ length: 21 }, (_, index) => ({
+        sku: index >= 19 ? "SKU-FISICO" : `SKU-${index}`,
+        ubicacion: { locationId: index === 20 ? "22222222-2222-4222-8222-222222222222" : "11111111-1111-4111-8111-111111111111",
+          nombre: index === 20 ? "Tienda Norte" : "Almacén Central", codigo: "LOC", tipo: "ALMACEN", activa: true },
+        skuActivo: null, onHand: 0, reserved: 0, blocked: 0, available: 0, umbralEfectivo: 5,
+        estado: "AGOTADO", stockVersion: 3, actualizadoEn: "2026-11-07T13:00:00Z",
+      }));
+      if (pageInfo.tamanio === 20) stockPages.push(pageInfo.pagina);
+      const from = (pageInfo.pagina - 1) * pageInfo.tamanio;
+      return route.fulfill({ json: { items: balances.slice(from, from + pageInfo.tamanio),
+        meta: { ...pageInfo, total: balances.length, totalPaginas: Math.ceil(balances.length / pageInfo.tamanio) } } });
+    }
+    if (["/api/v1/cupones", "/api/v1/combos"].includes(pathname)) {
+      return route.fulfill({ json: { items: [], meta: { ...pageInfo, totalPaginas: 0 } } });
+    }
+    // This session fixture also verifies a provider can deny a read without dropping the G7 session.
+    return route.fulfill({ status: 403, json: { code: "FORBIDDEN" } });
+  });
+  await page.goto("/cupones");
+  await expect(page).toHaveURL(/\/login$/);
+  expect(reads).toHaveLength(0);
+  await login(page);
+  await expect(page.getByText("Todavía no hay cupones", { exact: true })).toBeVisible();
+  expect(reads.map(read => read.path)).toEqual(["/api/v1/cupones"]);
+
+  const navigation = page.getByRole("navigation", { name: "Navegación de la aplicación", exact: true });
+  for (const [label, path, operation] of [
+    ["Consultar precios", "/precios", "/api/v1/productos"],
+    ["Gestión de productos", "/productos", "/api/v1/productos/administracion"],
+    ["Categorías", "/categorias", "/api/v1/categorias/arbol"],
+    ["Dashboard analítico", "/inventario/dashboard", "/api/v1/inventario/dashboard"],
+    ["Gestión de combos", "/combos", "/api/v1/combos"],
+  ]) {
+    const readStart = reads.length;
+    await navigation.getByRole("link", { name: label, exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`${path}$`));
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await expect.poll(() => reads.slice(readStart).map(read => read.path)).toContain(operation);
+  }
+  await navigation.getByRole("link", { name: "Control de stock", exact: true }).click();
+  await expect(page.getByText("21 saldos físicos", { exact: true })).toBeVisible();
+  await expect(page.getByRole("row").filter({ hasText: "SKU-FISICO" })).toContainText("Almacén Central");
+  await page.getByRole("button", { name: "2", exact: true }).click();
+  await expect(page.getByRole("row").filter({ hasText: "SKU-FISICO" })).toContainText("Tienda Norte");
+  await page.getByTitle("Ver detalle de SKU-FISICO en Tienda Norte").click();
+  await expect(page.getByText("Desconocido", { exact: true })).toBeVisible();
+  await expect(page.getByText("v3", { exact: true })).toBeVisible();
+  expect(stockPages).toEqual([1, 2]);
+  await page.getByRole("button", { name: "Cerrar detalle", exact: true }).click();
+  await navigation.getByRole("link", { name: "Traslados de stock", exact: true }).click();
+  await expect(page.getByText("Función no disponible", { exact: true })).toBeVisible();
+  expect(reads.some(read => read.path.startsWith("/api/v1/inventario/traslados"))).toBe(false);
+  for (const read of reads) {
+    expect(read, read.path).toMatchObject({ method: "GET", authorization: `Bearer ${dto.accessToken}` });
+  }
+  expect(calls.filter(call => call.path.endsWith("/login"))).toHaveLength(1);
+});
+
 test("la entrada de productos conserva el login y consulta el canal elegido sin JWT", async ({ page }) => {
   const adminReads: string[] = [];
   const publicReads: string[] = [];
@@ -312,7 +407,7 @@ test("la entrada de productos conserva el login y consulta el canal elegido sin 
   await expect(page).toHaveURL(/\/login$/);
   await login(page);
   await expect(page.getByRole("heading", { name: "Gestión de productos", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Crear producto", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Crear producto", exact: true }).first()).toBeVisible();
   await expect(page.getByText("Limitación del contrato administrativo:", { exact: true })).toBeVisible();
   await expect.poll(() => adminReads.length).toBeGreaterThanOrEqual(1);
   await page.getByRole("link", { name: "Abrir en Consultas de los módulos", exact: true }).click();
@@ -443,7 +538,7 @@ test("login conserva destino interno; logout sin red, atrás y recarga no recupe
   await expect(page).toHaveURL(/\/combos\?vista=lista$/);
   await expect(page.getByText("Sesión de Gestora de prueba", { exact: true })).toBeVisible();
   await page.evaluate(() => { history.pushState({}, "", "/login"); dispatchEvent(new PopStateEvent("popstate")); });
-  await expect(page).toHaveURL(/\/precios$/);
+  await expect(page).toHaveURL(/\/productos$/);
   await page.getByRole("button", { name: "Cerrar sesión", exact: true }).click();
   await expect(page).toHaveURL(/\/login$/);
   await page.goBack();
