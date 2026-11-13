@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { categoryService } from "../services/categoryService";
-import type { BajaCategoriaSeguimiento, BajaSolicitudResult } from "../types";
+import type { BajaCategoriaSeguimiento, BajaSolicitudResult, CategoryDetail } from "../types";
+import { getTaxonomyGateway } from "../services/taxonomyGatewayRuntime";
+import { resolveDataMode } from "../../../app/config/dataMode";
+import { solicitarBajaHttp } from "../adapters/httpTaxonomyDeactivationAdapter";
+import { useTaxonomyOperationPolling } from "./useTaxonomyOperationPolling";
 
 export type SolicitarBajaState =
   | { status: "idle" }
@@ -14,9 +18,12 @@ export type BajaSeguimientoState =
   | { status: "success"; result: BajaCategoriaSeguimiento }
   | { status: "error"; message: string };
 
-export function useSolicitarBaja(id: string) {
+export function useSolicitarBaja(id: string, detalle?: CategoryDetail) {
+  const api = resolveDataMode(import.meta.env?.VITE_DATA_MODE, import.meta.env?.DEV ?? true) === "api";
+  const [operationId, setOperationId] = useState<string | null>(null);
+  const polling = useTaxonomyOperationPolling(api ? getTaxonomyGateway() : undefined, operationId);
   const [state, setState] = useState<SolicitarBajaState>({ status: "idle" });
-  const [seguimiento, setSeguimiento] = useState<BajaSeguimientoState>({
+  const [mockSeguimiento, setSeguimiento] = useState<BajaSeguimientoState>({
     status: "idle",
   });
   const controllerRef = useRef<AbortController | null>(null);
@@ -29,7 +36,14 @@ export function useSolicitarBaja(id: string) {
     controllerRef.current = controller;
     setState({ status: "enviando" });
     setSeguimiento({ status: "idle" });
-    void categoryService.solicitarBaja(id, controller.signal).then(
+    const gateway = api ? getTaxonomyGateway() : undefined;
+    const solicitud = api
+      ? gateway && detalle ? solicitarBajaHttp(gateway, "categorias", id, controller.signal).then((operacionId): BajaSolicitudResult => {
+          setOperationId(operacionId);
+          return { resultado: "verificando", categoria: detalle, bloqueos: [], mensaje: "Solicitud admitida; esperando resultado.", operacionId };
+        }) : Promise.reject(new Error("La baja de categoría no está configurada."))
+      : categoryService.solicitarBaja(id, controller.signal);
+    void solicitud.then(
       (result) => {
         if (controller.signal.aborted) return;
         setState({ status: "success", result });
@@ -48,6 +62,7 @@ export function useSolicitarBaja(id: string) {
   };
 
   const consultarEstado = (operacionId: string) => {
+    if (api) { setOperationId(operacionId); return; }
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -74,9 +89,19 @@ export function useSolicitarBaja(id: string) {
 
   const reiniciar = () => {
     controllerRef.current?.abort();
+    setOperationId(null);
     setState({ status: "idle" });
     setSeguimiento({ status: "idle" });
   };
 
-  return { state, seguimiento, solicitar, consultarEstado, reiniciar };
+  let seguimiento: BajaSeguimientoState = mockSeguimiento;
+  if (api && operationId && polling.status !== "idle") {
+    if (polling.status === "error") seguimiento = { status: "error", message: polling.message };
+    else {
+      const estado = polling.status === "completed" ? "confirmada" : polling.status === "rejected" ? "rechazada" : polling.status === "unconfirmed" ? "no-concluyente" : "pendiente";
+      const mensaje = estado === "confirmada" ? "La baja fue confirmada." : estado === "rechazada" ? "La baja fue rechazada; consulta el estado de la categoría." : estado === "no-concluyente" ? "No se recibió confirmación dentro del plazo. Consulta la operación antes de reintentar." : "Solicitud admitida; esperando resultado.";
+      seguimiento = { status: "success", result: { operacionId: operationId, estado, mensaje } };
+    }
+  }
+  return { state, seguimiento, solicitar, consultarEstado, reiniciar, seguimientoAutomatico: api };
 }

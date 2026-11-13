@@ -110,3 +110,29 @@ describe("transporte autenticado de Taxonomía", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 });
+
+it.each([401, 403, 409, 422, 500])("propaga HTTP %i y no reintenta mutaciones", async status => {
+  const auth = session();
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({code:"ERROR_PRUEBA"}, {status}));
+  const gateway = createAuthenticatedTaxonomyGateway("https://gateway.example", auth, fetcher);
+  await expect(gateway.request("/api/v1/categorias", new AbortController().signal, "id", {method:"POST", body:{nombre:"x"}})).rejects.toMatchObject({status, code:"ERROR_PRUEBA"});
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(auth.refreshAccessToken).not.toHaveBeenCalled();
+  expect(fetcher.mock.calls[0]?.[1]).toMatchObject({method:"POST", body:'{"nombre":"x"}', headers:{Authorization:"Bearer old-token", "X-Correlation-Id":"id", "Content-Type":"application/json"}});
+});
+
+it("envía FormData sin forzar Content-Type y conserva Bearer en mutaciones públicas", async () => {
+  const form = new FormData(); form.append("nombre", "x");
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, {status:200}));
+  const gateway = createAuthenticatedTaxonomyGateway("https://gateway.example", session(), fetcher, {publicReads:true});
+  await gateway.request("/api/v1/marcas/1", new AbortController().signal, "id", {method:"PATCH", body:form});
+  expect(fetcher.mock.calls[0]?.[1]).toMatchObject({method:"PATCH", body:form, headers:{Authorization:"Bearer old-token"}});
+  expect(fetcher.mock.calls[0]?.[1]?.headers).not.toHaveProperty("Content-Type");
+});
+
+it("informa un error de red sin repetir la mutación", async () => {
+  const fetcher = vi.fn<typeof fetch>().mockRejectedValue(new TypeError("network"));
+  const gateway = createAuthenticatedTaxonomyGateway("https://gateway.example", session(), fetcher);
+  await expect(gateway.request("/api/v1/marcas/1", new AbortController().signal, undefined, {method:"POST"})).rejects.toMatchObject({name:"TaxonomyNetworkError"});
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
