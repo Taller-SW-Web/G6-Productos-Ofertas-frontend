@@ -295,6 +295,40 @@ describe("createHttpPricingRepository", () => {
     });
   });
 
+  it.each([null, "MARKETPLACE"])(
+    "deja el PATCH Retail sin confirmar cuando la respuesta indica canal %s",
+    async (channelId) => {
+      const onUpdated = vi.fn();
+      const { repository, calls } = setup(
+        async (_path, request) =>
+          jsonResponse(
+            request.method === "PATCH"
+              ? skuPrice({
+                  channel_id: channelId,
+                  precio_regular: 13.2,
+                  price_version: 5,
+                })
+              : skuPrice({ channel_id: "RETAIL" }),
+          ),
+        { onUpdated },
+      );
+      const target = { targetId: variant.id, channel: "retail" as const };
+      const signal = new AbortController().signal;
+      const update = change({ target });
+      await repository.readEditable(target, signal);
+
+      await expect(repository.update(update, signal)).rejects.toMatchObject({
+        kind: "unknown",
+        message: expect.stringContaining("La respuesta no confirma el cambio"),
+      });
+      await expect(repository.update(update, signal)).rejects.toMatchObject({
+        kind: "unknown",
+      });
+      expect(calls.map(({ request }) => request.method)).toEqual(["GET", "PATCH"]);
+      expect(onUpdated).not.toHaveBeenCalled();
+    },
+  );
+
   it("clasifica errores HTTP y solo interpreta los 404 contractuales como ausencia", async () => {
     for (const [status, code, kind] of [
       [400, "VALIDACION", "error"],

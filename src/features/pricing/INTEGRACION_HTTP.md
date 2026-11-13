@@ -100,14 +100,6 @@ El fetch directo del harness es solo un doble de transporte de pruebas.
 elegibilidad verificables por Catálogo; no se conecta a mocks. `listTargets`
 falla explícitamente si esa dependencia no se inyecta.
 
-Para PATCH y programación, OpenAPI 0.6.0-rc.3 define `RETAIL` en el enum
-`Canal` y `null` para el alcance global. El adaptador envía esos valores
-directamente. La edición usa la versión de una definición propia del objetivo
-y canal. El GET de producto sigue limitado al alcance global. El uso de las
-rutas administrativas propuestas requiere confirmación del owner del contrato.
-
-[OpenAPI 0.6.0-rc.3](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/aba8d1ca998cfcd2db1c4fa87654036a5a4c1ac1/contratos/http/openapi.yaml)
-
 Castilla conserva `src/main.tsx`, `src/app/config/**` y la composición hybrid.
 Debe inyectar explícitamente un runtime mock en `AuditRuntimeContext` para
 MK-014; no usar `createAuditRuntime("api")` como sustituto. La prueba local
@@ -120,7 +112,32 @@ invoca. Una programación incierta queda bloqueada para ese alcance durante la
 vida del repositorio; leer la lista no autoriza por sí mismo a reenviarla. No
 se promete idempotencia durable entre recargas del navegador.
 
-## Pantallas y fuente de datos
+## Contrato publicado de Pricing
+
+El OpenAPI oficial 0.6.0-rc.3 documenta la consulta de precios por SKU,
+el GET de precio base de producto, los PATCH de producto y SKU, y sus
+rutas de programación. Cada operación conserva el `x-status` del contrato.
+El GET de precio base de producto consulta el alcance global. El GET
+comercial por SKU puede devolver un precio heredado. La edición requiere
+una definición propia del objetivo y del canal solicitado, con su versión.
+Para PATCH y programación el adaptador envía `RETAIL` para ese canal y
+`null` para el alcance global. La disponibilidad por Gateway y la
+persistencia de un PATCH autenticado quedan pendientes de validación conjunta.
+
+[OpenAPI oficial 0.6.0-rc.3](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/aba8d1ca998cfcd2db1c4fa87654036a5a4c1ac1/contratos/http/openapi.yaml)
+
+## Rutas administrativas propuestas en Backend
+
+La propuesta H4 incluye `GET /api/v1/precios/administracion/productos/{productoId}`
+y `GET /api/v1/precios/administracion/skus/{sku}` para consultar una definición
+editable exacta. Su incorporación al contrato oficial y su autorización por
+Gateway quedan pendientes de confirmación del responsable del contrato.
+El adaptador actual mantiene la edición Retail de producto bloqueada hasta
+contar con una lectura confirmada de esa definición.
+
+[Propuesta H4 de Pricing administrativo](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/2a97bd91e5d9fe85e4cc67f6bc960346481ed44a/docs/hito-4/pricing-admin.openapi.json)
+
+## Pantallas y fuente de datos al 2026-10-17
 
 La aplicación normal conserva su modo mock. El modo API productivo sigue sin
 provider compartido; falla visiblemente y no recurre a fixtures.
