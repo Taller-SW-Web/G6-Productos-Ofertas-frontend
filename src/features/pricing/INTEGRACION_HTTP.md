@@ -1,5 +1,36 @@
 # MK-013 / MK-014 — entrega parcial de integración, 2026-10-17
 
+## Verificación local del 2026-11-13
+
+Frontend `vera@53f159ab` con el cambio de Retail en revisión. Backend
+`vera@2a97bd91` y Docs oficial `aba8d1ca` (OpenAPI 0.6.0-rc.3,
+AsyncAPI 0.6.0-rc.4). Las secciones fechadas de octubre conservan su
+diagnóstico y resultados históricos.
+
+- PATCH y programación usan el valor contractual `RETAIL`, con `null` para
+  global. La edición conserva la verificación del objetivo, canal y versión.
+- Chromium a 1440 × 900 ejecutó el harness de MK-013 con un objetivo de prueba
+  y Vite reenviando `/api/v1` al Gateway en 3000. El GET llegó a Pricing en 3002
+  y leyó PostgreSQL 16 desechable: 12,30 PEN, oferta y canal nulos, versión 4.
+  En `PUBLIC_READ_ONLY` el PATCH anónimo dio 401 y la versión persistida siguió
+  en 4. Al detener Pricing, Gateway devolvió 503 y la vista marcó su última
+  consulta como desactualizada. MK-014 abrió con el runtime mock explícito.
+- En Backend, `npm run test:e2e -- apps/pricing-svc apps/price-audit-svc` con
+  `PRICING_TEST_POSTGRES`, `PRICING_TEST_AMQP`, `PRICING_TEST_AUDIT`,
+  `PRICE_AUDIT_TEST_POSTGRES` y `PRICE_AUDIT_TEST_AMQP` en `1` verificó el
+  recorrido del Outbox a Price Audit, la deduplicación y la ausencia de eventos
+  efectivos antes de la vigencia de un precio programado.
+- La suite `catalog-pricing.integration.e2e-spec.ts` pasó por separado con
+  `PRICING_TEST_CATALOG=1` y un checkout desechable de Catálogo en `263bd265`.
+  Comprueba inicialización, baja de SKU y mensajería entre servicios.
+- Para completar la integración en la aplicación normal, Castilla debe
+  inyectar el cliente compartido y el selector por feature (#45/#109). Poma
+  debe habilitar la fuente autoritativa de objetivos. El PATCH de navegador
+  con persistencia queda pendiente de acceso autenticado; la prueba de
+  solo lectura usa únicamente `obtenerPrecioBaseProducto` en las allowlists.
+
+## Entrega original del 2026-10-17
+
 **PARTIAL.** El adaptador HTTP se valida con respuestas de prueba explícitas.
 La aplicación productiva todavía no está conectada al Gateway por el cliente
 compartido. Ningún PATCH de esta entrega se presenta como persistido en una
@@ -53,7 +84,6 @@ createPricingRuntime("api", {
   api: async () => createHttpPricingRepository({
     transport: sharedGatewayTransport,
     listCatalogTargets: authoritativeCatalogPricingTargets,
-    channelIds: canonicalPricingChannelIds,
     // onUpdated opcional: solamente una anotación de demo con before/after conocidos.
   }),
 });
@@ -68,8 +98,15 @@ El fetch directo del harness es solo un doble de transporte de pruebas.
 
 `authoritativeCatalogPricingTargets` requiere identidades, etiquetas y estado/
 elegibilidad verificables por Catálogo; no se conecta a mocks. `listTargets`
-falla explícitamente si esa dependencia no se inyecta. Retail exige la identidad
-canónica del canal de escritura: no se inventa un ID desde su etiqueta.
+falla explícitamente si esa dependencia no se inyecta.
+
+Para PATCH y programación, OpenAPI 0.6.0-rc.3 define `RETAIL` en el enum
+`Canal` y `null` para el alcance global. El adaptador envía esos valores
+directamente. La edición usa la versión de una definición propia del objetivo
+y canal. El GET de producto sigue limitado al alcance global. El uso de las
+rutas administrativas propuestas requiere confirmación del owner del contrato.
+
+[OpenAPI 0.6.0-rc.3](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/aba8d1ca998cfcd2db1c4fa87654036a5a4c1ac1/contratos/http/openapi.yaml)
 
 Castilla conserva `src/main.tsx`, `src/app/config/**` y la composición hybrid.
 Debe inyectar explícitamente un runtime mock en `AuditRuntimeContext` para
