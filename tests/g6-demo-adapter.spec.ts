@@ -113,6 +113,10 @@ test("la demo pública exige canal, lo conserva al volver del detalle y omite fi
   expect(new URL(detailUrls[0]!).searchParams.get("canal")).toBe("CHATBOT");
   await page.getByRole("link", { name: "Volver a productos" }).click();
   await expect(page).toHaveURL(/\/demo\/g6\/productos\?canal=CHATBOT/);
+  await page.getByRole("link", { name: "Consultar categorías" }).click();
+  await expect(page).toHaveURL(/\/demo\/g6\/categorias\?canal=CHATBOT/);
+  await page.getByRole("link", { name: "Productos", exact: true }).click();
+  await expect(page).toHaveURL(/\/demo\/g6\/productos\?canal=CHATBOT/);
 });
 
 test("Pricing simulado: máximo tres consultas activas; cancelar cola no envía HTTP; 500 libera cupo sin retry", async () => {

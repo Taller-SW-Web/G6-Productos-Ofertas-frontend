@@ -208,7 +208,13 @@ function Products() {
           value={categoryId || null}
           onChange={(value) => change("categoriaId", value ?? "")}
         />
-        <Button variant="outline" component={Link} to="/demo/g6/categorias">
+        <Button
+          variant="outline"
+          component={Link}
+          to={
+            `/demo/g6/categorias${channel ? `?canal=${encodeURIComponent(channel)}` : ""}`
+          }
+        >
           Consultar categorías
         </Button>
       </Group>
