@@ -33,6 +33,7 @@ import {
 import {
   demoCatalogApi,
   type DemoCategory,
+  type DemoChannel,
   type DemoProduct,
 } from "../adapters/demoCatalogApi";
 import { useDemoRead } from "../hooks/useDemoRead";
@@ -41,6 +42,16 @@ const money = (value: number) =>
   new Intl.NumberFormat("es-PE", { style: "currency", currency: "PEN" }).format(
     value,
   );
+const channels: { value: DemoChannel; label: string }[] = [
+  { value: "MARKETPLACE", label: "Marketplace" },
+  { value: "CHATBOT", label: "Chatbot" },
+  { value: "RETAIL", label: "Retail" },
+];
+function readChannel(value: string | null): DemoChannel | null {
+  return channels.some((channel) => channel.value === value)
+    ? (value as DemoChannel)
+    : null;
+}
 function Price({ id }: { id: string }) {
   const load = useCallback(
     (signal: AbortSignal) => demoCatalogApi.price(id, signal),
@@ -98,21 +109,20 @@ function Products() {
   const page = Math.max(1, Number(params.get("pagina")) || 1);
   const q = params.get("q") ?? "";
   const categoryId = params.get("categoriaId") ?? "";
-  const rawState = params.get("estado");
-  const productState =
-    rawState === "ACTIVO" || rawState === "INACTIVO" ? rawState : "BORRADOR";
+  const channel = readChannel(params.get("canal"));
   const load = useCallback(
     async (signal: AbortSignal) => {
+      const categoriesPromise = demoCatalogApi.categories(signal);
+      const productsPromise = channel
+        ? demoCatalogApi.list({ page, q, categoryId, channel }, signal)
+        : Promise.resolve(null);
       const [products, categories] = await Promise.all([
-        demoCatalogApi.list(
-          { page, q, categoryId, state: productState },
-          signal,
-        ),
-        demoCatalogApi.categories(signal),
+        productsPromise,
+        categoriesPromise,
       ]);
       return { products, categories };
     },
-    [page, q, categoryId, productState],
+    [page, q, categoryId, channel],
   );
   const state = useDemoRead(load);
   const change = (key: string, value: string) => {
@@ -138,7 +148,7 @@ function Products() {
         <Anchor
           c="var(--po-primaryHover)"
           component={Link}
-          to={`/demo/g6/productos/${encodeURIComponent(row.id)}`}
+          to={`/demo/g6/productos/${encodeURIComponent(row.id)}?canal=${encodeURIComponent(channel!)}`}
           state={{ from: location.pathname + location.search }}
         >
           {row.name}
@@ -173,9 +183,16 @@ function Products() {
     <Stack>
       <PageHeader
         title="Productos"
-        description="Consulta del catálogo de G6. Los borradores se muestran para revisión y no acreditan disponibilidad comercial."
+        description="Consulta productos visibles comercialmente. Elige el canal para cargar el catálogo correspondiente."
       />
       <Group align="end">
+        <Select
+          label="Canal comercial"
+          placeholder="Selecciona un canal"
+          data={channels}
+          value={channel}
+          onChange={(value) => change("canal", value ?? "")}
+        />
         <TextInput
           label="Buscar productos"
           value={q}
@@ -191,16 +208,6 @@ function Products() {
           value={categoryId || null}
           onChange={(value) => change("categoriaId", value ?? "")}
         />
-        <Select
-          label="Estado del catálogo"
-          data={[
-            { value: "BORRADOR", label: "Borrador" },
-            { value: "ACTIVO", label: "Activo" },
-            { value: "INACTIVO", label: "Inactivo" },
-          ]}
-          value={productState}
-          onChange={(value) => change("estado", value ?? "BORRADOR")}
-        />
         <Button variant="outline" component={Link} to="/demo/g6/categorias">
           Consultar categorías
         </Button>
@@ -208,7 +215,11 @@ function Products() {
       <EntityTable
         caption="Productos de G6"
         columns={columns}
-        rows={state.status === "success" ? state.data.products.items : []}
+        rows={
+          state.status === "success" && state.data.products
+            ? state.data.products.items
+            : []
+        }
         rowKey={(row) => row.id}
         state={
           state.status === "error"
@@ -218,11 +229,13 @@ function Products() {
               : { status: "success" }
         }
         empty={{
-          title: "Sin productos",
-          description: "No hay productos para los filtros seleccionados.",
+          title: channel ? "Sin productos" : "Selecciona un canal",
+          description: channel
+            ? "No hay productos visibles para este canal y estos filtros."
+            : "Elige Marketplace, Chatbot o Retail para consultar productos visibles.",
         }}
         pagination={
-          state.status === "success"
+          state.status === "success" && state.data.products
             ? {
                 page: state.data.products.page,
                 pageSize: state.data.products.pageSize,
@@ -239,22 +252,37 @@ function Products() {
 function Detail() {
   const { id = "" } = useParams();
   const location = useLocation();
+  const [params] = useSearchParams();
+  const channel = readChannel(params.get("canal"));
   const from: unknown = location.state?.from;
   const back =
     typeof from === "string" && from.startsWith("/demo/g6/productos?")
       ? from
-      : "/demo/g6/productos";
+      : "/demo/g6/productos" +
+        (channel ? `?canal=${encodeURIComponent(channel)}` : "");
   const load = useCallback(
     async (signal: AbortSignal) => {
+      if (!channel) return null;
       const [product, categories] = await Promise.all([
-        demoCatalogApi.detail(id, signal),
+        demoCatalogApi.detail(id, channel, signal),
         demoCatalogApi.categories(signal),
       ]);
       return { product, categories };
     },
-    [id],
+    [id, channel],
   );
   const state = useDemoRead(load);
+  if (!channel)
+    return (
+      <Stack>
+        <FeedbackAlert semantic="info" title="Selecciona un canal comercial">
+          El detalle requiere el canal elegido para consultar el producto.
+        </FeedbackAlert>
+        <Button component={Link} to="/demo/g6/productos" variant="outline">
+          Elegir canal
+        </Button>
+      </Stack>
+    );
   if (state.status === "loading")
     return <Text role="status">Cargando producto…</Text>;
   if (state.status === "error")
@@ -268,6 +296,7 @@ function Detail() {
         </FeedbackAlert>
       </Stack>
     );
+  if (!state.data) return null;
   const { product, categories } = state.data;
   return (
     <Stack>
@@ -297,6 +326,8 @@ function Detail() {
   );
 }
 function Categories() {
+  const [params] = useSearchParams();
+  const channel = readChannel(params.get("canal"));
   const load = useCallback(
     (signal: AbortSignal) => demoCatalogApi.categories(signal),
     [],
@@ -319,7 +350,7 @@ function Categories() {
               <Anchor
                 c="var(--po-primaryHover)"
                 component={Link}
-                to={`/demo/g6/productos?categoriaId=${encodeURIComponent(row.id)}`}
+                to={`/demo/g6/productos?${channel ? `canal=${encodeURIComponent(channel)}&` : ""}categoriaId=${encodeURIComponent(row.id)}`}
               >
                 {row.name}
               </Anchor>
@@ -352,6 +383,11 @@ function Categories() {
   );
 }
 export function G6ReadDemoApp() {
+  const location = useLocation();
+  const selectedChannel = readChannel(new URLSearchParams(location.search).get("canal"));
+  const categoriesHref =
+    "/demo/g6/categorias" +
+    (selectedChannel ? `?canal=${encodeURIComponent(selectedChannel)}` : "");
   return (
     <>
       <Container size="xl" py="xl">
@@ -363,13 +399,16 @@ export function G6ReadDemoApp() {
             </Badge>
           </Group>
           <Group component="nav" aria-label="Navegación de consulta">
-            <Anchor c="var(--po-primaryHover)" component={Link} to="/demo/g6/productos">
+            <Anchor c="var(--po-primaryHover)" component={Link} to={
+              "/demo/g6/productos" +
+              (selectedChannel ? `?canal=${encodeURIComponent(selectedChannel)}` : "")
+            }>
               Productos
             </Anchor>
             <Anchor
               c="var(--po-primaryHover)"
               component={Link}
-              to="/demo/g6/categorias"
+              to={categoriesHref}
             >
               Categorías
             </Anchor>
