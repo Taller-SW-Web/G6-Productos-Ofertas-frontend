@@ -24,6 +24,7 @@ export interface DemoPage {
   pageSize: number;
   total: number;
 }
+export type DemoChannel = "MARKETPLACE" | "CHATBOT" | "RETAIL";
 export class DemoApiError extends Error {
   constructor(
     readonly status: number,
@@ -43,6 +44,12 @@ function record(value: unknown): Record<string, unknown> {
 function text(value: unknown): string {
   if (typeof value !== "string" || !value)
     throw new Error("Respuesta de API incompleta.");
+  return value;
+}
+function optionalText(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value !== "string")
+    throw new Error("Respuesta de API inválida.");
   return value;
 }
 function integer(value: unknown, minimum = 0): number {
@@ -67,7 +74,7 @@ function product(value: unknown): DemoProduct {
     id: text(row.product_id),
     name: text(row.name),
     sku: row.sku_base == null ? null : text(row.sku_base),
-    description: row.description == null ? "" : text(row.description),
+    description: optionalText(row.description),
     categoryId: text(row.categoria_id),
     images: row.images.map(imageUrl),
   };
@@ -149,17 +156,16 @@ export function createDemoCatalogApi(fetcher: typeof fetch = fetch, origin = "")
     async list(
       input: {
         page: number;
+        channel: DemoChannel;
         q?: string;
         categoryId?: string;
-        state: "BORRADOR" | "ACTIVO" | "INACTIVO";
       },
       signal?: AbortSignal,
     ): Promise<DemoPage> {
-      // The channel is a compatibility parameter of the existing operation;
-      // the enabled backend demo is an internal read, not channel eligibility.
+      if (!["MARKETPLACE", "CHATBOT", "RETAIL"].includes(input.channel))
+        throw new Error("Canal comercial inválido.");
       const query = new URLSearchParams({
-        canal: "MARKETPLACE",
-        estado: input.state,
+        canal: input.channel,
         pagina: String(input.page),
         tamanio: "20",
         orden: "NOMBRE_ASC",
@@ -176,10 +182,16 @@ export function createDemoCatalogApi(fetcher: typeof fetch = fetch, origin = "")
         total: integer(body.total),
       };
     },
-    async detail(id: string, signal?: AbortSignal): Promise<DemoProduct> {
+    async detail(
+      id: string,
+      channel: DemoChannel,
+      signal?: AbortSignal,
+    ): Promise<DemoProduct> {
+      if (!["MARKETPLACE", "CHATBOT", "RETAIL"].includes(channel))
+        throw new Error("Canal comercial inválido.");
       return product(
         await get(
-          `/productos/${encodeURIComponent(id)}?canal=MARKETPLACE`,
+          `/productos/${encodeURIComponent(id)}?canal=${encodeURIComponent(channel)}`,
           signal,
         ),
       );
