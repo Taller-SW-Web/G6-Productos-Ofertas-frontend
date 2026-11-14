@@ -1,4 +1,7 @@
-import type { CatalogRepository, ProductView } from "../../catalog/services/catalogRepository";
+import type {
+  CatalogRepository,
+  ProductView,
+} from "../../catalog/services/catalogRepository";
 import type {
   CombosCatalogPort,
   ProductDetail,
@@ -11,7 +14,8 @@ import type {
 // own domain entity (not a Catalog product), so this set is empty by default;
 // it exists so a Catalog that publishes a combo type is rejected as a nested
 // component without ever matching on the product *name*.
-export const DEFAULT_COMBO_PRODUCT_TYPE_IDS: ReadonlySet<string> = new Set<string>();
+export const DEFAULT_COMBO_PRODUCT_TYPE_IDS: ReadonlySet<string> =
+  new Set<string>();
 const SKU_RESOLUTION_CACHE_MS = 30_000;
 const SKU_RESOLUTION_CACHE_MAX = 500;
 const MOCK_REFRESH_CONCURRENCY = 8;
@@ -33,31 +37,61 @@ export class CatalogCombosAdapter implements CombosCatalogPort {
   private readonly comboTypeIds: ReadonlySet<string>;
   private readonly pageSize: number;
   private readonly allowMockCatalogScan: boolean;
-  private readonly skuIndexCache = new Map<string, { resolved: ResolvedSku; expiresAt: number }>();
+  private readonly skuIndexCache = new Map<
+    string,
+    { resolved: ResolvedSku; expiresAt: number }
+  >();
   private mockCatalogChanged = false;
 
   constructor(options: CatalogCombosAdapterOptions) {
     this.catalog = options.catalog;
     this.comboTypeIds = options.comboTypeIds ?? DEFAULT_COMBO_PRODUCT_TYPE_IDS;
-    this.pageSize = options.pageSize && options.pageSize > 0 ? options.pageSize : 50;
+    this.pageSize =
+      options.pageSize && options.pageSize > 0 ? options.pageSize : 50;
     this.allowMockCatalogScan = options.allowMockCatalogScan === true;
     if (this.allowMockCatalogScan) {
-      const observable = this.catalog as CatalogRepository & { subscribe?: (listener: () => void) => () => void };
-      observable.subscribe?.(() => { this.mockCatalogChanged = true; });
+      const observable = this.catalog as CatalogRepository & {
+        subscribe?: (listener: () => void) => () => void;
+      };
+      observable.subscribe?.(() => {
+        this.mockCatalogChanged = true;
+      });
     }
   }
 
-  async listProducts(query: string, page: number, pageSize: number, signal?: AbortSignal): Promise<ProductSummaryPage> {
+  async listProducts(
+    query: string,
+    page: number,
+    pageSize: number,
+    signal?: AbortSignal,
+  ): Promise<ProductSummaryPage> {
     const result = await this.catalog.list(
-      { q: query.trim() || undefined, status: "ACTIVO", page, pageSize },
+      {
+        q: query.trim() || undefined,
+        status: "ACTIVO",
+        page,
+        pageSize,
+        typeIdsExcluded: [...this.comboTypeIds],
+      },
       undefined,
       signal,
     );
-    if (result.page !== page || result.pageSize !== pageSize ||
-      result.items.length !== Math.min(pageSize, Math.max(0, result.total - (page - 1) * pageSize))) {
-      throw new Error("Catálogo devolvió una página inconsistente de productos para Combos.");
+    if (
+      result.page !== page ||
+      result.pageSize !== pageSize ||
+      result.items.length !==
+        Math.min(pageSize, Math.max(0, result.total - (page - 1) * pageSize))
+    ) {
+      throw new Error(
+        "Catálogo devolvió una página inconsistente de productos para Combos.",
+      );
     }
     const items = result.items.map((product) => this.toSummary(product));
+    if (items.some((product) => product.isCombo)) {
+      throw new Error(
+        "Catálogo no aplicó el filtro de tipos antes de paginar; no se presenta una página inconsistente.",
+      );
+    }
     result.items.forEach((product) => this.cacheProductSummary(product));
     return {
       // Keep the exact server page and total aligned. Combo types cannot be
@@ -69,7 +103,10 @@ export class CatalogCombosAdapter implements CombosCatalogPort {
     };
   }
 
-  async getProduct(productId: string, signal?: AbortSignal): Promise<ProductDetail | null> {
+  async getProduct(
+    productId: string,
+    signal?: AbortSignal,
+  ): Promise<ProductDetail | null> {
     const detail = await this.catalog.getById(productId, undefined, signal);
     if (!detail) return null;
     this.cacheProductDetail(detail);
@@ -77,35 +114,117 @@ export class CatalogCombosAdapter implements CombosCatalogPort {
       ...this.toSummary(detail),
       variants: detail.variants.map((variant) => ({
         sku: variant.sku,
-        label: variant.attributesSummary ? `${variant.attributesSummary} · ${variant.sku}` : variant.sku,
+        label: variant.attributesSummary
+          ? `${variant.attributesSummary} · ${variant.sku}`
+          : variant.sku,
         active: variant.status === "ACTIVA",
       })),
     };
   }
 
-  async resolveSkus(skus: string[], signal?: AbortSignal): Promise<ResolvedSku[]> {
+  async resolveSkus(
+    skus: string[],
+    signal?: AbortSignal,
+  ): Promise<ResolvedSku[]> {
     signal?.throwIfAborted();
     const requested = [...new Set(skus)];
-    if (this.allowMockCatalogScan && this.mockCatalogChanged) await this.refreshObservedMockProducts(signal);
+    if (!this.allowMockCatalogScan) {
+      if (!this.catalog.resolveComboSkus)
+        throw new Error(
+          "La resolución autoritativa por lote de SKU aún no está disponible en Catálogo.",
+        );
+      const resolved: ResolvedSku[] = [];
+      for (let offset = 0; offset < requested.length; offset += 100) {
+        signal?.throwIfAborted();
+        const batch = requested.slice(offset, offset + 100);
+        const rows = await this.catalog.resolveComboSkus(batch, signal);
+        if (
+          rows.length !== batch.length ||
+          rows.some((row, index) => row.sku !== batch[index])
+        ) {
+          throw new Error(
+            "Catálogo devolvió una resolución SKU incompleta o reordenada.",
+          );
+        }
+        for (const row of rows) {
+          if (row.resultado === "NO_ENCONTRADO") continue;
+          if (
+            !row.productId ||
+            !row.nombre ||
+            !row.productoPadre ||
+            !row.estado ||
+            !row.tipoProductoId
+          ) {
+            throw new Error("Catálogo devolvió una identidad SKU incompleta.");
+          }
+          const isCombo = this.comboTypeIds.has(row.tipoProductoId);
+          const isVariantParentSku =
+            !row.variante && row.productoPadre.tieneVariantes;
+          const productActive = row.productoPadre.estado === "ACTIVO";
+          const variantActive = row.variante
+            ? row.variante.estado === "ACTIVA"
+            : !isVariantParentSku;
+          const item: ResolvedSku = {
+            sku: row.sku,
+            productId: row.productId,
+            productName: row.nombre,
+            isCombo,
+            productActive,
+            variantActive,
+            sellable: row.resultado === "ELEGIBLE" && !isCombo,
+            isVariantParentSku,
+          };
+          this.cache(item);
+          resolved.push(item);
+        }
+      }
+      return resolved;
+    }
+    if (this.allowMockCatalogScan && this.mockCatalogChanged)
+      await this.refreshObservedMockProducts(signal);
     const cached = this.peekResolvedSkus(requested);
-    if (cached.length === requested.length || !this.allowMockCatalogScan) return cached;
+    if (cached.length === requested.length || !this.allowMockCatalogScan)
+      return cached;
     const known = new Map(cached.map((item) => [item.sku, item]));
     for (const product of await this.readMockCatalog(signal)) {
       signal?.throwIfAborted();
       const combo = this.isComboProduct(product);
       const active = isActiveProduct(product);
-      const add = (sku: string, variantActive: boolean, isVariantParentSku: boolean) => {
+      const add = (
+        sku: string,
+        variantActive: boolean,
+        isVariantParentSku: boolean,
+      ) => {
         if (!requested.includes(sku)) return;
-        const resolved: ResolvedSku = { sku, productId: product.id, productName: product.name, isCombo: combo, productActive: active, variantActive, sellable: active && variantActive && !combo && !isVariantParentSku, isVariantParentSku };
-        known.set(sku, resolved); this.cache(resolved);
+        const resolved: ResolvedSku = {
+          sku,
+          productId: product.id,
+          productName: product.name,
+          isCombo: combo,
+          productActive: active,
+          variantActive,
+          sellable: active && variantActive && !combo && !isVariantParentSku,
+          isVariantParentSku,
+        };
+        known.set(sku, resolved);
+        this.cache(resolved);
       };
-      if (product.skuBase) add(product.skuBase, !product.hasVariants, product.hasVariants);
+      if (product.skuBase)
+        add(product.skuBase, !product.hasVariants, product.hasVariants);
       if (product.hasVariants) {
-        const detail = await this.catalog.getById(product.id, undefined, signal);
-        if (detail) for (const variant of detail.variants) add(variant.sku, variant.status === "ACTIVA", false);
+        const detail = await this.catalog.getById(
+          product.id,
+          undefined,
+          signal,
+        );
+        if (detail)
+          for (const variant of detail.variants)
+            add(variant.sku, variant.status === "ACTIVA", false);
       }
     }
-    return requested.flatMap((sku) => known.has(sku) ? [known.get(sku)!] : []);
+    return requested.flatMap((sku) =>
+      known.has(sku) ? [known.get(sku)!] : [],
+    );
   }
 
   private async readMockCatalog(signal?: AbortSignal): Promise<ProductView[]> {
@@ -114,10 +233,30 @@ export class CatalogCombosAdapter implements CombosCatalogPort {
     let total = Number.POSITIVE_INFINITY;
     while (items.length < total) {
       signal?.throwIfAborted();
-      const result = await this.catalog.list({ page, pageSize: this.pageSize, status: "all" }, undefined, signal);
-      if (result.page !== page || result.pageSize !== this.pageSize || result.items.length !== Math.min(this.pageSize, Math.max(0, result.total - (page - 1) * this.pageSize))) throw new Error("La resolución mock de SKU recibió una página inconsistente.");
-      total = result.total; items.push(...result.items); page += 1;
-      if (page > 10_000) throw new Error("La resolución mock excedió el límite defensivo de páginas.");
+      const result = await this.catalog.list(
+        { page, pageSize: this.pageSize, status: "all" },
+        undefined,
+        signal,
+      );
+      if (
+        result.page !== page ||
+        result.pageSize !== this.pageSize ||
+        result.items.length !==
+          Math.min(
+            this.pageSize,
+            Math.max(0, result.total - (page - 1) * this.pageSize),
+          )
+      )
+        throw new Error(
+          "La resolución mock de SKU recibió una página inconsistente.",
+        );
+      total = result.total;
+      items.push(...result.items);
+      page += 1;
+      if (page > 10_000)
+        throw new Error(
+          "La resolución mock excedió el límite defensivo de páginas.",
+        );
     }
     return items;
   }
@@ -134,9 +273,13 @@ export class CatalogCombosAdapter implements CombosCatalogPort {
   private cache(resolved: ResolvedSku): void {
     this.pruneSkuCache();
     this.skuIndexCache.delete(resolved.sku);
-    this.skuIndexCache.set(resolved.sku, { resolved, expiresAt: Date.now() + SKU_RESOLUTION_CACHE_MS });
+    this.skuIndexCache.set(resolved.sku, {
+      resolved,
+      expiresAt: Date.now() + SKU_RESOLUTION_CACHE_MS,
+    });
     while (this.skuIndexCache.size > SKU_RESOLUTION_CACHE_MAX) {
-      const oldest = this.skuIndexCache.keys().next().value as string | undefined;
+      const oldest = this.skuIndexCache.keys().next().value as
+        string | undefined;
       if (oldest === undefined) break;
       this.skuIndexCache.delete(oldest);
     }
@@ -144,34 +287,91 @@ export class CatalogCombosAdapter implements CombosCatalogPort {
 
   private pruneSkuCache(): void {
     const now = Date.now();
-    for (const [sku, entry] of this.skuIndexCache) if (entry.expiresAt <= now) this.skuIndexCache.delete(sku);
+    for (const [sku, entry] of this.skuIndexCache)
+      if (entry.expiresAt <= now) this.skuIndexCache.delete(sku);
   }
 
   private cacheProductSummary(product: ProductView): void {
     if (product.hasVariants || !product.skuBase) return;
     const isCombo = this.isComboProduct(product);
     const productActive = isActiveProduct(product);
-    this.cache({ sku: product.skuBase, productId: product.id, productName: product.name, isCombo, productActive, variantActive: true, sellable: productActive && !isCombo, isVariantParentSku: false });
+    this.cache({
+      sku: product.skuBase,
+      productId: product.id,
+      productName: product.name,
+      isCombo,
+      productActive,
+      variantActive: true,
+      sellable: productActive && !isCombo,
+      isVariantParentSku: false,
+    });
   }
 
-  private cacheProductDetail(product: ProductView & { variants: readonly { sku: string; status: string }[] }): void {
+  private cacheProductDetail(
+    product: ProductView & {
+      variants: readonly { sku: string; status: string }[];
+    },
+  ): void {
     this.invalidateProductCache(product.id);
     const isCombo = this.isComboProduct(product);
     const productActive = isActiveProduct(product);
-    if (product.hasVariants && product.skuBase) this.cache({ sku: product.skuBase, productId: product.id, productName: product.name, isCombo, productActive, variantActive: false, sellable: false, isVariantParentSku: true });
-    if (!product.hasVariants && product.skuBase) this.cache({ sku: product.skuBase, productId: product.id, productName: product.name, isCombo, productActive, variantActive: true, sellable: productActive && !isCombo, isVariantParentSku: false });
+    if (product.hasVariants && product.skuBase)
+      this.cache({
+        sku: product.skuBase,
+        productId: product.id,
+        productName: product.name,
+        isCombo,
+        productActive,
+        variantActive: false,
+        sellable: false,
+        isVariantParentSku: true,
+      });
+    if (!product.hasVariants && product.skuBase)
+      this.cache({
+        sku: product.skuBase,
+        productId: product.id,
+        productName: product.name,
+        isCombo,
+        productActive,
+        variantActive: true,
+        sellable: productActive && !isCombo,
+        isVariantParentSku: false,
+      });
     for (const variant of product.variants) {
       const variantActive = variant.status === "ACTIVA";
-      this.cache({ sku: variant.sku, productId: product.id, productName: product.name, isCombo, productActive, variantActive, sellable: productActive && variantActive && !isCombo, isVariantParentSku: false });
+      this.cache({
+        sku: variant.sku,
+        productId: product.id,
+        productName: product.name,
+        isCombo,
+        productActive,
+        variantActive,
+        sellable: productActive && variantActive && !isCombo,
+        isVariantParentSku: false,
+      });
     }
   }
 
-  private async refreshObservedMockProducts(signal?: AbortSignal): Promise<void> {
-    const productIds = [...new Set([...this.skuIndexCache.values()].map((entry) => entry.resolved.productId))];
-    for (let offset = 0; offset < productIds.length; offset += MOCK_REFRESH_CONCURRENCY) {
+  private async refreshObservedMockProducts(
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const productIds = [
+      ...new Set(
+        [...this.skuIndexCache.values()].map(
+          (entry) => entry.resolved.productId,
+        ),
+      ),
+    ];
+    for (
+      let offset = 0;
+      offset < productIds.length;
+      offset += MOCK_REFRESH_CONCURRENCY
+    ) {
       signal?.throwIfAborted();
       const ids = productIds.slice(offset, offset + MOCK_REFRESH_CONCURRENCY);
-      const details = await Promise.all(ids.map((id) => this.catalog.getById(id, undefined, signal)));
+      const details = await Promise.all(
+        ids.map((id) => this.catalog.getById(id, undefined, signal)),
+      );
       details.forEach((detail, index) => {
         if (detail) this.cacheProductDetail(detail);
         else this.invalidateProductCache(ids[index]!);
@@ -182,7 +382,8 @@ export class CatalogCombosAdapter implements CombosCatalogPort {
 
   private invalidateProductCache(productId: string): void {
     for (const [sku, entry] of this.skuIndexCache) {
-      if (entry.resolved.productId === productId) this.skuIndexCache.delete(sku);
+      if (entry.resolved.productId === productId)
+        this.skuIndexCache.delete(sku);
     }
   }
 
@@ -192,7 +393,7 @@ export class CatalogCombosAdapter implements CombosCatalogPort {
       name: product.name,
       hasVariants: product.hasVariants,
       active: isActiveProduct(product),
-      baseSku: product.hasVariants ? null : product.skuBase ?? null,
+      baseSku: product.hasVariants ? null : (product.skuBase ?? null),
       isCombo: this.isComboProduct(product),
     };
   }
@@ -201,5 +402,4 @@ export class CatalogCombosAdapter implements CombosCatalogPort {
     // Identity published by Catalog: product type id. Never inferred from the name.
     return this.comboTypeIds.has(product.typeId);
   }
-
 }
