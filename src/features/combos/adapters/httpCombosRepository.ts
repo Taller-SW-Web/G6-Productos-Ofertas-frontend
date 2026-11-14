@@ -1,13 +1,7 @@
 import type { AuthenticatedGatewayClient } from "../../../app/config/authenticatedGatewayClient";
 import type { CombosRepository, Combo, ComboAvailability, ComboPayload, ComboPage, ComboQuery, CombosCatalogPort } from "../types/combos";
 
-type AvailabilityDto = {
-  comboId: string;
-  verificable: boolean;
-  cantidadInformativa: number | null;
-  calculated_at: string;
-  estadoActualizacion: "ACTUALIZADA" | "DESACTUALIZADA" | "INCOMPLETA";
-};
+type ComboAvailabilityDto = { informative_availability?: unknown; calculated_at?: unknown; freshness?: unknown };
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Respuesta de Combos inválida.");
@@ -34,25 +28,25 @@ function minor(value: unknown): number {
   if (!Number.isSafeInteger(cents)) throw new Error("Combos devolvió un precio no representable.");
   return cents;
 }
-function mapAvailability(value: unknown, comboId: string, status: Combo["status"]): ComboAvailability {
-  const dto = object(value) as unknown as AvailabilityDto;
-  if (dto.comboId !== comboId || typeof dto.verificable !== "boolean" || !["ACTUALIZADA", "DESACTUALIZADA", "INCOMPLETA"].includes(dto.estadoActualizacion) || !Number.isFinite(Date.parse(dto.calculated_at)))
-    throw new Error("Combos devolvió una disponibilidad incompatible con el contrato.");
-  const quantity = dto.cantidadInformativa === null ? null : integer(dto.cantidadInformativa);
-  if (dto.verificable && quantity === null) throw new Error("Combos no entregó la cantidad informativa requerida.");
-  const freshness = dto.estadoActualizacion;
-  const state = status === "INACTIVO"
-    ? "COMBO_INACTIVO"
-    : !dto.verificable || quantity === null
-      ? freshness === "DESACTUALIZADA" ? "DESACTUALIZADA" : freshness === "INCOMPLETA" ? "INCOMPLETA" : "NO_VERIFICABLE"
-      : quantity === 0 ? "AGOTADO" : "DISPONIBLE";
+function mapAvailability(dto: ComboAvailabilityDto, status: Combo["status"]): ComboAvailability {
+  const quantity = dto.informative_availability === null || dto.informative_availability === undefined
+    ? null
+    : integer(dto.informative_availability);
+  const calculatedAt = typeof dto.calculated_at === "string" && Number.isFinite(Date.parse(dto.calculated_at))
+    ? dto.calculated_at : null;
+  const freshness = dto.freshness === "ACTUALIZADA" || dto.freshness === "DESACTUALIZADA" || dto.freshness === "INCOMPLETA"
+    ? dto.freshness : "NO_VERIFICABLE";
+  const verifiable = status === "ACTIVO" && freshness === "ACTUALIZADA" && quantity !== null && calculatedAt !== null;
+  const state = status === "INACTIVO" ? "COMBO_INACTIVO"
+    : !verifiable ? freshness === "DESACTUALIZADA" ? "DESACTUALIZADA" : freshness === "INCOMPLETA" ? "INCOMPLETA" : "NO_VERIFICABLE"
+    : quantity === 0 ? "AGOTADO" : "DISPONIBLE";
   return {
     state,
-    verifiable: dto.verificable,
+    verifiable,
     quantity,
     freshness,
-    calculatedAt: dto.calculated_at,
-    reason: dto.verificable ? null : "La API de Combos no puede verificar la disponibilidad con una fuente común de inventario.",
+    calculatedAt,
+    reason: verifiable ? null : "La API de Combos no ofrece una disponibilidad informativa verificable para este registro.",
   };
 }
 
@@ -100,17 +94,7 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
     try { return await response.json(); }
     catch { throw method === "GET" ? new Error("Combos devolvió JSON ilegible.") : new ConfirmedComboWrite("Combos confirmó la escritura, pero su DTO es ilegible. No la repitas; consulta el recurso."); }
   }
-  async function availability(id: string, status: Combo["status"], signal?: AbortSignal): Promise<ComboAvailability> {
-    try { return mapAvailability(await request(`/api/v1/combos/${encodeURIComponent(id)}/disponibilidad`, "GET", signal), id, status); }
-    catch (error) {
-      if (signal?.aborted) throw error;
-      if (error instanceof Error && /HTTP (401|403)/.test(error.message)) throw error;
-      return { state: status === "INACTIVO" ? "COMBO_INACTIVO" : "NO_VERIFICABLE", verifiable: false, quantity: null,
-        freshness: "NO_VERIFICABLE", calculatedAt: null,
-        reason: `No se pudo consultar la disponibilidad auxiliar; el registro del combo sigue disponible. ${error instanceof Error ? error.message : "Error de consulta."}` };
-    }
-  }
-  async function mapCombo(value: unknown, signal?: AbortSignal): Promise<Combo> {
+  function mapCombo(value: unknown, signal?: AbortSignal): Combo {
     const dto = object(value);
     const id = text(dto.combo_id);
     if (dto.status !== "ACTIVO" && dto.status !== "INACTIVO") throw new Error("Combos devolvió un estado desconocido.");
@@ -119,9 +103,13 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
       const component = object(item);
       return { sku: text(component.sku), quantity: integer(component.quantity, 1) };
     });
-    const resolved = await catalog.resolveSkus(rawComponents.map((item) => item.sku), signal).catch(() => []);
+    const skus = rawComponents.map((item) => item.sku);
+    const resolved = catalog.peekResolvedSkus?.(skus) ?? [];
     const names = new Map(resolved.map((item) => [item.sku, item.productName]));
     const status = dto.status;
+    // Name enrichment is auxiliary. Return the authoritative Combo DTO first;
+    // subsequent reads can use the bounded resolver cache.
+    void catalog.resolveSkus(skus, signal).catch(() => undefined);
     return {
       id,
       name: text(dto.name),
@@ -130,7 +118,7 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
       priceMinor: minor(dto.price),
       version: integer(dto.version),
       components: rawComponents.map((item) => ({ sku: item.sku, productName: names.get(item.sku) ?? item.sku, quantity: item.quantity, regularUnitMinor: null, publicUnitMinor: null })),
-      availability: await availability(id, status, signal),
+      availability: mapAvailability(dto as ComboAvailabilityDto, status),
     };
   }
   async function createFingerprint(userId: string, body: string): Promise<string> {
@@ -227,7 +215,7 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
         for (;;) {
           const index = next++;
           if (index >= rawItems.length) return;
-          items[index] = await mapCombo(rawItems[index], signal);
+          items[index] = mapCombo(rawItems[index], signal);
         }
       }));
       return { items, page, pageSize, total };

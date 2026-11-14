@@ -1,5 +1,5 @@
 import { Button, Modal, Stack, Text } from "@mantine/core";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   EntityTable,
   StatusBadge,
@@ -9,6 +9,11 @@ import { longTableRow } from "../mocks/tableCases";
 type Row = typeof longTableRow;
 export function LongTableExample() {
   const [opened, setOpened] = useState(false);
+  const descriptionTrigger = useRef<HTMLButtonElement>(null);
+  const closeDialog = () => {
+    setOpened(false);
+    requestAnimationFrame(() => descriptionTrigger.current?.focus());
+  };
   const columns: TableColumn<Row>[] = [
     {
       key: "sku",
@@ -52,7 +57,11 @@ export function LongTableExample() {
       header: "Acción de consulta",
       width: 200,
       render: () => (
-        <Button variant="outline" onClick={() => setOpened(true)}>
+        <Button
+          ref={descriptionTrigger}
+          variant="outline"
+          onClick={() => setOpened(true)}
+        >
           Ver descripción completa
         </Button>
       ),
@@ -73,7 +82,7 @@ export function LongTableExample() {
       />
       <Modal
         opened={opened}
-        onClose={() => setOpened(false)}
+        onClose={closeDialog}
         title="Detalle de tabla extensa"
       >
         <Stack gap="md">

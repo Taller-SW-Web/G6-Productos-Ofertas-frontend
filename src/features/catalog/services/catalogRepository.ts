@@ -258,6 +258,8 @@ export interface VariantMutationResult {
 }
 
 export interface CatalogRepository {
+  /** Local mock stores can signal mutations so consumers invalidate derived caches. */
+  subscribe?(listener: () => void): () => void;
   list(
     query: CatalogQuery,
     scenario?: string,
