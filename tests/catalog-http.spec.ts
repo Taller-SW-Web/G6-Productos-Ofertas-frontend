@@ -128,7 +128,7 @@ test("HTTP: el listado administrativo rechaza un DTO comercial y transmite el fi
   await expect(h.catalog.list({ page: 1, pageSize: 20 })).rejects.toMatchObject({ kind: "blocked_contract" });
   await expect(h.catalog.list({ page: 1, pageSize: 20, typeId: "type" })).rejects.toMatchObject({ kind: "blocked_contract" });
   expect(h.calls).toHaveLength(2);
-  expect(h.calls[1].path).toContain("tipoProductoIdsIncluidos=type");
+  expect(h.calls[1]?.path).toContain("tipoProductoIdsIncluidos=type");
 });
 
 test("HTTP: preparación conserva manual_retry_allowed y 202 solo admite; 409 no se repite", async () => {
