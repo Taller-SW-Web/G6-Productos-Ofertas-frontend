@@ -41,7 +41,7 @@ export async function createCombosRuntime(
     return {
       combos: comboRepository,
       catalog,
-      pricing: new PricingCombosAdapter({ pricing: pricing.service }),
+      pricing: new PricingCombosAdapter({ pricing: pricing.service, gateway: dependencies.gateway }),
       availability,
       now: () => Date.now(),
     };

@@ -1,10 +1,4 @@
-import type {
-  CatalogPageResult,
-  CatalogRepository,
-  ProductView,
-  VariantDetailView,
-  VariantPageResult,
-} from "../../catalog/services/catalogRepository";
+import type { CatalogRepository, ProductView } from "../../catalog/services/catalogRepository";
 import type {
   CombosCatalogPort,
   ProductDetail,
@@ -18,11 +12,15 @@ import type {
 // it exists so a Catalog that publishes a combo type is rejected as a nested
 // component without ever matching on the product *name*.
 export const DEFAULT_COMBO_PRODUCT_TYPE_IDS: ReadonlySet<string> = new Set<string>();
+const SKU_RESOLUTION_CACHE_MS = 30_000;
+const SKU_RESOLUTION_CACHE_MAX = 500;
 
 export interface CatalogCombosAdapterOptions {
   catalog: CatalogRepository;
   comboTypeIds?: ReadonlySet<string>;
   pageSize?: number;
+  /** Local fixture support only. Never enable with an HTTP CatalogRepository. */
+  allowMockCatalogScan?: boolean;
 }
 
 function isActiveProduct(product: ProductView): boolean {
@@ -33,11 +31,14 @@ export class CatalogCombosAdapter implements CombosCatalogPort {
   private readonly catalog: CatalogRepository;
   private readonly comboTypeIds: ReadonlySet<string>;
   private readonly pageSize: number;
+  private readonly allowMockCatalogScan: boolean;
+  private readonly skuIndexCache = new Map<string, { resolved: ResolvedSku; expiresAt: number }>();
 
   constructor(options: CatalogCombosAdapterOptions) {
     this.catalog = options.catalog;
     this.comboTypeIds = options.comboTypeIds ?? DEFAULT_COMBO_PRODUCT_TYPE_IDS;
     this.pageSize = options.pageSize && options.pageSize > 0 ? options.pageSize : 50;
+    this.allowMockCatalogScan = options.allowMockCatalogScan === true;
   }
 
   async listProducts(query: string, page: number, pageSize: number, signal?: AbortSignal): Promise<ProductSummaryPage> {
@@ -50,8 +51,12 @@ export class CatalogCombosAdapter implements CombosCatalogPort {
       result.items.length !== Math.min(pageSize, Math.max(0, result.total - (page - 1) * pageSize))) {
       throw new Error("Catálogo devolvió una página inconsistente de productos para Combos.");
     }
+    const items = result.items.map((product) => this.toSummary(product));
+    result.items.forEach((product) => this.cacheProductSummary(product));
     return {
-      items: result.items.filter((product) => isActiveProduct(product) && !this.isComboProduct(product)).map((product) => this.toSummary(product)),
+      // Keep the exact server page and total aligned. Combo types cannot be
+      // excluded until the provider publishes that filter.
+      items,
       total: result.total,
       page: result.page,
       pageSize: result.pageSize,
@@ -61,6 +66,7 @@ export class CatalogCombosAdapter implements CombosCatalogPort {
   async getProduct(productId: string, signal?: AbortSignal): Promise<ProductDetail | null> {
     const detail = await this.catalog.getById(productId, undefined, signal);
     if (!detail) return null;
+    this.cacheProductDetail(detail);
     return {
       ...this.toSummary(detail),
       variants: detail.variants.map((variant) => ({
@@ -72,56 +78,83 @@ export class CatalogCombosAdapter implements CombosCatalogPort {
   }
 
   async resolveSkus(skus: string[], signal?: AbortSignal): Promise<ResolvedSku[]> {
-    const wanted = new Set(skus);
-    if (wanted.size === 0) return [];
-    const products = await this.listAllProducts(signal);
-    const resolved: ResolvedSku[] = [];
-    for (const product of products) {
-      const isCombo = this.isComboProduct(product);
-      const productActive = isActiveProduct(product);
+    signal?.throwIfAborted();
+    const requested = [...new Set(skus)];
+    const cached = this.peekResolvedSkus(requested);
+    if (cached.length === requested.length || !this.allowMockCatalogScan) return cached;
+    const known = new Map(cached.map((item) => [item.sku, item]));
+    for (const product of await this.readMockCatalog(signal)) {
+      signal?.throwIfAborted();
+      const combo = this.isComboProduct(product);
+      const active = isActiveProduct(product);
+      const add = (sku: string, variantActive: boolean, isVariantParentSku: boolean) => {
+        if (!requested.includes(sku)) return;
+        const resolved: ResolvedSku = { sku, productId: product.id, productName: product.name, isCombo: combo, productActive: active, variantActive, sellable: active && variantActive && !combo && !isVariantParentSku, isVariantParentSku };
+        known.set(sku, resolved); this.cache(resolved);
+      };
+      if (product.skuBase) add(product.skuBase, !product.hasVariants, product.hasVariants);
       if (product.hasVariants) {
-        if (product.skuBase && wanted.has(product.skuBase)) {
-          // A variant-parent SKU is not directly sellable.
-          resolved.push({
-            sku: product.skuBase,
-            productId: product.id,
-            productName: product.name,
-            isCombo,
-            productActive,
-            variantActive: false,
-            sellable: false,
-            isVariantParentSku: true,
-          });
-        }
-        const variants = await this.listAllVariants(product.id, signal);
-        for (const variant of variants) {
-          if (!wanted.has(variant.sku)) continue;
-          const variantActive = variant.status === "ACTIVA";
-          resolved.push({
-            sku: variant.sku,
-            productId: product.id,
-            productName: product.name,
-            isCombo,
-            productActive,
-            variantActive,
-            sellable: productActive && variantActive && !isCombo,
-            isVariantParentSku: false,
-          });
-        }
-      } else if (product.skuBase && wanted.has(product.skuBase)) {
-        resolved.push({
-          sku: product.skuBase,
-          productId: product.id,
-          productName: product.name,
-          isCombo,
-          productActive,
-          variantActive: true,
-          sellable: productActive && !isCombo,
-          isVariantParentSku: false,
-        });
+        const detail = await this.catalog.getById(product.id, undefined, signal);
+        if (detail) for (const variant of detail.variants) add(variant.sku, variant.status === "ACTIVA", false);
       }
     }
-    return resolved;
+    return requested.flatMap((sku) => known.has(sku) ? [known.get(sku)!] : []);
+  }
+
+  private async readMockCatalog(signal?: AbortSignal): Promise<ProductView[]> {
+    const items: ProductView[] = [];
+    let page = 1;
+    let total = Number.POSITIVE_INFINITY;
+    while (items.length < total) {
+      signal?.throwIfAborted();
+      const result = await this.catalog.list({ page, pageSize: this.pageSize, status: "all" }, undefined, signal);
+      if (result.page !== page || result.pageSize !== this.pageSize || result.items.length !== Math.min(this.pageSize, Math.max(0, result.total - (page - 1) * this.pageSize))) throw new Error("La resolución mock de SKU recibió una página inconsistente.");
+      total = result.total; items.push(...result.items); page += 1;
+      if (page > 10_000) throw new Error("La resolución mock excedió el límite defensivo de páginas.");
+    }
+    return items;
+  }
+
+  peekResolvedSkus(skus: string[]): ResolvedSku[] {
+    this.pruneSkuCache();
+    return [...new Set(skus)].flatMap((sku) => {
+      const cached = this.skuIndexCache.get(sku);
+      return cached ? [cached.resolved] : [];
+    });
+  }
+
+  private cache(resolved: ResolvedSku): void {
+    this.pruneSkuCache();
+    this.skuIndexCache.delete(resolved.sku);
+    this.skuIndexCache.set(resolved.sku, { resolved, expiresAt: Date.now() + SKU_RESOLUTION_CACHE_MS });
+    while (this.skuIndexCache.size > SKU_RESOLUTION_CACHE_MAX) {
+      const oldest = this.skuIndexCache.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      this.skuIndexCache.delete(oldest);
+    }
+  }
+
+  private pruneSkuCache(): void {
+    const now = Date.now();
+    for (const [sku, entry] of this.skuIndexCache) if (entry.expiresAt <= now) this.skuIndexCache.delete(sku);
+  }
+
+  private cacheProductSummary(product: ProductView): void {
+    if (product.hasVariants || !product.skuBase) return;
+    const isCombo = this.isComboProduct(product);
+    const productActive = isActiveProduct(product);
+    this.cache({ sku: product.skuBase, productId: product.id, productName: product.name, isCombo, productActive, variantActive: true, sellable: productActive && !isCombo, isVariantParentSku: false });
+  }
+
+  private cacheProductDetail(product: ProductView & { variants: readonly { sku: string; status: string }[] }): void {
+    const isCombo = this.isComboProduct(product);
+    const productActive = isActiveProduct(product);
+    if (product.hasVariants && product.skuBase) this.cache({ sku: product.skuBase, productId: product.id, productName: product.name, isCombo, productActive, variantActive: false, sellable: false, isVariantParentSku: true });
+    if (!product.hasVariants && product.skuBase) this.cache({ sku: product.skuBase, productId: product.id, productName: product.name, isCombo, productActive, variantActive: true, sellable: productActive && !isCombo, isVariantParentSku: false });
+    for (const variant of product.variants) {
+      const variantActive = variant.status === "ACTIVA";
+      this.cache({ sku: variant.sku, productId: product.id, productName: product.name, isCombo, productActive, variantActive, sellable: productActive && variantActive && !isCombo, isVariantParentSku: false });
+    }
   }
 
   private toSummary(product: ProductView): ProductSummary {
@@ -140,54 +173,4 @@ export class CatalogCombosAdapter implements CombosCatalogPort {
     return this.comboTypeIds.has(product.typeId);
   }
 
-  private async listAllProducts(signal?: AbortSignal): Promise<ProductView[]> {
-    const all: ProductView[] = [];
-    const ids = new Set<string>();
-    let page = 1;
-    let total: number | undefined;
-    for (;;) {
-      const result: CatalogPageResult = await this.catalog.list(
-        { page, pageSize: this.pageSize, status: "all" },
-        undefined,
-        signal,
-      );
-      if (result.page !== page || result.pageSize !== this.pageSize || (total !== undefined && total !== result.total) || result.items.length !== Math.min(this.pageSize, Math.max(0, result.total - (page - 1) * this.pageSize))) throw new Error("Catálogo devolvió una paginación incompleta de productos para Combos.");
-      total = result.total;
-      for (const item of result.items) {
-        if (!item.id || ids.has(item.id)) throw new Error("Catálogo devolvió una identidad de producto vacía o repetida para Combos.");
-        ids.add(item.id); all.push(item);
-      }
-      if (page >= Math.ceil(result.total / this.pageSize)) break;
-      if (page >= 10_000) throw new Error("Catálogo excedió el límite defensivo de páginas para Combos.");
-      page += 1;
-    }
-    if (all.length !== (total ?? 0)) throw new Error("Combos no obtuvo la lista completa de productos.");
-    return all;
-  }
-
-  private async listAllVariants(productId: string, signal?: AbortSignal): Promise<VariantDetailView[]> {
-    const all: VariantDetailView[] = [];
-    const ids = new Set<string>();
-    let page = 1;
-    let total: number | undefined;
-    for (;;) {
-      const result: VariantPageResult = await this.catalog.listVariants(
-        productId,
-        { page, pageSize: this.pageSize, status: "all" },
-        undefined,
-        signal,
-      );
-      if (result.page !== page || result.pageSize !== this.pageSize || (total !== undefined && total !== result.total) || result.items.length !== Math.min(this.pageSize, Math.max(0, result.total - (page - 1) * this.pageSize)) || result.items.some(item => item.productId !== productId)) throw new Error("Catálogo devolvió una paginación o identidad de variante incompleta para Combos.");
-      total = result.total;
-      for (const item of result.items) {
-        if (!item.variantId || ids.has(item.variantId)) throw new Error("Catálogo devolvió una identidad de variante vacía o repetida para Combos.");
-        ids.add(item.variantId); all.push(item);
-      }
-      if (page >= Math.ceil(result.total / this.pageSize)) break;
-      if (page >= 10_000) throw new Error("Catálogo excedió el límite defensivo de páginas de variantes para Combos.");
-      page += 1;
-    }
-    if (all.length !== (total ?? 0)) throw new Error("Combos no obtuvo la lista completa de variantes.");
-    return all;
-  }
 }

@@ -61,7 +61,9 @@ export function ComboEditor({ existing }: { existing?: Combo }) {
   const versionIdentity = useRef(new RequestIdentity());
   const versionController = useRef<AbortController | null>(null);
   const skuKey = draft.components.map((item) => item.sku).join("|");
-  const searchKey = JSON.stringify([debouncedSearchQuery, searchPage, searchRetry]);
+  const searchTerm = debouncedSearchQuery.trim();
+  const searchKey = JSON.stringify([searchQuery, debouncedSearchQuery, searchPage, searchRetry]);
+  const searchRequestKey = JSON.stringify([searchTerm, searchPage, searchRetry]);
   const selectedProductId = selectedProduct?.productId ?? "";
   const detailKey = JSON.stringify([selectedProductId, detailRetry]);
   const priceKey = JSON.stringify([skuKey, priceRetry]);
@@ -96,7 +98,7 @@ export function ComboEditor({ existing }: { existing?: Combo }) {
   }, []);
 
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearchQuery(searchQuery.trim()), 250);
+    const timer = setTimeout(() => setDebouncedSearchQuery(searchQuery), 250);
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
@@ -104,18 +106,24 @@ export function ComboEditor({ existing }: { existing?: Combo }) {
     const controller = new AbortController();
     const requests = searchIdentity.current;
     const requestId = requests.begin();
-    void catalog.listProducts(debouncedSearchQuery, searchPage, PRODUCT_PAGE_SIZE, controller.signal).then((result) => {
-      if (requests.isCurrent(requestId, controller.signal)) setSearchState({ key: searchKey, status: "success", result });
+    if (searchQuery !== debouncedSearchQuery) {
+      return () => {
+        controller.abort();
+        requests.invalidate();
+      };
+    }
+    void catalog.listProducts(searchTerm, searchPage, PRODUCT_PAGE_SIZE, controller.signal).then((result) => {
+      if (requests.isCurrent(requestId, controller.signal)) setSearchState({ key: searchRequestKey, status: "success", result });
     }).catch((reason: unknown) => {
       if (requests.isCurrent(requestId, controller.signal)) {
-        setSearchState({ key: searchKey, status: "error", message: reason instanceof Error ? reason.message : "No se pudieron consultar los productos." });
+        setSearchState({ key: searchRequestKey, status: "error", message: reason instanceof Error ? reason.message : "No se pudieron consultar los productos." });
       }
     });
     return () => {
       controller.abort();
       requests.invalidate();
     };
-  }, [catalog, debouncedSearchQuery, searchKey, searchPage]);
+  }, [catalog, searchQuery, debouncedSearchQuery, searchTerm, searchRequestKey, searchPage]);
 
   useEffect(() => {
     if (!selectedProduct?.hasVariants) return;
@@ -159,7 +167,7 @@ export function ComboEditor({ existing }: { existing?: Combo }) {
     };
   }, [priceKey, pricing, skuKey]);
 
-  const currentSearch = searchState.key === searchKey ? searchState : { key: searchKey, status: "loading" as const };
+  const currentSearch = searchQuery === debouncedSearchQuery && searchState.key === searchRequestKey ? searchState : { key: searchKey, status: "loading" as const };
   const currentDetail: ProductDetailState = !selectedProduct?.hasVariants
     ? { key: detailKey, status: "success", product: null }
     : detailState.key === detailKey ? detailState : { key: detailKey, status: "loading" };
@@ -175,13 +183,16 @@ export function ComboEditor({ existing }: { existing?: Combo }) {
   const canSave = !submitting && !versionConflict && !nameError && compositionErrors.length === 0 && currentPrice.status === "success" && comparison.status === "ready" && comparison.valid;
   const pageProducts = currentSearch.status === "success" ? currentSearch.result.items : [];
   const productOptions = [...pageProducts, ...(selectedProduct && !pageProducts.some((item) => item.productId === selectedProduct.productId) ? [selectedProduct] : [])]
-    .filter((product) => product.active && !product.isCombo)
-    .map((product) => ({ value: product.productId, label: product.name }));
+    .filter((product) => product.active)
+    .map((product) => ({ value: product.productId, label: product.name, disabled: product.isCombo }));
   const variantOptions = currentDetail.status === "success" ? currentDetail.product?.variants.filter((variant) => variant.active).map((variant) => ({ value: variant.sku, label: variant.label })) ?? [] : [];
   const diffRows = versionConflict && serverVersion ? diffComboDraft(draft, serverVersion) : [];
 
   function selectProduct(productId: string | null) {
-    const product = currentSearch.status === "success" ? currentSearch.result.items.find((item) => item.productId === productId) ?? null : null;
+    const product = (currentSearch.status === "success"
+      ? currentSearch.result.items.find((item) => item.productId === productId)
+      : undefined) ?? (selectedProduct?.productId === productId ? selectedProduct : null);
+    if (product?.isCombo) return;
     setSelectedProduct(product);
     setSelectedVariantSku(null);
   }
@@ -316,7 +327,7 @@ export function ComboEditor({ existing }: { existing?: Combo }) {
       {currentSearch.status === "error" && <FeedbackAlert semantic="error" title="No se pudo consultar el catálogo" actions={<Button type="button" variant="outline" onClick={() => setSearchRetry((value) => value + 1)}>Reintentar búsqueda</Button>}>{currentSearch.message} Los componentes ya seleccionados se conservan.</FeedbackAlert>}
       {currentSearch.status === "success" && currentSearch.result.total === 0 && <Alert icon={<IconInfoCircle size={18} />} color="gray" title="No hay productos activos">Prueba con otro nombre o revisa el catálogo.</Alert>}
       <Group align="flex-end" wrap="wrap">
-        <Select className={classes.productSelect} label="Producto" placeholder="Busca producto activo" searchable clearable data={productOptions} value={selectedProduct?.productId ?? null} searchValue={searchQuery} onSearchChange={(value) => { setSearchPage(1); setSearchQuery(value); }} onChange={selectProduct} nothingFoundMessage={currentSearch.status === "loading" ? "Buscando productos…" : "No hay productos con ese término en esta página."} />
+        <Select className={classes.productSelect} label="Producto" placeholder="Busca producto activo" searchable data={productOptions} value={selectedProduct?.productId ?? null} searchValue={searchQuery} onSearchChange={(value) => { setSearchPage(1); setSearchQuery(value); }} onChange={selectProduct} nothingFoundMessage={currentSearch.status === "loading" ? "Buscando productos…" : "No hay productos con ese término en esta página."} />
         {selectedProduct?.hasVariants && <Select className={classes.productSelect} label="Variante / SKU" placeholder={currentDetail.status === "loading" ? "Consultando variantes…" : "Elige una variante"} data={variantOptions} value={selectedVariantSku} onChange={setSelectedVariantSku} disabled={currentDetail.status !== "success"} />}
         <Button type="button" variant="outline" disabled={!selectedProduct || (selectedProduct.hasVariants && (currentDetail.status !== "success" || !selectedVariantSku))} onClick={addSelectedSku}>Agregar componente</Button>
       </Group>

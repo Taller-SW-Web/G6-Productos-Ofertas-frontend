@@ -150,6 +150,8 @@ export interface CombosCatalogPort {
   getProduct(productId: string, signal?: AbortSignal): Promise<ProductDetail | null>;
   // Coherent, paginated, authoritative resolution of every requested SKU.
   resolveSkus(skus: string[], signal?: AbortSignal): Promise<ResolvedSku[]>;
+  // Optional read-only cache peek for non-blocking name presentation.
+  peekResolvedSkus?(skus: string[]): ResolvedSku[];
 }
 
 export interface CombosPricingPort {

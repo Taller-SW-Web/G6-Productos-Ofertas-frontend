@@ -37,7 +37,13 @@ import {
 // A fresh adapter over the shared Catalog ensures every test starts from the
 // real product/variant fixture state instead of the process-wide singleton.
 function makeCatalog(options: { pageSize?: number; comboTypeIds?: ReadonlySet<string> } = {}) {
-  return new CatalogCombosAdapter({ catalog: new MockCatalogRepository(), ...options });
+  return new CatalogCombosAdapter({ catalog: new MockCatalogRepository(), allowMockCatalogScan: true, ...options });
+}
+
+async function resolveAfterObservedCatalogReads(catalog: CatalogCombosAdapter, skus: string[]) {
+  const page = await catalog.listProducts("", 1, 50);
+  await Promise.all(page.items.filter((product) => product.hasVariants).map((product) => catalog.getProduct(product.productId)));
+  return catalog.resolveSkus(skus);
 }
 
 function makeAvailability(snapshot: Record<string, StockReading> = stockFixtures as Record<string, StockReading>) {
@@ -80,7 +86,7 @@ function active(sku: string, quantity = 1) {
 
 describe("COM-01 · resolución autoritativa de SKU contra el Catálogo compartido", () => {
   it("marca como vendible un SKU simple de producto activo y una variante activa", async () => {
-    const resolved = await makeCatalog().resolveSkus(["CAS-COR-001", "CAM-RUN-BLA-M"]);
+    const resolved = await resolveAfterObservedCatalogReads(makeCatalog(), ["CAS-COR-001", "CAM-RUN-BLA-M"]);
     expect(resolved).toHaveLength(2);
     expect(resolved.find((entry) => entry.sku === "CAS-COR-001"))
       .toMatchObject({ productId: "PROD-CAS-001", productActive: true, variantActive: true, sellable: true, isVariantParentSku: false, isCombo: false });
@@ -89,15 +95,15 @@ describe("COM-01 · resolución autoritativa de SKU contra el Catálogo comparti
   });
 
   it("no considera vendible un producto inactivo ni una variante inactiva", async () => {
-    const [inactiveProduct] = await makeCatalog().resolveSkus(["ZAP-RUN-41"]);
+    const [inactiveProduct] = await resolveAfterObservedCatalogReads(makeCatalog(), ["ZAP-RUN-41"]);
     expect(inactiveProduct).toMatchObject({ productId: "PROD-ZAP-001", productActive: false, sellable: false });
 
-    const [inactiveVariant] = await makeCatalog().resolveSkus(["CAM-RUN-NEG-S"]);
+    const [inactiveVariant] = await resolveAfterObservedCatalogReads(makeCatalog(), ["CAM-RUN-NEG-S"]);
     expect(inactiveVariant).toMatchObject({ productId: "PROD-RUN-001", productActive: true, variantActive: false, sellable: false });
   });
 
   it("no vende el SKU padre de un producto con variantes", async () => {
-    const [parent] = await makeCatalog().resolveSkus(["CAM-RUN"]);
+    const [parent] = await resolveAfterObservedCatalogReads(makeCatalog(), ["CAM-RUN"]);
     expect(parent).toMatchObject({ sku: "CAM-RUN", productId: "PROD-RUN-001", isVariantParentSku: true, sellable: false });
   });
 
@@ -106,20 +112,56 @@ describe("COM-01 · resolución autoritativa de SKU contra el Catálogo comparti
   });
 
   it("detecta un combo por el tipo publicado de Catálogo y nunca por su nombre", async () => {
-    const byDefault = await makeCatalog().resolveSkus(["CAS-COR-001"]);
+    const byDefault = await resolveAfterObservedCatalogReads(makeCatalog(), ["CAS-COR-001"]);
     expect(byDefault[0]).toMatchObject({ isCombo: false, sellable: true });
 
-    const withComboType = await makeCatalog({ comboTypeIds: new Set(["TIP-CASACA"]) }).resolveSkus(["CAS-COR-001"]);
+    const withComboType = await resolveAfterObservedCatalogReads(makeCatalog({ comboTypeIds: new Set(["TIP-CASACA"]) }), ["CAS-COR-001"]);
     expect(withComboType[0]).toMatchObject({ isCombo: true, sellable: false });
 
     const listed = await makeCatalog({ comboTypeIds: new Set(["TIP-CASACA"]) }).listProducts("", 1, 50);
-    expect(listed.items.every((product) => !product.isCombo)).toBe(true);
+    expect(listed.items.some((product) => product.isCombo)).toBe(true);
+    expect(listed.total).toBeGreaterThanOrEqual(listed.items.length);
   });
 
-  it("resuelve SKU ubicados en páginas posteriores a la primera", async () => {
-    const paged = makeCatalog({ pageSize: 1 });
-    const resolved = await paged.resolveSkus(["CAS-COR-001", "CAM-RUN-BLA-M"]);
-    expect(resolved.map((entry) => entry.sku).sort()).toEqual(["CAM-RUN-BLA-M", "CAS-COR-001"]);
+  it("no consulta todo el catálogo para resolver un SKU no observado", async () => {
+    const repository = new MockCatalogRepository();
+    let productRequests = 0;
+    let variantRequests = 0;
+    const originalList = repository.list.bind(repository);
+    const originalVariants = repository.listVariants.bind(repository);
+    repository.list = async (...args) => { productRequests += 1; return originalList(...args); };
+    repository.listVariants = async (...args) => { variantRequests += 1; return originalVariants(...args); };
+    const catalog = new CatalogCombosAdapter({ catalog: repository });
+    await expect(catalog.resolveSkus(["CAM-RUN-BLA-M"])).resolves.toEqual([]);
+    expect(productRequests).toBe(0);
+    expect(variantRequests).toBe(0);
+    await catalog.listProducts("Camiseta Running", 1, 20);
+    await catalog.getProduct("PROD-RUN-001");
+    await expect(catalog.resolveSkus(["CAM-RUN-BLA-M"])).resolves.toMatchObject([{ sellable: true, productName: "Camiseta Running Endurance" }]);
+    expect(productRequests).toBe(1);
+    expect(variantRequests).toBe(0);
+  });
+
+  it("resuelve en caché SKU ya observados sin iniciar lecturas duplicadas", async () => {
+    const repository = new MockCatalogRepository();
+    const originalList = repository.list.bind(repository);
+    const originalVariants = repository.listVariants.bind(repository);
+    let productReads = 0;
+    let variantReads = 0;
+    repository.list = async (...args) => { productReads += 1; return originalList(...args); };
+    repository.listVariants = async (...args) => { variantReads += 1; return originalVariants(...args); };
+    const catalog = new CatalogCombosAdapter({ catalog: repository, pageSize: 50 });
+    await catalog.listProducts("", 1, 50);
+    await catalog.getProduct("PROD-RUN-001");
+    const [left, right] = await Promise.all([
+      catalog.resolveSkus(["CAS-COR-001", "CAM-RUN-BLA-M"]),
+      catalog.resolveSkus(["CAM-RUN-BLA-M", "CAS-COR-001"]),
+    ]);
+    const counts = [productReads, variantReads];
+    await catalog.resolveSkus(["CAS-COR-001"]);
+    expect(left.map(item => item.sku)).toEqual(["CAS-COR-001", "CAM-RUN-BLA-M"]);
+    expect(right.map(item => item.sku)).toEqual(["CAM-RUN-BLA-M", "CAS-COR-001"]);
+    expect([productReads, variantReads]).toEqual(counts);
   });
 
   it("busca candidatos usando una sola página filtrada de Catálogo", async () => {

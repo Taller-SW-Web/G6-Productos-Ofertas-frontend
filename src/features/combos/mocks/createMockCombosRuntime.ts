@@ -12,7 +12,7 @@ import { MockCombosAvailabilityAdapter } from "./mockCombosAvailabilityAdapter";
 // parallel combos catalog nor a divergent price list: SKUs, activity, prices and
 // the demo clock all come from the shared services.
 export function createMockCombosRuntime(pricingRuntime: PricingRuntime): CombosRuntime {
-  const catalog = new CatalogCombosAdapter({ catalog: getCatalogServices("mock").catalog });
+  const catalog = new CatalogCombosAdapter({ catalog: getCatalogServices("mock").catalog, allowMockCatalogScan: true });
   const pricing = new PricingCombosAdapter({ pricing: pricingRuntime.service });
   const now = () => Date.parse(pricingRuntime.clock.now());
   const availability = new MockCombosAvailabilityAdapter({ inventory: getInventoryRepository() });

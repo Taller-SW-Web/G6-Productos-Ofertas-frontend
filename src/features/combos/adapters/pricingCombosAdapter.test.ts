@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createMockPricingRepository } from "../../pricing/adapters/mockPricingRepository";
 import { demoNow } from "../../pricing/mocks/prices";
@@ -8,6 +8,7 @@ import type {
   PricingRepository,
 } from "../../pricing/services/pricingRepository";
 import { PricingCombosAdapter, parseMinorAmount } from "./pricingCombosAdapter";
+import type { AuthenticatedGatewayClient } from "../../../app/config/authenticatedGatewayClient";
 
 // Combos and MK-013 share the exact same Pricing mock repository, so both features
 // must resolve the identical economic reference for a SKU.
@@ -76,6 +77,45 @@ describe("parseMinorAmount", () => {
 });
 
 describe("PricingCombosAdapter · referencias compartidas de Pricing", () => {
+  it("usa precios batch publicados en alcance global y conserva la identidad de vigencia", async () => {
+    const request = vi.fn(async (path: string) => {
+      expect(path).toMatch(/^\/api\/v1\/precios\?skus=/);
+      return new Response(JSON.stringify({ items: [{ sku: "SKU-X", precio_regular: 12.5, precio_oferta: 10, currency: "PEN", channel_id: null, valid_from: "2026-11-01T00:00:00Z", valid_until: "2026-12-01T00:00:00Z", price_version: 9, vigencia_id: "vig-actual", origen: "SKU_OVERRIDE" }] }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    const gateway: AuthenticatedGatewayClient = { request };
+    const adapter = new PricingCombosAdapter({ pricing: createMockPricingRepository(fixedClock), gateway });
+    await expect(adapter.readCurrent(["SKU-X"])).resolves.toEqual([{
+      sku: "SKU-X", regularMinor: 1250, offerMinor: 1000, currency: "PEN", channelId: null,
+      priceVersion: 9, validityId: "vig-actual", validFrom: "2026-11-01T00:00:00Z", validUntil: "2026-12-01T00:00:00Z",
+    }]);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0]?.[0]).not.toContain("canal=");
+  });
+
+  it("acota consultas batch a 100 y usa lectura individual publicada para SKU con coma", async () => {
+    const paths: string[] = [];
+    const request: AuthenticatedGatewayClient["request"] = async (path) => {
+      paths.push(path);
+      if (path.includes("/precios/skus/")) return new Response(JSON.stringify({ sku: "SKU,-X", precio_regular: 2, precio_oferta: null, currency: "PEN", channel_id: null, valid_from: "2026-11-01T00:00:00Z", valid_until: null, price_version: 1, vigencia_id: "vig-comma", origen: "PRODUCTO" }), { status: 200, headers: { "content-type": "application/json" } });
+      const parsed = new URL(path, "https://gateway.invalid");
+      expect(parsed.searchParams.get("skus")?.split(",")).toHaveLength(100);
+      return new Response(JSON.stringify({ items: [] }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const adapter = new PricingCombosAdapter({ pricing: createMockPricingRepository(fixedClock), gateway: { request } });
+    await adapter.readCurrent([...Array.from({ length: 100 }, (_, index) => `SKU-${index}`), "SKU,-X"]);
+    expect(paths).toHaveLength(2);
+    expect(paths[1]).toContain("/api/v1/precios/skus/SKU%2C-X");
+  });
+
+  it("solo interpreta como precio ausente el 404 contractual de la lectura individual", async () => {
+    const individual: AuthenticatedGatewayClient = { request: async () => new Response(JSON.stringify({ status: 404, code: "PRECIO_NO_ENCONTRADO" }), { status: 404, headers: { "content-type": "application/problem+json" } }) };
+    await expect(new PricingCombosAdapter({ pricing: createMockPricingRepository(fixedClock), gateway: individual }).readCurrent(["SKU,-X"])).resolves.toEqual([]);
+
+    const batch: AuthenticatedGatewayClient = { request: async () => new Response("{}", { status: 404, headers: { "content-type": "application/problem+json" } }) };
+    await expect(new PricingCombosAdapter({ pricing: createMockPricingRepository(fixedClock), gateway: batch }).readCurrent(["SKU-X"]))
+      .rejects.toMatchObject({ kind: "pricing_unavailable" });
+  });
+
   it("resuelve el SKU de producto por referenceSku publicado", async () => {
     const prices = await makeAdapter(createMockPricingRepository(fixedClock)).readCurrent(["CAS-COR-001"]);
     expect(prices).toHaveLength(1);

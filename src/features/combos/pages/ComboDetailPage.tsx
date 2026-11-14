@@ -123,10 +123,11 @@ function ComboDetailForId({ comboId, unavailable }: { comboId: string; unavailab
   useEffect(() => {
     if (!combo || comboStatus === undefined) return;
     let active = true;
+    const controller = new AbortController();
     const components = combo.components.map((component) => ({ sku: component.sku, quantity: component.quantity }));
     void Promise.all([
-      catalog.resolveSkus(components.map((component) => component.sku)),
-      availabilityPort.readStocks(components.map((component) => component.sku)),
+      catalog.resolveSkus(components.map((component) => component.sku), controller.signal),
+      availabilityPort.readStocks(components.map((component) => component.sku), controller.signal),
     ]).then(([resolved, readings]) => {
       if (!active) return;
       const sellable = new Map(resolved.map((entry) => [entry.sku, entry.sellable]));
@@ -140,7 +141,7 @@ function ComboDetailForId({ comboId, unavailable }: { comboId: string; unavailab
       if (!active) return;
       setAvailabilityState({ key: availabilityKey, status: "error", message: reason instanceof Error ? reason.message : "La disponibilidad no está disponible." });
     });
-    return () => { active = false; };
+    return () => { active = false; controller.abort(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [availabilityPort, catalog, comboStatus, availabilityKey, scenario]);
 
