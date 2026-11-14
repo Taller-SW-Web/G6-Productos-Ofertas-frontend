@@ -14,6 +14,7 @@ import type {
 export const DEFAULT_COMBO_PRODUCT_TYPE_IDS: ReadonlySet<string> = new Set<string>();
 const SKU_RESOLUTION_CACHE_MS = 30_000;
 const SKU_RESOLUTION_CACHE_MAX = 500;
+const MOCK_REFRESH_CONCURRENCY = 8;
 
 export interface CatalogCombosAdapterOptions {
   catalog: CatalogRepository;
@@ -33,12 +34,17 @@ export class CatalogCombosAdapter implements CombosCatalogPort {
   private readonly pageSize: number;
   private readonly allowMockCatalogScan: boolean;
   private readonly skuIndexCache = new Map<string, { resolved: ResolvedSku; expiresAt: number }>();
+  private mockCatalogChanged = false;
 
   constructor(options: CatalogCombosAdapterOptions) {
     this.catalog = options.catalog;
     this.comboTypeIds = options.comboTypeIds ?? DEFAULT_COMBO_PRODUCT_TYPE_IDS;
     this.pageSize = options.pageSize && options.pageSize > 0 ? options.pageSize : 50;
     this.allowMockCatalogScan = options.allowMockCatalogScan === true;
+    if (this.allowMockCatalogScan) {
+      const observable = this.catalog as CatalogRepository & { subscribe?: (listener: () => void) => () => void };
+      observable.subscribe?.(() => { this.mockCatalogChanged = true; });
+    }
   }
 
   async listProducts(query: string, page: number, pageSize: number, signal?: AbortSignal): Promise<ProductSummaryPage> {
@@ -80,6 +86,7 @@ export class CatalogCombosAdapter implements CombosCatalogPort {
   async resolveSkus(skus: string[], signal?: AbortSignal): Promise<ResolvedSku[]> {
     signal?.throwIfAborted();
     const requested = [...new Set(skus)];
+    if (this.allowMockCatalogScan && this.mockCatalogChanged) await this.refreshObservedMockProducts(signal);
     const cached = this.peekResolvedSkus(requested);
     if (cached.length === requested.length || !this.allowMockCatalogScan) return cached;
     const known = new Map(cached.map((item) => [item.sku, item]));
@@ -117,6 +124,7 @@ export class CatalogCombosAdapter implements CombosCatalogPort {
 
   peekResolvedSkus(skus: string[]): ResolvedSku[] {
     this.pruneSkuCache();
+    if (this.mockCatalogChanged) return [];
     return [...new Set(skus)].flatMap((sku) => {
       const cached = this.skuIndexCache.get(sku);
       return cached ? [cached.resolved] : [];
@@ -147,6 +155,7 @@ export class CatalogCombosAdapter implements CombosCatalogPort {
   }
 
   private cacheProductDetail(product: ProductView & { variants: readonly { sku: string; status: string }[] }): void {
+    this.invalidateProductCache(product.id);
     const isCombo = this.isComboProduct(product);
     const productActive = isActiveProduct(product);
     if (product.hasVariants && product.skuBase) this.cache({ sku: product.skuBase, productId: product.id, productName: product.name, isCombo, productActive, variantActive: false, sellable: false, isVariantParentSku: true });
@@ -154,6 +163,26 @@ export class CatalogCombosAdapter implements CombosCatalogPort {
     for (const variant of product.variants) {
       const variantActive = variant.status === "ACTIVA";
       this.cache({ sku: variant.sku, productId: product.id, productName: product.name, isCombo, productActive, variantActive, sellable: productActive && variantActive && !isCombo, isVariantParentSku: false });
+    }
+  }
+
+  private async refreshObservedMockProducts(signal?: AbortSignal): Promise<void> {
+    const productIds = [...new Set([...this.skuIndexCache.values()].map((entry) => entry.resolved.productId))];
+    for (let offset = 0; offset < productIds.length; offset += MOCK_REFRESH_CONCURRENCY) {
+      signal?.throwIfAborted();
+      const ids = productIds.slice(offset, offset + MOCK_REFRESH_CONCURRENCY);
+      const details = await Promise.all(ids.map((id) => this.catalog.getById(id, undefined, signal)));
+      details.forEach((detail, index) => {
+        if (detail) this.cacheProductDetail(detail);
+        else this.invalidateProductCache(ids[index]!);
+      });
+    }
+    this.mockCatalogChanged = false;
+  }
+
+  private invalidateProductCache(productId: string): void {
+    for (const [sku, entry] of this.skuIndexCache) {
+      if (entry.resolved.productId === productId) this.skuIndexCache.delete(sku);
     }
   }
 
