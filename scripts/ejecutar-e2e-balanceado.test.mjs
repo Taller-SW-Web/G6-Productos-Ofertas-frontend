@@ -10,7 +10,12 @@ test("extrae rutas de pruebas y normaliza separadores", () => {
 });
 
 test("acepta una cobertura completa con archivos nuevos dentro de una prueba existente", () => {
-  assert.equal(validarManifiestos(["catalog.spec.ts", "combos/smoke.spec.ts"], [["catalog.spec.ts"], ["combos/smoke.spec.ts"]]).valido, true);
+  const resultado = validarManifiestos(["catalog.spec.ts", "combos/smoke.spec.ts"], [["catalog.spec.ts"], ["combos/smoke.spec.ts"]]);
+  assert.equal(resultado.valido, true);
+  assert.equal(resultado.archivos, 2);
+  assert.deepEqual(resultado.faltantes, []);
+  assert.deepEqual(resultado.adicionales, []);
+  assert.deepEqual(resultado.duplicados, []);
 });
 
 test("rechaza manifiestos con archivos ausentes, adicionales o duplicados", () => {
@@ -22,4 +27,5 @@ test("rechaza manifiestos con archivos ausentes, adicionales o duplicados", () =
   assert.deepEqual(resultado.faltantes, ["combos/smoke.spec.ts"]);
   assert.deepEqual(resultado.adicionales, ["catalog-removed.spec.ts"]);
   assert.deepEqual(resultado.duplicados, ["catalog.spec.ts"]);
+  assert.equal(resultado.archivos, 2);
 });
