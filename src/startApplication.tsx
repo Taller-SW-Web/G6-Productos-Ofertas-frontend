@@ -28,6 +28,7 @@ import { createBulkFetchTransport, createHttpBulkRepository } from "./features/b
 import { GatewayOriginContext } from "./app/config/GatewayOriginContext";
 import { AdminApiContext } from "./app/config/AdminApiContext";
 import { createAuthenticatedInventoryTransport } from "./features/inventory/adapters/authenticatedInventoryTransport";
+import { listVariantsByProduct } from "./features/inventory/adapters/catalogSkuSnapshot";
 
 export async function startApplication(root: Root, mode: "mock" | "api", session: G7Session | null, gatewayOrigin?: string, securityApiBase?: string, adminApiEnabled = false) {
   let gateway: string | undefined;
@@ -49,15 +50,16 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
   const httpCatalog = mode === "api" ? createOptionalCatalogHttpServices(gatewayOrigin, session, gatewayClient ?? undefined, adminApi) : null;
   const catalogServices = httpCatalog ?? getCatalogServices(mode);
   const commercialCatalog = httpCatalog?.commercialCatalog ?? catalogServices.catalog;
-  const runtime = await createPricingRuntime(mode, {
-    ...(adminApi && gatewayClient
-      ? {
-          api: async () =>
-            createHttpPricingRepository({
-              transport: gatewayClient,
-              scopeId,
-              canManagePricing: () => session?.snapshot().user?.roles.includes("GESTOR_COMERCIAL") === true,
-              listCatalogTargets: async signal => {
+  const [runtime, auditRuntime] = await Promise.all([
+    createPricingRuntime(mode, {
+      ...(adminApi && gatewayClient
+        ? {
+            api: async () =>
+              createHttpPricingRepository({
+                transport: gatewayClient,
+                scopeId,
+                canManagePricing: () => session?.snapshot().user?.roles.includes("GESTOR_COMERCIAL") === true,
+                listCatalogTargets: async signal => {
                 const targets = [];
                 const pageSize = 100;
                 let page = 1;
@@ -101,16 +103,17 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
                 } while (page <= totalPages);
                 if (productIds.size !== (reportedTotal ?? 0)) throw new Error("La selección de Pricing no cubre el catálogo completo.");
                 return targets;
-              },
-            }),
-        }
-      : {}),
-  });
-  const auditRuntime = await createAuditRuntime(mode, {
-    ...(adminApi && gatewayClient
-      ? { api: async () => createHttpAuditRepository(gatewayClient) }
-      : {}),
-  });
+                },
+              }),
+          }
+        : {}),
+    }),
+    createAuditRuntime(mode, {
+      ...(adminApi && gatewayClient
+        ? { api: async () => createHttpAuditRepository(gatewayClient) }
+        : {}),
+    }),
+  ]);
   type InventorySkus = import("./features/inventory/adapters/apiInventoryAdapter").InventoryCatalogSku[];
   const inventorySkuCache = new Map<string, { items: InventorySkus; at: number }>();
   const inventorySkuLoads = new Map<string, Promise<InventorySkus>>();
@@ -148,20 +151,14 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
         for (const product of result.items) {
           if (!product.id || productIds.has(product.id) || !(product.commerciallyActive === true || product.status === "ACTIVO")) throw new Error("Catálogo devolvió una identidad de producto duplicada o no activa para Inventario.");
           productIds.add(product.id);
+        }
+        const productsWithVariants = result.items.filter(product => product.hasVariants);
+        const variantsByProduct = await listVariantsByProduct(commercialCatalog, productsWithVariants, 100);
+        for (const product of result.items) {
           const meta = { productName: product.name, categoryId: product.categoryId, categoryName: categoryNames.get(product.categoryId) ?? `ID ${product.categoryId}`, brandId: product.brandId, brandName: brandNames.get(product.brandId) ?? `ID ${product.brandId}` };
           if (!product.hasVariants && product.skuBase) output.push({ sku: product.skuBase, ...meta });
           if (product.hasVariants) {
-            let variantPage = 1;
-            let variantPages: number;
-            let variantTotal: number | undefined;
-            do {
-              const variants = await commercialCatalog.listVariants(product.id, { page: variantPage, pageSize: 100, status: "all" });
-              if (variants.page !== variantPage || variants.pageSize !== 100 || (variantTotal !== undefined && variantTotal !== variants.total) || variants.items.length !== Math.min(100, Math.max(0, variants.total - (variantPage - 1) * 100)) || variants.items.some(variant => variant.productId !== product.id)) throw new Error("Paginación o identidad de variantes incompleta para Inventario.");
-              variantTotal = variants.total;
-              variantPages = Math.ceil(variants.total / 100);
-              for (const variant of variants.items) if (variant.status === "ACTIVA") output.push({ sku: variant.sku, ...meta });
-              variantPage++;
-            } while (variantPage <= variantPages);
+            for (const variant of variantsByProduct.get(product.id) ?? []) if (variant.status === "ACTIVA") output.push({ sku: variant.sku, ...meta });
           }
         }
         page++;

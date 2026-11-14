@@ -11,7 +11,7 @@ afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 const payload: ComboPayload = { name: "Combo H4", description: "Prueba", components: [{ sku: "SKU-H4-001", quantity: 1 }, { sku: "SKU-H4-002", quantity: 2 }], priceMinor: 4990 };
 const comboDto = (id: string, overrides: Record<string, unknown> = {}) => ({ combo_id: id, name: "Combo H4", description: "Prueba", status: "ACTIVO", price: 49.9, version: 1, components: [{ sku: "SKU-H4-001", quantity: 1 }, { sku: "SKU-H4-002", quantity: 2 }], ...overrides });
 const available = (id: string) => ({ comboId: id, verificable: true, cantidadInformativa: 3, calculated_at: "2026-11-07T12:00:00Z", estadoActualizacion: "ACTUALIZADA" });
-const catalog = { listProducts: async () => [], getProduct: async () => null, resolveSkus: async () => [] };
+const catalog = { listProducts: async (_query: string, page: number, pageSize: number) => ({ items: [], total: 0, page, pageSize }), getProduct: async () => null, resolveSkus: async () => [] };
 function setup(request: AuthenticatedGatewayClient["request"]) {
   const client: AuthenticatedGatewayClient = { request: vi.fn(request) };
   return { repository: createHttpCombosRepository(client, catalog, () => owner), request: client.request as ReturnType<typeof vi.fn> };

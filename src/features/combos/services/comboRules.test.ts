@@ -112,8 +112,8 @@ describe("COM-01 · resolución autoritativa de SKU contra el Catálogo comparti
     const withComboType = await makeCatalog({ comboTypeIds: new Set(["TIP-CASACA"]) }).resolveSkus(["CAS-COR-001"]);
     expect(withComboType[0]).toMatchObject({ isCombo: true, sellable: false });
 
-    const listed = await makeCatalog({ comboTypeIds: new Set(["TIP-CASACA"]) }).listProducts("");
-    expect(listed.map((product) => product.name).every((name) => !name.toLocaleLowerCase("es-PE").includes("combo"))).toBe(true);
+    const listed = await makeCatalog({ comboTypeIds: new Set(["TIP-CASACA"]) }).listProducts("", 1, 50);
+    expect(listed.items.every((product) => !product.isCombo)).toBe(true);
   });
 
   it("resuelve SKU ubicados en páginas posteriores a la primera", async () => {
@@ -122,9 +122,28 @@ describe("COM-01 · resolución autoritativa de SKU contra el Catálogo comparti
     expect(resolved.map((entry) => entry.sku).sort()).toEqual(["CAM-RUN-BLA-M", "CAS-COR-001"]);
   });
 
+  it("busca candidatos usando una sola página filtrada de Catálogo", async () => {
+    const repository = new MockCatalogRepository();
+    const originalList = repository.list.bind(repository);
+    const queries: Parameters<typeof repository.list>[0][] = [];
+    repository.list = async (query, scenario, signal) => {
+      queries.push(query);
+      return originalList(query, scenario, signal);
+    };
+    const catalog = new CatalogCombosAdapter({ catalog: repository });
+
+    const result = await catalog.listProducts("a", 1, 1);
+
+    expect(queries).toHaveLength(1);
+    expect(queries[0]).toMatchObject({ q: "a", status: "ACTIVO", page: 1, pageSize: 1 });
+    expect(result).toMatchObject({ page: 1, pageSize: 1 });
+    expect(result.total).toBeGreaterThan(result.items.length);
+    expect(result.items.every((product) => product.active && !product.isCombo)).toBe(true);
+  });
+
   it("propaga el fallo del catálogo en lugar de silenciarlo", async () => {
     const failingCatalog: CombosCatalogPort = {
-      async listProducts() { return []; },
+      async listProducts(_query, page, pageSize) { return { items: [], total: 0, page, pageSize }; },
       async getProduct() { return null; },
       async resolveSkus() { throw new Error("Catálogo compartido no disponible."); },
     };
@@ -527,7 +546,7 @@ describe("COM-03 · prioridad de disponibilidad y recomputo autoritativo", () =>
   it("propaga el fallo de un puerto en lugar de publicar un snapshot obsoleto", async () => {
     const failingCatalog = makeRepository({
       catalog: {
-        async listProducts() { return []; },
+        async listProducts(_query, page, pageSize) { return { items: [], total: 0, page, pageSize }; },
         async getProduct() { return null; },
         async resolveSkus() { throw new Error("Catálogo no disponible."); },
       },

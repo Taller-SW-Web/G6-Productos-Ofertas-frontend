@@ -8,6 +8,7 @@ import type {
 import type {
   CombosCatalogPort,
   ProductDetail,
+  ProductSummaryPage,
   ProductSummary,
   ResolvedSku,
 } from "../types/combos";
@@ -39,13 +40,22 @@ export class CatalogCombosAdapter implements CombosCatalogPort {
     this.pageSize = options.pageSize && options.pageSize > 0 ? options.pageSize : 50;
   }
 
-  async listProducts(query: string, signal?: AbortSignal): Promise<ProductSummary[]> {
-    const normalized = query.trim().toLocaleLowerCase("es-PE");
-    const products = await this.listAllProducts(signal);
-    return products
-      .filter((product) => isActiveProduct(product))
-      .filter((product) => (normalized ? product.name.toLocaleLowerCase("es-PE").includes(normalized) : true))
-      .map((product) => this.toSummary(product));
+  async listProducts(query: string, page: number, pageSize: number, signal?: AbortSignal): Promise<ProductSummaryPage> {
+    const result = await this.catalog.list(
+      { q: query.trim() || undefined, status: "ACTIVO", page, pageSize },
+      undefined,
+      signal,
+    );
+    if (result.page !== page || result.pageSize !== pageSize ||
+      result.items.length !== Math.min(pageSize, Math.max(0, result.total - (page - 1) * pageSize))) {
+      throw new Error("Catálogo devolvió una página inconsistente de productos para Combos.");
+    }
+    return {
+      items: result.items.filter((product) => isActiveProduct(product) && !this.isComboProduct(product)).map((product) => this.toSummary(product)),
+      total: result.total,
+      page: result.page,
+      pageSize: result.pageSize,
+    };
   }
 
   async getProduct(productId: string, signal?: AbortSignal): Promise<ProductDetail | null> {
