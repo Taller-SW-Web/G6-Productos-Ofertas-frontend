@@ -123,12 +123,12 @@ test("HTTP: red/timeout de escritura es resultado desconocido; cancelación y re
   expect(h.calls.at(-1)?.init.signal.aborted).toBe(true);
 });
 
-test("HTTP: el listado administrativo rechaza un DTO comercial y no envía filtros sin contrato", async () => {
+test("HTTP: el listado administrativo rechaza un DTO comercial y transmite el filtro de tipo publicado", async () => {
   const h = harness(() => json({ items: [], pagina: 1, tamanio: 20, total: 0 }));
   await expect(h.catalog.list({ page: 1, pageSize: 20 })).rejects.toMatchObject({ kind: "blocked_contract" });
-  const count = h.calls.length;
   await expect(h.catalog.list({ page: 1, pageSize: 20, typeId: "type" })).rejects.toMatchObject({ kind: "blocked_contract" });
-  expect(h.calls).toHaveLength(count);
+  expect(h.calls).toHaveLength(2);
+  expect(h.calls[1]?.path).toContain("tipoProductoIdsIncluidos=type");
 });
 
 test("HTTP: preparación conserva manual_retry_allowed y 202 solo admite; 409 no se repite", async () => {

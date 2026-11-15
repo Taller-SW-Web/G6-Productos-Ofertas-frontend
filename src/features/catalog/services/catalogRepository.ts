@@ -103,6 +103,8 @@ export interface CatalogQuery {
   q?: string;
   categoryId?: string;
   typeId?: string;
+  typeIdsIncluded?: readonly string[];
+  typeIdsExcluded?: readonly string[];
   saleModel?: "all" | "simple" | "variants";
   status?: "all" | ProductStatus;
   page: number;
@@ -114,6 +116,25 @@ export interface CatalogPageResult {
   total: number;
   page: number;
   pageSize: number;
+}
+
+export interface ComboSkuResolution {
+  sku: string;
+  resultado: "ELEGIBLE" | "INACTIVO" | "NO_ELEGIBLE" | "NO_ENCONTRADO";
+  productId: string | null;
+  nombre: string | null;
+  productoPadre: {
+    productId: string;
+    nombre: string;
+    tieneVariantes: boolean;
+    estado: ProductStatus;
+  } | null;
+  variante: {
+    variantId: string;
+    estado: "BORRADOR" | "ACTIVA" | "INACTIVA";
+  } | null;
+  estado: ProductStatus | VariantStatus | null;
+  tipoProductoId: string | null;
 }
 
 export interface ProductCreatePayload {
@@ -258,11 +279,18 @@ export interface VariantMutationResult {
 }
 
 export interface CatalogRepository {
+  /** Local mock stores can signal mutations so consumers invalidate derived caches. */
+  subscribe?(listener: () => void): () => void;
   list(
     query: CatalogQuery,
     scenario?: string,
     signal?: AbortSignal,
   ): Promise<CatalogPageResult>;
+  /** Authoritative, human-authenticated read used by Combos; POST is query-only. */
+  resolveComboSkus?(
+    skus: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<ComboSkuResolution[]>;
   getById(
     id: string,
     scenario?: string,

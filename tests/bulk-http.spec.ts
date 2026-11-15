@@ -103,8 +103,12 @@ test("Bulk API contra servidor HTTP aislado simula rutas, upload válido, errore
     await page.goto(`/tests/harness/bulk-http.html?gateway=${encodeURIComponent(gateway)}#/carga-masiva`);
     await page.locator('input[type="file"]').setInputFiles({ name: "upload.csv", mimeType: "text/csv", buffer: Buffer.from(validBulkV2Csv) });
     await page.getByRole("button", { name: "Continuar a revisión" }).click();
+    const importRequestPromise = page.waitForRequest((request) =>
+      request.method() === "POST" && new URL(request.url()).pathname === `${root}/importaciones`,
+    );
     await page.getByRole("button", { name: "Confirmar importación" }).first().click();
-    const correlationId = requests.find((request) => request.method === "POST" && request.url === `${root}/importaciones`)?.correlation;
+    const importRequest = await importRequestPromise;
+    const correlationId = importRequest.headers()["x-correlation-id"];
     const expectedBatchId = contractBatchId(String(correlationId), Buffer.from(validBulkV2Csv));
     await expect(page).toHaveURL(new RegExp(`${expectedBatchId}$`));
     await expect(page.getByText("SKU-HTTP-9")).toBeVisible();

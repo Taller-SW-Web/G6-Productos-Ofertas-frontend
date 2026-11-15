@@ -2,6 +2,7 @@ import type { DataMode } from "../../../app/config/dataMode";
 import type { PricingRuntime } from "../../pricing/services/pricingRuntime";
 import type { AuthenticatedGatewayClient } from "../../../app/config/authenticatedGatewayClient";
 import type { CatalogRepository } from "../../catalog/services/catalogRepository";
+import type { CatalogServices } from "../../catalog/services/catalogServices";
 import type {
   CombosAvailabilityPort,
   CombosCatalogPort,
@@ -41,11 +42,32 @@ export async function createCombosRuntime(
     return {
       combos: comboRepository,
       catalog,
-      pricing: new PricingCombosAdapter({ pricing: pricing.service }),
+      pricing: new PricingCombosAdapter({ pricing: pricing.service, gateway: dependencies.gateway }),
       availability,
       now: () => Date.now(),
     };
   }
   const { createMockCombosRuntime } = await import("../mocks/createMockCombosRuntime");
   return createMockCombosRuntime(pricing);
+}
+
+/** Compose Combos exactly as the application does, keeping public catalog reads separate. */
+export function createApplicationCombosRuntime(
+  mode: DataMode,
+  pricing: PricingRuntime,
+  dependencies: {
+    gateway?: AuthenticatedGatewayClient;
+    catalogServices: CatalogServices & { commercialCatalog?: CatalogRepository };
+    adminApi: boolean;
+    scopeId?: () => string | null;
+  },
+): Promise<CombosRuntime> {
+  const catalog = dependencies.adminApi
+    ? dependencies.catalogServices.catalog
+    : (dependencies.catalogServices.commercialCatalog ?? dependencies.catalogServices.catalog);
+  return createCombosRuntime(mode, pricing, {
+    gateway: dependencies.gateway,
+    catalog,
+    scopeId: dependencies.scopeId,
+  });
 }

@@ -2,9 +2,11 @@ import { isGatewayTokenInvalid } from "../../features/shared/isGatewayTokenInval
 import { secureBase, type G7Session } from "../../features/promotions/adapters/g7Session";
 
 export type GatewayMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
+export type GatewayRequestMethod = GatewayMethod | "POST_READ";
 
 export interface GatewayRequest {
-  method: GatewayMethod;
+  /** POST_READ is a logical read and is only accepted for the published SKU resolver. */
+  method: GatewayRequestMethod;
   signal?: AbortSignal;
   headers?: Readonly<Record<string, string>>;
   body?: BodyInit;
@@ -54,7 +56,7 @@ export function createAuthenticatedGatewayClient(
     const target = new URL(path, origin);
     if (target.origin !== origin || !target.pathname.startsWith("/api/v1/")) throw new Error("Destino de Gateway no válido.");
     return fetcher(target.href, {
-      method: request.method,
+      method: request.method === "POST_READ" ? "POST" : request.method,
       signal,
       credentials: "omit",
       redirect: "error",
@@ -80,6 +82,12 @@ export function createAuthenticatedGatewayClient(
       const signal = request.signal
         ? AbortSignal.any([request.signal, timeout])
         : timeout;
+      const replayableRead = request.method === "GET" || (
+        request.method === "POST_READ" &&
+        path === "/api/v1/productos/administracion/skus/resolver"
+      );
+      if (request.method === "POST_READ" && !replayableRead)
+        throw new Error("POST_READ solo está habilitado para el resolver administrativo de SKU.");
       signal.throwIfAborted();
       const token = await session.getAccessToken(signal);
       signal.throwIfAborted();
@@ -91,7 +99,7 @@ export function createAuthenticatedGatewayClient(
       assertSession();
       if (!(await isGatewayTokenInvalid(response))) return response;
       assertSession();
-      if (request.method === "GET") {
+      if (replayableRead) {
         const refreshed = await session.refreshAccessToken(token, signal);
         signal.throwIfAborted();
         if (!refreshed) {
