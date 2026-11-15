@@ -136,7 +136,6 @@ function SeoConfigContent({ detalle }: { detalle: SeoCategory }) {
     e.preventDefault();
     if (slug.trim() === "") return;
     setGuardadoS(false);
-    guardarS.reiniciar();
     guardarS.guardar({
       id: detalleActual.id,
       slug: slug.trim(),
@@ -144,6 +143,8 @@ function SeoConfigContent({ detalle }: { detalle: SeoCategory }) {
       metaDescripcion: metaDescripcion.trim(),
     });
   };
+
+  const inputSeo = { id: detalleActual.id, slug: slug.trim(), metaTitulo: metaTitulo.trim(), metaDescripcion: metaDescripcion.trim() };
 
   const warnTitulo = metaTitulo.length > 70;
   const warnDesc = metaDescripcion.length > 160;
@@ -241,6 +242,11 @@ function SeoConfigContent({ detalle }: { detalle: SeoCategory }) {
               {guardarS.state.message}
             </FeedbackAlert>
           )}
+          {guardarS.state.status === "incierto" && (
+            <FeedbackAlert semantic="warning" title="Resultado incierto" actions={<Button variant="outline" onClick={() => void guardarS.reconciliar()}>Consultar SEO e historial</Button>}>
+              {guardarS.state.message}
+            </FeedbackAlert>
+          )}
           <form onSubmit={handleSubmit}>
             <Stack gap="md">
               <TextInput
@@ -275,7 +281,7 @@ function SeoConfigContent({ detalle }: { detalle: SeoCategory }) {
                 >
                   Cancelar
                 </Button>
-                <Button type="submit" loading={guardando}>
+                <Button type="submit" loading={guardando} disabled={guardarS.isUnknownIntent(inputSeo)}>
                   Guardar
                 </Button>
               </Group>

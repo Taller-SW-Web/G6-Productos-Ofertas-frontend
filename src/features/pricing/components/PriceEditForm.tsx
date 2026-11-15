@@ -24,6 +24,7 @@ import type {
   WriteTarget,
 } from "../services/pricingModels";
 import { PriceSummary } from "./PriceSummary";
+import { priceChannelLabel } from "../services/pricePresentation";
 import { UnsavedPriceGuard } from "./UnsavedPriceGuard";
 import { useUnsavedPriceNavigation } from "../hooks/useUnsavedPriceNavigation";
 
@@ -85,7 +86,7 @@ export function PriceEditForm({
           >
             <Text size="sm">
               * Campo obligatorio. Canal de escritura:{" "}
-              {target.channel === "retail" ? "Retail" : "Global"}.
+              {priceChannelLabel(target.channel)}.
             </Text>
             <SimpleGrid cols={2} spacing="lg">
               <NumberInput
@@ -287,7 +288,7 @@ export function PriceEditForm({
             {product
               ? "Producto; afecta a las variantes que heredan"
               : "Override del SKU"}{" "}
-            · {target.channel === "retail" ? "Retail" : "Global"} · Versión{" "}
+            · {priceChannelLabel(target.channel)} · Versión{" "}
             {edit.readPrice.version}.
           </Text>
           <Text size="sm">

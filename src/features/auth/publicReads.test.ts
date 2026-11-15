@@ -6,6 +6,7 @@ import { createPromotionSessionRuntime } from "../promotions/services/promotionS
 import { createHttpBulkRepository } from "../bulk/adapters/httpBulkRepository";
 import { consultaEntries, consultaHref, publicReadEntries } from "../../app/routes/publicReadEntries";
 import { readOperations } from "../reads/readOperations";
+import { createMemoryStorage } from "../../../tests/fixtures/h4Controlled";
 
 const origin = "https://gateway.example.test";
 const signal = () => new AbortController().signal;
@@ -18,7 +19,7 @@ function setup() {
   const fetcher = vi.spyOn(globalThis, "fetch").mockImplementation(async () => denied());
   return { session, fetcher };
 }
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("login conservado y lecturas públicas sin JWT", () => {
   it("las 10 pantallas con limitación de contrato administrativo exponen aviso explícito y enlace a /consultas", () => {
@@ -69,6 +70,9 @@ describe("login conservado y lecturas públicas sin JWT", () => {
 
   it("Bulk conserva el JWT de escritura y no repite un POST", async () => {
     const { session, fetcher } = setup();
+    vi.stubGlobal("sessionStorage", createMemoryStorage());
+    vi.spyOn(session, "snapshot").mockReturnValue({ ...session.snapshot(),
+      user: { id: "gestor", nombreCompleto: "Gestor de prueba", correo: "gestor@example.test", roles: ["GESTOR_COMERCIAL"] } });
     const transport = { request: (_path: string, init: RequestInit) => fetch(origin, init) };
     await expect(createHttpBulkRepository(transport, session, { publicReads: true }).createExport("CSV", signal()))
       .rejects.toMatchObject({ status: 401 });

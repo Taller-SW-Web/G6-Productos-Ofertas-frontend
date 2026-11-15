@@ -3,10 +3,10 @@ import { getInventoryRepository } from "../services/inventoryProvider";
 import { useInventoryChangeSignal } from "./useInventoryChangeSignal";
 import type {
   StockFiltersQuery,
-  StockItem,
+  StockPage,
 } from "../services/inventoryTypes";
 
-export function useInventoryStock(filters: StockFiltersQuery) {
+export function useInventoryStock(filters: StockFiltersQuery, page?: number) {
   const revision = useInventoryChangeSignal();
   const { search, category, brand, locationId, status } = filters;
   // Token de recarga explícito: permite reintentar una consulta fallida sin
@@ -18,48 +18,53 @@ export function useInventoryStock(filters: StockFiltersQuery) {
     brand,
     locationId,
     status,
+    page,
     revision,
     reloadToken,
   ]);
 
   const [response, setResponse] = useState<{
     requestKey: string;
-    items: StockItem[];
+    result: StockPage;
     error: string | null;
   }>();
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
 
-    getInventoryRepository()
-      .getStockItems({ search, category, brand, locationId, status })
+    const repository = getInventoryRepository();
+    const query = { search, category, brand, locationId, status };
+    const load = page !== undefined && repository.getStockPage
+      ? repository.getStockPage(query, page, 20, controller.signal)
+      : repository.getStockItems(query, controller.signal).then(items => ({ items, total: items.length, pages: items.length ? 1 : 0 }));
+    load
       .then((data) => {
-        if (!cancelled) {
-          setResponse({ requestKey, items: data, error: null });
+        if (!controller.signal.aborted) {
+          setResponse({ requestKey, result: data, error: null });
         }
       })
       .catch((err: Error) => {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setResponse({
             requestKey,
-            items: [],
+            result: { items: [], total: 0, pages: 0 },
             error: err.message || "Error al cargar el inventario.",
           });
         }
       });
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [search, category, brand, locationId, status, requestKey]);
+  }, [search, category, brand, locationId, status, page, requestKey]);
 
   const isCurrent = response?.requestKey === requestKey;
   const loading = !isCurrent;
-  const items = isCurrent ? response.items : [];
+  const result = isCurrent ? response.result : { items: [], total: 0, pages: 0 };
   const error = isCurrent ? response.error : null;
 
   return {
-    items,
+    ...result,
     loading,
     error,
     refetch: () => setReloadToken((token) => token + 1),

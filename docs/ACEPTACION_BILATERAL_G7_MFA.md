@@ -88,9 +88,10 @@ peticiones. El acta registra la operación, los estados, la hora y la referencia
 de la evidencia sin incluir JWT, credenciales ni cabeceras. La operación está
 definida como `listarCupones` con `userBearer` en el
 [OpenAPI de G6](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/a7778ec1a22811c1213a94ef096ab905911342cc/contratos/http/openapi.yaml).
-Tras «Consultar precios»
-exige `/precios`, «Gestión de precios» y su descripción propia; acredita
-navegación, no integración del provider Pricing.
+La aceptación bilateral continúa en Cupones hasta el cierre de sesión. En
+loopback, el arnés de producción también abre `/precios`, verifica «Gestión de
+precios» y comprueba la lectura paginada de objetivos de Catálogo. Para incluir
+esa lectura en la aceptación bilateral se requiere su aprobación expresa.
 
 ## Logout local y revocación: evidencias distintas
 

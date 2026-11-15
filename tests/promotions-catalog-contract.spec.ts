@@ -18,7 +18,7 @@ test("CUE-01/04: same provider edits, product activation/deactivation and SKU st
   expect(products[0]!.skus.map(row => row.sku)).toEqual(["CAM-RUN-BLA-M", "CAM-RUN-AZU-L"]);
   expect(products[1]!.skus[0]!.sku).toBe("CAS-COR-001");
   const current = (await catalog.getById("PROD-CAS-001"))!;
-  await catalog.update(current.id, { nombre: "Casaca actualizada", descripcion: current.description, categoriaId: current.categoryId, marcaId: current.brandId, catalogVersion: current.catalogVersion, atributos: current.attributes, imagenes: current.images, perfilFisico: current.physicalProfile });
+  await catalog.update(current.id, { nombre: "Casaca actualizada", descripcion: current.description ?? "", categoriaId: current.categoryId, marcaId: current.brandId, catalogVersion: current.catalogVersion!, atributos: current.attributes, imagenes: current.images, perfilFisico: current.physicalProfile });
   expect((await services.catalog.products(signal())).find(row => row.id === current.id)?.name).toBe("Casaca actualizada");
   await catalog.activate("PROD-MOCH-001");
   expect((await services.catalog.products(signal())).map(row => row.id)).toContain("PROD-MOCH-001");

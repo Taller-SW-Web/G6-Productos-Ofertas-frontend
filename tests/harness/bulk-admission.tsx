@@ -59,7 +59,7 @@ createRoot(document.getElementById("root")!).render(
       cssVariablesResolver={cssVariablesResolver}
       forceColorScheme="light"
     >
-      <DataModeContext.Provider value="api">
+      <DataModeContext.Provider value="mock">
         <BulkRepositoryContext.Provider value={deferredRepository}>
           <HashRouter>
             <Routes>

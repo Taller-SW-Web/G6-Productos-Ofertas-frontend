@@ -62,6 +62,17 @@ test("creación de un combo directo y desactivación conservando el histórico",
   await expect(page.getByText("La definición administrativa se conserva y no se ofrece para nuevas ventas.")).toBeVisible();
 });
 
+test("COM-B5: conserva el producto seleccionado al cambiar la búsqueda debounced", async ({ page }) => {
+  await page.goto("/combos/nuevo");
+  const product = page.getByRole("combobox", { name: "Producto" });
+  await product.click();
+  await page.getByRole("option", { name: "Casaca Cortaviento Trail" }).click();
+  await product.fill("SKU-QUE-NO-EXISTE");
+  await expect(page.getByRole("listbox", { name: "Producto" })).toContainText("Buscando productos…");
+  await page.getByRole("button", { name: "Agregar componente" }).click();
+  await expect(page.getByRole("table")).toContainText("CAS-COR-001");
+});
+
 test("error de listado con reintento sin mostrar un estado vacío", async ({ page }) => {
   // Finish the shared runtime's initial reads before delivering its one-shot
   // error. Startup invalidation can otherwise consume the fixture's retry.

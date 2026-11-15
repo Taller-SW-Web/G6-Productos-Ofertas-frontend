@@ -1,10 +1,13 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useContext } from "react";
 import type { ProductDetailView, ProductAttributeValue, VariantCreatePayload, VariantDetailView, VariantUpdatePayload } from "../services/catalogRepository";
 import { CatalogError } from "../services/catalogRepository";
 import { useCatalogServices } from "./useCatalogServices";
 import { normalizePhysicalProfile, calculateVolumeCm3 } from "../services/catalogPresentation";
 import { validateVariantAttributes } from "../services/variantAttributeValidation";
 import type { AttributeSchema } from "../services/taxonomyRepository";
+import { runCatalogCreateIntent, hasCatalogCreateIntent } from "../services/catalogCreateIntent";
+import { DataModeContext } from "../../../app/config/DataModeContext";
+import { PromotionSessionContext } from "../../../app/config/PromotionSessionContext";
 
 export interface FormAttributeEntry {
   key: string;
@@ -34,6 +37,10 @@ export interface UseVariantFormOptions {
 export function useVariantForm({ parentProduct, initialVariant, scenario, onSuccess }: UseVariantFormOptions) {
   const isEdit = Boolean(initialVariant);
   const { catalog, taxonomy } = useCatalogServices();
+  const mode = useContext(DataModeContext);
+  const promotionSession = useContext(PromotionSessionContext);
+  const identifyingIds = parentProduct?.identifyingCharacteristicIds;
+  const choosingIdentifiers = !isEdit && identifyingIds?.length === 0;
   const [schemaResult, setSchemaResult] = useState<{ typeId: string; repository: typeof taxonomy; schemas: AttributeSchema[]; error: string | null }>();
   const schemaCurrent = schemaResult?.typeId === parentProduct?.typeId && schemaResult?.repository === taxonomy;
   const attributeSchemas = schemaCurrent ? schemaResult.schemas : [];
@@ -41,7 +48,7 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
   const schemaError = schemaCurrent ? schemaResult.error : null;
   const fromAttribute = (a: ProductAttributeValue): FormAttributeEntry => ({
     key: a.caracteristicaId, caracteristicaId: a.caracteristicaId,
-    nombre: a.nombre, tipo: a.tipo, valor: a.valorId ?? String(a.valor), unidad: a.unidad,
+    nombre: a.nombre, tipo: a.tipo, valor: a.valorDisponible === false || a.valor === null ? "" : a.valorId ?? String(a.valor), unidad: a.unidad,
   });
   const [formData, setFormData] = useState<VariantFormData>(() => ({
     sku: initialVariant?.sku ?? "",
@@ -57,18 +64,42 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
+  const [writeOutcomeUnknown, setWriteOutcomeUnknown] = useState(false);
+  const reconcileCreateBySku = async () => {
+    if (isEdit || mode !== "api" || !parentProduct || !formData.sku.trim()) return null;
+    try {
+      const matches: VariantDetailView[] = []; let page = 1; let pages = 1;
+      do {
+        const result = await catalog.listVariants(parentProduct.id, { page, pageSize: 100, status: "all" });
+        if (result.page !== page || result.pageSize !== 100 || result.items.some(item => item.productId !== parentProduct.id)) throw new Error("La paginación o identidad de variantes no permitió reconciliar el SKU.");
+        pages = Math.ceil(result.total / 100);
+        matches.push(...result.items.filter(item => item.sku === formData.sku.trim()));
+        page++;
+      } while (page <= pages && page <= 10_000);
+      if (matches.length === 1) return matches[0]!;
+      setGeneralError(matches.length > 1 ? "La consulta encontró más de una variante con este SKU; la creación sigue bloqueada." : "Catálogo no muestra todavía esta variante. El resultado anterior sigue incierto y no se reenviará.");
+    } catch (error) { setGeneralError(error instanceof Error ? error.message : "No se pudo reconciliar la variante en Catálogo."); }
+    return null;
+  };
+  useEffect(() => {
+    let active = true;
+    if (isEdit || mode !== "api" || !parentProduct?.id || !formData.sku.trim()) { setWriteOutcomeUnknown(false); return; }
+    void hasCatalogCreateIntent(promotionSession?.snapshot().user?.id, `variant:${parentProduct.id}:${formData.sku.trim()}`).then(pending => { if (active) setWriteOutcomeUnknown(pending); });
+    return () => { active = false; };
+  }, [isEdit, mode, parentProduct?.id, formData.sku, promotionSession]);
 
   useEffect(() => {
     const controller = new AbortController();
     const typeId = parentProduct?.typeId;
     if (!typeId) return;
-    taxonomy.getAttributeSchema(typeId, controller.signal).then(schemas => {
+    taxonomy.getAttributeSchema(typeId, controller.signal).then(source => {
       if (controller.signal.aborted) return;
-      if (schemas.some(s => s.esIdentificadora === undefined)) {
+      const schemas = identifyingIds === undefined ? source : source.map(schema => ({
+        ...schema,
+        esIdentificadora: choosingIdentifiers ? undefined : identifyingIds.includes(schema.caracteristicaId),
+      }));
+      if (identifyingIds === undefined && schemas.some(s => s.esIdentificadora === undefined)) {
         throw new Error("El esquema no informa el rol identificador de las características.");
-      }
-      if (schemas.some(s => s.tipo === "TEXTO" && s.maxLength === undefined)) {
-        throw new Error("El esquema no informa el límite de texto configurado.");
       }
       setSchemaResult({ typeId, repository: taxonomy, schemas, error: null });
       setFormData(prev => {
@@ -87,7 +118,7 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
               const schema = schemas.find(s => s.caracteristicaId === a.caracteristicaId);
               return schema ? entry(schema, prev.nonIdentifyingAttributes) : a;
             }),
-            ...schemas.filter(s => !s.esIdentificadora && s.obligatorio &&
+            ...schemas.filter(s => s.esIdentificadora === false && s.obligatorio &&
               !prev.nonIdentifyingAttributes.some(a => a.caracteristicaId === s.caracteristicaId))
               .map(s => entry(s, [])),
           ],
@@ -98,7 +129,7 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
         error: err instanceof Error ? err.message : "Error al cargar Taxonomía." });
     });
     return () => controller.abort();
-  }, [parentProduct?.typeId, taxonomy, initialVariant]);
+  }, [parentProduct?.typeId, taxonomy, initialVariant, identifyingIds, choosingIdentifiers]);
 
   const updateField = <K extends keyof VariantFormData>(field: K, value: VariantFormData[K]) => {
     if (isEdit && (field === "sku" || field === "identifyingAttributes")) return;
@@ -109,8 +140,8 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
   const addAttribute = (identity: boolean) => {
     if (schemaLoading || schemaError || (identity && isEdit)) return;
     const field = identity ? "identifyingAttributes" : "nonIdentifyingAttributes";
-    const s = attributeSchemas.find(s => s.esIdentificadora === identity &&
-      !formData[field].some(a => a.caracteristicaId === s.caracteristicaId));
+    const s = attributeSchemas.find(s => (choosingIdentifiers || s.esIdentificadora === identity) &&
+      ![...formData.identifyingAttributes, ...formData.nonIdentifyingAttributes].some(a => a.caracteristicaId === s.caracteristicaId));
     if (!s) return;
     updateField(field, [...formData[field], { key: s.caracteristicaId,
       caracteristicaId: s.caracteristicaId, nombre: s.nombre, tipo: s.tipo,
@@ -128,7 +159,7 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
     const current = entries[index];
     if (!current) return;
     const s = attributeSchemas.find(s => s.caracteristicaId ===
-      (key === "caracteristicaId" ? value : current.caracteristicaId) && s.esIdentificadora === identity);
+      (key === "caracteristicaId" ? value : current.caracteristicaId) && (choosingIdentifiers || s.esIdentificadora === identity));
     if (!s || (key === "caracteristicaId" && entries.some((a, i) =>
       i !== index && a.caracteristicaId === value))) return;
     entries[index] = { key: s.caracteristicaId, caracteristicaId: s.caracteristicaId,
@@ -146,6 +177,9 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
   };
   const validate = () => {
     const next: Record<string, string> = {};
+    if (isEdit && [...(initialVariant?.identifyingAttributes ?? []), ...(initialVariant?.nonIdentifyingAttributes ?? [])].some(attribute => attribute.valorDisponible === false || attribute.valor === null)) {
+      next.attributes = "La variante contiene valores comerciales no disponibles. No se enviará una edición que pueda sobrescribirlos.";
+    }
     if (!isEdit && !formData.sku.trim()) next.sku = "El SKU es obligatorio; ingrese un código único.";
     if (schemaLoading || schemaError || !parentProduct) {
       next.attributes = "No se puede guardar sin un esquema de Taxonomía válido.";
@@ -154,8 +188,11 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
         const s = attributeSchemas.find(s => s.caracteristicaId === a.caracteristicaId);
         return { ...a, valorId: a.valorId ?? s?.opciones?.find(o => o.valor === String(a.valor))?.id };
       }) : formData.identifyingAttributes.map(toAttribute);
+      const schemas = choosingIdentifiers ? attributeSchemas.map(schema => ({
+        ...schema, esIdentificadora: identity.some(attribute => attribute.caracteristicaId === schema.caracteristicaId),
+      })) : attributeSchemas;
       Object.assign(next, validateVariantAttributes(identity,
-        formData.nonIdentifyingAttributes.map(toAttribute), attributeSchemas));
+        formData.nonIdentifyingAttributes.map(toAttribute), schemas));
     }
     if (!isEdit && !formData.imageUrl.trim()) next.imageUrl = "La URL de imagen es obligatoria para la variante (VarianteCreateRequest).";
     if (formData.imageUrl.trim()) {
@@ -171,7 +208,7 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
   };
   const handleSubmit = async (event?: React.FormEvent) => {
     event?.preventDefault();
-    if (submitting || !parentProduct || !validate()) return;
+    if (submitting || writeOutcomeUnknown || !parentProduct || !validate()) return;
     setSubmitting(true);
     setGeneralError(null);
     const physicalProfile = normalizePhysicalProfile(formData);
@@ -186,16 +223,19 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
         const payload: VariantCreatePayload = { sku: formData.sku.trim(),
           identifyingAttributes: formData.identifyingAttributes.filter(a => a.valor.trim()).map(toAttribute),
           nonIdentifyingAttributes, imageUrl: formData.imageUrl.trim() || undefined, physicalProfile };
-        result = await catalog.createVariant(parentProduct.id, payload, scenario);
+        result = mode === "api"
+          ? await runCatalogCreateIntent(promotionSession?.snapshot().user?.id, `variant:${parentProduct.id}:${payload.sku.trim()}`, () => catalog.createVariant(parentProduct.id, payload, scenario))
+          : await catalog.createVariant(parentProduct.id, payload, scenario);
       }
       setIsDirty(false);
       onSuccess?.(result);
     } catch (err) {
+      if (err instanceof CatalogError && err.kind === "write_unknown") setWriteOutcomeUnknown(true);
       if (err instanceof CatalogError && err.kind === "duplicate_sku") setErrors(prev => ({ ...prev, sku: err.message }));
       else setGeneralError(err instanceof Error ? err.message : "Error inesperado al procesar la solicitud.");
     } finally { setSubmitting(false); }
   };
-  return { formData, attributeSchemas, schemaLoading, schemaError, updateField,
+  return { formData, attributeSchemas, choosingIdentifiers, schemaLoading, schemaError, updateField,
     addIdentifyingAttribute: () => addAttribute(true),
     addNonIdentifyingAttribute: () => addAttribute(false),
     removeIdentifyingAttribute: (index: number) => removeAttribute(true, index),
@@ -203,5 +243,5 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
     updateIdentifyingAttribute: (index: number, key: "valor" | "caracteristicaId", value: string) => updateAttribute(true, index, key, value),
     updateNonIdentifyingAttribute: (index: number, key: "valor" | "caracteristicaId", value: string) => updateAttribute(false, index, key, value),
     derivedVolumeCm3: calculateVolumeCm3(formData.largoCm, formData.anchoCm, formData.altoCm),
-    errors, generalError, submitting, isDirty, handleSubmit, isEdit };
+    errors, generalError, submitting, isDirty, writeOutcomeUnknown, reconcileCreateBySku, handleSubmit, isEdit };
 }

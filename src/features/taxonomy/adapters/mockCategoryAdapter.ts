@@ -166,6 +166,7 @@ const aDetalle = (registro: RegistroCategoria): CategoryDetail => {
     slug: registro.slug,
     nivel: nivelDe(registro.id),
     orden: registro.orden,
+    version: 1,
     estado: registro.estado,
     descripcion: registro.descripcion,
     padreId: registro.padreId ?? undefined,

@@ -75,7 +75,7 @@ function ProductTypeDetailContent({ id }: { id: string }) {
       header: "Característica",
       render: (asoc) => (
         <Text size="sm" fw={600}>
-          {asoc.caracteristica.nombre}
+          {asoc.caracteristica?.nombre ?? `ID ${asoc.caracteristicaId} · detalles no disponibles`}
         </Text>
       ),
     },
@@ -83,30 +83,28 @@ function ProductTypeDetailContent({ id }: { id: string }) {
       key: "tipo",
       header: "Tipo",
       width: 100,
-      render: (asoc) => asoc.caracteristica.tipo,
+      render: (asoc) => asoc.caracteristica?.tipo ?? "No disponible",
     },
     {
       key: "regla",
       header: "Regla",
       render: (asoc) => {
-        if (asoc.caracteristica.tipo === "LISTA") {
-          return `${asoc.caracteristica.valoresActivos} valores activos`;
+        if (asoc.caracteristica?.tipo === "LISTA") {
+          return `${asoc.caracteristica?.valoresActivos ?? "—"} valores activos`;
         }
-        if (asoc.caracteristica.tipo === "NUMERO") {
-          return asoc.caracteristica.unidad ?? "sin definir";
+        if (asoc.caracteristica?.tipo === "NUMERO") {
+          return asoc.caracteristica?.unidad ?? "sin definir";
         }
-        return "Texto";
+        return asoc.caracteristica ? "Texto" : "Datos no disponibles";
       },
     },
     {
       key: "estado",
       header: "Estado",
       width: 120,
-      render: (asoc) => (
-        <StatusBadge semantic={estadoCaracteristicaSemantic[asoc.caracteristica.estado]}>
-          {asoc.caracteristica.estado}
-        </StatusBadge>
-      ),
+      render: (asoc) => asoc.caracteristica ? (
+        <StatusBadge semantic={estadoCaracteristicaSemantic[asoc.caracteristica.estado]}>{asoc.caracteristica.estado}</StatusBadge>
+      ) : <Text size="sm">Datos no disponibles</Text>,
     },
     {
       key: "obligatoria",
@@ -115,7 +113,7 @@ function ProductTypeDetailContent({ id }: { id: string }) {
       render: (asoc) => (
         <Group gap="xs" wrap="nowrap">
           <Switch
-            aria-label={`Condición obligatoria de ${asoc.caracteristica.nombre}`}
+            aria-label={`Condición obligatoria de ${asoc.caracteristica?.nombre ?? `ID ${asoc.caracteristicaId} · detalles no disponibles`}`}
             checked={asoc.obligatoria}
             disabled={
               !tipoActivo || obligatoriedad.state.status === "enviando"
@@ -173,7 +171,7 @@ function ProductTypeDetailContent({ id }: { id: string }) {
     ? obligatoriedadSuccess.detalle.asociadas.find(
         (asoc) =>
           asoc.caracteristicaId === obligatoriedadSuccess.caracteristicaId,
-      )?.caracteristica.nombre
+      )?.caracteristica?.nombre
     : undefined;
 
   // La alerta de «solicitud admitida» (estado success + resultado pendiente) solo
@@ -583,10 +581,7 @@ function ProductTypeDetailContent({ id }: { id: string }) {
                     onClick={() =>
                       navigate(`/tipos-producto/${detalle.tipoProductoId}/asociar`)
                     }
-                    disabled={
-                      detalle.caracteristicasAsignadas >=
-                      detalle.limiteCaracteristicas
-                    }
+                    disabled={detalle.limiteCaracteristicas !== null && detalle.caracteristicasAsignadas >= detalle.limiteCaracteristicas}
                   >
                     Asociar característica
                   </Button>

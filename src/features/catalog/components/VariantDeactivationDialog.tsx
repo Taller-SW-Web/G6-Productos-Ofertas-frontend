@@ -25,7 +25,7 @@ export function VariantDeactivationDialog({
   onSuccess,
   scenario,
 }: VariantDeactivationDialogProps) {
-  const { loading, error, deactivate, clearError } = useVariantStateMutation();
+  const { loading, error, deactivate, clearError, reconcile, isUnknown } = useVariantStateMutation();
 
   // Check if this variant is the only active one in the product's variants list
   const activeVariantsCount = product.variants.filter((v) => v.status === "ACTIVA").length;
@@ -33,6 +33,10 @@ export function VariantDeactivationDialog({
   const parentIsActive = product.status === "ACTIVO";
 
   const handleConfirm = async () => {
+    if (isUnknown(product.id, variant.variantId)) {
+      if (await reconcile(product.id, variant.variantId, "INACTIVA")) onSuccess();
+      return;
+    }
     try {
       await deactivate(product.id, variant.variantId, scenario);
       onSuccess();
@@ -50,7 +54,7 @@ export function VariantDeactivationDialog({
     <ConfirmDialog
       opened={opened}
       title="Desactivar Variante (SKU)"
-      confirmLabel="Desactivar Variante"
+      confirmLabel={isUnknown(product.id, variant.variantId) ? "Consultar estado" : "Desactivar Variante"}
       destructive
       submitting={loading}
       onCancel={handleClose}

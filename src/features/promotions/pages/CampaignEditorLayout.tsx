@@ -114,7 +114,7 @@ function CampaignEditorProvider({ initial }: { initial: CampaignView | null }) {
       <Navigate
         replace
         to={`/promociones/${form.confirmed.id}?${next}`}
-        state={{ saved: true }}
+        state={{ saved: true, reconciled: form.confirmed.writeOutcome === "RECONCILED" }}
       />
     );
   }

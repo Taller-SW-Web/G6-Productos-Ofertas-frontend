@@ -10,6 +10,12 @@ import type {
   PriceView,
 } from "../services/pricingRepository";
 
+export interface PricingChannelIds {
+  retail?: string;
+  marketplace?: string;
+  chatbot?: string;
+  ventas?: string;
+}
 function invalidResponse(): never {
   throw new PricingFailure(
     "error",
@@ -131,9 +137,13 @@ function responseMoney(value: unknown): string {
   return value.toString();
 }
 
-function priceChannel(value: string | null): PriceChannel {
+function priceChannel(
+  value: string | null,
+  channelIds: PricingChannelIds = {},
+): PriceChannel {
   if (value === null) return "global";
-  if (value === "RETAIL") return "retail";
+  for (const channel of ["retail", "marketplace", "chatbot", "ventas"] as const)
+    if (value === channel.toUpperCase() || (channelIds[channel] && value === channelIds[channel])) return channel;
   return invalidResponse();
 }
 
@@ -185,7 +195,9 @@ export function validatePriceTargets(value: unknown): PriceTarget[] {
 export function mapPriceDto(
   value: unknown,
   target: PriceTarget,
+  channelIds: PricingChannelIds = {},
   responseSku?: string,
+  allowProductChannel = false,
 ): PriceView {
   const dto = record(value);
   const productResponse =
@@ -225,8 +237,7 @@ export function mapPriceDto(
   const validUntil = optionalNullableDate(dto, "valid_until");
   if (validUntil !== null && Date.parse(validUntil) <= Date.parse(validFrom))
     return invalidResponse();
-  if (productResponse && channelId !== null) return invalidResponse();
-
+  if (productResponse && !allowProductChannel && channelId !== null) return invalidResponse();
   return {
     id: target.id,
     name: target.label,
@@ -236,7 +247,7 @@ export function mapPriceDto(
     currency,
     version: version(dto, "price_version"),
     origin,
-    channel: priceChannel(channelId),
+    channel: priceChannel(channelId, channelIds),
     validFrom,
     validUntil,
     inherited: target.kind === "variant" && origin === "product",
@@ -244,9 +255,31 @@ export function mapPriceDto(
   };
 }
 
+export function mapEditablePriceDto(value: unknown, target: PriceTarget, channel: PriceChannel): PriceView | null {
+  const dto = record(value);
+  const sku = target.kind === "variant" ? target.sku : target.referenceSku;
+  if (target.kind === "product"
+    ? dto.productId !== target.productId || dto.sku !== null
+    : dto.productId !== null || dto.sku !== target.sku) return invalidResponse();
+  if (dto.channelId !== (channel === "global" ? null : channel.toUpperCase())) return invalidResponse();
+  const priceVersion = version(dto, "priceVersion");
+  if (dto.vigenciaActual === null) return null;
+  const current = record(dto.vigenciaActual);
+  const regular = responseMoney(current.precioRegular);
+  const offer = current.precioOferta === null ? null : responseMoney(current.precioOferta);
+  const currency = requiredString(current, "currency");
+  const validFrom = requiredDate(current, "validFrom");
+  const validUntil = optionalNullableDate(current, "validUntil");
+  if (currency.length !== 3 || (offer !== null && requestMoney(offer) >= requestMoney(regular)) ||
+    (validUntil !== null && Date.parse(validUntil) <= Date.parse(validFrom))) return invalidResponse();
+  return { id: target.id, name: target.label, sku, regular, offer, currency, version: priceVersion,
+    origin: target.kind === "product" ? "product" : "sku", channel, validFrom, validUntil, inherited: false };
+}
+
 export function mapScheduleDto(
   value: unknown,
   target: PriceTarget,
+  channelIds: PricingChannelIds = {},
 ): ScheduleView {
   const dto = record(value);
   if (
@@ -278,7 +311,7 @@ export function mapScheduleDto(
     kind,
     amount: responseMoney(dto.importe),
     currency,
-    channel: priceChannel(channelId),
+    channel: priceChannel(channelId, channelIds),
     start: validFrom,
     end: validUntil,
     status,
@@ -291,6 +324,7 @@ export function mapSchedulePageDto(
   target: PriceTarget,
   page: number,
   pageSize: number,
+  channelIds: PricingChannelIds = {},
 ) {
   const dto = record(value);
   if (!Array.isArray(dto.items)) return invalidResponse();
@@ -312,7 +346,7 @@ export function mapSchedulePageDto(
   )
     return invalidResponse();
   return {
-    items: dto.items.map((item) => mapScheduleDto(item, target)),
+    items: dto.items.map((item) => mapScheduleDto(item, target, channelIds)),
     page,
     pageSize,
     total,

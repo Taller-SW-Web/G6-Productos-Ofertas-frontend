@@ -6,6 +6,7 @@ import { notifyInventoryChanged } from "../services/inventoryEvents";
 import { resetInventoryRepository } from "../services/inventoryProvider";
 import type { InventoryRepository } from "../services/inventoryRepository";
 import type { ThresholdConfig } from "../services/inventoryTypes";
+import { createMemoryStorage } from "../../../../tests/fixtures/h4Controlled";
 
 function createMockRepository(
   overrides: Partial<InventoryRepository> = {},
@@ -38,9 +39,43 @@ function config(
 afterEach(() => {
   cleanup();
   resetInventoryRepository();
+  vi.unstubAllGlobals();
 });
 
 describe("useThresholds — flujo real del hook (P1-02)", () => {
+  it("INV-H4-05: DELETE confirmado con GET auxiliar 503 conserva intención y no repite DELETE", async () => {
+    const storage = createMemoryStorage();
+    vi.stubGlobal("sessionStorage", storage);
+    const getThresholds = vi.fn().mockResolvedValueOnce(config(10, { "SKU-H4": 3 })).mockRejectedValueOnce(new Error("503 GET auxiliar"));
+    const removeSkuThresholdOverride = vi.fn().mockResolvedValue(undefined);
+    resetInventoryRepository(createMockRepository({ getThresholds, removeSkuThresholdOverride }));
+    const { result } = renderHook(() => useThresholds());
+    await waitFor(() => expect(result.current.thresholds?.skuOverrides["SKU-H4"]).toBe(3));
+    await act(async () => { await result.current.removeSkuOverride("SKU-H4"); });
+    expect(removeSkuThresholdOverride).toHaveBeenCalledOnce();
+    expect(getThresholds).toHaveBeenCalledTimes(2);
+    expect(storage.getItem("g6:inventory:threshold:session-unavailable:sku:SKU-H4")).not.toBeNull();
+    expect(result.current.feedback?.title).toBe("Resultado no confirmado");
+  });
+
+  it("INV-H4-06: GET antiguo conserva marcador de umbral incierto y bloquea segunda escritura", async () => {
+    const storage = createMemoryStorage();
+    vi.stubGlobal("sessionStorage", storage);
+    const updateGlobalThreshold = vi.fn().mockRejectedValue(new InventoryError("RESULTADO_INCIERTO", "timeout después del despacho"));
+    const getThresholds = vi.fn().mockResolvedValue(config(10));
+    resetInventoryRepository(createMockRepository({ getThresholds, updateGlobalThreshold }));
+    const { result } = renderHook(() => useThresholds());
+    await waitFor(() => expect(result.current.thresholds?.globalThreshold).toBe(10));
+    await act(async () => { await result.current.updateGlobal(12); });
+    const intent = "g6:inventory:threshold:session-unavailable:global:";
+    expect(storage.getItem(intent)).not.toBeNull();
+    expect(updateGlobalThreshold).toHaveBeenCalledOnce();
+    await act(async () => { await result.current.updateGlobal(13); });
+    expect(updateGlobalThreshold).toHaveBeenCalledOnce();
+    expect(storage.getItem(intent)).not.toBeNull();
+    expect(getThresholds).toHaveBeenCalledTimes(2);
+  });
+
   it("PUT 200 confirmado seguido del fallo del GET que dispara su propia notificación conserva la configuración y el éxito", async () => {
     const initial = config(10);
     const confirmed = config(20);

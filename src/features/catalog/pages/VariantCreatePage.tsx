@@ -122,7 +122,7 @@ function VariantCreateForProduct({ productId }: { productId?: string }) {
               <Button
                 type="submit"
                 loading={form.submitting}
-                disabled={form.schemaLoading || Boolean(form.schemaError)}
+                disabled={form.schemaLoading || Boolean(form.schemaError) || form.writeOutcomeUnknown}
                 leftSection={<IconCheck size={16} />}
               >
                 Guardar Variante
@@ -138,6 +138,7 @@ function VariantCreateForProduct({ productId }: { productId?: string }) {
             </FeedbackAlert>
           </Box>
         )}
+        {form.writeOutcomeUnknown && <Button type="button" variant="outline" mb="md" onClick={async () => { const variant = await form.reconcileCreateBySku(); if (variant) navigate(`/productos/${productId}/variantes/${variant.variantId}`); }}>Consultar Catálogo por SKU</Button>}
 
         <Stack gap="lg" mt="md">
           <VariantFormFields form={form} parentProduct={parentProduct} />

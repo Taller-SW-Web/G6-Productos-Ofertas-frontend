@@ -41,17 +41,19 @@ export class AdmissionCoordinator<T> {
   private nextId = 0;
   private operation: AdmissionOperation<T> | null = null;
 
-  select(value: T | null): AdmissionStatus {
+  select(value: T | null, restored?: { correlationId: string; status: AdmissionStatus }): AdmissionStatus {
     this.nextId++;
     this.operation = value === null
       ? null
-      : { id: this.nextId, value, correlationId: crypto.randomUUID(), status: "ready" };
+      : { id: this.nextId, value, correlationId: restored?.correlationId ?? crypto.randomUUID(), status: restored?.status ?? "ready" };
     return this.status;
   }
 
   get status(): AdmissionStatus {
     return this.operation?.status ?? "idle";
   }
+
+  get correlationId(): string | null { return this.operation?.correlationId ?? null; }
 
   begin(value: T, retryUncertain = false): AdmissionTask<T> | null {
     const operation = this.operation;

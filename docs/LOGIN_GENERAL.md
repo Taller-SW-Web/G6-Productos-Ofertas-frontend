@@ -50,7 +50,7 @@ de herramientas del plan Starter. No se declara verificación de Figma.
   al entrar y al vencer el acceso. La navegación de una sesión ya validada conserva
   el shell montado; no se reinicia la validación por cada location.key.
 - El retorno admite únicamente rutas administrativas registradas; URLs externas,
-  rutas desconocidas, login y demo pública vuelven a `/precios`. No se infieren
+  rutas desconocidas, login y demo pública vuelven a `/productos`. No se infieren
   grants. La entrada al panel exige el rol publicado `GESTOR_COMERCIAL`
   (Arquitectura §21); cada operación sigue autorizándose en sus providers.
 - El encabezado muestra la identidad recibida y ofrece logout en todos los módulos.

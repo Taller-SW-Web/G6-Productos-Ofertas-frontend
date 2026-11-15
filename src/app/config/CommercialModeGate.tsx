@@ -5,10 +5,12 @@ import { Anchor } from "@mantine/core";
 import { FeedbackAlert } from "../../components/shared";
 import { DataModeContext } from "./DataModeContext";
 import { consultaEntries, consultaHref } from "../routes/publicReadEntries";
+import { AdminApiContext } from "./AdminApiContext";
 
 export function CommercialModeGate({ children }: { children: ReactNode }) {
   const mode = useContext(DataModeContext);
   const api = useContext(PromotionApiContext);
+  const adminApi = useContext(AdminApiContext);
   const { pathname } = useLocation();
   if (!mode)
     throw new Error("La aplicación requiere configurar su modo de datos.");
@@ -16,19 +18,10 @@ export function CommercialModeGate({ children }: { children: ReactNode }) {
     (path) => pathname === path || pathname.startsWith(`${path}/`),
   );
 
-  // En modo API solo se habilitan /inventario/umbrales y /inventario/dashboard.
-  // /inventario y /inventario/traslados se conservan explícitamente bloqueadas.
-  const isBlockedInventory =
-    pathname === "/inventario" ||
-    pathname === "/inventario/" ||
-    pathname === "/inventario/traslados" ||
-    pathname.startsWith("/inventario/traslados/");
-
-  const pendingModule =
-    isBlockedInventory ||
-    ["/combos"].some(
-      (path) => pathname === path || pathname.startsWith(`${path}/`),
-    );
+  const route = pathname.replace(/\/+$/, "");
+  const transfers = route === "/inventario/traslados" || route.startsWith("/inventario/traslados/");
+  const pendingModule = transfers || (!adminApi &&
+    (route === "/inventario" || route === "/combos" || route.startsWith("/combos/")));
 
   if (mode === "api" && (pendingModule || (mockOnly && !api))) {
     const entry = consultaEntries[pathname];

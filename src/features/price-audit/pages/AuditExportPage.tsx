@@ -172,6 +172,11 @@ function AuditExportFlow({
                 {requestError.message}
               </FeedbackAlert>
             )}
+            {exportation.exportOutcomeUncertain && !id && (
+              <FeedbackAlert semantic="warning" title="Solicitud pendiente de reconciliación">
+                Ya se envió una solicitud con estos filtros y no se confirmó su resultado. No vuelvas a enviarla. Revisa el historial de exportaciones con la hora aproximada; el contrato no ofrece búsqueda por correlación para recuperar automáticamente la referencia.
+              </FeedbackAlert>
+            )}
             {!id && !job && (
               <Button
                 disabled={
@@ -179,7 +184,7 @@ function AuditExportFlow({
                   limited ||
                   count.status !== "success" ||
                   total === 0 ||
-                  requestError?.kind === "unknown"
+                  requestError?.kind === "unknown" || exportation.exportOutcomeUncertain
                 }
                 loading={exportation.submitting}
                 onClick={() => void exportation.submit()}

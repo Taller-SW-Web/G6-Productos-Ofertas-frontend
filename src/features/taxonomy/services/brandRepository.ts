@@ -21,6 +21,7 @@ export interface BrandRepository {
     signal?: AbortSignal,
   ): Promise<BrandDetail | null>;
   solicitarBaja(id: string, signal?: AbortSignal): Promise<BrandBajaResult>;
+  reactivar(id: string, signal?: AbortSignal): Promise<BrandDetail | null>;
   consultarResultadoBaja(
     operacionId: string,
     signal?: AbortSignal,

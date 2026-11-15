@@ -5,7 +5,7 @@ import {
   StatusBadge,
 } from "../../../components/shared";
 import type { PriceView } from "../services/pricingRepository";
-import { priceOriginLabel, formatMoney } from "../services/pricePresentation";
+import { priceOriginLabel, formatMoney, priceChannelLabel } from "../services/pricePresentation";
 import { displayInstant, priceTimeZone } from "../services/pricingValidation";
 export function PriceSummary({
   price,
@@ -21,7 +21,7 @@ export function PriceSummary({
         <Group gap="sm">
           <StatusBadge>{priceOriginLabel(price)}</StatusBadge>
           <StatusBadge>
-            {price.channel === "global" ? "Global efectivo" : "Retail efectivo"}
+            {`${priceChannelLabel(price.channel)} efectivo`}
           </StatusBadge>
           <StatusBadge>Versión {price.version}</StatusBadge>
         </Group>

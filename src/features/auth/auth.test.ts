@@ -6,6 +6,7 @@ import { createOptionalAuthSession } from "../../app/config/authSessionRuntime";
 import { createPromotionSessionRuntime } from "../promotions/services/promotionSessionRuntime";
 import { createAuthenticatedCatalogTransport } from "../catalog/adapters/authenticatedCatalogTransport";
 import { canAdminister } from "./authorization";
+import { resolveGatewayOrigin, supportsAdministrativeContracts } from "../../app/config/gatewayOrigin";
 
 afterEach(() => vi.restoreAllMocks());
 describe("una sola sesión transversal", () => {
@@ -20,10 +21,27 @@ describe("una sola sesión transversal", () => {
 });
 describe("retorno a rutas registradas", () => {
   it.each([undefined, null, {}, "https://evil.test", "//evil.test", "/\\evil.test", "/login", "/demo/g6/productos", "/no-existe", "/%2f%2fevil.test"])("rechaza %s", value => {
-    expect(loginDestination(value)).toBe("/precios");
+    expect(loginDestination(value)).toBe("/productos");
   });
-  it.each(["/productos", "/productos/nuevo", "/combos?vista=lista", "/precios/auditoria"])("conserva %s", value => {
+  it.each(["/productos", "/productos/nuevo", "/combos?vista=lista", "/precios/auditoria", "/consultas?operacion=listarProductos"])("conserva %s", value => {
     expect(loginDestination(value)).toBe(value);
+  });
+});
+describe("habilitación administrativa explícita para un backend compatible", () => {
+  const location = { hostname: "g6.example.vercel.app", origin: "https://g6.example.vercel.app" };
+  const azure = "https://api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io";
+  it.each([azure, location.origin, "https://admin.example.test", "http://127.0.0.1:5197"])("permite el origen validado %s solo con opt-in", gateway => {
+    expect(supportsAdministrativeContracts(false, gateway)).toBe(false);
+    expect(supportsAdministrativeContracts(true, gateway)).toBe(true);
+  });
+  it("conserva el proxy fijo de Vercel sin alterar su destino", () => {
+    const proxy = resolveGatewayOrigin(azure, location, true);
+    expect(proxy).toBe(location.origin);
+    expect(supportsAdministrativeContracts(false, proxy)).toBe(false);
+    expect(supportsAdministrativeContracts(true, proxy)).toBe(true);
+  });
+  it.each([undefined, "", "invalid", "http://remote.test", "https://user:secret@admin.test", "https://admin.test/api/v1", "https://admin.test?other=1", "https://admin.test#fragment"])("rechaza configuración %s incluso con opt-in", gateway => {
+    expect(supportsAdministrativeContracts(true, gateway)).toBe(false);
   });
 });
 const dto = (version = 1) => ({

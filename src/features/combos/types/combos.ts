@@ -70,6 +70,13 @@ export interface ProductSummary {
   isCombo: boolean;
 }
 
+export interface ProductSummaryPage {
+  items: ProductSummary[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export interface ProductDetail extends ProductSummary {
   variants: { sku: string; label: string; active: boolean }[];
 }
@@ -139,10 +146,12 @@ export interface CombosRepository {
 }
 
 export interface CombosCatalogPort {
-  listProducts(query: string, signal?: AbortSignal): Promise<ProductSummary[]>;
+  listProducts(query: string, page: number, pageSize: number, signal?: AbortSignal): Promise<ProductSummaryPage>;
   getProduct(productId: string, signal?: AbortSignal): Promise<ProductDetail | null>;
   // Coherent, paginated, authoritative resolution of every requested SKU.
   resolveSkus(skus: string[], signal?: AbortSignal): Promise<ResolvedSku[]>;
+  // Optional read-only cache peek for non-blocking name presentation.
+  peekResolvedSkus?(skus: string[]): ResolvedSku[];
 }
 
 export interface CombosPricingPort {

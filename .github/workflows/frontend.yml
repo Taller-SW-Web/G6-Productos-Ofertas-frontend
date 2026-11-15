@@ -5,6 +5,24 @@ on:
     branches: [master]
   push:
     branches: [master]
+  workflow_dispatch:
+    inputs:
+      performance_harness:
+        description: Ejecutar benchmark opt-in de pantallas administrativas
+        required: false
+        type: boolean
+        default: false
+      baseline_ref:
+        description: Ref base para comparación secuencial en el mismo runner
+        required: false
+        type: string
+        default: master
+      performance_family:
+        description: Familia SPA medida en 100 ciclos después del inventario de rutas
+        required: false
+        type: choice
+        default: all
+        options: [all, Combos]
 
 concurrency:
   group: frontend-${{ github.event.pull_request.number || github.ref }}
@@ -15,6 +33,7 @@ permissions:
 
 jobs:
   clasificar_cambios:
+    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
     name: Clasificar alcance de cambios
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -35,6 +54,7 @@ jobs:
         run: node scripts/clasificar-cambios-ci.mjs
 
   revision_estilo:
+    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
     name: Revisión de estilo
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -60,6 +80,7 @@ jobs:
         run: node --test scripts/ejecutar-e2e-balanceado.test.mjs
 
   comprobacion_tipos:
+    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
     name: Comprobación de tipos
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -77,6 +98,7 @@ jobs:
         run: npm run typecheck
 
   unitarias_combos:
+    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
     name: Pruebas unitarias - Combos
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -94,6 +116,7 @@ jobs:
         run: npm run test:unit:combos
 
   unitarias_carga_masiva:
+    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
     name: Pruebas unitarias - Carga masiva
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -111,6 +134,7 @@ jobs:
         run: npm run test:unit:bulk
 
   unitarias_inventario:
+    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
     name: Pruebas unitarias - Inventario
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -128,6 +152,7 @@ jobs:
         run: npm run test:unit:inventory
 
   unitarias_precios:
+    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
     name: Pruebas unitarias - Precios
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -145,6 +170,7 @@ jobs:
         run: npm run test:unit:pricing
 
   compilacion_demostracion:
+    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
     name: Compilación - Datos de demostración
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -171,6 +197,7 @@ jobs:
           retention-days: 1
 
   compilacion_api:
+    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
     name: Compilación - Integración con API
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -227,6 +254,7 @@ jobs:
           retention-days: 7
 
   verificacion_compilacion:
+    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
     name: Verificación de compilación local
     needs: [compilacion_demostracion]
     runs-on: ubuntu-latest
@@ -284,6 +312,7 @@ jobs:
           retention-days: 7
 
   pruebas_rapidas_interfaz:
+    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
     name: Pruebas rápidas de interfaz
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -315,10 +344,98 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  comparacion_rendimiento_admin:
+    name: Benchmark administrativo base y optimizado (opt-in)
+    if: github.event_name == 'workflow_dispatch' && inputs.performance_harness
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CI: 'true'
+      VITE_DATA_MODE: api
+    steps:
+      - name: Obtener el candidato optimizado
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Preparar Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Instalar dependencias del candidato
+        run: npm ci
+      - name: Instalar Chromium una vez para ambas ejecuciones
+        run: npx playwright install --with-deps chromium
+      - name: Obtener versión base
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ inputs.baseline_ref || 'master' }}
+          path: baseline
+          persist-credentials: false
+      - name: Instalar dependencias de la versión base
+        working-directory: baseline
+        run: npm ci
+      - name: Ejecutar el mismo harness sobre la versión base
+        env:
+          G6_PERF_APP_ROOT: ${{ github.workspace }}/baseline
+          G6_PERF_RUN_LABEL: baseline-${{ inputs.baseline_ref || 'master' }}
+          G6_PERF_FAMILY: ${{ inputs.performance_family || 'all' }}
+        run: |
+          rm -rf baseline/node_modules/.vite
+          node scripts/run-admin-performance.mjs
+      - name: Guardar evidencia base antes de ejecutar candidato
+        if: always()
+        run: |
+          mkdir -p artifacts/admin-performance-baseline
+          cp -R test-results/. artifacts/admin-performance-baseline/ || true
+      - name: Ejecutar el mismo harness sobre el candidato optimizado
+        id: candidato
+        env:
+          G6_PERF_APP_ROOT: ${{ github.workspace }}
+          G6_PERF_RUN_LABEL: optimized-${{ github.sha }}
+          G6_PERF_FAMILY: ${{ inputs.performance_family || 'all' }}
+        run: |
+          rm -rf baseline
+          rm -rf node_modules/.vite
+          node scripts/run-admin-performance.mjs
+      - name: Guardar evidencia optimizada
+        if: always() && steps.candidato.outcome != 'skipped'
+        run: |
+          mkdir -p artifacts/admin-performance-optimized
+          cp -R test-results/. artifacts/admin-performance-optimized/ || true
+      - name: Calcular diferencias de percentiles por familia
+        if: always()
+        run: |
+          mkdir -p artifacts
+          baseline_report=$(find artifacts/admin-performance-baseline -name admin-browser-performance.json -print -quit 2>/dev/null || true)
+          optimized_report=$(find artifacts/admin-performance-optimized -name admin-browser-performance.json -print -quit 2>/dev/null || true)
+          if [ -n "$baseline_report" ] && [ -n "$optimized_report" ]; then
+            node scripts/compare-admin-performance.mjs artifacts/admin-performance-baseline artifacts/admin-performance-optimized artifacts/admin-performance-comparison.json
+          else
+            printf '{"schemaVersion":1,"status":"PARTIAL","comparison":"not-produced","baselineReportPresent":%s,"optimizedReportPresent":%s}\n' \
+              "$( [ -n "$baseline_report" ] && echo true || echo false )" \
+              "$( [ -n "$optimized_report" ] && echo true || echo false )" \
+              > artifacts/admin-performance-comparison.json
+            echo 'Comparison unavailable; retained any reports and Playwright failure diagnostics.'
+          fi
+      - name: Conservar mediciones comparables
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: benchmark-admin-${{ inputs.baseline_ref || 'master' }}-vs-${{ github.sha }}
+          path: |
+            artifacts/admin-performance-baseline/
+            artifacts/admin-performance-optimized/
+            artifacts/admin-performance-comparison.json
+          if-no-files-found: ignore
+          retention-days: 30
+
   pruebas_extremo_a_extremo:
     name: Pruebas de extremo a extremo (parte ${{ matrix.parte }} de 4)
     needs: [clasificar_cambios]
     if: >-
+      (github.event_name != 'workflow_dispatch' || !inputs.performance_harness) &&
       always() &&
       (needs.clasificar_cambios.result != 'success' ||
        needs.clasificar_cambios.outputs.clasificacion != 'solo_documentacion')
@@ -361,7 +478,7 @@ jobs:
   validacion_integral:
     # La protección real de master exige el contexto de GitHub Actions `validate`.
     name: validate
-    if: always()
+    if: always() && (github.event_name != 'workflow_dispatch' || !inputs.performance_harness)
     needs:
       - revision_estilo
       - clasificar_cambios

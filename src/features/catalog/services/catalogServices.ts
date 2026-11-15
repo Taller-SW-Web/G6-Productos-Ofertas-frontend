@@ -38,6 +38,15 @@ export function createCatalogServices(
         .then(module => taxonomy ? new module.MockCatalogRepository(taxonomy) : module.mockCatalogRepository);
 
       return {
+        subscribe: (listener) => {
+          let unsubscribe: (() => void) | undefined;
+          let disposed = false;
+          void getInstance().then(repository => {
+            if (disposed) return;
+            unsubscribe = repository.subscribe?.(listener);
+          });
+          return () => { disposed = true; unsubscribe?.(); };
+        },
         list: async (q, sc, sig) => (await getInstance()).list(q, sc, sig),
         getById: async (id, sc, sig) => (await getInstance()).getById(id, sc, sig),
         create: async (p, sc, sig) => (await getInstance()).create(p, sc, sig),

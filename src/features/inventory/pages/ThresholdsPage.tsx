@@ -24,6 +24,8 @@ export function ThresholdsPage() {
     refreshWarning,
     updateGlobal,
     updateSku,
+    removeSkuOverride,
+    canRemoveSkuOverride,
     clearFeedback,
   } = useThresholds();
 
@@ -89,6 +91,8 @@ export function ThresholdsPage() {
             saving={saving}
             onUpdateGlobal={updateGlobal}
             onUpdateSku={updateSku}
+            onRemoveSkuOverride={removeSkuOverride}
+            canRemoveSkuOverride={canRemoveSkuOverride}
             onUpdateStart={clearFeedback}
           />
         )}

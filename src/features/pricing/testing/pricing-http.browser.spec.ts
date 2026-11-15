@@ -1,3 +1,4 @@
+import { adminPriceDefinition } from "../../../../tests/fixtures/adminPriceDefinition";
 import { test, expect, type Page } from "@playwright/test";
 
 // HTTP interceptado de forma explícita. No hay Gateway/DB real en esta suite.
@@ -98,7 +99,7 @@ test("API: PATCH confirmado conserva versión y reconsulta al volver a precio vi
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(stored),
+      body: JSON.stringify(route.request().url().includes("/administracion/") ? adminPriceDefinition(stored) : stored),
     });
   });
   await mount(page, "/precios/editar?target=http-test");
@@ -133,7 +134,7 @@ test("API: 409 conserva formulario, sin éxito ni segundo PATCH", async ({
     await route.fulfill({
       status: write ? 409 : 200,
       contentType: "application/json",
-      body: JSON.stringify(write ? { code: "VERSION_CONFLICT" } : price),
+      body: JSON.stringify(write ? { code: "VERSION_CONFLICT" } : adminPriceDefinition(price)),
     });
   });
   await mount(page, "/precios/editar?target=http-test");
@@ -148,6 +149,38 @@ test("API: 409 conserva formulario, sin éxito ni segundo PATCH", async ({
     page.getByRole("button", { name: "Guardar cambios", exact: true }),
   ).toBeDisabled();
   expect(patches).toBe(1);
+});
+
+test("API: Retail usa la versión exacta del producto y el global heredado solo se consulta", async ({ page }) => {
+  let hasRetail = true;
+  const retail = { ...price, channel_id: "RETAIL", price_version: 7 };
+  const requests: { path: string; method: string }[] = [];
+  await page.route("**/api/v1/precios/**", route => {
+    const request = route.request();
+    const url = new URL(request.url());
+    requests.push({ path: url.pathname + url.search, method: request.method() });
+    if (request.method() === "PATCH") {
+      expect(request.postDataJSON()).toMatchObject({ channelId: "RETAIL", priceVersion: 7 });
+      return route.fulfill({ json: { ...retail, precio_regular: 14, price_version: 8 } });
+    }
+    if (url.pathname.includes("/administracion/")) {
+      expect(url.searchParams.get("channelId")).toBe("RETAIL");
+      return hasRetail
+        ? route.fulfill({ json: adminPriceDefinition(retail) })
+        : route.fulfill({ status: 404, json: { code: "PRECIO_NO_ENCONTRADO" } });
+    }
+    return route.fulfill({ json: price });
+  });
+  await mount(page, "/precios/editar?target=http-test&channel=retail");
+  await confirm(page);
+  await expect(page.getByText("Precio actualizado", { exact: true })).toBeVisible();
+  hasRetail = false;
+  await mount(page, "/precios?target=http-test&channel=retail");
+  await expect(page.getByText("Fallback al precio global", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Editar precio", exact: true })).toHaveCount(0);
+  await mount(page, "/precios/editar?target=http-test&channel=retail");
+  await expect(page.getByText("Sin precio para editar", { exact: true })).toBeVisible();
+  expect(requests.filter(item => item.method === "PATCH")).toEqual([{ path: "/api/v1/precios/productos/http-product", method: "PATCH" }]);
 });
 
 test("Pricing API no impide auditoría mock cuando se inyecta explícitamente su runtime", async ({
@@ -167,7 +200,7 @@ test("API: timeout y relectura anterior conservan formulario y bloqueo sin segun
       await route.abort("timedout");
       return;
     }
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(stored) });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(route.request().url().includes("/administracion/") ? adminPriceDefinition(stored) : stored) });
   });
   await mount(page, "/precios/editar?target=http-test");
   await confirm(page);

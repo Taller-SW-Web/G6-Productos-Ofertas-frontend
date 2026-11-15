@@ -2,6 +2,18 @@ import { secureBase } from "../../features/promotions/adapters/g7Session";
 
 const azureGateway = "https://api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io";
 
+// Deployment opt-in after verifying Backend #222 contracts at this origin.
+// The flag defaults to false; it is not capability discovery or authorization.
+// Azure and its fixed Vercel proxy can be enabled after the compatible release.
+export function supportsAdministrativeContracts(
+  enabled: boolean,
+  gateway: string | undefined,
+): boolean {
+  if (!enabled || !gateway) return false;
+  try { return Boolean(secureBase(gateway, true)); }
+  catch { return false; }
+}
+
 // Vercel proxies this fixed backend through /api/v1; local development keeps
 // its explicitly configured origin. No credentials or alternate backend fallback.
 export function resolveGatewayOrigin(

@@ -1,5 +1,6 @@
 const loopback = new Set(["127.0.0.1", "localhost", "[::1]"]);
 export const protectedCouponRead = "/api/v1/cupones?pagina=1&tamanio=10";
+export const isolatedPricingCatalogRead = "/api/v1/productos?pagina=1&tamanio=100";
 
 export function targetUrl(value, { originOnly = false, isolatedFixture = false } = {}) {
   let url;
@@ -38,23 +39,27 @@ export function verifyIntegrations(policy, effective) {
 
 export function verifyPreviewLocation(policy, value) {
   const url = new URL(value);
-  if (url.origin !== policy.preview || !["/login", "/cupones", "/precios"].includes(url.pathname) || url.search || url.hash || url.username || url.password) {
+  if (url.origin !== policy.preview || !isPreviewRoute(policy, url.pathname) || url.search || url.hash || url.username || url.password) {
     throw new Error("RELEASE_NAVIGATION_NOT_APPROVED");
   }
 }
 
-export function permittedRequest(policy, { url: value, method, resourceType }, { promotionIds = new Set() } = {}) {
+function isPreviewRoute(policy, pathname) {
+  return pathname === "/login" || pathname === "/cupones" || (policy.isolatedFixture && pathname === "/precios");
+}
+
+export function permittedRequest(policy, { url: value, method, resourceType }, { promotionIds = new Set(), checkingIsolatedPricing = false } = {}) {
   let url;
   try { url = new URL(value); } catch { return false; }
   if (url.username || url.password || url.hash) return false;
-  if (resourceType === "document") return url.origin === policy.preview && method === "GET" && !url.search && ["/login", "/cupones", "/precios"].includes(url.pathname);
+  if (resourceType === "document") return url.origin === policy.preview && method === "GET" && !url.search && isPreviewRoute(policy, url.pathname);
   const apiRequest = ["fetch", "xhr"].includes(resourceType) || (method === "OPTIONS" && resourceType === "other");
   const authPaths = ["login", "otp/solicitar", "otp/verificar", "refresh", "logout"].map(path => `${policy.g7Base}/auth/${path}`);
   if (authPaths.includes(url.href)) return apiRequest && (method === "POST" || method === "OPTIONS");
   if (url.origin === policy.gateway && url.pathname.startsWith("/api/v1/")) {
     if (!apiRequest || !["GET", "OPTIONS"].includes(method)) return false;
-    // This gate visits only the initial coupon page, then Pricing. Coupon
-    // enrichment may read only parents named by that authenticated response.
+    if (policy.isolatedFixture && checkingIsolatedPricing && url.pathname + url.search === isolatedPricingCatalogRead) return true;
+    // Coupon enrichment may read only parents named by its authenticated response.
     if (url.pathname === "/api/v1/cupones") {
       const expected = { pagina: "1", tamanio: "10" };
       return [...url.searchParams].every(([key, value]) => expected[key] === value && url.searchParams.getAll(key).length === 1);

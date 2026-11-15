@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   ActionIcon,
@@ -29,6 +29,7 @@ import { characteristicService } from "../services/characteristicService";
 import { getPendingCharacteristicValueOperation } from "../adapters/mockCharacteristicAdapter";
 import { estadoCaracteristicaSemantic } from "../services/estadoSemantic";
 import type { CharacteristicValue, ValorBajaResult } from "../types";
+import { DataModeContext } from "../../../app/config/DataModeContext";
 
 // MK-009-S03: baja de un valor permitido. La pantalla solo transmite la solicitud vía
 // servicio y representa el resultado (verificación en curso, rechazo por uso, baja
@@ -150,8 +151,9 @@ function CharacteristicValuesContent({
     () => valores.filter((valor) => valor.estado === "Activo").length,
     [valores],
   );
-  const maxLista = characteristicConfigDefaults.maxValoresLista;
-  const limiteAlcanzado = valoresActivos >= maxLista;
+  const mode = useContext(DataModeContext);
+  const maxLista = mode === "mock" ? characteristicConfigDefaults.maxValoresLista : null;
+  const limiteAlcanzado = maxLista !== null && valoresActivos >= maxLista;
   const valorEnComprobacionId =
     baja.status === "verificando"
       ? baja.valor.valorId
@@ -179,7 +181,7 @@ function CharacteristicValuesContent({
         if (controller.signal.aborted) return;
         if (res) {
           setValores(res);
-          const pending = getPendingCharacteristicValueOperation(idDetalle);
+          const pending = mode === "mock" ? getPendingCharacteristicValueOperation(idDetalle) : null;
           const value = pending
             ? res.find((item) => item.valorId === pending.valorId)
             : undefined;
@@ -212,7 +214,7 @@ function CharacteristicValuesContent({
         setLoadingValores(false);
       });
     return () => controller.abort();
-  }, [detalle.id]);
+  }, [detalle.id, mode]);
 
   useEffect(
     () => () => {
@@ -730,7 +732,7 @@ function CharacteristicValuesContent({
 
         <SectionCard
           title="Agregar valor permitido"
-          description={`Valores permitidos activos: ${valoresActivos} (máx. ${maxLista})`}
+          description={maxLista === null ? `Valores permitidos activos: ${valoresActivos}. El límite lo define Taxonomía.` : `Valores permitidos activos: ${valoresActivos} (máx. ${maxLista})`}
         >
           <Stack gap="md">
             {soloLectura && (

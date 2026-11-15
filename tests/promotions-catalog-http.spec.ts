@@ -516,6 +516,77 @@ test("Catalog HTTP cold start: a read slower than 7.5 seconds still loads the se
   }
 });
 
+test("Catalog categories HTTP cold start: a read slower than 7.5 seconds succeeds", async () => {
+  const server = createServer((_request, response) => {
+    setTimeout(() => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(pageBody(categories, 1, 100, categories.length, true)));
+    }, 8100);
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Missing port");
+  try {
+    const result = await apiFor(`http://127.0.0.1:${address.port}`).catalog.categories(new AbortController().signal);
+    expect(result).toEqual([{ id: categories[0]!.categoriaId, name: categories[0]!.nombre, active: true }]);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>(done => server.close(() => done()));
+  }
+});
+
+test("Catalog categories HTTP: consumer cancellation aborts a pending read without returning results", async () => {
+  let responseClosed = false;
+  const server = createServer((_request, response) => {
+    response.on("close", () => { responseClosed = !response.writableEnded; });
+    setTimeout(() => {
+      if (!response.destroyed) {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify(pageBody(categories, 1, 100, categories.length, true)));
+      }
+    }, 1000);
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Missing port");
+  const controller = new AbortController();
+  try {
+    const pending = apiFor(`http://127.0.0.1:${address.port}`).catalog.categories(controller.signal);
+    const rejected = expect(pending).rejects.toMatchObject({ kind: "unavailable" });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    controller.abort();
+    await rejected;
+    await expect.poll(() => responseClosed).toBe(true);
+  } finally {
+    controller.abort();
+    server.closeAllConnections();
+    await new Promise<void>(done => server.close(() => done()));
+  }
+});
+
+for (const status of [401, 403] as const) {
+  test(`Catalog categories HTTP: ${status} remains a visible access error`, async () => {
+    await fixture(() => ({ status }), async origin => {
+      await expect(apiFor(origin).catalog.categories(new AbortController().signal)).rejects.toMatchObject({
+        kind: status === 401 ? "session" : "forbidden",
+      });
+    });
+  });
+}
+
+for (const [name, body] of [
+  ["invalid category", pageBody([{ categoriaId: "category-broken", nombre: 12, estado: "ACTIVO", version: 1 }], 1, 100, 1, true)],
+  ["incomplete category page", pageBody(categories, 2, 100, categories.length, true)],
+] as const) {
+  test(`Catalog categories HTTP: ${name} rejects without a simulated fallback`, async () => {
+    await fixture(() => ({ body }), async origin => {
+      await expect(apiFor(origin).catalog.categories(new AbortController().signal)).rejects.toMatchObject({ kind: "unavailable" });
+    });
+  });
+}
+
 test("Catalog HTTP: variant reads use bounded concurrency and preserve product order", async () => {
   const rows = Array.from({ length: 9 }, (_, index) => ({ ...variable, product_id: `product-${index}` }));
   let active = 0, peak = 0;

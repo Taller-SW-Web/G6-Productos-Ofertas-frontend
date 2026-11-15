@@ -25,9 +25,13 @@ export function VariantReactivationDialog({
   onSuccess,
   scenario,
 }: VariantReactivationDialogProps) {
-  const { loading, error, reactivate, clearError } = useVariantStateMutation();
+  const { loading, error, reactivate, clearError, reconcile, isUnknown } = useVariantStateMutation();
 
   const handleConfirm = async () => {
+    if (isUnknown(product.id, variant.variantId)) {
+      if (await reconcile(product.id, variant.variantId, "ACTIVA")) onSuccess();
+      return;
+    }
     try {
       await reactivate(product.id, variant.variantId, scenario);
       onSuccess();
@@ -53,7 +57,7 @@ export function VariantReactivationDialog({
     <ConfirmDialog
       opened={opened}
       title="Reactivar Variante (SKU)"
-      confirmLabel="Reactivar Variante"
+      confirmLabel={isUnknown(product.id, variant.variantId) ? "Consultar estado" : "Reactivar Variante"}
       submitting={loading}
       onCancel={handleClose}
       onConfirm={handleConfirm}

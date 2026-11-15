@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useContext, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { ActionIcon, Button, Group, Stack, Text } from "@mantine/core";
+import { ActionIcon, Button, Group, Pagination, Stack, Text } from "@mantine/core";
 import {
   IconAdjustments,
   IconChartBar,
@@ -19,9 +19,11 @@ import { DevScenarioSelector } from "../dev/DevScenarioSelector";
 import { useInventoryStock } from "../hooks/useInventoryStock";
 import { useInventoryFilterOptions } from "../hooks/useInventoryFilterOptions";
 import type { StockFiltersQuery, StockItem } from "../services/inventoryTypes";
+import { DataModeContext } from "../../../app/config/DataModeContext";
 
 export function StockControlPage() {
   const [params, setParams] = useSearchParams();
+  const isApi = useContext(DataModeContext) === "api";
 
   const filters: StockFiltersQuery = useMemo(
     () => ({
@@ -32,9 +34,12 @@ export function StockControlPage() {
     [params],
   );
 
-  const { items, loading, error, refetch } = useInventoryStock(filters);
+  const requestedPage = Number(params.get("pagina"));
+  const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+  const { items, total, pages, loading, error, refetch } = useInventoryStock(filters, isApi ? page : undefined);
   const { locations, loading: catalogLoading } = useInventoryFilterOptions();
-  const [selectedItem, setSelectedItem] = useState<StockItem | null>(null);
+  const [selection, setSelection] = useState<{ sku: string; locationId: string } | null>(null);
+  const selectedItem = selection ? items.find(item => item.sku === selection.sku && item.locationId === selection.locationId) ?? null : null;
 
   const isRevisionMode =
     import.meta.env.DEV && params.get("modoRevision") === "1";
@@ -42,6 +47,7 @@ export function StockControlPage() {
   const handleFiltersChange = (next: StockFiltersQuery) => {
     setParams((prev) => {
       const nextParams = new URLSearchParams(prev);
+      nextParams.delete("pagina");
       if (next.search) nextParams.set("search", next.search);
       else {
         nextParams.delete("search");
@@ -180,7 +186,7 @@ export function StockControlPage() {
           size={32}
           aria-label="Ver detalle"
           title={`Ver detalle de ${row.sku} en ${row.locationName}`}
-          onClick={() => setSelectedItem(row)}
+          onClick={() => setSelection({ sku: row.sku, locationId: row.locationId })}
         >
           <IconEye size={16} />
         </ActionIcon>
@@ -249,6 +255,7 @@ export function StockControlPage() {
           filters={filters}
           locations={locations}
           loading={catalogLoading}
+          exactSku={isApi}
           onChange={handleFiltersChange}
           onReset={handleResetFilters}
         />
@@ -257,7 +264,7 @@ export function StockControlPage() {
           caption="Tabla de inventario por SKU y ubicación física"
           columns={columns}
           rows={items}
-          rowKey={(row) => `${row.sku}:${row.locationId}`}
+          rowKey={(row) => JSON.stringify([row.sku, row.locationId])}
           state={tableState}
           empty={{
             title: "No se encontraron saldos de stock",
@@ -270,12 +277,17 @@ export function StockControlPage() {
             ),
           }}
         />
+        {isApi && !loading && !error && total > 0 && <Group justify="space-between">
+          <Text size="sm">{total} saldos físicos</Text>
+          {pages > 1 && <Pagination value={Math.min(page, pages)} total={pages} onChange={value =>
+            setParams(previous => { const next = new URLSearchParams(previous); next.set("pagina", String(value)); return next; })} />}
+        </Group>}
       </Stack>
 
       <StockDetailDrawer
         item={selectedItem}
         opened={Boolean(selectedItem)}
-        onClose={() => setSelectedItem(null)}
+        onClose={() => setSelection(null)}
       />
     </>
   );

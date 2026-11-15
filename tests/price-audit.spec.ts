@@ -9,6 +9,8 @@ import {
 } from "../src/features/price-audit/services/auditPresentation";
 import { alternateAuditId } from "./adapters/alternateAuditRepository";
 import { evidencePath } from "./support/evidence";
+import { createHttpAuditRepository } from "../src/features/price-audit/adapters/httpAuditRepository";
+import { createAuthenticatedGatewayClient } from "../src/app/config/authenticatedGatewayClient";
 
 async function mount(
   page: Page,
@@ -403,23 +405,29 @@ test("MK-014: unknown POST cannot be resubmitted; known job GET retries without 
     1,
   );
   await mount(page, "/precios/auditoria/exportar/csv");
-  await page.evaluate(() => {
+  await expect(page.getByRole("button", { name: "Solicitar CSV" })).toBeDisabled();
+  expect(await page.evaluate(() => window.auditControl.requests.length)).toBe(0);
+
+  const knownJobPage = await page.context().newPage();
+  await mount(knownJobPage, "/precios/auditoria/exportar/csv");
+  await expect(knownJobPage.getByRole("button", { name: "Solicitar CSV" })).toBeEnabled();
+  await knownJobPage.evaluate(() => {
     window.auditControl.readFailure = "unavailable";
   });
-  await page.getByRole("button", { name: "Solicitar CSV" }).click();
-  await expect(page.getByRole("alert")).toContainText(
+  await knownJobPage.getByRole("button", { name: "Solicitar CSV" }).click();
+  await expect(knownJobPage.getByRole("alert")).toContainText(
     "Origen alternativo no disponible",
   );
-  await page.evaluate(() => {
+  await knownJobPage.evaluate(() => {
     window.auditControl.readFailure = undefined;
   });
-  await page
+  await knownJobPage
     .getByRole("button", { name: "Consultar estado", exact: true })
     .click();
   await expect(
-    page.getByText("Generando archivo", { exact: true }).first(),
+    knownJobPage.getByText("Generando archivo", { exact: true }).first(),
   ).toBeVisible();
-  expect(await page.evaluate(() => window.auditControl.requests.length)).toBe(
+  expect(await knownJobPage.evaluate(() => window.auditControl.requests.length)).toBe(
     1,
   );
 });
@@ -858,4 +866,83 @@ test("MK-014 strict dates: impossible calendar dates and invalid time/zone never
         page.getByRole("button", { name: /Solicitar (CSV|PDF)/ }),
       ).toBeDisabled();
   }
+});
+
+const auditHttpEntryH4 = { id_auditoria: "audit-h4-product", sku: null, target_type: "PRODUCTO", product_id: "11111111-1111-4111-8111-111111111111", tipo_precio: "REGULAR", precio_anterior: null, precio_nuevo: 10, variacion_porcentual: null, tipo_operacion: "CREACION", canal_origen: null, motivo_cambio: "Fixture contractual H4", batch_id: null, usuario_id: null, usuario_email: null, ip_origen: null, timestamp: "2026-11-07T12:00:00Z", canal: null };
+const auditHttpJobH4 = { export_id: "export-h4-001", formato: "CSV", status: "QUEUED", created_at: "2026-11-07T12:00:00Z", completed_at: null, download_url: null };
+
+test("AUD-H4-01: la lista y el detalle conservan SKU y canal nulos y registros SKU normales", async () => {
+  const calls: string[] = [];
+  const normal = { ...auditHttpEntryH4, id_auditoria: "audit-h4-sku", sku: "SKU-H4", target_type: "SKU", canal_origen: "RETAIL" };
+  const repository = createHttpAuditRepository({ request: async path => {
+    calls.push(path);
+    const dto = path.includes("?") ? { items: [auditHttpEntryH4, normal], meta: { pagina: 1, tamanio: 10, total: 2, totalPaginas: 1 } } : auditHttpEntryH4;
+    return new Response(JSON.stringify(dto), { status: 200, headers: { "content-type": "application/json" } });
+  } });
+  const signal = new AbortController().signal;
+  await expect(repository.list({ page: 1, size: 10, sku: "", canal: "", desde: "", hasta: "", usuarioId: "", batchId: "" }, signal)).resolves.toMatchObject({
+    items: [{ targetType: "PRODUCTO", sku: null, origin: null }, { targetType: "SKU", sku: "SKU-H4", origin: "RETAIL" }],
+  });
+  await expect(repository.detail("audit-h4-product", signal)).resolves.toMatchObject({ sku: null, origin: null });
+  await expect(repository.detail("audit-ajeno", signal)).rejects.toThrow(/otro registro/);
+  expect(calls).toEqual(["/api/v1/auditoria-precios/administracion?pagina=1&tamanio=10", "/api/v1/auditoria-precios/administracion/audit-h4-product", "/api/v1/auditoria-precios/administracion/audit-ajeno"]);
+});
+
+test("AUD-H4-02: respuesta contractual 400 para filtro no publicado no se transforma en éxito", async () => {
+  const calls: string[] = [];
+  const repository = createHttpAuditRepository({ request: async path => { calls.push(path); return new Response(JSON.stringify({ status: 400, code: "FILTRO_NO_PUBLICADO" }), { status: 400, headers: { "content-type": "application/problem+json" } }); } });
+  await expect(repository.list({ page: 1, size: 10, sku: "", canal: "", desde: "", hasta: "", usuarioId: "", batchId: "" }, new AbortController().signal)).rejects.toMatchObject({ kind: "unknown" });
+  expect(calls).toHaveLength(1);
+});
+
+test("AUD-H4-03: POST de exportación 503 conserva resultado incierto y esta solicitud no se reenvía", async () => {
+  const calls: { path: string; method: string }[] = [];
+  const repository = createHttpAuditRepository({ request: async (path, init) => { calls.push({ path, method: init.method }); return new Response(JSON.stringify({ status: 503, code: "SERVICIO_NO_DISPONIBLE" }), { status: 503, headers: { "content-type": "application/problem+json" } }); } });
+  await expect(repository.requestExport({ format: "CSV", filters: { sku: "", canal: "", desde: "", hasta: "", usuarioId: "", batchId: "" } }, new AbortController().signal)).rejects.toMatchObject({ kind: "unknown" });
+  expect(calls).toEqual([{ path: "/api/v1/auditoria-precios/exportaciones", method: "POST" }]);
+});
+
+test("AUD-H4-04: exportId confirmado se consulta y descarga bajo el mismo identificador", async () => {
+  const calls: { path: string; method: string }[] = [];
+  let exportStatus: "QUEUED" | "PROCESSING" | "COMPLETED" = "QUEUED";
+  const repository = createHttpAuditRepository({ request: async (path, init) => {
+    calls.push({ path, method: init.method });
+    if (path.endsWith("/archivo")) {
+      expect(exportStatus).toBe("COMPLETED");
+      return new Response("row\n", { status: 200, headers: { "content-type": "text/csv" } });
+    }
+    if (init.method === "POST") return new Response(JSON.stringify(auditHttpJobH4), { status: 202, headers: { "content-type": "application/json" } });
+    return new Response(JSON.stringify({ ...auditHttpJobH4, status: exportStatus }), { status: 200, headers: { "content-type": "application/json" } });
+  } });
+  const created = await repository.requestExport({ format: "CSV", filters: { sku: "", canal: "", desde: "", hasta: "", usuarioId: "", batchId: "" } }, new AbortController().signal);
+  expect(created.id).toBe("export-h4-001");
+  exportStatus = "PROCESSING";
+  await expect(repository.getExport(created.id, new AbortController().signal)).resolves.toMatchObject({ id: created.id, status: "PROCESSING" });
+  exportStatus = "COMPLETED";
+  await expect(repository.getExport(created.id, new AbortController().signal)).resolves.toMatchObject({ id: created.id, status: "COMPLETED" });
+  await expect(repository.download(created.id, new AbortController().signal)).resolves.toMatchObject({ filename: "auditoria-precios.csv" });
+  expect(calls).toEqual([
+    { path: "/api/v1/auditoria-precios/exportaciones", method: "POST" },
+    { path: "/api/v1/auditoria-precios/exportaciones/export-h4-001", method: "GET" },
+    { path: "/api/v1/auditoria-precios/exportaciones/export-h4-001", method: "GET" },
+    { path: "/api/v1/auditoria-precios/exportaciones/export-h4-001/archivo", method: "GET" },
+  ]);
+});
+
+test("AUD-H4-05: cambio A→B aborta descarga autenticada pendiente y no entrega bytes de A", async () => {
+  const controller = new AbortController();
+  const requests: { url: string; authorization: string | null }[] = [];
+  const fetcher: typeof fetch = async (input, init) => {
+    requests.push({ url: String(input), authorization: new Headers(init?.headers).get("Authorization") });
+    return new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true }));
+  };
+  let owner = "g7-audit-owner-a";
+  const session = { getAccessToken: async () => owner === "g7-audit-owner-a" ? "h4.fake.owner.a" : "h4.fake.owner.b", refreshAccessToken: async () => null, invalidateAccessToken: () => undefined };
+  const repository = createHttpAuditRepository(createAuthenticatedGatewayClient("http://127.0.0.1:9000", session, fetcher));
+  const download = repository.download("export-h4-001", controller.signal);
+  await expect.poll(() => requests.length).toBe(1);
+  owner = "g7-audit-owner-b";
+  controller.abort(new Error("identity changed"));
+  await expect(download).rejects.toThrow();
+  expect(requests).toEqual([{ url: "http://127.0.0.1:9000/api/v1/auditoria-precios/exportaciones/export-h4-001/archivo", authorization: "Bearer h4.fake.owner.a" }]);
 });

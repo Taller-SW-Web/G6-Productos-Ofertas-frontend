@@ -1,3 +1,4 @@
+import { useContext } from "react";
 import { Button, Select, Text } from "@mantine/core";
 import { Link } from "react-router-dom";
 import { EmptyState, FeedbackAlert } from "../../../components/shared";
@@ -5,6 +6,7 @@ import { usePricingContext } from "../hooks/usePricingContext";
 import { useEditableRead } from "../hooks/usePriceEdit";
 import { PricingPageFrame } from "../components/PricingPageFrame";
 import { PriceEditForm } from "../components/PriceEditForm";
+import { DataModeContext } from "../../../app/config/DataModeContext";
 
 export function EditPricePage() {
   return (
@@ -18,6 +20,7 @@ export function EditPricePage() {
 }
 function EditContent() {
   const context = usePricingContext();
+  const mode = useContext(DataModeContext);
   const scope =
     context.target?.kind === "variant" &&
     context.params.get("scope") !== "product"
@@ -29,7 +32,9 @@ function EditContent() {
       : context.target?.id;
   const target = {
     targetId: scope === "product" ? (parentId ?? "") : context.query.targetId,
-    channel: scope === "product" ? ("global" as const) : context.query.channel,
+    channel: scope === "product" && (mode !== "api" || context.target?.kind === "variant")
+      ? ("global" as const)
+      : context.query.channel,
   };
   const read = useEditableRead(target);
   return (
@@ -38,7 +43,8 @@ function EditContent() {
         label="Alcance del precio"
         value={scope}
         data={[
-          { value: "product", label: "Precio base del producto" },
+          { value: "product", label: context.target?.kind === "product" && target.channel !== "global"
+            ? "Precio del producto en el canal seleccionado" : "Precio base del producto" },
           ...(context.target?.kind === "variant"
             ? [
                 {
@@ -78,7 +84,7 @@ function EditContent() {
         ) : (
           <EmptyState
             title="Sin precio para editar"
-            description="Selecciona un objetivo con una lectura disponible."
+            description="El objetivo y canal seleccionados requieren una definición de precio propia y vigente para editar."
             action={
               <Button
                 component={Link}

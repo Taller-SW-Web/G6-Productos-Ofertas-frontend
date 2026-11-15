@@ -6,6 +6,7 @@ const defaults = {
   VITE_GATEWAY_ORIGIN: "https://api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io",
   VITE_G7_API_BASE: "https://g7-auth-service.onrender.com/api/v1",
   VITE_G6_READ_DEMO: "false",
+  VITE_G6_ADMIN_API_ENABLED: "false",
 };
 
 export function vercelBuildEnvironment(environment) {

@@ -56,6 +56,10 @@ export function ProductEditPage() {
     );
   }
 
+  if (detailState.product.catalogVersion === null) {
+    return <Stack gap="md"><PageHeader title={`Detalle de solo lectura: ${detailState.product.name}`} breadcrumbs={[{ label: "Catálogo", to: "/productos" }, { label: "Edición no disponible" }]} /><FeedbackAlert semantic="warning" title="No se puede editar este producto">Para guardar cambios se necesita una versión confirmada del registro administrativo.</FeedbackAlert><Button component={Link} to={`/productos/${detailState.product.id}`} variant="outline" w="fit-content">Volver al detalle</Button></Stack>;
+  }
+
   return (
     <ProductEditFormContent
       product={detailState.product}
@@ -84,6 +88,7 @@ function ProductEditFormContent({
     generalError,
     submitting,
     isDirty,
+    writeOutcomeUnknown,
     categories,
     brands,
     productTypes,
@@ -152,7 +157,7 @@ function ProductEditFormContent({
             <Button
               type="submit"
               loading={submitting}
-              disabled={!schemaConfirmed || loadingMasters}
+              disabled={!schemaConfirmed || loadingMasters || writeOutcomeUnknown}
               leftSection={<IconDeviceFloppy size={16} />}
             >
               Guardar cambios

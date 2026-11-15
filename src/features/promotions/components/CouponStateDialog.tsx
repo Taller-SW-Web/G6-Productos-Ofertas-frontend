@@ -48,11 +48,12 @@ export function CouponStateDialog({
       if (checking) return;
       setChecking(true);
       try {
-        const result = await confirmedRepository.read(
-          coupon.id,
-          new AbortController().signal,
-        );
-        if (result?.status === target) onConfirmed(result);
+        const signal = new AbortController().signal;
+        const resolution = await confirmedRepository.reconcilePending?.(coupon.id, null, signal);
+        const result = resolution
+          ? resolution.status === "reconciled" ? resolution.value : null
+          : await confirmedRepository.read(coupon.id, signal);
+        if (result?.id === coupon.id && result.status === target) onConfirmed(result);
         else
           setCheckError(
             "La consulta no confirmó el estado solicitado. No se reenviará el cambio automáticamente.",

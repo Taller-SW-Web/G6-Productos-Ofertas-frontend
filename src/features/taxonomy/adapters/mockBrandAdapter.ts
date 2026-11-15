@@ -268,7 +268,18 @@ export const mockBrandAdapter: BrandRepository = {
     };
   },
 
-  async consultarResultadoBaja(operacionId, signal) {
+  async reactivar(id, signal) {
+    signal?.throwIfAborted();
+    await esperar(300);
+    signal?.throwIfAborted();
+    const marca = store.find(item => item.marcaId === id);
+    if (!marca) return null;
+    if (marca.estado === "Activo") return aDetalle(marca);
+    marca.estado = "Activo";
+    marca.version += 1;
+    persist();
+    return aDetalle(marca);
+  },  async consultarResultadoBaja(operacionId, signal) {
     signal?.throwIfAborted();
     await esperar(600);
     signal?.throwIfAborted();

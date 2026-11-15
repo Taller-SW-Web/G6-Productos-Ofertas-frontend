@@ -21,7 +21,7 @@ export interface ScheduleDraft {
   kind: "REGULAR" | "OFERTA";
   amount: string;
   currency: string;
-  channel: "global" | "retail";
+  channel: PriceQuery["channel"];
   start: string;
   end: string;
   reason: string;
@@ -32,7 +32,7 @@ export interface ScheduleView {
   kind: ScheduleDraft["kind"];
   amount: string;
   currency: string;
-  channel: "global" | "retail";
+  channel: PriceQuery["channel"];
   start: string;
   end: string | null;
   status: "SCHEDULED" | "ACTIVE" | "HISTORICAL" | "CANCELLED";

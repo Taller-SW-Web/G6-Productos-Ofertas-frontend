@@ -9,7 +9,7 @@ test("H74-01: buildCommand usa el script y respeta el limite de 256 caracteres",
   assert.ok(config.buildCommand.length <= 256);
 });
 
-test("el build usa los cuatro valores por defecto solo si no estan definidos", () => {
+test("el build aplica los valores por defecto solo si no estan definidos", () => {
   const original = { PATH: "existing-path", VITE_DATA_MODE: undefined };
   assert.deepEqual(vercelBuildEnvironment(original), {
     PATH: "existing-path",
@@ -17,6 +17,7 @@ test("el build usa los cuatro valores por defecto solo si no estan definidos", (
     VITE_GATEWAY_ORIGIN: "https://api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io",
     VITE_G7_API_BASE: "https://g7-auth-service.onrender.com/api/v1",
     VITE_G6_READ_DEMO: "false",
+    VITE_G6_ADMIN_API_ENABLED: "false",
   });
   assert.deepEqual(original, { PATH: "existing-path", VITE_DATA_MODE: undefined });
 });
@@ -27,6 +28,7 @@ test("el entorno configurado tiene prioridad y llega intacto al build existente"
     VITE_GATEWAY_ORIGIN: "https://gateway.example.test",
     VITE_G7_API_BASE: "https://g7.example.test/api/v1",
     VITE_G6_READ_DEMO: "true",
+    VITE_G6_ADMIN_API_ENABLED: "true",
     PATH: "existing-path",
   };
   let calls = 0;
@@ -44,7 +46,7 @@ test("el entorno configurado tiene prioridad y llega intacto al build existente"
 });
 
 test("un valor vacio definido no se sustituye silenciosamente por un default", () => {
-  const configured = { VITE_DATA_MODE: "", VITE_GATEWAY_ORIGIN: "", VITE_G7_API_BASE: "", VITE_G6_READ_DEMO: "" };
+  const configured = { VITE_DATA_MODE: "", VITE_GATEWAY_ORIGIN: "", VITE_G7_API_BASE: "", VITE_G6_READ_DEMO: "", VITE_G6_ADMIN_API_ENABLED: "" };
   assert.deepEqual(vercelBuildEnvironment(configured), configured);
 });
 

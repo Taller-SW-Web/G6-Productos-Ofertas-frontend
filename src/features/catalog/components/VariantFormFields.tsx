@@ -40,6 +40,7 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
   const {
     formData,
     attributeSchemas,
+    choosingIdentifiers,
     schemaLoading,
     schemaError,
     updateField,
@@ -125,7 +126,10 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
             const entries = identity ? formData.identifyingAttributes : formData.nonIdentifyingAttributes;
             const update = identity ? updateIdentifyingAttribute : updateNonIdentifyingAttribute;
             const remove = identity ? removeIdentifyingAttribute : removeNonIdentifyingAttribute;
-            const available = attributeSchemas.filter(s => s.esIdentificadora === identity);
+            const otherEntries = identity ? formData.nonIdentifyingAttributes : formData.identifyingAttributes;
+            const available = attributeSchemas.filter(s => choosingIdentifiers
+              ? !otherEntries.some(entry => entry.caracteristicaId === s.caracteristicaId)
+              : s.esIdentificadora === identity);
             const locked = identity && isEdit;
             return <Box key={String(identity)}>
               <Group justify="space-between" mb="sm">

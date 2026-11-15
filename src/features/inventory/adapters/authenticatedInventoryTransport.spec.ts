@@ -37,19 +37,12 @@ describe("authenticatedInventoryTransport", () => {
     ).toThrow("VITE_GATEWAY_ORIGIN");
   });
 
-  it("permite llamadas sin sesión (modo demo sin auth)", async () => {
+  it("bloquea llamadas de Inventario sin sesión antes de llegar a Gateway", async () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify({ status: "ok" }), { status: 200 }));
     const transport = createAuthenticatedInventoryTransport("http://localhost:3000", null, fetcher);
 
-    const res = await transport.request("/api/v1/inventario/dashboard", { method: "GET" });
-    expect(res.status).toBe(200);
-    expect(fetcher).toHaveBeenCalledWith(
-      "http://localhost:3000/api/v1/inventario/dashboard",
-      expect.objectContaining({
-        method: "GET",
-        headers: expect.not.objectContaining({ Authorization: expect.anything() }),
-      }),
-    );
+    await expect(transport.request("/api/v1/inventario/dashboard", { method: "GET" })).rejects.toThrow("Inicia sesión");
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("adjunta Bearer token cuando la sesión está presente", async () => {
@@ -105,4 +98,3 @@ describe("authenticatedInventoryTransport", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 });
-

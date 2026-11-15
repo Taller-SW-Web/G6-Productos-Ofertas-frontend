@@ -36,6 +36,7 @@ import {
   readCatalogScenario,
 } from "../services/catalogPresentation";
 import { ProductActivationDialog } from "../components/ProductActivationDialog";
+import type { ProductDetailView } from "../services/catalogRepository";
 
 export function ProductPreparationPage() {
   const { productId } = useParams<{ productId: string }>();
@@ -47,7 +48,12 @@ export function ProductPreparationPage() {
   const [revision, setRevision] = useState(0);
   const [activateOpened, setActivateOpened] = useState(false);
 
-  const detailState = useProductDetail(productId || "", scenario, revision);
+  const fetchedDetailState = useProductDetail(productId || "", scenario, revision);
+  const createdProduct = location.state?.createdProduct as ProductDetailView | undefined;
+  const transientCreated = createdProduct?.id === productId ? createdProduct : undefined;
+  const detailState = transientCreated && ["not_found", "error"].includes(fetchedDetailState.status)
+    ? { status: "success" as const, product: transientCreated }
+    : fetchedDetailState;
   const prepState = useProductPreparation(productId || "", scenario, revision);
 
   if (detailState.status === "loading" || prepState.status === "loading") {
@@ -87,6 +93,13 @@ export function ProductPreparationPage() {
   }
 
   if (detailState.status === "not_found" || !detailState.product) {
+    if (prepState.status === "success" && prepState.data?.productId === productId) {
+      const confirmedPreparation = prepState.data!;
+      return <Stack gap="xl"><PageHeader title="Preparación del producto" breadcrumbs={[{ label: "Catálogo", to: "/productos" }, { label: "Preparación" }]} />
+        <FeedbackAlert semantic="warning" title="Estado administrativo no disponible">Catálogo devolvió la preparación para este identificador. Las acciones de estado requieren también un detalle administrativo con versión vigente.</FeedbackAlert>
+        <SectionCard title="Preparación confirmada por Catálogo"><Stack gap="sm"><Text>Pricing: {preparationStatusLabel(confirmedPreparation.pricing.status)}</Text>{confirmedPreparation.inventario && <Text>Inventario: {preparationStatusLabel(confirmedPreparation.inventario.status)}</Text>}{confirmedPreparation.variantes.map(v => <Text key={v.variantId}>{v.sku}: {preparationStatusLabel(v.inventario.status)}</Text>)}</Stack></SectionCard>
+        <Button component={Link} to="/productos" variant="outline" w="fit-content">Volver a productos</Button></Stack>;
+    }
     return (
       <Stack gap="xl">
         <PageHeader
@@ -98,8 +111,8 @@ export function ProductPreparationPage() {
             { label: "No encontrado" },
           ]}
         />
-        <FeedbackAlert semantic="error" title="404 - Producto inexistente">
-          El producto solicitado no fue encontrado.
+        <FeedbackAlert semantic="warning" title="No se pudo confirmar el estado del producto">
+          El detalle administrativo no encontró el producto solicitado.
         </FeedbackAlert>
         <Button component={Link} to="/productos" variant="outline" w="fit-content">
           Volver a la lista
@@ -139,7 +152,7 @@ export function ProductPreparationPage() {
               Ver detalle
             </Button>
 
-            {p.status !== "INACTIVO" && (
+            {p.catalogVersion !== null && p.status !== "INACTIVO" && (
               <Button
                 component={Link}
                 to={`/productos/${p.id}/editar`}
@@ -150,7 +163,7 @@ export function ProductPreparationPage() {
               </Button>
             )}
 
-            {p.status === "BORRADOR" && (
+            {p.catalogVersion !== null && p.status === "BORRADOR" && (
               <Button
                 onClick={() => setActivateOpened(true)}
                 leftSection={<IconCheck size={16} />}

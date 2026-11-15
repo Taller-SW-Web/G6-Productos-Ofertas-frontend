@@ -100,6 +100,14 @@ function CouponFormContent({ initial }: { initial: CouponView | null }) {
     navigate(initial ? `/cupones/${initial.id}${suffix}` : `/cupones${suffix}`);
   if (form.confirmed) {
     const next = clearTransientParams(params);
+    if (form.confirmed.writeOutcome === "RECONCILED") return (
+      <Stack gap="lg">
+        <PageHeader title={`Cupón — ${form.confirmed.code}`} />
+        <FeedbackAlert semantic="warning" title="Estado final conciliado">La lectura contractual coincide con la configuración esperada. Esto verifica el estado observado, no atribuye su autoría a la solicitud anterior.</FeedbackAlert>
+        <CouponSummary coupon={form.confirmed} />
+        <Button component={Link} to={`/cupones/${form.confirmed.id}?${next.toString()}`}>Consultar detalle</Button>
+      </Stack>
+    );
     if (form.confirmed.relatedDataUnavailable)
       return (
         <Stack gap="lg">
@@ -116,6 +124,15 @@ function CouponFormContent({ initial }: { initial: CouponView | null }) {
           <Button component={Link} to={`/cupones/${form.confirmed.id}?${next.toString()}`}>
             Consultar detalle
           </Button>
+        </Stack>
+      );
+    if (form.confirmed.relatedDataAccess)
+      return (
+        <Stack gap="lg">
+          <PageHeader title={`Cupón — ${form.confirmed.code}`} />
+          <FeedbackAlert semantic="success" title="Cupón guardado">La escritura fue confirmada por Backend.</FeedbackAlert>
+          <FeedbackAlert semantic="error" title={form.confirmed.relatedDataAccess === "session" ? "Sesión requerida" : "Acceso auxiliar denegado"}>{form.confirmed.relatedDataAccess === "session" ? "El cupón se guardó; vuelve a identificarte para consultar su promoción asociada." : "El cupón se guardó; tu cuenta no tiene permiso para consultar su promoción asociada."}</FeedbackAlert>
+          <CouponSummary coupon={form.confirmed} />
         </Stack>
       );
     return (

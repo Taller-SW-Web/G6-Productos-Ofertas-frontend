@@ -246,9 +246,9 @@ function CategoryDetailContent({
       >
         <Stack gap="sm">
           <CampoDato etiqueta="Nombre">{detalle.nombre}</CampoDato>
-          <CampoDato etiqueta="Slug">{detalle.slug}</CampoDato>
-          <CampoDato etiqueta="Nivel">{detalle.nivel}</CampoDato>
-          <CampoDato etiqueta="Orden">{detalle.orden}</CampoDato>
+          <CampoDato etiqueta="Slug">{detalle.slug ?? "No publicado"}</CampoDato>
+          <CampoDato etiqueta="Nivel">{detalle.nivel ?? "No disponible"}</CampoDato>
+          <CampoDato etiqueta="Orden">{detalle.orden ?? "No publicado"}</CampoDato>
           <CampoDato etiqueta="Estado">
             <StatusBadge semantic={estadoSemantic[detalle.estado]}>
               {detalle.estado}

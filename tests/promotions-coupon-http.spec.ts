@@ -1,9 +1,15 @@
+import { createMemoryStorage } from "./fixtures/h4Controlled";
 // Explicit HTTP fixtures, not homologation of G7 or Catalog services.
 import { expect, test, type Page } from "@playwright/test";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { once } from "node:events";
 import { createHttpPromotionServices } from "../src/features/promotions/adapters/httpPromotionServices";
 import type { CouponInput } from "../src/features/promotions/services/couponRepository";
+
+test.beforeEach(() => {
+  Object.defineProperty(globalThis, "sessionStorage", { value: createMemoryStorage(), configurable: true });
+});
+test.afterEach(() => { Reflect.deleteProperty(globalThis, "sessionStorage"); });
 
 const parent = {
   promotionId: "parent", nombre: "Promoción actual", modalidad: "CUPON",
@@ -46,6 +52,7 @@ async function fixture(
     await work(createHttpPromotionServices({
       gatewayOrigin: `http://127.0.0.1:${address.port}`,
       getAccessToken: async () => "synthetic-coupon-user",
+      scopeId: () => "fixture-promotions-owner",
     }), calls);
   } finally {
     server.closeAllConnections();

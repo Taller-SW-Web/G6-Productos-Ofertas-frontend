@@ -16,6 +16,7 @@ import {
 import { tokens } from "../../../theme/tokens";
 import { useScheduleForm } from "../hooks/usePriceSchedules";
 import type { ScheduleDraft } from "../services/pricingModels";
+import type { PriceChannel } from "../services/pricingRepository";
 import { displayInstant, priceTimeZone } from "../services/pricingValidation";
 import { formatMoney } from "../services/pricePresentation";
 import { UnsavedPriceGuard } from "./UnsavedPriceGuard";
@@ -29,7 +30,7 @@ export function ScheduleForm({
 }: {
   targetId: string;
   currency: string;
-  channel: "global" | "retail";
+  channel: PriceChannel;
   onCreated: () => void;
 }) {
   const form = useScheduleForm(targetId, currency, channel, onCreated);
@@ -107,12 +108,9 @@ export function ScheduleForm({
               <Select
                 label="Canal de la programación"
                 value={form.draft.channel}
-                data={[
-                  { value: "global", label: "Global" },
-                  { value: "retail", label: "Retail" },
-                ]}
+                data={["global", "retail", "marketplace", "chatbot", "ventas"].map(value => ({ value, label: value[0]!.toUpperCase() + value.slice(1) }))}
                 onChange={(value) =>
-                  change("channel", value === "retail" ? "retail" : "global")
+                  change("channel", value === "global" || value === "retail" || value === "marketplace" || value === "chatbot" || value === "ventas" ? value : "global")
                 }
                 disabled={locked}
               />
@@ -221,7 +219,7 @@ export function ScheduleForm({
         <Text size="sm">
           {form.draft.kind === "REGULAR" ? "Regular" : "Oferta"}:{" "}
           {form.draft.amount} {form.draft.currency} ·{" "}
-          {form.draft.channel === "retail" ? "Retail" : "Global"}. Inicio{" "}
+          {form.draft.channel[0]!.toUpperCase() + form.draft.channel.slice(1)}. Inicio{" "}
           {form.draft.start}; fin {form.draft.end || "Sin fin"}, {priceTimeZone}
           . Motivo: {form.draft.reason}. La vigencia futura no reemplaza
           anticipadamente el precio actual.
