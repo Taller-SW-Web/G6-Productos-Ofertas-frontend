@@ -21,7 +21,7 @@ import { secureBase } from "./features/promotions/adapters/g7Session";
 import { CatalogServicesContext } from "./features/catalog/services/CatalogServicesContext";
 import { getCatalogServices } from "./features/catalog/services/catalogServices";
 import { createOptionalCatalogHttpServices } from "./features/catalog/services/catalogHttpRuntime";
-import { createCombosRuntime } from "./features/combos/services/combosService";
+import { createApplicationCombosRuntime } from "./features/combos/services/combosService";
 import { CombosProvider } from "./features/combos/components/CombosProvider";
 import { BulkRepositoryContext } from "./features/bulk/services/BulkRepositoryContext";
 import { createBulkFetchTransport, createHttpBulkRepository } from "./features/bulk/adapters/httpBulkRepository";
@@ -73,6 +73,8 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
                   if (result.page !== page || result.pageSize !== pageSize || (reportedTotal !== undefined && reportedTotal !== result.total) || result.items.length !== Math.min(pageSize, Math.max(0, result.total - (page - 1) * pageSize))) throw new Error("Paginación de Catálogo incompatible.");
                   reportedTotal = result.total;
                   totalPages = Math.ceil(result.total / pageSize);
+                  const productsWithVariants = result.items.filter(product => product.hasVariants);
+                  const variantsByProduct = await listVariantsByProduct(commercialCatalog, productsWithVariants, pageSize, signal);
                   for (const product of result.items) {
                     if (!product.id || productIds.has(product.id) || !(product.commerciallyActive === true || product.status === "ACTIVO")) throw new Error("Catálogo devolvió una identidad de producto duplicada o no comercialmente activa.");
                     productIds.add(product.id);
@@ -81,22 +83,12 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
                     targetIds.add(productTargetId);
                     targets.push({ id: productTargetId, label: product.name, productId: product.id, kind: "product" as const, ...(product.skuBase ? { referenceSku: product.skuBase } : {}) });
                     if (product.hasVariants) {
-                      let variantPage = 1;
-                      let variantPages: number;
-                      let variantTotal: number | undefined;
-                      do {
-                        const variants = await commercialCatalog.listVariants(product.id, { page: variantPage, pageSize }, undefined, signal);
-                        if (variants.page !== variantPage || variants.pageSize !== pageSize || (variantTotal !== undefined && variantTotal !== variants.total) || variants.items.length !== Math.min(pageSize, Math.max(0, variants.total - (variantPage - 1) * pageSize)) || variants.items.some(variant => variant.productId !== product.id)) throw new Error("Paginación o identidad de variantes incompatible.");
-                        variantTotal = variants.total;
-                        variantPages = Math.ceil(variants.total / pageSize);
-                        for (const variant of variants.items) if (variant.status === "ACTIVA") {
-                          if (!variant.sku || skus.has(variant.sku) || targetIds.has(`sku:${variant.sku}`)) throw new Error("Catálogo devolvió un SKU u objetivo de Pricing duplicado.");
-                          skus.add(variant.sku);
-                          targetIds.add(`sku:${variant.sku}`);
-                          targets.push({ id: `sku:${variant.sku}`, label: `${product.name} · ${variant.sku}`, productId: product.id, kind: "variant" as const, sku: variant.sku, productTargetId });
-                        }
-                        variantPage++;
-                      } while (variantPage <= variantPages);
+                      for (const variant of variantsByProduct.get(product.id) ?? []) if (variant.status === "ACTIVA") {
+                        if (!variant.sku || skus.has(variant.sku) || targetIds.has(`sku:${variant.sku}`)) throw new Error("Catálogo devolvió un SKU u objetivo de Pricing duplicado.");
+                        skus.add(variant.sku);
+                        targetIds.add(`sku:${variant.sku}`);
+                        targets.push({ id: `sku:${variant.sku}`, label: `${product.name} · ${variant.sku}`, productId: product.id, kind: "variant" as const, sku: variant.sku, productTargetId });
+                      }
                     }
                   }
                   page++;
@@ -205,9 +197,10 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
   } else {
     configureInventoryApi(null);
   }
-  const combosRuntime = await createCombosRuntime(mode, runtime, {
+  const combosRuntime = await createApplicationCombosRuntime(mode, runtime, {
     gateway: adminApi ? gatewayClient ?? undefined : undefined,
-    catalog: commercialCatalog,
+    catalogServices,
+    adminApi,
     scopeId,
   });
   const bulkRepository = mode === "api" && gateway && session

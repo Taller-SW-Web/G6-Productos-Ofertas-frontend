@@ -5,7 +5,7 @@ export interface CatalogHttpTransport {
   request(
     path: string,
     init: {
-      method: "GET" | "POST" | "PATCH";
+      method: "GET" | "POST" | "POST_READ" | "PATCH";
       signal: AbortSignal;
       headers: Record<string, string>;
       body?: string;
@@ -79,7 +79,6 @@ export function createCatalogHttp(transport: CatalogHttpTransport) {
     signal?: AbortSignal,
     expected = 200,
   ): Promise<unknown> {
-    const transportMethod = method === "POST_READ" ? "POST" : method;
     const isCommercialWrite = method === "POST" || method === "PATCH";
     const correlation = crypto.randomUUID();
     const combined = signal
@@ -88,7 +87,7 @@ export function createCatalogHttp(transport: CatalogHttpTransport) {
     let response: Response;
     try {
       response = await transport.request("/api/v1" + path, {
-        method: transportMethod,
+        method,
         signal: combined,
         headers: {
           Accept: "application/json",
@@ -193,6 +192,7 @@ export function createCatalogFetchTransport(
     request: (path, init) =>
       fetcher(url.origin + path, {
         ...init,
+        method: init.method === "POST_READ" ? "POST" : init.method,
         credentials: "omit",
         redirect: "error",
       }),

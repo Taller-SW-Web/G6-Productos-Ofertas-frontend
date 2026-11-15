@@ -54,7 +54,7 @@ describe("Catálogo HTTP: filtros de Combos y resolución SKU por lote", () => {
     const sku = "000/A, SKU+ñ";
     const request = vi.fn(
       async (_path: string, init: { method: string; body?: string }) => {
-        expect(init.method).toBe("POST");
+        expect(init.method).toBe("POST_READ");
         expect(JSON.parse(init.body ?? "{}").skus).toEqual([sku, sku]);
         return response({
           items: [0, 1].map(() => ({
