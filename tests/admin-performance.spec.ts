@@ -111,6 +111,7 @@ const authResponse = {
 async function installControlledApi(page: Page, samples: HttpSample[]) {
   let retry503Attempt = 0;
   let catalogFixtureTotal = 10;
+  const pendingResponses = new Set<Promise<void>>();
   await page.route("**/src/main.tsx*", async (route) => {
     const response = await route.fetch();
     let body = await response.text();
@@ -130,16 +131,20 @@ async function installControlledApi(page: Page, samples: HttpSample[]) {
   page.on("response", async (response: Response) => {
     const request = response.request();
     if (!starts.has(request)) return;
-    const path = new URL(request.url()).pathname;
-    let responseBodyBytes = 0;
-    try { responseBodyBytes = (await response.body()).byteLength; } catch { /* cancelled or bodyless */ }
-    const requestBody = request.postData() ?? "";
-    samples.push({
-      method: request.method(), path, status: response.status(),
-      requestBodyBytes: new TextEncoder().encode(requestBody).byteLength,
-      responseBodyBytes,
-      durationMs: Math.max(0, performance.now() - (starts.get(request) ?? performance.now())),
-    });
+    const pending = (async () => {
+      const path = new URL(request.url()).pathname;
+      let responseBodyBytes = 0;
+      try { responseBodyBytes = (await response.body()).byteLength; } catch { /* cancelled or bodyless */ }
+      const requestBody = request.postData() ?? "";
+      samples.push({
+        method: request.method(), path, status: response.status(),
+        requestBodyBytes: new TextEncoder().encode(requestBody).byteLength,
+        responseBodyBytes,
+        durationMs: Math.max(0, performance.now() - (starts.get(request) ?? performance.now())),
+      });
+    })();
+    pendingResponses.add(pending);
+    void pending.finally(() => pendingResponses.delete(pending));
   });
   page.on("requestfailed", (request) => {
     const start = starts.get(request);
@@ -198,7 +203,10 @@ async function installControlledApi(page: Page, samples: HttpSample[]) {
     const pageSize = Number(url.searchParams.get("tamanio") ?? 20);
     await route.fulfill({ json: { items: [], meta: { pagina: pageNumber, tamanio: pageSize, total: 0, totalPaginas: 0 }, pagina: pageNumber, tamanio: pageSize, total: 0 } });
   });
-  return (total: number) => { catalogFixtureTotal = total; };
+  return {
+    setCatalogFixtureTotal: (total: number) => { catalogFixtureTotal = total; },
+    flushSamples: async () => { await Promise.all([...pendingResponses]); },
+  };
 }
 
 async function login(page: Page) {
@@ -219,7 +227,7 @@ test("@smoke API de fixture del harness responde en el navegador real", async ({
 
 test("@smoke pantalla real de Catálogo consume su endpoint administrativo con filas contractuales", async ({ page }) => {
   const samples: HttpSample[] = [];
-  const setCatalogFixtureTotal = await installControlledApi(page, samples);
+  const { setCatalogFixtureTotal } = await installControlledApi(page, samples);
   setCatalogFixtureTotal(20);
   await page.goto("/productos?tamanio=20");
   await login(page);
@@ -233,7 +241,7 @@ test("benchmark opt-in navegador: rutas administrativas contra API controlada", 
   test.skip(!process.env.G6_PERF_HARNESS, "Opt-in: ejecutar con G6_PERF_HARNESS=1 y guardar artefactos JSON.");
   test.setTimeout(600_000);
   const samples: HttpSample[] = [];
-  const setCatalogFixtureTotal = await installControlledApi(page, samples);
+  const { setCatalogFixtureTotal, flushSamples } = await installControlledApi(page, samples);
   const consoleErrors: string[] = [];
   const consoleWarnings: string[] = [];
   const pageErrors: string[] = [];
@@ -257,11 +265,25 @@ test("benchmark opt-in navegador: rutas administrativas contra API controlada", 
       return text.length > 0 && !text.includes("Cargando página…");
     }, { timeout: 10_000 }).toBe(true);
     await page.waitForTimeout(100);
+    await flushSamples();
     const heading = (await page.getByRole("heading").allTextContents()).join(" | ").trim();
     const visibleAlertCount = await page.getByRole("alert").count();
     const visibleAlerts = await page.getByRole("alert").allTextContents();
     const visibleDataRows = await page.locator("#contenido tbody tr").count();
     const contentVisibleAt = Date.now();
+    const alertText = visibleAlerts.join(" ");
+    const alertClassification = visibleAlertCount === 0
+      ? "none"
+      : alertText.includes("Función no disponible")
+        ? "gateway-contract-unavailable"
+        : /Aún no hay componentes|requiere al menos/.test(alertText)
+          ? "fixture-empty-state-validation"
+          : /respuesta (in)?completa|respuesta (in)?válida|incompatible|no se pudo|no se pudieron|no se puede|error al|consulta no disponible/i.test(alertText)
+            ? "fixture-response-incomplete"
+            : "fixture-data-required";
+    const screenReadiness = heading
+      ? alertClassification === "none" ? "heading-visible-no-alert" : "heading-visible-with-alert"
+      : alertClassification === "none" ? "no-heading-no-alert" : "no-heading-with-alert";
     const routeSamples = samples.splice(0);
     const signatures = routeSamples.map(({ method, path }) => `${method} ${path}`);
     const duplicateRequests = signatures.length - new Set(signatures).size;
@@ -273,7 +295,8 @@ test("benchmark opt-in navegador: rutas administrativas contra API controlada", 
       visibleAlerts,
       visibleDataRows,
       visibleContent: (await page.locator("#contenido").innerText()).slice(0, 400),
-      screenReadiness: heading && visibleAlertCount === 0 ? "heading-visible-no-alert" : visibleAlerts.some((alert) => alert.includes("Función no disponible")) ? "gateway-contract-unavailable" : "fixture-error-or-no-heading",
+      screenReadiness,
+      alertClassification,
       browserRouteToContentMs: contentVisibleAt - browserRouteStart,
       authFormWaitMs: authFormVisibleAt - browserRouteStart,
       authenticationFixtureMs: authCompletedAt - authFormVisibleAt,
@@ -295,6 +318,7 @@ test("benchmark opt-in navegador: rutas administrativas contra API controlada", 
     await login(page);
     await expect(page.getByRole("heading", { name: "Gestión de productos", exact: true })).toBeVisible();
     await expect(page.getByText(`Mostrando ${pageSize} de ${total} productos`, { exact: true })).toBeVisible();
+    await flushSamples();
     const firstPageRows = await page.getByRole("row").count() - 1;
     const pageSamples = samples.splice(0);
     const traversedPages = [1];
@@ -326,6 +350,7 @@ test("benchmark opt-in navegador: rutas administrativas contra API controlada", 
   const searchResponse = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/v1/productos/administracion" && new URL(response.url()).searchParams.has("q"));
   await page.getByRole("textbox", { name: "Búsqueda" }).fill("benchmark");
   await searchResponse;
+  await flushSamples();
   const catalogSearchSamples = samples.splice(0);
   const familySamples: Array<Record<string, unknown>> = [];
   const familyNav = [
@@ -368,6 +393,7 @@ test("benchmark opt-in navegador: rutas administrativas contra API controlada", 
       }, { reset: resetPath, target: targetPath });
       await page.waitForTimeout(10);
       if (sampleIndex >= 0) {
+        await flushSamples();
         durations.push(duration);
         const routeSamples = samples.splice(0);
         const signatures = routeSamples.map(({ method, path }) => `${method} ${path}`);
@@ -404,6 +430,7 @@ test("benchmark opt-in navegador: rutas administrativas contra API controlada", 
   });
   expect(retryScenario).toEqual([503, 200]);
   await page.waitForTimeout(20);
+  await flushSamples();
   const retrySamples = samples.splice(0);
   const report = {
     schemaVersion: 1,
@@ -414,7 +441,9 @@ test("benchmark opt-in navegador: rutas administrativas contra API controlada", 
     bytes: "request/response body bytes only; excludes HTTP headers, TLS and browser assets",
     routeCount: results.length,
     familyCount: new Set(routes.map((route) => route.family)).size,
+    screenReadinessNote: "A visible heading does not establish that endpoint-shaped data was loaded. Route inventory responses are deterministic empty or generic fixtures; only catalogListDatasetRuns populates rows with a contract-shaped dataset.",
     routeReadiness: Object.fromEntries([...new Set(results.map((result) => result.screenReadiness as string))].map((status) => [status, results.filter((result) => result.screenReadiness === status).length])),
+    alertClassification: Object.fromEntries([...new Set(results.map((result) => result.alertClassification as string))].map((classification) => [classification, results.filter((result) => result.alertClassification === classification).length])),
     familyUiSamples: familySamples,
     catalogListDatasetRuns: { note: "real /productos screen and useProductList using contract-shaped fixture on the actual administrative list endpoint; page size is capped at 100 so 1000 total rows are paginated over ten requests", series: catalogListDatasetRuns },
     catalogListSearch: { query: "benchmark", requests: catalogSearchSamples },
