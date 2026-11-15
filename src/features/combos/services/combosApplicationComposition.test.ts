@@ -22,8 +22,8 @@ function setup(token: string) {
   const fetcher = vi.fn<typeof fetch>(async (input, init) => {
     const url = new URL(String(input));
     const bearer = new Headers(init?.headers).get("Authorization");
-    if (url.pathname.includes("/precios/") || url.pathname.includes("/internal/"))
-      throw new Error(`No se permite Pricing privado desde el navegador: ${url.pathname}`);
+    if (url.pathname.includes("/precios/") || url.pathname.includes("/internal/") || url.pathname === "/api/v1/productos/skus/contexto/lote")
+      throw new Error(`No se permite invocar contexto privado de Pricing/Catálogo desde el navegador: ${url.pathname}`);
     if (url.pathname === "/api/v1/productos/administracion" || url.pathname === "/api/v1/productos/administracion/skus/resolver") {
       if (bearer !== "Bearer gestor") return Response.json({ code: "SCOPE_INSUFICIENTE" }, { status: 403 });
       return url.pathname.endsWith("/resolver") ? Response.json(resolution("SKU-001")) : Response.json(emptyPage);
@@ -58,6 +58,7 @@ describe("composición real de Combos de startApplication", () => {
     expect(requests[2]?.init?.method).toBe("POST");
     expect(requests.every(({ init }) => new Headers(init?.headers).get("Authorization") === "Bearer gestor")).toBe(true);
     expect(fetcher.mock.calls.some(([input]) => String(input).includes("/precios/") || String(input).includes("/internal/"))).toBe(false);
+    expect(requests.some(({ url }) => url.pathname === "/api/v1/productos/skus/contexto/lote")).toBe(false);
   });
 
   it("preserva el rechazo 403 de un usuario sin GESTOR_COMERCIAL", async () => {
