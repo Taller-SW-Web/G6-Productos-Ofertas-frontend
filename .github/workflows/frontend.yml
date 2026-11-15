@@ -5,6 +5,18 @@ on:
     branches: [master]
   push:
     branches: [master]
+  workflow_dispatch:
+    inputs:
+      performance_harness:
+        description: Ejecutar benchmark opt-in de pantallas administrativas
+        required: false
+        type: boolean
+        default: false
+      baseline_ref:
+        description: Ref base para comparación secuencial en el mismo runner
+        required: false
+        type: string
+        default: master
 
 concurrency:
   group: frontend-${{ github.event.pull_request.number || github.ref }}
@@ -314,6 +326,71 @@ jobs:
             playwright-report/
           if-no-files-found: ignore
           retention-days: 7
+
+  comparacion_rendimiento_admin:
+    name: Benchmark administrativo base y optimizado (opt-in)
+    if: github.event_name == 'workflow_dispatch' && inputs.performance_harness
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CI: 'true'
+      VITE_DATA_MODE: api
+    steps:
+      - name: Obtener el candidato optimizado
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Preparar Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Instalar dependencias del candidato
+        run: npm ci
+      - name: Instalar Chromium una vez para ambas ejecuciones
+        run: npx playwright install --with-deps chromium
+      - name: Obtener versión base
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ inputs.baseline_ref || 'master' }}
+          path: baseline
+          persist-credentials: false
+      - name: Instalar dependencias de la versión base
+        working-directory: baseline
+        run: npm ci
+      - name: Ejecutar el mismo harness sobre la versión base
+        env:
+          G6_PERF_APP_ROOT: ${{ github.workspace }}/baseline
+          G6_PERF_RUN_LABEL: baseline-${{ inputs.baseline_ref || 'master' }}
+        run: node scripts/run-admin-performance.mjs
+      - name: Guardar evidencia base antes de ejecutar candidato
+        run: |
+          mkdir -p artifacts/admin-performance-baseline
+          cp -R test-results/. artifacts/admin-performance-baseline/
+      - name: Ejecutar el mismo harness sobre el candidato optimizado
+        env:
+          G6_PERF_RUN_LABEL: optimized-${{ github.sha }}
+        run: node scripts/run-admin-performance.mjs
+      - name: Guardar evidencia optimizada
+        if: always()
+        run: |
+          mkdir -p artifacts/admin-performance-optimized
+          cp -R test-results/. artifacts/admin-performance-optimized/ || true
+      - name: Calcular diferencias de percentiles por familia
+        if: always()
+        run: node scripts/compare-admin-performance.mjs artifacts/admin-performance-baseline artifacts/admin-performance-optimized artifacts/admin-performance-comparison.json
+      - name: Conservar mediciones comparables
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: benchmark-admin-${{ inputs.baseline_ref || 'master' }}-vs-${{ github.sha }}
+          path: |
+            artifacts/admin-performance-baseline/
+            artifacts/admin-performance-optimized/
+            artifacts/admin-performance-comparison.json
+          if-no-files-found: ignore
+          retention-days: 30
 
   pruebas_extremo_a_extremo:
     name: Pruebas de extremo a extremo (parte ${{ matrix.parte }} de 4)

@@ -18,6 +18,7 @@ export default defineConfig({
   },
   webServer: {
     command: `npm run dev -- --port ${port} --strictPort`,
+    ...(process.env.G6_PERF_APP_ROOT ? { cwd: process.env.G6_PERF_APP_ROOT } : {}),
     url: `http://127.0.0.1:${port}`,
     reuseExistingServer: !process.env.CI && !process.env.PLAYWRIGHT_PORT,
   },
