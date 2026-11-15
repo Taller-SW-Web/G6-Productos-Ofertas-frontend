@@ -375,6 +375,7 @@ jobs:
           G6_PERF_APP_ROOT: ${{ github.workspace }}
           G6_PERF_RUN_LABEL: optimized-${{ github.sha }}
         run: |
+          rm -rf baseline
           rm -rf node_modules/.vite
           node scripts/run-admin-performance.mjs
       - name: Guardar evidencia optimizada
