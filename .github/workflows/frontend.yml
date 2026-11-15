@@ -363,15 +363,20 @@ jobs:
         env:
           G6_PERF_APP_ROOT: ${{ github.workspace }}/baseline
           G6_PERF_RUN_LABEL: baseline-${{ inputs.baseline_ref || 'master' }}
-        run: node scripts/run-admin-performance.mjs
+        run: |
+          rm -rf baseline/node_modules/.vite
+          node scripts/run-admin-performance.mjs
       - name: Guardar evidencia base antes de ejecutar candidato
         run: |
           mkdir -p artifacts/admin-performance-baseline
           cp -R test-results/. artifacts/admin-performance-baseline/
       - name: Ejecutar el mismo harness sobre el candidato optimizado
         env:
+          G6_PERF_APP_ROOT: ${{ github.workspace }}
           G6_PERF_RUN_LABEL: optimized-${{ github.sha }}
-        run: node scripts/run-admin-performance.mjs
+        run: |
+          rm -rf node_modules/.vite
+          node scripts/run-admin-performance.mjs
       - name: Guardar evidencia optimizada
         if: always()
         run: |
