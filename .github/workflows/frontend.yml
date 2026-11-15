@@ -17,6 +17,12 @@ on:
         required: false
         type: string
         default: master
+      performance_family:
+        description: Familia SPA medida en 100 ciclos después del inventario de rutas
+        required: false
+        type: choice
+        default: all
+        options: [all, Combos]
 
 concurrency:
   group: frontend-${{ github.event.pull_request.number || github.ref }}
@@ -27,6 +33,7 @@ permissions:
 
 jobs:
   clasificar_cambios:
+    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
     name: Clasificar alcance de cambios
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -47,6 +54,7 @@ jobs:
         run: node scripts/clasificar-cambios-ci.mjs
 
   revision_estilo:
+    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
     name: Revisión de estilo
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -72,6 +80,7 @@ jobs:
         run: node --test scripts/ejecutar-e2e-balanceado.test.mjs
 
   comprobacion_tipos:
+    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
     name: Comprobación de tipos
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -89,6 +98,7 @@ jobs:
         run: npm run typecheck
 
   unitarias_combos:
+    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
     name: Pruebas unitarias - Combos
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -106,6 +116,7 @@ jobs:
         run: npm run test:unit:combos
 
   unitarias_carga_masiva:
+    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
     name: Pruebas unitarias - Carga masiva
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -123,6 +134,7 @@ jobs:
         run: npm run test:unit:bulk
 
   unitarias_inventario:
+    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
     name: Pruebas unitarias - Inventario
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -140,6 +152,7 @@ jobs:
         run: npm run test:unit:inventory
 
   unitarias_precios:
+    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
     name: Pruebas unitarias - Precios
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -157,6 +170,7 @@ jobs:
         run: npm run test:unit:pricing
 
   compilacion_demostracion:
+    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
     name: Compilación - Datos de demostración
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -183,6 +197,7 @@ jobs:
           retention-days: 1
 
   compilacion_api:
+    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
     name: Compilación - Integración con API
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -239,6 +254,7 @@ jobs:
           retention-days: 7
 
   verificacion_compilacion:
+    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
     name: Verificación de compilación local
     needs: [compilacion_demostracion]
     runs-on: ubuntu-latest
@@ -296,6 +312,7 @@ jobs:
           retention-days: 7
 
   pruebas_rapidas_interfaz:
+    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
     name: Pruebas rápidas de interfaz
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -363,6 +380,7 @@ jobs:
         env:
           G6_PERF_APP_ROOT: ${{ github.workspace }}/baseline
           G6_PERF_RUN_LABEL: baseline-${{ inputs.baseline_ref || 'master' }}
+          G6_PERF_FAMILY: ${{ inputs.performance_family || 'all' }}
         run: |
           rm -rf baseline/node_modules/.vite
           node scripts/run-admin-performance.mjs
@@ -374,6 +392,7 @@ jobs:
         env:
           G6_PERF_APP_ROOT: ${{ github.workspace }}
           G6_PERF_RUN_LABEL: optimized-${{ github.sha }}
+          G6_PERF_FAMILY: ${{ inputs.performance_family || 'all' }}
         run: |
           rm -rf baseline
           rm -rf node_modules/.vite
@@ -402,6 +421,7 @@ jobs:
     name: Pruebas de extremo a extremo (parte ${{ matrix.parte }} de 4)
     needs: [clasificar_cambios]
     if: >-
+      (github.event_name != 'workflow_dispatch' || !inputs.performance_harness) &&
       always() &&
       (needs.clasificar_cambios.result != 'success' ||
        needs.clasificar_cambios.outputs.clasificacion != 'solo_documentacion')
@@ -444,7 +464,7 @@ jobs:
   validacion_integral:
     # La protección real de master exige el contexto de GitHub Actions `validate`.
     name: validate
-    if: always()
+    if: always() && (github.event_name != 'workflow_dispatch' || !inputs.performance_harness)
     needs:
       - revision_estilo
       - clasificar_cambios

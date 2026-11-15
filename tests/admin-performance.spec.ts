@@ -11,6 +11,16 @@ type HttpSample = {
   failed?: string;
 };
 
+type TraceRequest = {
+  method: string;
+  path: string;
+  requestBodyBytes: number;
+  status?: number;
+  responseBodyBytes?: number;
+  durationMs?: number;
+  failed?: string;
+};
+
 const routes = [
   { family: "Combos", path: "/combos", kind: "list" },
   { family: "Combos", path: "/combos/nuevo", kind: "form" },
@@ -108,10 +118,86 @@ const authResponse = {
   },
 };
 
+// Read-only response fixtures use the published DTO field names and the same
+// identifiers as the route inventory. They keep unknown endpoints on the
+// generic fallback so an absent contract remains visible as an alert.
+function adminReadFixture(path: string): unknown | undefined {
+  const page = { pagina: 1, tamanio: 20, total: 0, totalPaginas: 0 };
+  const category = (categoriaId: string) => ({ categoriaId, nombre: `Categoría ${categoriaId}`, estado: "ACTIVO", version: 1 });
+  const product = {
+    productId: "product-001", nombre: "Producto de fixture", skuBase: "SKU-FIXTURE",
+    tieneVariantes: true, categoriaId: "category-fixture", tipoProductoId: "type-fixture",
+    marcaId: "brand-fixture", estado: "ACTIVO", catalogVersion: 1, descripcion: "Fixture de lectura",
+    imagenes: [], atributos: [], perfilFisico: null,
+  };
+  const preparation = {
+    product_id: "product-001", tiene_variantes: true,
+    pricing: { status: "COMPLETED", manual_retry_allowed: false }, inventario: null,
+    variantes: [{ variant_id: "variant-001", sku: "SKU-FIXTURE-V1", inventario: { status: "COMPLETED", manual_retry_allowed: false } }],
+  };
+  if (path === "/api/v1/categorias/arbol") return [{ categoria: category("cat-001"), hijos: [] }];
+  if (path === "/api/v1/productos") return { items: [], pagina: 1, tamanio: 20, total: 0 };
+  if (path === "/api/v1/productos/administracion/product-001") return product;
+  if (path === "/api/v1/productos/product-001/preparacion") return preparation;
+  if (path === "/api/v1/productos/product-001/variantes") return { items: [], meta: page };
+  if (path === "/api/v1/productos/product-001/variantes/variant-001") return {
+    variant_id: "variant-001", sku: "SKU-FIXTURE-V1", status: "ACTIVA", catalog_version: 1,
+    identifying_attributes: [], non_identifying_attributes: [], images: [], physical_profile: null,
+  };
+  if (path === "/api/v1/combos/combo-001") return {
+    combo_id: "combo-001", status: "ACTIVO", price: 25, components: [
+      { sku: "SKU-FIXTURE-A", quantity: 1 }, { sku: "SKU-FIXTURE-B", quantity: 1 },
+    ], informative_availability: null, calculated_at: null, freshness: null,
+    name: "Combo de fixture", description: "Solo lectura", version: 1,
+  };
+  if (path === "/api/v1/categorias/cat-001" || path === "/api/v1/categorias/seo-001") return category(path.endsWith("seo-001") ? "seo-001" : "cat-001");
+  if (path === "/api/v1/categorias/seo-001/seo") return { categoriaId: "seo-001", slug: "categoria-seo-fixture", metaTitulo: "Categoría", metaDescripcion: "Fixture", updatedAt: "2026-01-01T00:00:00Z" };
+  if (path === "/api/v1/caracteristicas/char-001") return { caracteristicaId: "char-001", nombre: "Material", tipo: "TEXTO", estado: "ACTIVO", version: 1, valores: [] };
+  if (path === "/api/v1/caracteristicas/char-001/valores") return [];
+  if (path === "/api/v1/tipos-producto/type-001") return { tipoProductoId: "type-001", nombre: "Tipo de fixture", estado: "ACTIVO", schemaVersion: 1 };
+  if (path === "/api/v1/tipos-producto/type-001/caracteristicas") return {
+    tipoProducto: { tipoProductoId: "type-001", nombre: "Tipo de fixture", estado: "ACTIVO", schemaVersion: 1 },
+    caracteristicas: [], schemaVersion: 1,
+  };
+  if (path === "/api/v1/marcas/brand-001") return { marcaId: "brand-001", nombre: "Marca de fixture", estado: "ACTIVO", version: 1, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
+  if (path === "/api/v1/recomendaciones/reglas/rule-001") return {
+    reglaId: "rule-001", nombre: "Regla de fixture", tipo: "CROSS_SELL", origen: { tipo: "PRODUCTO", id: "product-001" },
+    prioridad: 1, estado: "ACTIVO", validFrom: "2030-01-01T00:00:00Z", validUntil: "2030-12-31T23:59:59Z", recomendados: [],
+  };
+  if (path === "/api/v1/promociones/promo-001") return {
+    promotionId: "promo-001", nombre: "Promoción de fixture", tipoDescuento: "PORCENTAJE", valor: 10,
+    modalidad: "AUTOMATICA", estado: "ACTIVO", validFrom: "2030-01-01T00:00:00Z", validUntil: "2030-12-31T23:59:59Z",
+    alcance: { productIds: [], skus: [] }, prioridad: 1, canalesHabilitados: [],
+    politicaCombinacion: { ofertaPricing: true, promocionAutomatica: true, cupon: false }, puedeCambiarModalidad: true,
+  };
+  if (path === "/api/v1/cupones/coupon-001") return {
+    cuponId: "coupon-001", codigo: "FIXTURE", promocionId: "promo-001", estado: "ACTIVO",
+    politicaCancelacion: "RESTAURAR_EN_CANCELACION", usosGlobalesConsumidos: 0, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+  };
+  if (path === "/api/v1/precios/importaciones/batch-001") return { batch_id: "batch-001", status: "COMPLETED", allow_partial: false, total_rows: 0, completed_rows: 0, failed_rows: 0, rows: [] };
+  if (path === "/api/v1/auditoria-precios/administracion/audit-001") return {
+    id_auditoria: "audit-001", sku: "SKU-FIXTURE", product_id: "product-001", tipo_precio: "REGULAR",
+    precio_anterior: null, precio_nuevo: 25, variacion_porcentual: null, tipo_operacion: "CREACION",
+    canal_origen: "RETAIL", motivo_cambio: "Fixture de lectura", timestamp: "2026-01-01T00:00:00Z",
+  };
+  if (path === "/api/v1/inventario/dashboard") return {
+    generatedAt: "2026-01-01T00:00:00Z", totalSkus: 0, totalOnHand: 0, totalReserved: 0, totalAvailable: 0,
+    skusDisponibles: 0, skusStockBajo: 0, skusAgotados: 0, porUbicacion: [],
+  };
+  if (path === "/api/v1/carga-masiva/productos/importaciones/batch-001") return {
+    batch_id: "batch-001", status: "COMPLETED", total_rows: 0, completed_rows: 0, failed_rows: 0,
+    needs_reconciliation: false, rows: [],
+  };
+  return undefined;
+}
+
 async function installControlledApi(page: Page, samples: HttpSample[]) {
   let retry503Attempt = 0;
   let catalogFixtureTotal = 10;
   const pendingResponses = new Set<Promise<void>>();
+  let activeTrace: string | null = null;
+  const requestTraces = new Map<string, TraceRequest[]>();
+  const tracedRequestByRequest = new Map<Request, TraceRequest>();
   await page.route("**/src/main.tsx*", async (route) => {
     const response = await route.fetch();
     let body = await response.text();
@@ -126,7 +212,17 @@ async function installControlledApi(page: Page, samples: HttpSample[]) {
 
   const starts = new Map<Request, number>();
   page.on("request", (request) => {
-    if (new URL(request.url()).pathname.startsWith("/api/v1/")) starts.set(request, performance.now());
+    const path = new URL(request.url()).pathname;
+    if (path.startsWith("/api/v1/")) {
+      starts.set(request, performance.now());
+      if (activeTrace) {
+        const trace = requestTraces.get(activeTrace) ?? [];
+        const entry: TraceRequest = { method: request.method(), path, requestBodyBytes: new TextEncoder().encode(request.postData() ?? "").byteLength };
+        trace.push(entry);
+        tracedRequestByRequest.set(request, entry);
+        requestTraces.set(activeTrace, trace);
+      }
+    }
   });
   page.on("response", async (response: Response) => {
     const request = response.request();
@@ -136,6 +232,12 @@ async function installControlledApi(page: Page, samples: HttpSample[]) {
       let responseBodyBytes = 0;
       try { responseBodyBytes = (await response.body()).byteLength; } catch { /* cancelled or bodyless */ }
       const requestBody = request.postData() ?? "";
+      const traced = tracedRequestByRequest.get(request);
+      if (traced) {
+        traced.status = response.status();
+        traced.responseBodyBytes = responseBodyBytes;
+        traced.durationMs = Math.max(0, performance.now() - (starts.get(request) ?? performance.now()));
+      }
       samples.push({
         method: request.method(), path, status: response.status(),
         requestBodyBytes: new TextEncoder().encode(requestBody).byteLength,
@@ -149,11 +251,19 @@ async function installControlledApi(page: Page, samples: HttpSample[]) {
   page.on("requestfailed", (request) => {
     const start = starts.get(request);
     if (start === undefined) return;
+    const failure = request.failure()?.errorText ?? "request failed";
+    const traced = tracedRequestByRequest.get(request);
+    if (traced) {
+      traced.status = 0;
+      traced.responseBodyBytes = 0;
+      traced.durationMs = Math.max(0, performance.now() - start);
+      traced.failed = failure;
+    }
     samples.push({
       method: request.method(), path: new URL(request.url()).pathname, status: 0,
       requestBodyBytes: new TextEncoder().encode(request.postData() ?? "").byteLength,
       responseBodyBytes: 0, durationMs: Math.max(0, performance.now() - start),
-      failed: request.failure()?.errorText ?? "request failed",
+      failed: failure,
     });
   });
   await page.route("**/api/v1/**", async (route) => {
@@ -198,6 +308,11 @@ async function installControlledApi(page: Page, samples: HttpSample[]) {
       await route.fulfill({ json: { items: [], meta: { pagina: pageNumber, tamanio: pageSize, total: 0, totalPaginas: 0 } } });
       return;
     }
+    const contractFixture = adminReadFixture(path);
+    if (contractFixture !== undefined) {
+      await route.fulfill({ json: contractFixture });
+      return;
+    }
     // API fixtures are deterministic, intentionally empty and local to this run.
     const pageNumber = Number(url.searchParams.get("pagina") ?? 1);
     const pageSize = Number(url.searchParams.get("tamanio") ?? 20);
@@ -205,6 +320,8 @@ async function installControlledApi(page: Page, samples: HttpSample[]) {
   });
   return {
     setCatalogFixtureTotal: (total: number) => { catalogFixtureTotal = total; },
+    setTrace: (trace: string | null) => { activeTrace = trace; },
+    takeTrace: (trace: string) => requestTraces.get(trace) ?? [],
     flushSamples: async () => { await Promise.all([...pendingResponses]); },
   };
 }
@@ -241,7 +358,7 @@ test("benchmark opt-in navegador: rutas administrativas contra API controlada", 
   test.skip(!process.env.G6_PERF_HARNESS, "Opt-in: ejecutar con G6_PERF_HARNESS=1 y guardar artefactos JSON.");
   test.setTimeout(600_000);
   const samples: HttpSample[] = [];
-  const { setCatalogFixtureTotal, flushSamples } = await installControlledApi(page, samples);
+  const { setCatalogFixtureTotal, flushSamples, setTrace, takeTrace } = await installControlledApi(page, samples);
   const consoleErrors: string[] = [];
   const consoleWarnings: string[] = [];
   const pageErrors: string[] = [];
@@ -362,15 +479,18 @@ test("benchmark opt-in navegador: rutas administrativas contra API controlada", 
     ["Inventory", "/inventario"], ["Bulk", "/carga-masiva"],
   ] as const;
   for (const [family, targetPath] of familyNav) {
+    if (process.env.G6_PERF_FAMILY && process.env.G6_PERF_FAMILY !== "all" && process.env.G6_PERF_FAMILY !== family) continue;
     const durations: number[] = [];
     let requestCount = 0;
-    let requestBodyBytes = 0;
-    let responseBodyBytes = 0;
     let duplicateRequests = 0;
-    let failedRequests = 0;
     const requestPathCounts = new Map<string, number>();
+    const navigationTraces: Array<{ sample: number; resetPath: string; targetPath: string; requestsStarted: Array<{ method: string; path: string; requestBodyBytes: number }> }> = [];
+    await flushSamples();
+    samples.splice(0);
     for (let sampleIndex = -5; sampleIndex < 100; sampleIndex += 1) {
       const resetPath = targetPath === "/combos" ? "/productos" : "/combos";
+      const traceId = `${family}:${sampleIndex}`;
+      setTrace(traceId);
       const duration = await page.evaluate(async ({ reset, target }) => {
         const clickRoute = (path: string) => new Promise<void>((resolve, reject) => {
           const anchor = [...document.querySelectorAll<HTMLAnchorElement>('nav[aria-label="Navegación de la aplicación"] a')]
@@ -392,22 +512,28 @@ test("benchmark opt-in navegador: rutas administrativas contra API controlada", 
         return performance.now() - startedAt;
       }, { reset: resetPath, target: targetPath });
       await page.waitForTimeout(10);
+      setTrace(null);
+      const requestsStarted = takeTrace(traceId);
       if (sampleIndex >= 0) {
-        await flushSamples();
         durations.push(duration);
-        const routeSamples = samples.splice(0);
-        const signatures = routeSamples.map(({ method, path }) => `${method} ${path}`);
-        requestCount += routeSamples.length;
-        requestBodyBytes += routeSamples.reduce((sum, sample) => sum + sample.requestBodyBytes, 0);
-        responseBodyBytes += routeSamples.reduce((sum, sample) => sum + sample.responseBodyBytes, 0);
+        const signatures = requestsStarted.map(({ method, path }) => `${method} ${path}`);
+        requestCount += requestsStarted.length;
         duplicateRequests += signatures.length - new Set(signatures).size;
-        failedRequests += routeSamples.filter((sample) => sample.failed).length;
-        for (const sample of routeSamples) {
-          const key = `${sample.method} ${sample.path} ${sample.status}`;
+        navigationTraces.push({ sample: sampleIndex, resetPath, targetPath, requestsStarted });
+        for (const sample of requestsStarted) {
+          const key = `${sample.method} ${sample.path}`;
           requestPathCounts.set(key, (requestPathCounts.get(key) ?? 0) + 1);
         }
       }
     }
+    await page.waitForTimeout(100);
+    await flushSamples();
+    const familyRequests = navigationTraces.flatMap((trace) => trace.requestsStarted) as TraceRequest[];
+    const requestBodyBytes = familyRequests.reduce((sum, request) => sum + request.requestBodyBytes, 0);
+    const responseBodyBytes = familyRequests.reduce((sum, request) => sum + (request.responseBodyBytes ?? 0), 0);
+    const failedRequests = familyRequests.filter((request) => request.failed).length;
+    const completedRequests = familyRequests.filter((request) => request.status !== undefined).length;
+    samples.splice(0);
     const sorted = [...durations].sort((a, b) => a - b);
     const percentile = (p: number) => sorted[Math.min(sorted.length - 1, Math.ceil(p * sorted.length) - 1)] ?? 0;
     familySamples.push({
@@ -416,7 +542,11 @@ test("benchmark opt-in navegador: rutas administrativas contra API controlada", 
       meanMs: durations.reduce((sum, value) => sum + value, 0) / durations.length,
       requestCount, requestBodyBytes, responseBodyBytes, duplicateRequests, failedRequests,
       requestPathCounts: Object.fromEntries(requestPathCounts),
-      scope: "authenticated sidebar click to SPA URL transition plus 10ms fixture settle; excludes provider latency",
+      navigationTraces,
+      requestCounting: "requests started during each reset→target navigation pair; response completion is tracked independently after the original 10ms settle",
+      completedRequests,
+      pendingAtCollection: familyRequests.length - completedRequests,
+      scope: "authenticated sidebar reset and target SPA URL transitions with the original 10ms fixture settle; excludes provider latency",
     });
   }
   const retryScenario = await page.evaluate(async () => {
