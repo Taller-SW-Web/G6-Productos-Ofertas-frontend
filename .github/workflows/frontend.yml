@@ -385,10 +385,12 @@ jobs:
           rm -rf baseline/node_modules/.vite
           node scripts/run-admin-performance.mjs
       - name: Guardar evidencia base antes de ejecutar candidato
+        if: always()
         run: |
           mkdir -p artifacts/admin-performance-baseline
-          cp -R test-results/. artifacts/admin-performance-baseline/
+          cp -R test-results/. artifacts/admin-performance-baseline/ || true
       - name: Ejecutar el mismo harness sobre el candidato optimizado
+        id: candidato
         env:
           G6_PERF_APP_ROOT: ${{ github.workspace }}
           G6_PERF_RUN_LABEL: optimized-${{ github.sha }}
@@ -398,13 +400,25 @@ jobs:
           rm -rf node_modules/.vite
           node scripts/run-admin-performance.mjs
       - name: Guardar evidencia optimizada
-        if: always()
+        if: always() && steps.candidato.outcome != 'skipped'
         run: |
           mkdir -p artifacts/admin-performance-optimized
           cp -R test-results/. artifacts/admin-performance-optimized/ || true
       - name: Calcular diferencias de percentiles por familia
         if: always()
-        run: node scripts/compare-admin-performance.mjs artifacts/admin-performance-baseline artifacts/admin-performance-optimized artifacts/admin-performance-comparison.json
+        run: |
+          mkdir -p artifacts
+          baseline_report=$(find artifacts/admin-performance-baseline -name admin-browser-performance.json -print -quit 2>/dev/null || true)
+          optimized_report=$(find artifacts/admin-performance-optimized -name admin-browser-performance.json -print -quit 2>/dev/null || true)
+          if [ -n "$baseline_report" ] && [ -n "$optimized_report" ]; then
+            node scripts/compare-admin-performance.mjs artifacts/admin-performance-baseline artifacts/admin-performance-optimized artifacts/admin-performance-comparison.json
+          else
+            printf '{"schemaVersion":1,"status":"PARTIAL","comparison":"not-produced","baselineReportPresent":%s,"optimizedReportPresent":%s}\n' \
+              "$( [ -n "$baseline_report" ] && echo true || echo false )" \
+              "$( [ -n "$optimized_report" ] && echo true || echo false )" \
+              > artifacts/admin-performance-comparison.json
+            echo 'Comparison unavailable; retained any reports and Playwright failure diagnostics.'
+          fi
       - name: Conservar mediciones comparables
         if: always()
         uses: actions/upload-artifact@v7.0.2
