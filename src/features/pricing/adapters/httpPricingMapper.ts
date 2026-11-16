@@ -16,7 +16,6 @@ export interface PricingChannelIds {
   chatbot?: string;
   ventas?: string;
 }
-
 function invalidResponse(): never {
   throw new PricingFailure(
     "error",
@@ -140,7 +139,7 @@ function responseMoney(value: unknown): string {
 
 function priceChannel(
   value: string | null,
-  channelIds: PricingChannelIds,
+  channelIds: PricingChannelIds = {},
 ): PriceChannel {
   if (value === null) return "global";
   for (const channel of ["retail", "marketplace", "chatbot", "ventas"] as const)

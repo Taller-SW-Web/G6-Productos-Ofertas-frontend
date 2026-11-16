@@ -72,7 +72,6 @@ function setup(
     async () => jsonResponse(skuPrice()),
   options: {
     targets?: PriceTarget[];
-    retailChannelId?: string;
     onUpdated?: HttpPricingRepositoryDependencies["onUpdated"];
   } = {},
 ) {
@@ -87,9 +86,6 @@ function setup(
       signal.throwIfAborted();
       return options.targets ?? targets;
     },
-    channelIds: options.retailChannelId
-      ? { retail: options.retailChannelId }
-      : undefined,
     onUpdated: options.onUpdated,
   });
   return { repository, request, calls };
@@ -277,6 +273,32 @@ describe("createHttpPricingRepository", () => {
     expect(request).toHaveBeenCalledTimes(2);
   });
 
+  it("consulta la versión propia del SKU y envía el canal canónico RETAIL en el PATCH", async () => {
+    const { repository, calls } = setup(async (_path, request) =>
+      jsonResponse(
+        skuPrice({
+          channel_id: "RETAIL",
+          ...(request.method === "PATCH"
+            ? { precio_regular: 13.2, price_version: 5 }
+            : {}),
+        }),
+      ),
+    );
+    const retailTarget = { targetId: variant.id, channel: "retail" as const };
+    const signal = new AbortController().signal;
+    const before = await repository.readEditable(retailTarget, signal);
+    expect(before).toMatchObject({ channel: "retail", version: 4 });
+    await expect(
+      repository.update(change({ target: retailTarget }), signal),
+    ).resolves.toMatchObject({ channel: "retail", version: 5 });
+    expect(calls.map(({ request }) => request.method)).toEqual(["GET", "PATCH"]);
+    expect(firstCall(calls).path).toBe("/api/v1/precios/administracion/skus/SKU%2FA?channelId=RETAIL");
+    expect(JSON.parse(firstCall(calls.slice(1)).request.body ?? "{}")).toMatchObject({
+      channelId: "RETAIL",
+      priceVersion: 4,
+    });
+  });
+
   it("lee y envía Retail textual con la versión exacta del producto; un 409 no se reintenta", async () => {
     const { repository, calls } = setup(async (path, init) => init.method === "PATCH"
       ? jsonResponse({ code: "VERSION_CONFLICT" }, 409)
@@ -296,6 +318,40 @@ describe("createHttpPricingRepository", () => {
     ]);
     expect(JSON.parse(calls[2]!.request.body!)).toMatchObject({ channelId: "RETAIL", priceVersion: 7 });
   });
+
+  it.each([null, "MARKETPLACE"])(
+    "deja el PATCH Retail sin confirmar cuando la respuesta indica canal %s",
+    async (channelId) => {
+      const onUpdated = vi.fn();
+      const { repository, calls } = setup(
+        async (_path, request) =>
+          jsonResponse(
+            request.method === "PATCH"
+              ? skuPrice({
+                  channel_id: channelId,
+                  precio_regular: 13.2,
+                  price_version: 5,
+                })
+              : skuPrice({ channel_id: "RETAIL" }),
+          ),
+        { onUpdated },
+      );
+      const target = { targetId: variant.id, channel: "retail" as const };
+      const signal = new AbortController().signal;
+      const update = change({ target });
+      await repository.readEditable(target, signal);
+
+      await expect(repository.update(update, signal)).rejects.toMatchObject({
+        kind: "unknown",
+        message: expect.stringContaining("La respuesta no confirma el cambio"),
+      });
+      await expect(repository.update(update, signal)).rejects.toMatchObject({
+        kind: "unknown",
+      });
+      expect(calls.map(({ request }) => request.method)).toEqual(["GET", "PATCH"]);
+      expect(onUpdated).not.toHaveBeenCalled();
+    },
+  );
 
   it("clasifica errores HTTP y solo interpreta los 404 contractuales como ausencia", async () => {
     for (const [status, code, kind] of [
@@ -394,7 +450,7 @@ describe("createHttpPricingRepository", () => {
         tipoPrecio: "OFERTA",
         importe: 10,
         moneda: "COP",
-        channelId: null,
+        channelId: "RETAIL",
         validFrom: "2026-10-20T15:00:00.000Z",
         validUntil: null,
         estado: "SCHEDULED",
@@ -407,7 +463,7 @@ describe("createHttpPricingRepository", () => {
         kind: "OFERTA",
         amount: "10.00",
         currency: "COP",
-        channel: "global",
+        channel: "retail",
         start: "2026-10-20T10:00",
         end: "",
         reason: "Oferta de temporada",
@@ -420,7 +476,7 @@ describe("createHttpPricingRepository", () => {
       tipoPrecio: "OFERTA",
       importe: 10,
       moneda: "COP",
-      channelId: null,
+      channelId: "RETAIL",
       validFrom: "2026-10-20T15:00:00.000Z",
       validUntil: null,
       motivoCambio: "Oferta de temporada",
