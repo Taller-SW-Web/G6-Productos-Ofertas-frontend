@@ -582,6 +582,7 @@ export function createHttpCatalogRepository(
         preparationSummary,
         ...(audience === "admin"
           ? {
+              typeCorrectionEligible: dto.elegibleCorreccionTipo === true,
               identifyingCharacteristicIds: array(
                 dto.caracteristicasIdentificadoras,
               ).map(string),

@@ -49,6 +49,8 @@ export function useProductForm({
   const isEdit = Boolean(initialProduct);
   const { catalog: catalogService, taxonomy: taxonomyService } = useCatalogServices();
   const mode = useContext(DataModeContext);
+  const canCorrectType = initialProduct?.typeCorrectionEligible === true &&
+    initialProduct.catalogVersion !== null;
   const promotionSession = useContext(PromotionSessionContext);
 
   const [categories, setCategories] = useState<TaxonomyCategory[]>([]);
@@ -216,8 +218,7 @@ export function useProductForm({
 
   const updateField = useCallback(
     <K extends keyof ProductFormData>(field: K, value: ProductFormData[K]) => {
-      // Q-06 is still open: no ordinary edit may propose a type correction.
-      if (isEdit && field === "tipoProductoId") return;
+      if (isEdit && field === "tipoProductoId" && !canCorrectType) return;
       setFormData((prev) => ({ ...prev, [field]: value }));
       setIsDirty(true);
       setErrors((prev) => {
@@ -226,7 +227,7 @@ export function useProductForm({
         return next;
       });
     },
-    [isEdit],
+    [isEdit, canCorrectType],
   );
 
   const updateAttribute = useCallback(
@@ -272,6 +273,15 @@ export function useProductForm({
     }
     if (!formData.tipoProductoId) {
       newErrors.tipoProductoId = "Selecciona un tipo de producto.";
+    }
+    if (initialProduct && formData.tipoProductoId !== initialProduct.typeId) {
+      if (!canCorrectType || !productTypes.some(type => type.id === formData.tipoProductoId && type.activo)) {
+        newErrors.tipoProductoId = "Selecciona un tipo de producto activo autorizado.";
+      } else if (initialProduct.attributes.some(attribute =>
+        !attributeSchema.some(schema => schema.caracteristicaId === attribute.caracteristicaId && schema.tipo === attribute.tipo),
+      )) {
+        newErrors.tipoProductoId = "El nuevo tipo es incompatible con los atributos guardados.";
+      }
     }
 
     // Physical profile: if simple, any supplied dimension must be > 0
@@ -376,6 +386,9 @@ export function useProductForm({
           imagenes: images,
           perfilFisico: physicalProfile,
           catalogVersion: initialProduct.catalogVersion,
+          ...(formData.tipoProductoId !== initialProduct.typeId
+            ? { tipoProductoId: formData.tipoProductoId }
+            : {}),
         };
         const updated = await catalogService.update(
           initialProduct.id,
@@ -451,6 +464,7 @@ export function useProductForm({
     schemaLoading,
     schemaError,
     schemaConfirmed,
+    canCorrectType,
     retrySchema,
     loadingMasters,
     handleSubmit,
