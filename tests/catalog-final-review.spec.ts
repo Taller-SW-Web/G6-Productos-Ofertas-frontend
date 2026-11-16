@@ -46,14 +46,10 @@ test("LISTA with only a historical label requires explicit ID confirmation", asy
 });
 
 for (const publication of ["true", "false", "unknown"]) {
-  test(`type correction requires known publication preconditions and resolved Q-06: ${publication}`, async ({ page }) => {
+  test(`Q-06 stays unavailable without Catalog eligibility confirmation (publication: ${publication})`, async ({ page }) => {
     await page.goto(`/tests/harness/catalog-adapter.html?product-edit=1&schema-empty=1&publication=${publication}&path=/productos/external-product/editar`);
     await expect(page.getByRole("combobox", { name: "Tipo de producto", exact: true })).toBeDisabled();
-    if (publication === "false") {
-      await expect(page.getByText("El tipo de producto no se puede cambiar en este momento.")).toBeVisible();
-    } else {
-      await expect(page.getByText("Completa los requisitos del producto antes de cambiar el tipo.")).toBeVisible();
-    }
+    await expect(page.getByText("Catálogo no confirmó que este producto pueda corregir su tipo.", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Guardar cambios", exact: true }).click();
     await expect.poll(() => page.evaluate(() => window.productPayload)).toBeTruthy();
     expect(await page.evaluate(() => window.productPayload)).not.toHaveProperty("tipoProductoId");
