@@ -96,6 +96,7 @@ function ProductEditFormContent({
     schemaLoading,
     schemaError,
     schemaConfirmed,
+    canCorrectType,
     loadingMasters,
     retrySchema,
     handleSubmit,
@@ -150,7 +151,7 @@ function ProductEditFormContent({
             attributeSchema={attributeSchema}
             schemaConfirmed={schemaConfirmed}
             isEdit={true}
-            initialProduct={product}
+            canCorrectType={canCorrectType}
           />
 
           <Group justify="flex-start" gap="md" mt="md">

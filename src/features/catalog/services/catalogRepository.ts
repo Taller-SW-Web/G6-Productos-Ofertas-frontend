@@ -97,6 +97,7 @@ export interface ProductDetailView extends ProductView {
   preparation: ProductPreparationView;
   variants: VariantSummaryView[];
   publishedCommercially?: boolean;
+  typeCorrectionEligible?: boolean;
 }
 
 export interface CatalogQuery {

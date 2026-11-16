@@ -9,7 +9,9 @@ import { createCatalogServices, type CatalogServices } from "./catalogServices";
 export function createCatalogHttpServices(transport: CatalogHttpTransport, adminReads = true): CatalogServices & { commercialCatalog: CatalogServices["catalog"] } {
   const taxonomy = createHttpTaxonomyRepository(transport);
   return { ...createCatalogServices("api", { apiTaxonomy: () => taxonomy,
-    apiCatalog: () => createHttpCatalogRepository(transport, adminReads ? "admin" : "commercial") }),
+    apiCatalog: () => adminReads
+      ? createHttpCatalogRepository(transport, "admin")
+      : createUnavailableApiCatalogRepository("La API administrativa de Catálogo requiere habilitación explícita.") }),
     commercialCatalog: createHttpCatalogRepository(transport, "commercial") };
 }
 
