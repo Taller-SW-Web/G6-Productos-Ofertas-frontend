@@ -69,12 +69,20 @@ export function VariantPreparationPage() {
     );
   }
 
-  const inventoryStatus =
-    preparation?.inventario?.status ??
-    preparation?.inventoryStatus ??
-    variant?.inventoryStatus ??
-    variant?.inventoryPreparationStatus ??
-    "PENDING";
+  if (!preparation) {
+    return (
+      <Box p="lg">
+        <FeedbackAlert semantic="error" title="Preparación no disponible">
+          Catálogo no devolvió un estado autoritativo y consistente para esta variante.
+        </FeedbackAlert>
+        <Button onClick={() => reload()} mt="md" variant="outline">
+          Consultar nuevamente
+        </Button>
+      </Box>
+    );
+  }
+
+  const inventoryStatus = preparation.inventario.status;
   const prepSemantic =
     inventoryStatus === "COMPLETED"
       ? "success"
@@ -230,12 +238,6 @@ export function VariantPreparationPage() {
                   </Alert>
                 )}
 
-                {preparation?.lastCheckedAt && (
-                  <Text size="xs" c="dimmed">
-                    Última verificación de sincronización:{" "}
-                    <strong>{new Date(preparation.lastCheckedAt).toLocaleString()}</strong>
-                  </Text>
-                )}
               </Stack>
             </SectionCard>
           </Grid.Col>

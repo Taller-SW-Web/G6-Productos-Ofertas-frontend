@@ -67,6 +67,23 @@ export function ProductPreparationPage() {
     );
   }
 
+  if (prepState.status === "error") {
+    return (
+      <Stack gap="md" p="lg">
+        <FeedbackAlert semantic="error" title="No se pudo consultar la preparación">
+          {prepState.error}
+        </FeedbackAlert>
+        <Button
+          variant="outline"
+          leftSection={<IconRefresh size={16} />}
+          onClick={() => prepState.reload()}
+        >
+          Consultar nuevamente
+        </Button>
+      </Stack>
+    );
+  }
+
   if (["error", "forbidden", "session"].includes(detailState.status)) {
     const prep = prepState.status === "success" && prepState.data?.productId === productId ? prepState.data : undefined;
     const dependencies = prep ? [
@@ -122,7 +139,19 @@ export function ProductPreparationPage() {
   }
 
   const p = detailState.product;
-  const prep = prepState.status === "success" && prepState.data?.productId === p.id ? prepState.data : p.preparation;
+  const prep = prepState.data;
+  if (!prep || prep.productId !== p.id) {
+    return (
+      <Stack gap="md" p="lg">
+        <FeedbackAlert semantic="error" title="Preparación no disponible">
+          Catálogo no devolvió un estado administrativo consistente para este producto.
+        </FeedbackAlert>
+        <Button variant="outline" onClick={() => prepState.reload()}>
+          Consultar nuevamente
+        </Button>
+      </Stack>
+    );
+  }
 
   const isPricingReady = prep.pricing.status === "COMPLETED";
   const isInventoryReady = p.hasVariants
@@ -162,6 +191,14 @@ export function ProductPreparationPage() {
                 Editar producto
               </Button>
             )}
+
+            <Button
+              variant="outline"
+              leftSection={<IconRefresh size={16} />}
+              onClick={() => setRevision((current) => current + 1)}
+            >
+              Consultar estado
+            </Button>
 
             {p.catalogVersion !== null && p.status === "BORRADOR" && (
               <Button
