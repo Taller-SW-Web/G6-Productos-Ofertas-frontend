@@ -490,7 +490,8 @@ jobs:
 
   unitarias_taxonomy:
     if: >-
-      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
+      (github.event_name != 'workflow_dispatch' || !inputs.performance_harness)
     name: Pruebas unitarias - Taxonomy
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -505,7 +506,8 @@ jobs:
 
   politica_release:
     if: >-
-      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
+      (github.event_name != 'workflow_dispatch' || !inputs.performance_harness)
     name: Política de release
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -520,7 +522,8 @@ jobs:
 
   e2e_pricing:
     if: >-
-      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
+      (github.event_name != 'workflow_dispatch' || !inputs.performance_harness)
     name: E2E Pricing (configuración propia)
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -549,7 +552,8 @@ jobs:
 
   seguridad_dependencias:
     if: >-
-      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
+      (github.event_name != 'workflow_dispatch' || !inputs.performance_harness)
     name: Auditoría de dependencias High/Critical
     runs-on: ubuntu-latest
     permissions:
@@ -559,8 +563,15 @@ jobs:
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '22'
-      - name: Registrar SHA auditado
-        run: printf '%s\n' "$GITHUB_SHA" > dependency-audit-sha.txt
+      - name: Registrar SHA auditado y contexto de PR
+        env:
+          AUDITED_SHA: ${{ github.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          ACTIONS_RUN_ID: ${{ github.run_id }}
+        run: |
+          printf '%s\n' "$AUDITED_SHA" > dependency-audit-sha.txt
+          node -e "require('node:fs').writeFileSync('dependency-audit-context.json', JSON.stringify({audited_sha:process.env.AUDITED_SHA,pull_request_head_sha:process.env.PR_HEAD_SHA||null,pull_request_base_sha:process.env.PR_BASE_SHA||null,actions_run_id:process.env.ACTIONS_RUN_ID},null,2)+'\\n')"
       - name: Auditar dependencias directas y transitivas desde package-lock
         run: npm audit --audit-level=high --json > dependency-audit.json
       - name: Conservar evidencia por SHA incluso ante vulnerabilidades
@@ -570,6 +581,7 @@ jobs:
           name: dependency-audit-${{ github.sha }}
           path: |
             dependency-audit-sha.txt
+            dependency-audit-context.json
             dependency-audit.json
           if-no-files-found: error
           retention-days: 30
@@ -599,6 +611,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Obtener el código evaluado
+        uses: actions/checkout@v7.0.1
+      - name: Preparar Node.js para el verificador
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
       - name: Verificar resultados obligatorios y clasificación documental
         env:
           RESULTADOS: ${{ toJSON(needs) }}
