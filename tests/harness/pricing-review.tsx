@@ -19,7 +19,7 @@ const params = new URLSearchParams(window.location.search);
 const pricing = createDemoPricingRuntime(browserReportDownloader, { reviewTools: true });
 const combos = await createCombosRuntime("mock", pricing);
 window.history.replaceState(null, "", params.get("path") ?? "/precios");
-const { App } = await import("../../src/app/App");
+const { FeatureTestApp: App } = await import("./FeatureTestApp");
 createRoot(document.getElementById("root")!).render(
   <MantineProvider theme={theme} cssVariablesResolver={cssVariablesResolver} forceColorScheme="light">
     <DataModeContext.Provider value="mock">

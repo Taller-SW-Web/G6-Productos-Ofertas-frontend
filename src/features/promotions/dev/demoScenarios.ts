@@ -8,6 +8,7 @@ export type CouponScenario =
   | "session"
   | "forbidden"
   | "missing"
+  | "expired"
   | "usage-unavailable";
 
 export type CouponMutationScenario =
@@ -130,6 +131,7 @@ export function readCouponScenario(params: URLSearchParams): CouponScenario {
     case "session":
     case "forbidden":
     case "missing":
+    case "expired":
     case "usage-unavailable":
       return value;
     default:

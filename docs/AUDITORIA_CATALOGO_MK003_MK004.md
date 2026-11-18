@@ -1,4 +1,9 @@
-# Auditoría vigente MK-003 / MK-004 — revisión del 13 de octubre de 2026
+# Auditoría histórica MK-003 / MK-004 — revisión del 13 de octubre de 2026
+
+> Actualización del 16 de octubre: la revisión vigente de composición, sincronización
+> y validación es [Issue #35 — Catálogo/SKU](ISSUE_35_CATALOGO.md). Este archivo conserva
+> la evidencia histórica del PR #25, ya integrado en master. Sus afirmaciones sobre
+> PR abierto, fuentes/versiones, tests y puente predeterminado no describen la entrega #35.
 
 Rama `poma`, PR #25 en borrador. Estado: `MOCK_INTEGRATED`; `BLOCKED_CONTRACT` para
 activar Taxonomía compartida y HTTP real. Esta sección sustituye las conclusiones de

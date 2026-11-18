@@ -31,6 +31,7 @@ export function ProductActivationDialog({
     reactivate,
     reconcile,
     clearError,
+    isUnknown,
   } = useProductStateMutation();
 
   // Evaluate requirements locally for checklist preview
@@ -58,7 +59,7 @@ export function ProductActivationDialog({
     : true;
 
   const handleConfirm = async () => {
-    if (isUnknownError) {
+    if (isUnknownError || isUnknown(product.id)) {
       const ok = await reconcile(product.id, "ACTIVO");
       if (ok) {
         onSuccess({ ...product, status: "ACTIVO" });
@@ -84,7 +85,7 @@ export function ProductActivationDialog({
     <ConfirmDialog
       opened={opened}
       title={actionTitle}
-      confirmLabel={isUnknownError ? "Consultar estado" : actionTitle}
+      confirmLabel={isUnknownError || isUnknown(product.id) ? "Consultar estado" : actionTitle}
       submitting={submitting || reconciling}
       onCancel={handleClose}
       onConfirm={handleConfirm}
@@ -96,7 +97,7 @@ export function ProductActivationDialog({
           </Text>
           <Group gap="xs" mt={2}>
             <Text size="xs" c="dimmed">
-              SKU Base: <strong>{product.skuBase}</strong>
+              SKU Base: <strong>{product.skuBase ?? "Sin SKU base"}</strong>
             </Text>
             <Badge size="xs" variant="outline" color="gray">
               {product.hasVariants ? "Con variantes" : "Simple"}

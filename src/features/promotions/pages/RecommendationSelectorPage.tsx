@@ -9,6 +9,7 @@ import {
   SectionCard,
 } from "../../../components/shared";
 import type { RecommendationEditorContext } from "./RecommendationEditorLayout";
+import { PromotionDataNotice } from "../components/PromotionDataNotice";
 export function RecommendationSelectorPage() {
   const { form, products, catalogLoading, catalogError, root, suffix } =
     useOutletContext<RecommendationEditorContext>();
@@ -34,6 +35,7 @@ export function RecommendationSelectorPage() {
         description="El origen específico, los productos inactivos y los ya añadidos se excluyen. La selección es a nivel producto."
       />
       <Stack gap="lg">
+        <PromotionDataNotice kind="recommendation-selector" />
         <SearchField
           label="Buscar productos"
           value={search}

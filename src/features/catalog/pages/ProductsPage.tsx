@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useContext, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { ActionIcon, Avatar, Button, Group, Stack, Text } from "@mantine/core";
 import { IconEye, IconPlus } from "@tabler/icons-react";
@@ -19,8 +19,10 @@ import {
 import type { CatalogQuery, ProductView } from "../services/catalogRepository";
 import { useTaxonomyFilters } from "../hooks/useTaxonomyFilters";
 import { useMockStateRevision } from "../../shared/useMockStateRevision";
+import { DataModeContext } from "../../../app/config/DataModeContext";
 
 export function ProductsPage() {
+  const mode = useContext(DataModeContext) ?? "mock";
   const [params, setParams] = useSearchParams();
   const location = useLocation();
   const [revision, setRevision] = useState(0);
@@ -33,6 +35,8 @@ export function ProductsPage() {
   ]);
   const effectiveRevision = revision + mockRevision;
   const taxonomy = useTaxonomyFilters(effectiveRevision);
+  const categoryNames = new Map(taxonomy.categories.map(({ id, nombre }) => [id, nombre]));
+  const typeNames = new Map(taxonomy.productTypes.map(({ id, nombre }) => [id, nombre]));
 
   const query: CatalogQuery = {
     q: params.get("q") || undefined,
@@ -132,7 +136,7 @@ export function ProductsPage() {
               {row.name}
             </Text>
             <Text size="xs" c="dimmed">
-              {row.categoryName} · {row.typeName}
+              {mode === "mock" ? row.categoryName : categoryNames.get(row.categoryId) ?? "Categoría sin nombre"} · {mode === "mock" ? row.typeName : typeNames.get(row.typeId) ?? "Tipo sin nombre"}
             </Text>
           </div>
         </Group>
@@ -144,7 +148,7 @@ export function ProductsPage() {
       width: 160,
       render: (row) => (
         <Text size="sm" ff="monospace" fw={500} c="dimmed">
-          {row.skuBase}
+          {row.skuBase ?? "Sin SKU base"}
         </Text>
       ),
     },
@@ -182,6 +186,8 @@ export function ProductsPage() {
                 Rechazada
               </StatusBadge>
             );
+          case null:
+            return <Text size="sm" c="dimmed">Consultar en el detalle</Text>;
           default:
             return (
               <StatusBadge semantic="info" size="sm">
@@ -198,7 +204,7 @@ export function ProductsPage() {
       render: (row) => {
         return (
           <StatusBadge semantic="neutral" size="sm">
-            {productStatusLabel(row.status)}
+            {row.commerciallyActive ? "Publicado comercialmente · estado administrativo no publicado" : productStatusLabel(row.status)}
           </StatusBadge>
         );
       },
@@ -235,6 +241,11 @@ export function ProductsPage() {
         <FeedbackAlert
           semantic="error"
           title={state.status === "forbidden" ? "Acceso denegado" : "Sesión expirada"}
+          actions={state.status === "forbidden" && hasSearchOrFilters ? (
+            <Button size="xs" variant="outline" onClick={clearFilters}>
+              Limpiar filtros
+            </Button>
+          ) : undefined}
         >
           {state.error}
         </FeedbackAlert>
@@ -264,12 +275,21 @@ export function ProductsPage() {
       />
 
       {taxonomy.loading && <Text size="sm">Cargando filtros de Taxonomía...</Text>}
-      {taxonomy.error && <FeedbackAlert semantic="error" title="Error al cargar filtros"
+      {taxonomy.error && <FeedbackAlert semantic="error" title={mode === "api" ? "Categorías no disponibles" : "Error al cargar filtros"}
         actions={<Button variant="outline" onClick={handleRetry}>Reintentar filtros</Button>}>
         {taxonomy.error}
       </FeedbackAlert>}
+      {taxonomy.typesUnavailable && (
+        <FeedbackAlert semantic="warning" title="Tipos de producto no disponibles"
+          actions={<Button variant="outline" onClick={handleRetry}>Reintentar tipos</Button>}>
+          El listado sigue disponible. No se pudieron consultar los tipos de Taxonomía.
+        </FeedbackAlert>
+      )}
       <ProductFilters
         loading={taxonomy.loading}
+        categoriesUnavailable={Boolean(taxonomy.error)}
+        typesUnavailable={taxonomy.typesUnavailable}
+        mode={mode}
         query={query}
         categories={taxonomy.categories}
         productTypes={taxonomy.productTypes}

@@ -38,7 +38,8 @@ export function RecommendationFormPage() {
     key: K,
     value: RecommendationDraft[K],
   ) => form.update({ ...draft, [key]: value });
-  const originChoices = draft.originType === "category" ? categories : products;
+  const originChoices = (draft.originType === "category" ? categories : products)
+    .filter(item => item.active || item.id === draft.originId);
   const changeOriginType = (value: string | null) => {
     if (value !== "product" && value !== "category") return;
     if (value === draft.originType) return;
@@ -157,17 +158,22 @@ export function RecommendationFormPage() {
                 data={originChoices.map((item) => ({
                   value: item.id,
                   label: item.name,
+                  disabled: !item.active,
                 }))}
                 onChange={(value) => update("originId", value ?? "")}
                 error={draft.originType ? form.errors.origin : undefined}
               />
             </Stack>
+            {draft.originType === "product" && products.some(item => item.id === draft.originId && !item.active) && (
+              <Text size="sm">El producto de origen está inactivo. Su asociación se conserva hasta que elijas otro origen.</Text>
+            )}
             {catalogError && (
               <FeedbackAlert
                 semantic="warning"
                 title="Referencias no disponibles"
               >
                 {catalogError} El borrador se conserva.
+                {draft.originId && <Text size="sm">Referencia de origen conservada: {draft.originId}</Text>}
               </FeedbackAlert>
             )}
             {!initial ? (

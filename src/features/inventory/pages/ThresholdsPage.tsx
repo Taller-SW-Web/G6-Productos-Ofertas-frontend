@@ -20,9 +20,13 @@ export function ThresholdsPage() {
     loading,
     saving,
     error,
-    saveError,
+    feedback,
+    refreshWarning,
     updateGlobal,
     updateSku,
+    removeSkuOverride,
+    canRemoveSkuOverride,
+    clearFeedback,
   } = useThresholds();
 
   const { items: stockItems } = useInventoryStock({} as StockFiltersQuery);
@@ -65,9 +69,18 @@ export function ThresholdsPage() {
           </FeedbackAlert>
         )}
 
-        {saveError && (
-          <FeedbackAlert semantic="error" title="Error al actualizar umbral">
-            {saveError}
+        {refreshWarning && !error && (
+          <FeedbackAlert
+            semantic="warning"
+            title="No se pudo refrescar la configuración"
+          >
+            {refreshWarning}
+          </FeedbackAlert>
+        )}
+
+        {feedback && (
+          <FeedbackAlert semantic={feedback.semantic} title={feedback.title}>
+            {feedback.message}
           </FeedbackAlert>
         )}
 
@@ -78,6 +91,9 @@ export function ThresholdsPage() {
             saving={saving}
             onUpdateGlobal={updateGlobal}
             onUpdateSku={updateSku}
+            onRemoveSkuOverride={removeSkuOverride}
+            canRemoveSkuOverride={canRemoveSkuOverride}
+            onUpdateStart={clearFeedback}
           />
         )}
       </Stack>

@@ -1,4 +1,8 @@
-import type { PriceView } from "./pricingRepository";
+import type { PriceChannel, PriceView } from "./pricingRepository";
+
+export function priceChannelLabel(channel: PriceChannel): string {
+  return ({ global: "Global", retail: "Retail", marketplace: "Marketplace", chatbot: "Chatbot", ventas: "Ventas" })[channel];
+}
 
 export function priceOriginLabel(price: PriceView) {
   return price.inherited

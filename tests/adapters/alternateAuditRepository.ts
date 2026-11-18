@@ -26,6 +26,8 @@ export interface AlternateAuditControl {
   fileAvailable: boolean;
   slowSku?: string;
   slowFinished?: boolean;
+  holdSlow?: boolean;
+  releaseSlow?: () => void;
   slowExportId?: string;
   slowExportFinished?: boolean;
   slowDownloadId?: string;
@@ -70,7 +72,10 @@ export function createAlternateAuditRepository(
       signal.throwIfAborted();
       control.queries.push(structuredClone(query));
       if (control.slowSku === query.sku) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        await new Promise<void>((resolve) => {
+          if (control.holdSlow) control.releaseSlow = resolve;
+          else setTimeout(resolve, 500);
+        });
         control.slowFinished = true;
       }
       fail(control.listFailure);

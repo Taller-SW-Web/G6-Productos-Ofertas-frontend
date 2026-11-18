@@ -8,6 +8,7 @@ import {
   PageHeader,
 } from "../../../components/shared";
 import { useProductDetail } from "../hooks/useProductDetail";
+import { CatalogReadError } from "../components/CatalogReadError";
 import { useProductForm } from "../hooks/useProductForm";
 import { ProductFormFields } from "../components/ProductFormFields";
 import { readCatalogScenario } from "../services/catalogPresentation";
@@ -31,6 +32,8 @@ export function ProductEditPage() {
     );
   }
 
+  if (["error", "forbidden", "session"].includes(detailState.status)) return <CatalogReadError error={detailState.error} />;
+
   if (detailState.status === "not_found" || !detailState.product) {
     return (
       <Stack gap="xl">
@@ -51,6 +54,10 @@ export function ProductEditPage() {
         </Button>
       </Stack>
     );
+  }
+
+  if (detailState.product.catalogVersion === null) {
+    return <Stack gap="md"><PageHeader title={`Detalle de solo lectura: ${detailState.product.name}`} breadcrumbs={[{ label: "Catálogo", to: "/productos" }, { label: "Edición no disponible" }]} /><FeedbackAlert semantic="warning" title="No se puede editar este producto">Para guardar cambios se necesita una versión confirmada del registro administrativo.</FeedbackAlert><Button component={Link} to={`/productos/${detailState.product.id}`} variant="outline" w="fit-content">Volver al detalle</Button></Stack>;
   }
 
   return (
@@ -81,6 +88,7 @@ function ProductEditFormContent({
     generalError,
     submitting,
     isDirty,
+    writeOutcomeUnknown,
     categories,
     brands,
     productTypes,
@@ -88,6 +96,7 @@ function ProductEditFormContent({
     schemaLoading,
     schemaError,
     schemaConfirmed,
+    canCorrectType,
     loadingMasters,
     retrySchema,
     handleSubmit,
@@ -142,14 +151,14 @@ function ProductEditFormContent({
             attributeSchema={attributeSchema}
             schemaConfirmed={schemaConfirmed}
             isEdit={true}
-            initialProduct={product}
+            canCorrectType={canCorrectType}
           />
 
           <Group justify="flex-start" gap="md" mt="md">
             <Button
               type="submit"
               loading={submitting}
-              disabled={!schemaConfirmed || loadingMasters}
+              disabled={!schemaConfirmed || loadingMasters || writeOutcomeUnknown}
               leftSection={<IconDeviceFloppy size={16} />}
             >
               Guardar cambios

@@ -20,7 +20,7 @@ export async function readMockCatalogProducts(signal: AbortSignal): Promise<Cata
           })));
           if (variantPage * variants.pageSize >= variants.total || !variants.items.length) break;
         }
-      } else {
+      } else if (product.skuBase !== null) {
         skus.push({ sku: product.skuBase, label: product.name, active: product.status === "ACTIVO" });
       }
       products.push({ id: product.id, name: product.name, categoryId: product.categoryId,
@@ -41,8 +41,8 @@ export async function readMockPricingTargets(signal: AbortSignal): Promise<Price
         id: product.id,
         productId: product.id,
         kind: "product",
-        referenceSku: product.skuBase,
-        label: `${product.name} · ${product.skuBase}`,
+        referenceSku: product.skuBase ?? undefined,
+        label: `${product.name} · ${product.skuBase ?? "Sin SKU base"}`,
         initialRegular:
           product.priceInitial !== null && product.priceInitial !== undefined
             ? Number(product.priceInitial).toFixed(2)
@@ -87,12 +87,12 @@ export async function readMockInventoryCatalog() {
         categoryName: product.categoryName,
         brandName: product.brandName,
       };
-      if (!product.hasVariants) {
+      if (!product.hasVariants && product.skuBase !== null) {
         metadata.set(product.skuBase, {
           ...description,
           vendible: product.status !== "INACTIVO",
         });
-      } else {
+      } else if (product.hasVariants) {
         for (let variantPage = 1; ; variantPage++) {
           const variants = await mockCatalogRepository.listVariants(product.id, { page: variantPage, pageSize: 100 });
           for (const variant of variants.items) {

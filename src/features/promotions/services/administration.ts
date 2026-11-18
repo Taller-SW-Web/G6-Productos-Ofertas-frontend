@@ -9,6 +9,7 @@ export interface AdministrationRecord {
   id: string;
   name: string;
   status: CouponStatus;
+  writeOutcome?: "RECONCILED";
 }
 export interface AdministrationPage<T> {
   items: T[];
@@ -27,7 +28,13 @@ export interface AdministrationRepository<T extends AdministrationRecord, D> {
     status: CouponStatus,
     signal: AbortSignal,
   ): Promise<T>;
+  reconcilePending?(id: string, signal: AbortSignal): Promise<PromotionReconciliation<T>>;
 }
+export type PromotionReconciliation<T> =
+  | { status: "reconciled"; value: T }
+  | { status: "not_accredited" }
+  | { status: "access_denied" }
+  | { status: "unavailable" };
 export class AdministrationError extends Error {
   constructor(
     public readonly kind:

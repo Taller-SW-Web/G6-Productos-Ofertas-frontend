@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 test("same pages consume alternate adapters in API mode, preserve IDs and accept negative numbers", async ({ page }) => {
   await page.goto("/tests/harness/catalog-adapter.html");
   await expect(page.getByText("Producto del adapter alternativo").last()).toBeVisible();
+  await page.getByRole("textbox", { name: "SKU de la Variante" }).fill("000-external-SKU");
   await page.getByRole("combobox", { name: "Opción externa", exact: true }).click();
   await page.getByRole("option", { name: "Etiqueta vigente" }).click();
   await page.getByRole("textbox", { name: "Temperatura", exact: true }).fill("-5");

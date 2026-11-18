@@ -22,6 +22,7 @@ export function isTerminalTransferStatus(status: TransferStatus): boolean {
 
 export interface StockItem {
   sku: string;
+  skuActive?: boolean | null;
   productName: string;
   categoryName: string;
   brandName: string;
@@ -31,10 +32,10 @@ export interface StockItem {
   reserved: number;
   blocked: number;
   available: number;
-  threshold: number;
+  threshold: number | null;
   status: StockStatus;
-  stockVersion: number;
-  updatedAt: string;
+  stockVersion: number | null;
+  updatedAt: string | null;
 }
 
 export interface ThresholdConfig {
@@ -54,6 +55,7 @@ export interface TransferItem {
   quantityShipped: number;
   quantityReceived: number;
   quantityPending: number;
+  missingQuantity?: number;
   status: TransferStatus;
   shippedAt: string;
   notes?: string;
@@ -71,10 +73,12 @@ export interface ReceiveTransferPayload {
 
 export interface LocationDistribution {
   locationId: string;
-  locationName: string;
+  // `null` cuando el contrato no publica el nombre de la ubicación.
+  locationName: string | null;
   onHandTotal: number;
   reservedTotal: number;
-  blockedTotal: number;
+  // `null` cuando el contrato no publica unidades bloqueadas por ubicación.
+  blockedTotal: number | null;
   availableTotal: number;
   skusAvailableCount: number;
   skusLowStockCount: number;
@@ -99,6 +103,8 @@ export interface InventoryKpiSummary {
   transfersInTransit: KpiMetricValue;
   transfersPartiallyReceived: KpiMetricValue;
   transfersWithDiscrepancy: KpiMetricValue;
+  // Fecha/hora de generación del snapshot según DashboardInventario (OpenAPI)
+  generatedAt?: string | null;
 }
 
 export interface InventoryAlert {
@@ -119,6 +125,12 @@ export interface StockFiltersQuery {
   brand?: string;
   locationId?: string;
   status?: string;
+}
+
+export interface StockPage {
+  items: StockItem[];
+  total: number;
+  pages: number;
 }
 
 export interface DashboardFiltersQuery {

@@ -2,11 +2,14 @@ import type { PromotionServices } from "../services/promotionServices";
 import type {
   AdministrationRecord,
   AdministrationRepository,
+  PromotionReconciliation,
 } from "../services/administration";
 import {
   CouponReadError,
   CouponWriteError,
+  type CouponView,
 } from "../services/couponRepository";
+import { couponDraftFromRecord } from "../services/couponValidation";
 import {
   administrationResponse,
   checkAdministrationRead,
@@ -17,7 +20,7 @@ import {
 // Fault injection wraps productive ports. Only the mock composition selects it in DEV.
 export function createDemoServices(
   base: PromotionServices,
-  scenario: AdministrationScenario | "usage-unavailable",
+  scenario: AdministrationScenario | "expired" | "usage-unavailable",
 ): PromotionServices {
   if (scenario === "default") return base;
   const pending = (signal: AbortSignal) =>
@@ -28,7 +31,9 @@ export function createDemoServices(
       });
     });
   const administrativeScenario =
-    scenario === "usage-unavailable" ? "default" : scenario;
+    scenario === "usage-unavailable" || scenario === "expired"
+      ? "default"
+      : scenario;
   const read = (signal: AbortSignal) =>
     checkAdministrationRead(
       administrativeScenario === "selection-error" ||
@@ -40,6 +45,11 @@ export function createDemoServices(
   function administrative<T extends AdministrationRecord, D>(
     repository: AdministrationRepository<T, D>,
   ): AdministrationRepository<T, D> {
+    const pendingResults = new Map<string, T>();
+    function respond(record: T) {
+      if (scenario === "unknown-result") pendingResults.set(record.id, structuredClone(record));
+      return administrationResponse(record, administrativeScenario);
+    }
     return {
       async list(query, signal) {
         await read(signal);
@@ -57,17 +67,21 @@ export function createDemoServices(
       },
       async save(id, draft, signal) {
         await checkAdministrationWrite(administrativeScenario, signal);
-        return administrationResponse(
-          await repository.save(id, draft, signal),
-          administrativeScenario,
-        );
+        return respond(await repository.save(id, draft, signal));
       },
       async changeStatus(id, status, signal) {
         await checkAdministrationWrite(administrativeScenario, signal);
-        return administrationResponse(
-          await repository.changeStatus(id, status, signal),
-          administrativeScenario,
-        );
+        return respond(await repository.changeStatus(id, status, signal));
+      },
+      async reconcilePending(id, signal) {
+        const expected = pendingResults.get(id);
+        if (!expected) return { status: "not_accredited" };
+        const observed = await repository.read(id, signal);
+        if (!observed || JSON.stringify(observed) !== JSON.stringify(expected) || pendingResults.get(id) !== expected) {
+          return { status: "not_accredited" };
+        }
+        pendingResults.delete(id);
+        return { status: "reconciled", value: { ...observed, writeOutcome: "RECONCILED" } };
       },
     };
   }
@@ -106,12 +120,15 @@ export function createDemoServices(
         "La información cambió antes del guardado. Consulta el registro y revisa tu propuesta antes de continuar.",
       );
   }
-  function couponResponse<T>(record: T) {
-    if (scenario === "unknown-result")
+  const pendingCoupons = new Map<string, CouponView>();
+  function couponResponse(record: CouponView) {
+    if (scenario === "unknown-result") {
+      pendingCoupons.set(record.id, structuredClone(record));
       throw new CouponWriteError(
         "unknown",
         "No se pudo confirmar el resultado. Conservamos tu propuesta; consulta el resultado antes de enviar nuevamente.",
       );
+    }
     return record;
   }
   return {
@@ -139,9 +156,21 @@ export function createDemoServices(
         await couponRead(signal);
         const record =
           scenario === "missing" ? null : await base.coupons.read(id, signal);
-        return record && scenario === "usage-unavailable"
-          ? { ...record, consumedUses: undefined, remainingUses: undefined }
-          : record;
+        if (!record) return record;
+        if (scenario === "usage-unavailable")
+          return { ...record, consumedUses: undefined, remainingUses: undefined };
+        if (scenario === "expired")
+          return {
+            ...record,
+            promotion: record.promotion
+              ? {
+                  ...record.promotion,
+                  validFrom: "2026-09-01T00:00:00-05:00",
+                  validUntil: "2026-09-30T23:59:59-05:00",
+                }
+              : record.promotion,
+          };
+        return record;
       },
       async create(input, signal) {
         await couponWrite(signal);
@@ -156,6 +185,18 @@ export function createDemoServices(
         return couponResponse(
           await base.coupons.changeStatus(id, status, signal),
         );
+      },
+      async reconcilePending(id, code, signal): Promise<PromotionReconciliation<CouponView>> {
+        const expected = id ? pendingCoupons.get(id) : [...pendingCoupons.values()].find(record => record.code === code);
+        if (!expected) return { status: "not_accredited" };
+        const observed = await base.coupons.read(expected.id, signal);
+        if (observed?.id !== expected.id ||
+            JSON.stringify(couponDraftFromRecord(observed)) !== JSON.stringify(couponDraftFromRecord(expected)) ||
+            pendingCoupons.get(expected.id) !== expected) {
+          return { status: "not_accredited" };
+        }
+        pendingCoupons.delete(expected.id);
+        return { status: "reconciled", value: { ...observed, writeOutcome: "RECONCILED" } };
       },
     },
   };

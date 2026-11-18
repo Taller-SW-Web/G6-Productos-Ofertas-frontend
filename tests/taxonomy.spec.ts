@@ -38,7 +38,7 @@ test("crea un tipo de producto y permite consultar su detalle de inmediato", asy
   expect(detalle?.caracteristicasAsignadas).toBe(detalle?.asociadas.length);
 });
 
-test("asocia y desasocia una característica incrementando la versión del esquema", async () => {
+test("asocia y desasocia una característica mediante verificación segura", async () => {
   const creado = await productTypeService.crear({
     nombre: "Tipo esquema asociar QA",
   });
@@ -54,11 +54,23 @@ test("asocia y desasocia una característica incrementando la versión del esque
     "material",
   );
 
-  const desasociado = await productTypeService.desasociarCaracteristica(
+  const pendiente = await productTypeService.desasociarCaracteristica(
     creado.tipoProductoId,
     "material",
   );
-  expect(desasociado.resultado).toBe("exito");
+  expect(pendiente.resultado).toBe("pendiente");
+  expect(pendiente.operacionId).toBeTruthy();
+
+  const antesDeConfirmar = await productTypeService.obtener(
+    creado.tipoProductoId,
+  );
+  expect(antesDeConfirmar?.schemaVersion).toBe(1);
+  expect(antesDeConfirmar?.asociadas).toHaveLength(1);
+
+  const confirmado = await productTypeService.consultarEstadoOperacion(
+    pendiente.operacionId as string,
+  );
+  expect(confirmado.estado).toBe("confirmada");
 
   const detalle = await productTypeService.obtener(creado.tipoProductoId);
   expect(detalle?.schemaVersion).toBe(2);
@@ -120,7 +132,7 @@ test("conserva las asociaciones cuando la característica asociada pasa a inacti
   expect(detalle?.asociadas).toHaveLength(1);
   expect(detalle?.caracteristicasAsignadas).toBe(1);
   expect(detalle?.asociadas[0]?.caracteristicaId).toBe(caracteristica.id);
-  expect(detalle?.asociadas[0]?.caracteristica.estado).toBe("Inactivo");
+  expect(detalle?.asociadas[0]?.caracteristica?.estado).toBe("Inactivo");
 });
 
 test("crea y edita una marca y devuelve null al guardar una marca inexistente", async () => {

@@ -247,6 +247,11 @@ export const ProductTypeDetailPage = lazy(() =>
     default: module.ProductTypeDetailPage,
   })),
 );
+export const ProductTypeSchemaPage = lazy(() =>
+  import("../../features/taxonomy/pages/ProductTypeSchemaPage").then((module) => ({
+    default: module.ProductTypeSchemaPage,
+  })),
+);
 export const ProductTypeAssociatePage = lazy(() =>
   import("../../features/taxonomy/pages/ProductTypeAssociatePage").then((module) => ({
     default: module.ProductTypeAssociatePage,

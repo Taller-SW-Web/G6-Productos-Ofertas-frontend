@@ -5,7 +5,7 @@ import {
   type TableColumn,
 } from "../../../components/shared";
 import type { PriceView } from "../services/pricingRepository";
-import { priceOriginLabel, formatMoney } from "../services/pricePresentation";
+import { priceOriginLabel, formatMoney, priceChannelLabel } from "../services/pricePresentation";
 import { displayInstant } from "../services/pricingValidation";
 
 const columns: TableColumn<PriceView>[] = [
@@ -50,7 +50,7 @@ const columns: TableColumn<PriceView>[] = [
     key: "channel",
     header: "Alcance efectivo",
     width: 140,
-    render: (row) => (row.channel === "global" ? "Global" : "Retail"),
+    render: (row) => priceChannelLabel(row.channel),
   },
   {
     key: "validUntil",

@@ -17,7 +17,10 @@ export interface ProductAttributeValue {
   caracteristicaId: string;
   nombre: string;
   tipo: "TEXTO" | "NUMERO" | "LISTA";
-  valor: string | number;
+  valor: string | number | boolean | null;
+  /** False when an open-contract value could not be safely interpreted. */
+  valorDisponible?: boolean;
+  valorReferenciaId?: string;
   valorId?: string;
   unidad?: string;
 }
@@ -68,7 +71,7 @@ export interface VariantSummaryView {
 export interface ProductView {
   id: string;
   name: string;
-  skuBase: string;
+  skuBase: string | null;
   hasVariants: boolean;
   categoryId: string;
   categoryName: string;
@@ -76,27 +79,33 @@ export interface ProductView {
   typeName: string;
   brandId: string;
   brandName: string;
-  status: ProductStatus;
-  preparationSummary: "COMPLETED" | "PENDING" | "REJECTED" | "PARTIAL";
+  status: ProductStatus | null;
+  /** The consumer endpoint guarantees commercial publication, not admin state. */
+  commerciallyActive?: boolean;
+  preparationSummary: "COMPLETED" | "PENDING" | "REJECTED" | "PARTIAL" | null;
   imageUrl?: string;
-  catalogVersion: number;
+  catalogVersion: number | null;
   priceInitial?: number;
 }
 
 export interface ProductDetailView extends ProductView {
-  description: string;
+  identifyingCharacteristicIds?: string[];
+  description: string | null;
   images: ProductImageRef[];
   attributes: ProductAttributeValue[];
-  physicalProfile: Partial<PhysicalProfile> | null;
+  physicalProfile: Partial<PhysicalProfile> | null | undefined;
   preparation: ProductPreparationView;
   variants: VariantSummaryView[];
   publishedCommercially?: boolean;
+  typeCorrectionEligible?: boolean;
 }
 
 export interface CatalogQuery {
   q?: string;
   categoryId?: string;
   typeId?: string;
+  typeIdsIncluded?: readonly string[];
+  typeIdsExcluded?: readonly string[];
   saleModel?: "all" | "simple" | "variants";
   status?: "all" | ProductStatus;
   page: number;
@@ -108,6 +117,25 @@ export interface CatalogPageResult {
   total: number;
   page: number;
   pageSize: number;
+}
+
+export interface ComboSkuResolution {
+  sku: string;
+  resultado: "ELEGIBLE" | "INACTIVO" | "NO_ELEGIBLE" | "NO_ENCONTRADO";
+  productId: string | null;
+  nombre: string | null;
+  productoPadre: {
+    productId: string;
+    nombre: string;
+    tieneVariantes: boolean;
+    estado: ProductStatus;
+  } | null;
+  variante: {
+    variantId: string;
+    estado: "BORRADOR" | "ACTIVA" | "INACTIVA";
+  } | null;
+  estado: ProductStatus | VariantStatus | null;
+  tipoProductoId: string | null;
 }
 
 export interface ProductCreatePayload {
@@ -166,7 +194,9 @@ export class CatalogError extends Error {
       | "unknown"
       | "server"
       | "forbidden"
-      | "session",
+      | "session"
+      | "blocked_contract"
+      | "write_unknown",
     message: string,
     public readonly details?: Record<string, string>,
   ) {
@@ -222,7 +252,7 @@ export interface VariantPageResult {
 }
 
 export interface VariantCreatePayload {
-  sku?: string | null;
+  sku: string;
   identifyingAttributes?: ProductAttributeValue[];
   atributosIdentificadores?: ProductAttributeValue[];
   nonIdentifyingAttributes?: ProductAttributeValue[];
@@ -250,11 +280,18 @@ export interface VariantMutationResult {
 }
 
 export interface CatalogRepository {
+  /** Local mock stores can signal mutations so consumers invalidate derived caches. */
+  subscribe?(listener: () => void): () => void;
   list(
     query: CatalogQuery,
     scenario?: string,
     signal?: AbortSignal,
   ): Promise<CatalogPageResult>;
+  /** Authoritative, human-authenticated read used by Combos; POST is query-only. */
+  resolveComboSkus?(
+    skus: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<ComboSkuResolution[]>;
   getById(
     id: string,
     scenario?: string,

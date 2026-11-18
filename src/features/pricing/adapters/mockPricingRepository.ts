@@ -110,8 +110,11 @@ function isMockPricingState(value: unknown): value is MockPricingState {
 export function createMockPricingRepository(
   clock: Clock,
   onUpdated?: (target: PriceTarget, before: PriceView, after: PriceView, reason: string) => void,
-  options: { persist?: boolean } = {},
+  options: { persist?: boolean; catalogTargets?: boolean } = {},
 ): PricingRepository {
+  // The integrated demo opts in independently of localStorage availability.
+  // Default factories retain the isolated pilot and never append Catalog targets.
+  const includeCatalogTargets = options.catalogTargets ?? options.persist ?? false;
   const persistEnabled = options.persist === true && isMockPersistenceAvailable();
   const restored = persistEnabled
     ? readMockState<MockPricingState>("pricing", isMockPricingState)
@@ -178,7 +181,7 @@ export function createMockPricingRepository(
             names[existing.id] = catalogName;
           }
         }
-      } else if (persistEnabled) {
+      } else if (includeCatalogTargets) {
         const newTarget: PriceTarget = structuredClone(catalogTarget);
         if (newTarget.kind === "variant") {
           const parent = targets.find(t => t.kind === "product" && t.productId === newTarget.productId);
@@ -191,7 +194,7 @@ export function createMockPricingRepository(
         if (newTarget.kind === "product") {
           const catalogName = newTarget.label.slice(0, newTarget.label.lastIndexOf(" · "));
           names[newTarget.id] = catalogName || newTarget.label;
-          if (newTarget.initialRegular) {
+          if (persistEnabled && newTarget.initialRegular) {
             const hasExisting = records.some((r) => r.id === newTarget.id);
             if (!hasExisting) {
               const newRec: PriceView = {

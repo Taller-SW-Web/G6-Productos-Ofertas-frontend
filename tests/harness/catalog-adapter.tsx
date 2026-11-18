@@ -1,3 +1,5 @@
+import { AuthSessionContext } from "../../src/app/config/AuthSessionContext";
+import { createCatalogFixtureSession } from "./catalogSession";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, Link, RouterProvider } from "react-router-dom";
 import { ApplicationShell } from "../../src/app/layout/ApplicationShell";
@@ -86,7 +88,7 @@ const taxonomy: TaxonomyRepository = {
 const services = createCatalogServices("api", { apiCatalog: () => catalog, apiTaxonomy: () => taxonomy });
 const runtime = await createPricingRuntime("api");
 history.replaceState(null, "", params.get("path") ?? "/productos/external-product/variantes/nueva");
-const { App } = await import("../../src/app/App");
+const { FeatureTestApp: App } = await import("./FeatureTestApp");
 function RouteLinks() {
   return <div style={{ position: "fixed", top: 8, right: 20, zIndex: 1000, display: "flex", gap: 16 }}><Link to="/productos/second-product/variantes/nueva">Cambiar producto</Link><Link to="/productos/failed-product/variantes/nueva">Producto con error</Link></div>;
 }
@@ -95,10 +97,12 @@ const app = params.has("navigation") ? <RouterProvider router={createBrowserRout
 ])} /> : <App />;
 createRoot(document.getElementById("root")!).render(
   <MantineProvider theme={theme} cssVariablesResolver={cssVariablesResolver}>
+    <AuthSessionContext.Provider value={createCatalogFixtureSession()}>
     <DataModeContext.Provider value="api">
       <CatalogServicesContext.Provider value={services}>
         <PricingProvider runtime={runtime}>{app}</PricingProvider>
       </CatalogServicesContext.Provider>
     </DataModeContext.Provider>
+    </AuthSessionContext.Provider>
   </MantineProvider>,
 );

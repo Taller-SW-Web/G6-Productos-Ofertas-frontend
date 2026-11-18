@@ -43,6 +43,12 @@ export interface CharacteristicRepository {
     id: string,
     signal?: AbortSignal,
   ): Promise<CharacteristicValue[] | null>;
+  renombrarValor(
+    id: string,
+    valorId: string,
+    nombre: string,
+    signal?: AbortSignal,
+  ): Promise<CharacteristicValue>;
   agregarValor(
     id: string,
     nombre: string,
@@ -58,8 +64,7 @@ export interface CharacteristicRepository {
     estado: CharacteristicStatus,
     signal?: AbortSignal,
   ): Promise<CharacteristicDetail | null>;
-  // BLOCKED_CONTRACT: sondeo del resultado de la baja asíncrona de un valor (202).
-  // No hay endpoint OpenAPI confirmado; la simulación vive en el adapter mock.
+  // La operación de seguimiento está publicada en GET /api/v1/taxonomia/operaciones/{operationId}.
   consultarEstadoOperacion(
     operacionId: string,
     signal?: AbortSignal,

@@ -465,7 +465,7 @@ export class AlternateInventoryRepository implements InventoryRepository {
       if (payload.disposition === "REINGRESAR_BLOQUEADO") {
         stockItem.blocked += payload.quantityReceived;
       }
-      stockItem.stockVersion += 1;
+      if (stockItem.stockVersion !== null) stockItem.stockVersion += 1;
       stockItem.updatedAt = payload.receivedAt;
       this.recalculateStockStatus(stockItem);
     }
@@ -656,7 +656,7 @@ export class AlternateInventoryRepository implements InventoryRepository {
       }
       d.onHandTotal += item.onHand;
       d.reservedTotal += item.reserved;
-      d.blockedTotal += item.blocked;
+      d.blockedTotal = (d.blockedTotal ?? 0) + item.blocked;
       d.availableTotal += item.available;
       if (item.status === "DISPONIBLE") d.skusAvailableCount++;
       else if (item.status === "STOCK_BAJO") d.skusLowStockCount++;

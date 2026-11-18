@@ -139,6 +139,13 @@ export function CouponsPage() {
       />
       <Stack gap="lg">
         <PromotionDataNotice kind="coupons" />
+        {state.status === "success" && state.result.items.some(row => row.relatedDataUnavailable) && (
+          <FeedbackAlert semantic="warning" title="Datos relacionados no disponibles">
+            Los cupones se consultaron correctamente. No se pudo consultar la
+            promoción de algunos registros; sus datos complementarios figuran
+            como no disponibles.
+          </FeedbackAlert>
+        )}
         <FilterBar
           summary={
             state.status === "success"

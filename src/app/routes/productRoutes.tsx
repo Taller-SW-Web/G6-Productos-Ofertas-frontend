@@ -35,6 +35,7 @@ import {
   ProductTypeAssociatePage,
   ProductTypeCreatePage,
   ProductTypeDetailPage,
+  ProductTypeSchemaPage,
   ProductTypeListPage,
   RecommendationDetailPage,
   RecommendationEditorLayout,
@@ -141,6 +142,7 @@ export const productRoutes: RouteObject[] = [
   { path: "/tipos-producto", element: <ProductTypeListPage /> },
   { path: "/tipos-producto/nuevo", element: <ProductTypeCreatePage /> },
   { path: "/tipos-producto/:id/asociar", element: <ProductTypeAssociatePage /> },
+  { path: "/tipos-producto/:id/esquema", element: <ProductTypeSchemaPage /> },
   { path: "/tipos-producto/:id", element: <ProductTypeDetailPage /> },
   // MK-011: marcas
   { path: "/marcas", element: <BrandListPage /> },

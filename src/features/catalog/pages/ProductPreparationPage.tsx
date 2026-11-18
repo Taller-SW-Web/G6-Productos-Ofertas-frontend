@@ -29,12 +29,14 @@ import {
   StatusBadge,
 } from "../../../components/shared";
 import { useProductDetail } from "../hooks/useProductDetail";
+import { CatalogReadError } from "../components/CatalogReadError";
 import { useProductPreparation } from "../hooks/useProductPreparation";
 import {
   preparationStatusLabel,
   readCatalogScenario,
 } from "../services/catalogPresentation";
 import { ProductActivationDialog } from "../components/ProductActivationDialog";
+import type { ProductDetailView } from "../services/catalogRepository";
 
 export function ProductPreparationPage() {
   const { productId } = useParams<{ productId: string }>();
@@ -46,7 +48,12 @@ export function ProductPreparationPage() {
   const [revision, setRevision] = useState(0);
   const [activateOpened, setActivateOpened] = useState(false);
 
-  const detailState = useProductDetail(productId || "", scenario, revision);
+  const fetchedDetailState = useProductDetail(productId || "", scenario, revision);
+  const createdProduct = location.state?.createdProduct as ProductDetailView | undefined;
+  const transientCreated = createdProduct?.id === productId ? createdProduct : undefined;
+  const detailState = transientCreated && ["not_found", "error"].includes(fetchedDetailState.status)
+    ? { status: "success" as const, product: transientCreated }
+    : fetchedDetailState;
   const prepState = useProductPreparation(productId || "", scenario, revision);
 
   if (detailState.status === "loading" || prepState.status === "loading") {
@@ -60,7 +67,39 @@ export function ProductPreparationPage() {
     );
   }
 
+  if (["error", "forbidden", "session"].includes(detailState.status)) {
+    const prep = prepState.status === "success" && prepState.data?.productId === productId ? prepState.data : undefined;
+    const dependencies = prep ? [
+      { name: "Pricing", key: "PRICING" as const, state: prep.pricing },
+      ...(prep.inventario ? [{ name: "Inventario", key: "INVENTARIO" as const, state: prep.inventario }] : []),
+    ] : [];
+    return <CatalogReadError error={detailState.error}>
+      {prep ? <SectionCard title="Estado de preparación informado por Catálogo">
+        <Stack gap="md">
+          <Text size="sm">El detalle administrativo no está disponible. Estos estados provienen de la consulta independiente de preparación.</Text>
+          {dependencies.map(({ name, key, state }) => <Stack gap="xs" key={key}>
+            <Text>{name}: {preparationStatusLabel(state.status)}</Text>
+            {state.code && <Text size="sm">Causa: {state.code}</Text>}
+            {state.manualRetryAllowed && state.status !== "COMPLETED" && <Button loading={prepState.retrying} onClick={() => prepState.retry(key)}>Reintentar preparación de {name}</Button>}
+          </Stack>)}
+          {prep.hasVariants && <Text size="sm">El producto padre no tiene preparación física propia.</Text>}
+          {prep.variantes.map(v => <Text key={v.variantId}>{v.sku}: {preparationStatusLabel(v.inventario.status)}{v.inventario.code ? ` · ${v.inventario.code}` : ""}</Text>)}
+          {prepState.retryError && <FeedbackAlert semantic="error" title="No se pudo solicitar el reintento">{prepState.retryError}</FeedbackAlert>}
+          {prepState.retrySuccess && <FeedbackAlert semantic="info" title="Solicitud recibida">{prepState.retrySuccess}</FeedbackAlert>}
+          <Button variant="outline" onClick={() => setRevision(r => r + 1)}>Consultar nuevamente</Button>
+        </Stack>
+      </SectionCard> : <FeedbackAlert semantic="error" title="Preparación no disponible">{prepState.error}</FeedbackAlert>}
+    </CatalogReadError>;
+  }
+
   if (detailState.status === "not_found" || !detailState.product) {
+    if (prepState.status === "success" && prepState.data?.productId === productId) {
+      const confirmedPreparation = prepState.data!;
+      return <Stack gap="xl"><PageHeader title="Preparación del producto" breadcrumbs={[{ label: "Catálogo", to: "/productos" }, { label: "Preparación" }]} />
+        <FeedbackAlert semantic="warning" title="Estado administrativo no disponible">Catálogo devolvió la preparación para este identificador. Las acciones de estado requieren también un detalle administrativo con versión vigente.</FeedbackAlert>
+        <SectionCard title="Preparación confirmada por Catálogo"><Stack gap="sm"><Text>Pricing: {preparationStatusLabel(confirmedPreparation.pricing.status)}</Text>{confirmedPreparation.inventario && <Text>Inventario: {preparationStatusLabel(confirmedPreparation.inventario.status)}</Text>}{confirmedPreparation.variantes.map(v => <Text key={v.variantId}>{v.sku}: {preparationStatusLabel(v.inventario.status)}</Text>)}</Stack></SectionCard>
+        <Button component={Link} to="/productos" variant="outline" w="fit-content">Volver a productos</Button></Stack>;
+    }
     return (
       <Stack gap="xl">
         <PageHeader
@@ -72,8 +111,8 @@ export function ProductPreparationPage() {
             { label: "No encontrado" },
           ]}
         />
-        <FeedbackAlert semantic="error" title="404 - Producto inexistente">
-          El producto solicitado no fue encontrado.
+        <FeedbackAlert semantic="warning" title="No se pudo confirmar el estado del producto">
+          El detalle administrativo no encontró el producto solicitado.
         </FeedbackAlert>
         <Button component={Link} to="/productos" variant="outline" w="fit-content">
           Volver a la lista
@@ -83,7 +122,7 @@ export function ProductPreparationPage() {
   }
 
   const p = detailState.product;
-  const prep = prepState.data || p.preparation;
+  const prep = prepState.status === "success" && prepState.data?.productId === p.id ? prepState.data : p.preparation;
 
   const isPricingReady = prep.pricing.status === "COMPLETED";
   const isInventoryReady = p.hasVariants
@@ -113,7 +152,7 @@ export function ProductPreparationPage() {
               Ver detalle
             </Button>
 
-            {p.status !== "INACTIVO" && (
+            {p.catalogVersion !== null && p.status !== "INACTIVO" && (
               <Button
                 component={Link}
                 to={`/productos/${p.id}/editar`}
@@ -124,7 +163,7 @@ export function ProductPreparationPage() {
               </Button>
             )}
 
-            {p.status === "BORRADOR" && (
+            {p.catalogVersion !== null && p.status === "BORRADOR" && (
               <Button
                 onClick={() => setActivateOpened(true)}
                 leftSection={<IconCheck size={16} />}

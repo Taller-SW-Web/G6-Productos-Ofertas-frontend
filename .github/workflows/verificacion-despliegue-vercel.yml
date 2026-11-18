@@ -1,0 +1,94 @@
+name: Verificación de despliegues de Vercel
+
+on:
+  repository_dispatch:
+    types: [vercel.deployment.ready]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verificacion-produccion-${{ github.event.client_payload.git.sha || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  verificar_despliegue_produccion:
+    name: Verificar despliegue de producción
+    if: >-
+      github.event.client_payload.environment == 'production' &&
+      github.event.client_payload.project.name == 'g6-productos-ofertas' &&
+      github.event.client_payload.git.ref == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: vercel-produccion
+    permissions:
+      actions: read
+      contents: read
+      statuses: write
+    steps:
+      # El estado oficial acompaña al commit que originó repository_dispatch.
+      # El contexto propio adicional bloquea cancelaciones y fallas de publicación.
+      - name: Publicar control de GitHub para Vercel
+        uses: vercel/repository-dispatch/actions/status@30f760c6640485cd92f8c785ef361382555fb712 # v1
+        with:
+          name: "Vercel - g6-productos-ofertas: verificacion-automatizada-production"
+      - name: Obtener código confiable de la rama principal
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: refs/heads/master
+          persist-credentials: false
+      - name: Preparar Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+      - name: Validar identidad del despliegue en Vercel y GitHub
+        id: identidad
+        env:
+          VERCEL_DEPLOYMENT_ID: ${{ github.event.client_payload.id }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_TEAM_ID: ${{ vars.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+        run: node scripts/verificar-despliegue-vercel.mjs
+      - name: Publicar estado pendiente tras validar la identidad
+        env:
+          FASE_ESTADO: pendiente
+          DEPLOYMENT_SHA: ${{ steps.identidad.outputs.commit_sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/registrar-estado-vercel.mjs
+      - name: Instalar dependencias
+        run: npm ci
+      - name: Instalar Chromium para la comprobación remota
+        run: npx playwright install --with-deps chromium
+      - name: Comprobar URL inmutable de producción
+        env:
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: node scripts/vercel-smoke.mjs "${{ steps.identidad.outputs.deployment_url }}"
+      - name: Confirmar que el despliegue sigue vigente en master
+        env:
+          DEPLOYMENT_SHA: ${{ steps.identidad.outputs.commit_sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/verificar-vigencia-vercel.mjs
+      - name: Registrar resultado final de la comprobación
+        if: always()
+        env:
+          FASE_ESTADO: final
+          DEPLOYMENT_SHA: ${{ steps.identidad.outputs.commit_sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+          RESULTADO_COMPROBACION: ${{ job.status }}
+        run: node scripts/registrar-estado-vercel.mjs
+      - name: Registrar evidencia de la comprobación remota
+        if: always()
+        env:
+          DEPLOYMENT_SHA: ${{ steps.identidad.outputs.commit_sha }}
+          DEPLOYMENT_URL: ${{ steps.identidad.outputs.deployment_url }}
+          RESULTADO: ${{ job.status }}
+        run: |
+          {
+            echo '### Comprobación del despliegue de Vercel'
+            echo
+            echo "- Resultado: **$RESULTADO**"
+            printf -- '- SHA: `%s`\n' "$DEPLOYMENT_SHA"
+            echo "- URL inmutable verificada: $DEPLOYMENT_URL"
+            echo '- Alcance: rutas SPA, recarga, contenido, recursos, MIME, consola y solicitudes de red.'
+            echo '- Datos: Production conserva el modo de demostración configurado; no acredita integración con API real.'
+          } >> "$GITHUB_STEP_SUMMARY"

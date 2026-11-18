@@ -25,9 +25,13 @@ export function VariantActivationDialog({
   onSuccess,
   scenario,
 }: VariantActivationDialogProps) {
-  const { loading, error, activate, clearError } = useVariantStateMutation();
+  const { loading, error, activate, clearError, reconcile, isUnknown } = useVariantStateMutation();
 
   const handleConfirm = async () => {
+    if (isUnknown(product.id, variant.variantId)) {
+      if (await reconcile(product.id, variant.variantId, "ACTIVA")) onSuccess();
+      return;
+    }
     try {
       await activate(product.id, variant.variantId, scenario);
       onSuccess();
@@ -55,7 +59,7 @@ export function VariantActivationDialog({
     <ConfirmDialog
       opened={opened}
       title="Activar Variante (SKU)"
-      confirmLabel="Activar Variante"
+      confirmLabel={isUnknown(product.id, variant.variantId) ? "Consultar estado" : "Activar Variante"}
       submitting={loading}
       onCancel={handleClose}
       onConfirm={handleConfirm}
@@ -71,7 +75,7 @@ export function VariantActivationDialog({
             </Badge>
           </Group>
           <Text size="xs" c="dimmed" mt={2}>
-            Producto Padre: <strong>{product.name}</strong> ({product.skuBase})
+            Producto Padre: <strong>{product.name}</strong> ({product.skuBase ?? "Sin SKU base"})
           </Text>
         </div>
 

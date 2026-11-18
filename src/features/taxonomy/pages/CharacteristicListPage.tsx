@@ -38,8 +38,8 @@ import type {
 import { useMockStateRevision } from "../../shared/useMockStateRevision";
 
 const configVacia: CharacteristicCatalogConfig = {
-  maxTexto: 0,
-  maxValoresLista: 0,
+  maxTexto: null,
+  maxValoresLista: null,
 };
 
 export function CharacteristicListPage() {
@@ -62,7 +62,9 @@ export function CharacteristicListPage() {
       caracteristicas.filter(
         (item) =>
           termino === "" ||
-          item.nombre.toLocaleLowerCase("es").includes(termino),
+          item.nombre.toLocaleLowerCase("es").includes(termino) ||
+          item.tipo.toLocaleLowerCase("es").includes(termino) ||
+          etiquetaTipoCaracteristica[item.tipo].toLocaleLowerCase("es").includes(termino),
       ),
     [caracteristicas, termino],
   );

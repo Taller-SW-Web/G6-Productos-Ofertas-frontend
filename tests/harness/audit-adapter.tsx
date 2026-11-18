@@ -41,7 +41,7 @@ const runtime = await createAuditRuntime("api", {
 });
 const pricing = await createPricingRuntime("api");
 history.replaceState(null, "", params.get("path") ?? "/precios/auditoria");
-const { App } = await import("../../src/app/App");
+const { FeatureTestApp: App } = await import("./FeatureTestApp");
 createRoot(document.getElementById("root")!).render(
   <MantineProvider
     theme={theme}

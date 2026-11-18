@@ -8,6 +8,7 @@ interface DashboardAlertsProps {
   alerts: InventoryAlert[];
   loading?: boolean;
   error?: string | null;
+  blockedReason?: string | null;
   onRetry?: () => void;
 }
 
@@ -15,8 +16,20 @@ export function DashboardAlerts({
   alerts,
   loading,
   error,
+  blockedReason,
   onRetry,
 }: DashboardAlertsProps) {
+  if (blockedReason) {
+    return (
+      <FeedbackAlert
+        semantic="warning"
+        title="Alertas no verificables con el contrato vigente"
+      >
+        {blockedReason}
+      </FeedbackAlert>
+    );
+  }
+
   if (error) {
     return (
       <FeedbackAlert

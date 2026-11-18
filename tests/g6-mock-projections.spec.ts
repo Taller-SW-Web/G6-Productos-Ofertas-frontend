@@ -19,8 +19,8 @@ test("Catalog actualiza los metadatos de Inventory y Pricing sin alterar saldos 
   const brand = await taxonomy.brand.crear({ nombre: "Marca integrada", descripcion: null, paisOrigenIso: null });
   const product = (await catalog.getById("PROD-RUN-001"))!;
   await catalog.update(product.id, {
-    nombre: "Camiseta editada", descripcion: product.description,
-    categoriaId: category.id, marcaId: brand.marcaId, catalogVersion: product.catalogVersion,
+    nombre: "Camiseta editada", descripcion: product.description ?? "",
+    categoriaId: category.id, marcaId: brand.marcaId, catalogVersion: product.catalogVersion!,
   });
 
   const metadata = { productName: "Camiseta editada", categoryName: "Running integrado", brandName: "Marca integrada" };
@@ -54,7 +54,7 @@ test("Promotions conserva referencias actuales inactivas y las excluye de nuevas
   const signal = new AbortController().signal;
   const promotions = createMockPromotionCatalogRepository();
   const product = (await catalog.getById("PROD-RUN-001"))!;
-  await catalog.deactivate(product.id, { catalogVersion: product.catalogVersion });
+  await catalog.deactivate(product.id, { catalogVersion: product.catalogVersion! });
   expect((await promotions.products(signal)).some(row => row.id === product.id)).toBe(false);
   const historical = await promotions.products(signal, { productIds: [], skus: ["CAM-RUN-BLA-M"] });
   const reference = historical.find(row => row.id === product.id)!;

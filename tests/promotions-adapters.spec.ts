@@ -21,9 +21,84 @@ import {
   couponInputErrors,
   validateCouponDraft,
 } from "../src/features/promotions/services/couponValidation";
+import {
+  couponDateLabel,
+  couponPromotionValidity,
+  type CouponPromotionValidity,
+} from "../src/features/promotions/services/couponPresentation";
+import { couponFixtures } from "../src/features/promotions/mocks/coupons";
 
 const signal = () => new AbortController().signal;
 const query = { status: "all", kind: "all", page: 1, pageSize: 100 } as const;
+
+function couponWithValidity(validFrom?: string, validUntil?: string): CouponView {
+  const fixture = couponFixtures[0]!;
+  return {
+    ...structuredClone(fixture),
+    promotion: {
+      ...structuredClone(fixture.promotion)!,
+      validFrom,
+      validUntil,
+    },
+  };
+}
+
+test("presentación de vigencia usa instantes completos y clasifica límites", () => {
+  const from = "2026-10-20T00:00:00-05:00";
+  const until = "2026-10-21T00:00:00-05:00";
+  const atFrom = new Date(from);
+  const atUntil = new Date(until);
+  const cases: Array<[CouponView, Date, CouponPromotionValidity]> = [
+    [couponWithValidity(from, until), new Date("2026-10-19T23:59:59-05:00"), "not-started"],
+    [couponWithValidity(from, until), atFrom, "available"],
+    [couponWithValidity(from, until), new Date("2026-10-20T12:00:00-05:00"), "available"],
+    [couponWithValidity(from, until), atUntil, "expired"],
+    [couponWithValidity(undefined, until), atFrom, "unknown"],
+    [couponWithValidity("fecha-invalida", until), atFrom, "unknown"],
+    [couponWithValidity(until, from), atFrom, "unknown"],
+  ];
+  for (const [coupon, now, expected] of cases)
+    expect(couponPromotionValidity(coupon, now)).toBe(expected);
+});
+
+test("presentación de vigencia conserva fecha, hora y zona de Lima", () => {
+  const label = couponDateLabel("2026-10-31T00:00:00-05:00");
+  expect(label).toContain("31 oct.");
+  expect(label).toContain("12:00");
+});
+
+test("el repositorio mock conserva contadores durante consultas", async () => {
+  const services = createMockPromotionServices({}, { persist: false });
+  const signal = new AbortController().signal;
+  const known = await services.coupons.read("cyberinka20", signal);
+  const knownFromLimits = (
+    await services.coupons.list({ status: "all", page: 1, pageSize: 100 }, signal)
+  ).items.find((coupon) => coupon.id === "cyberinka20");
+  const knownAgain = await services.coupons.read("cyberinka20", signal);
+  expect(known?.consumedUses).toBe(500);
+  expect(known?.remainingUses).toBe(0);
+  expect(knownFromLimits?.remainingUses).toBe(0);
+  expect(knownAgain?.consumedUses).toBe(known?.consumedUses);
+  expect(knownAgain?.remainingUses).toBe(known?.remainingUses);
+
+  const unknown = {
+    ...structuredClone(couponFixtures[0]!),
+    id: "sin-capacidad",
+    consumedUses: 4,
+    remainingUses: undefined,
+  } satisfies CouponView;
+  const unknownRepository = createMockCouponRepository(
+    { promotions: async () => [] },
+    [unknown],
+    { persist: false },
+  );
+  const unknownDetail = await unknownRepository.read("sin-capacidad", signal);
+  const unknownAgain = await unknownRepository.read("sin-capacidad", signal);
+  expect(unknownDetail?.consumedUses).toBe(4);
+  expect(unknownDetail?.remainingUses).toBeUndefined();
+  expect(unknownAgain?.consumedUses).toBe(unknownDetail?.consumedUses);
+  expect(unknownAgain?.remainingUses).toBeUndefined();
+});
 
 test("composición global: api sin provider falla y no sustituye fallos por mocks", () => {
   expect(() => createPromotionRuntime("api")).toThrow(

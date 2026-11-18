@@ -40,6 +40,7 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
   const {
     formData,
     attributeSchemas,
+    choosingIdentifiers,
     schemaLoading,
     schemaError,
     updateField,
@@ -59,7 +60,7 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
       {/* CARD 1: Identidad y Contexto del Padre */}
       <SectionCard
         title="1. Identidad y SKU"
-        description="El SKU es la identidad comercial única de la variante. Si se deja en blanco al crear, Catálogo lo generará automáticamente."
+        description="El SKU es la identidad comercial única de la variante. Debe ingresarse explícitamente al crear."
       >
         <Stack gap="md">
           <Paper p="sm" withBorder bg="var(--po-subtle)">
@@ -74,7 +75,7 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
               </div>
               <Group gap="xs">
                 <Badge variant="outline" color="gray" size="sm">
-                  SKU Base: {parentProduct.skuBase}
+                  SKU Base: {parentProduct.skuBase ?? "Sin SKU base"}
                 </Badge>
                 <StatusBadge semantic="neutral">
                   {parentProduct.hasVariants ? "Con variantes" : "Simple"}
@@ -87,17 +88,17 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
             <Grid.Col span={{ base: 12, md: 6 }}>
               <TextInput
                 label="SKU de la Variante"
-                placeholder={isEdit ? "" : "Ej. PROD-RUN-AZUL-M (Opcional)"}
+                placeholder={isEdit ? "" : "Ej. PROD-RUN-AZUL-M"}
                 description={
                   isEdit
                     ? "El SKU es inmutable una vez creado."
-                    : "Opcional. Si se omite, el sistema generará uno único."
+                    : "Obligatorio. Se conserva sin generación automática."
                 }
                 value={formData.sku}
                 onChange={(e) => updateField("sku", e.currentTarget.value)}
                 error={errors.sku}
                 disabled={isEdit}
-                required={false}
+                required={!isEdit}
               />
             </Grid.Col>
           </Grid>
@@ -125,7 +126,10 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
             const entries = identity ? formData.identifyingAttributes : formData.nonIdentifyingAttributes;
             const update = identity ? updateIdentifyingAttribute : updateNonIdentifyingAttribute;
             const remove = identity ? removeIdentifyingAttribute : removeNonIdentifyingAttribute;
-            const available = attributeSchemas.filter(s => s.esIdentificadora === identity);
+            const otherEntries = identity ? formData.nonIdentifyingAttributes : formData.identifyingAttributes;
+            const available = attributeSchemas.filter(s => choosingIdentifiers
+              ? !otherEntries.some(entry => entry.caracteristicaId === s.caracteristicaId)
+              : s.esIdentificadora === identity);
             const locked = identity && isEdit;
             return <Box key={String(identity)}>
               <Group justify="space-between" mb="sm">

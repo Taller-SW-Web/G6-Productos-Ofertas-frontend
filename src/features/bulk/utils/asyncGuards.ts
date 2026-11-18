@@ -25,12 +25,14 @@ export type AdmissionStatus = "idle" | "ready" | "pending" | "accepted" | "uncer
 export interface AdmissionTask<T> {
   id: number;
   value: T;
+  correlationId: string;
   isCurrent: () => boolean;
 }
 
 interface AdmissionOperation<T> {
   id: number;
   value: T;
+  correlationId: string;
   status: AdmissionStatus;
 }
 
@@ -39,11 +41,11 @@ export class AdmissionCoordinator<T> {
   private nextId = 0;
   private operation: AdmissionOperation<T> | null = null;
 
-  select(value: T | null): AdmissionStatus {
+  select(value: T | null, restored?: { correlationId: string; status: AdmissionStatus }): AdmissionStatus {
     this.nextId++;
     this.operation = value === null
       ? null
-      : { id: this.nextId, value, status: "ready" };
+      : { id: this.nextId, value, correlationId: restored?.correlationId ?? crypto.randomUUID(), status: restored?.status ?? "ready" };
     return this.status;
   }
 
@@ -51,14 +53,16 @@ export class AdmissionCoordinator<T> {
     return this.operation?.status ?? "idle";
   }
 
-  begin(value: T): AdmissionTask<T> | null {
+  get correlationId(): string | null { return this.operation?.correlationId ?? null; }
+
+  begin(value: T, retryUncertain = false): AdmissionTask<T> | null {
     const operation = this.operation;
     if (
       !operation ||
       operation.value !== value ||
       operation.status === "pending" ||
       operation.status === "accepted" ||
-      operation.status === "uncertain"
+      (operation.status === "uncertain" && !retryUncertain)
     ) {
       return null;
     }
@@ -66,6 +70,7 @@ export class AdmissionCoordinator<T> {
     return {
       id: operation.id,
       value,
+      correlationId: operation.correlationId,
       isCurrent: () => this.operation === operation,
     };
   }

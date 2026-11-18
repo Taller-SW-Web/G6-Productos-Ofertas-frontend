@@ -73,25 +73,15 @@ export function useAdministrationEditor<T extends AdministrationRecord, D>(
     }
     setChecking(true);
     try {
-      const result = await confirmedRepository.read(
-        initial.id,
-        new AbortController().signal,
-      );
-      if (result) {
-        setCurrent(result);
-        if (
-          unknown &&
-          JSON.stringify(draftOf(result)) === JSON.stringify(draft)
-        )
-          setConfirmed(result);
-        else
-          setRecoveryMessage(
-            "Registro actual consultado. Tu propuesta se conserva para revisarla antes de guardar.",
-          );
-      } else
-        setRecoveryMessage(
-          "El registro no está disponible. Se conserva tu propuesta.",
-        );
+      if (unknown && confirmedRepository.reconcilePending) {
+        const resolution = await confirmedRepository.reconcilePending(initial.id, new AbortController().signal);
+        if (resolution.status === "reconciled") { setCurrent(resolution.value); setConfirmed(resolution.value); }
+        else setRecoveryMessage(resolution.status === "access_denied" ? "No tienes permiso para consultar la intención pendiente." : resolution.status === "unavailable" ? "La conciliación no está disponible; se conserva la intención bloqueada." : "La lectura no acredita la mutación. Se conserva la intención bloqueada.");
+      } else {
+        const result = await confirmedRepository.read(initial.id, new AbortController().signal);
+        if (result) { setCurrent(result); setRecoveryMessage("Registro actual consultado. Tu propuesta se conserva para revisarla antes de guardar."); }
+        else setRecoveryMessage("El registro no está disponible. Se conserva tu propuesta.");
+      }
     } catch {
       setRecoveryMessage(
         "No se pudo consultar el resultado. No se volverá a enviar automáticamente.",

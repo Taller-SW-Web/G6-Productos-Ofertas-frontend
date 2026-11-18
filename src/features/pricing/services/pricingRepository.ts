@@ -9,7 +9,7 @@ import type {
 } from "./pricingModels";
 
 // Internal ports/models, independent of HTTP DTOs, fixtures and display formatting.
-export type PriceChannel = "global" | "retail";
+export type PriceChannel = "global" | "retail" | "marketplace" | "chatbot" | "ventas";
 interface TargetContext {
   id: string;
   label: string;
@@ -31,6 +31,7 @@ export interface PriceView {
   validFrom: string;
   validUntil: string | null;
   inherited: boolean;
+  validityId?: string;
 }
 export interface PriceQuery {
   targetId: string;

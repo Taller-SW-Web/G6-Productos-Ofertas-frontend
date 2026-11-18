@@ -6,6 +6,7 @@ interface DashboardKpiGridProps {
   kpis: InventoryKpiSummary | null;
   loading: boolean;
   error?: string | null;
+  blockedReason?: string | null;
   onRetry?: () => void;
 }
 
@@ -26,8 +27,27 @@ export function DashboardKpiGrid({
   kpis,
   loading,
   error,
+  blockedReason,
   onRetry,
 }: DashboardKpiGridProps) {
+  if (blockedReason) {
+    return (
+      <FeedbackAlert
+        semantic="warning"
+        title="Indicadores no verificables para el filtro actual"
+        actions={
+          onRetry && (
+            <Button size="xs" variant="outline" onClick={onRetry}>
+              Reintentar
+            </Button>
+          )
+        }
+      >
+        {blockedReason}
+      </FeedbackAlert>
+    );
+  }
+
   if (error) {
     return (
       <FeedbackAlert
@@ -136,6 +156,9 @@ export function DashboardKpiGrid({
         Los estados por SKU no son excluyentes: un mismo SKU puede contarse como
         disponible, con stock bajo o agotado en ubicaciones distintas a la vez,
         por lo que la suma de estas tarjetas puede superar el total de SKU únicos.
+        &quot;Sin datos&quot; indica que la operación del contrato no publica esa
+        métrica o que no existe dato verificable para la selección; nunca se
+        sustituye por cero.
       </Text>
     </Stack>
   );

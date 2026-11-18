@@ -65,14 +65,16 @@ export interface CategoryCreateResult {
 export interface CategoryDetail {
   id: string;
   nombre: string;
-  slug: string;
-  nivel: number;
-  orden: number;
+  slug: string | null;
+  nivel: number | null;
+  orden: number | null;
+  version: number;
   estado: CategoryNode["estado"];
   descripcion?: string;
   padreId?: string;
   padreNombre?: string;
   hijas: CategoryNode[];
+  actualizadaSinLectura?: boolean;
 }
 
 export interface CategoryUpdateInput {
@@ -151,12 +153,12 @@ export interface CharacteristicListItem {
   tipo: CharacteristicType;
   estado: CharacteristicStatus;
   unidad?: string;
-  valoresActivos: number;
+  valoresActivos: number | null;
 }
 
 export interface CharacteristicCatalogConfig {
-  maxTexto: number;
-  maxValoresLista: number;
+  maxTexto: number | null;
+  maxValoresLista: number | null;
 }
 
 // S02 (Crear característica) — presentation models. The type is chosen at creation
@@ -184,7 +186,8 @@ export interface CharacteristicDetail {
   tipo: CharacteristicType;
   estado: CharacteristicStatus;
   unidad?: string;
-  valoresActivos: number;
+  valoresActivos: number | null;
+  version?: number;
   valores?: CharacteristicValue[];
 }
 
@@ -200,10 +203,10 @@ export type ProductTypeStatus = EntityStatus;
 export interface ProductTypeListItem {
   tipoProductoId: string;
   nombre: string;
-  estado: ProductTypeStatus;
+  estado: ProductTypeStatus | "Verificando baja";
   schemaVersion: number;
-  caracteristicasAsignadas: number;
-  limiteCaracteristicas: number;
+  caracteristicasAsignadas: number | null;
+  limiteCaracteristicas: number | null;
 }
 
 export interface ProductTypeCreateInput {
@@ -223,7 +226,7 @@ export interface ProductTypeAssociationCharacteristic {
   tipo: CharacteristicType;
   estado: CharacteristicStatus;
   unidad?: string;
-  valoresActivos: number;
+  valoresActivos: number | null;
 }
 
 export interface ProductTypeAssociation {
@@ -231,7 +234,7 @@ export interface ProductTypeAssociation {
   obligatoria: boolean;
   estado: CharacteristicStatus;
   schemaVersion: number;
-  caracteristica: ProductTypeAssociationCharacteristic;
+  caracteristica: ProductTypeAssociationCharacteristic | null;
 }
 
 export interface ProductTypeDetail {
@@ -239,12 +242,21 @@ export interface ProductTypeDetail {
   nombre: string;
   estado: ProductTypeStatus;
   schemaVersion: number;
-  limiteCaracteristicas: number;
+  limiteCaracteristicas: number | null;
   caracteristicasAsignadas: number;
   asociadas: ProductTypeAssociation[];
 }
 
 export interface ProductTypeAssociarInput {
+  tipoProductoId: string;
+  caracteristicaId: string;
+  obligatoria: boolean;
+}
+
+// MK-010 — cambio de obligatoriedad de una asociación existente.
+// Contrato: PATCH /tipos-producto/{tipoProductoId}/caracteristicas/{caracteristicaId}.
+// Solo incrementa schemaVersion cuando la asociación cambia realmente.
+export interface ProductTypeObligatoriedadInput {
   tipoProductoId: string;
   caracteristicaId: string;
   obligatoria: boolean;
@@ -289,12 +301,14 @@ export interface BrandDetail {
 
 export interface BrandCreateInput {
   nombre: string;
+  logoFile?: File | null;
   descripcion?: string | null;
   paisOrigenIso?: string | null;
 }
 
 export interface BrandUpdateInput {
   marcaId: string;
+  logoFile?: File | null;
   nombre: string;
   descripcion?: string | null;
   paisOrigenIso?: string | null;
@@ -340,11 +354,9 @@ export interface HistorialSlugItem {
 }
 
 // MK-008/009/010 — Seguimiento de operaciones asíncronas (202 Accepted).
-// BLOCKED_CONTRACT: no existe un contrato OpenAPI confirmado para el sondeo del
-// resultado de una operación asíncrona de baja/desasociación/desactivación (la
-// documentación de contratos no está accesible en este entorno). Estos modelos solo
-// representan el estado devuelto por el servicio; no definen ni inventan un endpoint
-// HTTP propio.
+// Contrato: GET /taxonomia/operaciones/{operationId}. Estos modelos representan el
+// estado que consume la UI; el mock no inventa un endpoint propio ni afirma que el
+// sondeo HTTP esté integrado en este PR.
 export type OperationFollowUpStatus =
   | "pendiente"
   | "confirmada"

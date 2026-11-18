@@ -1,11 +1,11 @@
 import { CatalogError, type CatalogRepository } from "../services/catalogRepository";
 
 // Deliberately fail closed. No endpoint, credentials or fallback are invented.
-export function createUnavailableApiCatalogRepository(): CatalogRepository {
+export function createUnavailableApiCatalogRepository(message = "La consulta del catálogo no está disponible."): CatalogRepository {
   async function unavailable(): Promise<never> {
     throw new CatalogError(
       "server",
-      "La consulta del catálogo no está disponible.",
+      message,
     );
   }
 

@@ -17,12 +17,12 @@ export function describirReglaCaracteristica(
   config: CharacteristicCatalogConfig,
 ): string {
   if (item.tipo === "LISTA") {
-    return `${item.valoresActivos} de ${config.maxValoresLista} valores activos`;
+    return `${item.valoresActivos ?? "No disponible"} de ${config.maxValoresLista ?? "límite no publicado"} valores activos`;
   }
   if (item.tipo === "NUMERO") {
     return `Unidad: ${item.unidad ?? "sin definir"}`;
   }
-  return `Hasta ${config.maxTexto} caracteres`;
+  return config.maxTexto === null ? "Límite definido por Taxonomía" : `Hasta ${config.maxTexto} caracteres`;
 }
 
 // Rule explanation used while the type is being chosen (create/edit form).
@@ -31,10 +31,10 @@ export function describirReglaTipo(
   config: CharacteristicCatalogConfig,
 ): string {
   if (tipo === "LISTA") {
-    return `Las listas admiten hasta ${config.maxValoresLista} valores activos.`;
+    return config.maxValoresLista === null ? "Taxonomía define el límite de valores." : `Las listas admiten hasta ${config.maxValoresLista} valores activos.`;
   }
   if (tipo === "NUMERO") {
     return "La unidad es obligatoria para características numéricas.";
   }
-  return `Los valores de texto admiten hasta ${config.maxTexto} caracteres.`;
+  return config.maxTexto === null ? "Taxonomía define el límite de caracteres." : `Los valores de texto admiten hasta ${config.maxTexto} caracteres.`;
 }

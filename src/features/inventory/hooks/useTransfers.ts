@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { isInventoryPresentationFailure } from "../services/inventoryErrors";
 import { notifyInventoryChanged } from "../services/inventoryEvents";
 import { getInventoryRepository } from "../services/inventoryProvider";
 import { useInventoryChangeSignal } from "./useInventoryChangeSignal";
@@ -28,6 +29,9 @@ export function useTransfers(filters: TransferFiltersQuery) {
 
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // TAC-P0-08: la recepción quedó registrada pero la vista no pudo actualizarse.
+  // Es feedback de PRESENTACIÓN, nunca un error transaccional.
+  const [presentationError, setPresentationError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -58,6 +62,7 @@ export function useTransfers(filters: TransferFiltersQuery) {
   const receive = async (payload: ReceiveTransferPayload) => {
     setSubmitting(true);
     setSubmitError(null);
+    setPresentationError(null);
     setSuccessMessage(null);
     try {
       const updated =
@@ -78,6 +83,15 @@ export function useTransfers(filters: TransferFiltersQuery) {
       notifyInventoryChanged();
       return updated;
     } catch (err: unknown) {
+      // TAC-P0-08: un fallo de PRESENTACIÓN ocurre después de que Inventory ya
+      // confirmó y persistió la recepción. No es un fallo transaccional: no se
+      // muestra como "no se pudo registrar", se dispara el refresco de la vista
+      // y se propaga para que el formulario quede bloqueado y no repita el POST.
+      if (isInventoryPresentationFailure(err)) {
+        setPresentationError(err.message);
+        notifyInventoryChanged();
+        throw err;
+      }
       const msg =
         err instanceof Error
           ? err.message
@@ -100,12 +114,15 @@ export function useTransfers(filters: TransferFiltersQuery) {
     submitting,
     error,
     submitError,
+    presentationError,
     successMessage,
     receive,
     refetch: () => setReloadToken((token) => token + 1),
     clearSubmitError: () => setSubmitError(null),
+    clearPresentationError: () => setPresentationError(null),
     clearFeedback: () => {
       setSubmitError(null);
+      setPresentationError(null);
       setSuccessMessage(null);
     },
   };

@@ -306,8 +306,9 @@ test("R3 P1-7: fallo en localStorage (QuotaExceededError) no bloquea la sesión 
   // Simular fallo de cuota en localStorage.setItem
   await page.evaluate(() => {
     const originalSetItem = Storage.prototype.setItem;
-    Storage.prototype.setItem = function () {
-      throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+    Storage.prototype.setItem = function (key, value) {
+      if (this === window.localStorage) throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+      return originalSetItem.call(this, key, value);
     };
     (window as unknown as { __restoreStorage?: () => void }).__restoreStorage = () => {
       Storage.prototype.setItem = originalSetItem;
@@ -696,10 +697,7 @@ test("R3 P1-06f: marca y categoría renombradas en Taxonomy se propagan a Catál
   const catInput = page.getByRole("textbox", { name: "Nombre" });
   await catInput.fill("Ropa Renombrada R3");
   await page.getByRole("button", { name: "Guardar cambios" }).click();
-  const dialog = page.getByRole("dialog");
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole("button", { name: "Guardar cambios" }).click();
-  await expect(page.getByText(/Se actualizó «Ropa Renombrada R3»/)).toBeVisible();
+  await expect(page.getByText(/Se actualizaron los datos de «Ropa Renombrada R3»/)).toBeVisible();
 
   // Verificar en Catálogo (producto PROD-RUN-001)
   await page.goto("/productos/PROD-RUN-001");

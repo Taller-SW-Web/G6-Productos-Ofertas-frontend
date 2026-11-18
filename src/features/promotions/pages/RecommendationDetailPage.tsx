@@ -19,6 +19,7 @@ import {
 import { AdministrationStateDialog } from "../components/AdministrationStateDialog";
 import { RecommendationCandidates } from "../components/RecommendationCandidates";
 import { useAdministrationRead } from "../hooks/useAdministrationRead";
+import { PromotionCatalogAccessError } from "../adapters/httpPromotionCatalog";
 
 import {
   recommendationKindLabel,
@@ -40,7 +41,8 @@ export function RecommendationDetailPage({
   } = usePromotionServices();
   const [revision, setRevision] = useState(0),
     [opened, setOpened] = useState(false),
-    [updated, setUpdated] = useState(false);
+    [updated, setUpdated] = useState(false),
+    [statusReconciled, setStatusReconciled] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null),
     location = useLocation(),
     navigate = useNavigate();
@@ -59,21 +61,32 @@ export function RecommendationDetailPage({
     setPrevResult(state.result);
     setCachedRecord(state.result);
   }
-  const record = state.status === "success" ? state.result : cachedRecord;
+  const record = state.status === "success" ? state.result : cachedRecord?.id === ruleId ? cachedRecord : null;
   const readCatalog = useCallback(
-    async (signal: AbortSignal) => ({
-      products: await confirmedServices.catalog.products(signal, record ? {
-        productIds: [
-          ...(record.configuration.originType === "product" ? [record.configuration.originId] : []),
-          ...record.configuration.candidates.map((candidate) => candidate.productId),
-        ],
-        skus: [],
-      } : undefined),
-      categories: await confirmedServices.catalog.categories(signal),
-    }),
+    async (signal: AbortSignal) => {
+      const [products, categories] = await Promise.allSettled([
+        confirmedServices.catalog.products(signal, record ? {
+          productIds: [
+            ...(record.configuration.originType === "product" ? [record.configuration.originId] : []),
+            ...record.configuration.candidates.map((candidate) => candidate.productId),
+          ],
+          skus: [],
+        } : undefined),
+        confirmedServices.catalog.categories(signal),
+      ]);
+      const errors = [products, categories].filter(result => result.status === "rejected");
+      const accessErrors = errors.filter(result => result.status === "rejected" && result.reason instanceof PromotionCatalogAccessError);
+      return {
+        products: products.status === "fulfilled" ? products.value : [],
+        categories: categories.status === "fulfilled" ? categories.value : [],
+        errors,
+        accessErrors,
+      };
+    },
     [confirmedServices, record],
   );
   const catalog = useAdministrationRead(`catalog:${revision + queryRevision}:${record?.id ?? ""}`, readCatalog);
+  const referencesDenied = catalog.status === "success" && catalog.result.accessErrors.length > 0;
   useEffect(() => {
     if (record && (location.state?.focusState || updated))
       trigger.current?.focus();
@@ -97,7 +110,7 @@ export function RecommendationDetailPage({
       <PageHeader
         title={record?.name ?? "Detalle de regla"}
         actions={
-          <Button
+            <Button
             component={Link}
             variant="outline"
             to={`/recomendaciones${suffix}`}
@@ -108,15 +121,17 @@ export function RecommendationDetailPage({
       />
       <Stack gap="lg">
         <PromotionDataNotice kind="recommendation-detail" />
+        {catalog.status === "success" && catalog.result.errors.length > 0 && <FeedbackAlert semantic="warning" title="Referencias auxiliares parciales">La información de productos y categorías se consultó por separado; la fuente disponible se conserva.</FeedbackAlert>}
+        {catalog.status === "success" && catalog.result.accessErrors.length > 0 && <FeedbackAlert semantic="error" title="Autorización requerida para referencias">Una consulta respondió con error de sesión o permisos; la referencia no se presenta como una lista vacía.</FeedbackAlert>}
         {location.state?.saved && (
-          <FeedbackAlert semantic="success" title="Regla guardada">
-            La configuración fue confirmada.
-          </FeedbackAlert>
+          location.state?.reconciled
+            ? <FeedbackAlert semantic="warning" title="Estado final conciliado">La lectura administrativa coincide con los campos esperados. Esto acredita el estado observado, no que la solicitud anterior haya sido su causa.</FeedbackAlert>
+            : <FeedbackAlert semantic="success" title="Regla guardada">La configuración fue confirmada.</FeedbackAlert>
         )}
         {updated && (
-          <FeedbackAlert semantic="success" title="Estado actualizado">
-            El cambio fue confirmado y los candidatos se conservan.
-          </FeedbackAlert>
+          statusReconciled
+            ? <FeedbackAlert semantic="warning" title="Estado final conciliado">El estado solicitado se observa en la lectura administrativa; no se atribuye a la petición original. Los candidatos se conservan.</FeedbackAlert>
+            : <FeedbackAlert semantic="success" title="Estado actualizado">El cambio fue confirmado y los candidatos se conservan.</FeedbackAlert>
         )}
         {state.status === "loading" && (
           <Text role="status">Consultando regla…</Text>
@@ -180,6 +195,7 @@ export function RecommendationDetailPage({
               products={
                 catalog.status === "success" ? catalog.result.products : []
               }
+              disabled={referencesDenied}
             />
             <Text size="sm" c="dimmed">
               Precio y disponibilidad por producto: No disponible.
@@ -188,6 +204,7 @@ export function RecommendationDetailPage({
               <Button
                 component={Link}
                 to={`/recomendaciones/${ruleId}/editar${suffix}`}
+                disabled={referencesDenied}
               >
                 Editar regla
               </Button>
@@ -195,6 +212,7 @@ export function RecommendationDetailPage({
                 ref={trigger}
                 variant="outline"
                 onClick={() => setOpened(true)}
+                disabled={referencesDenied}
               >
                 {record.status === "active"
                   ? "Desactivar regla"
@@ -204,7 +222,7 @@ export function RecommendationDetailPage({
             <AdministrationStateDialog
               record={record}
               entityLabel="regla"
-              opened={opened || changeState}
+              opened={(opened || changeState) && !referencesDenied}
               change={(status, signal) =>
                 services.recommendations.changeStatus(
                   ruleId,
@@ -212,13 +230,12 @@ export function RecommendationDetailPage({
                   signal,
                 )
               }
-              read={(signal) =>
-                confirmedServices.recommendations.read(ruleId, signal)
-              }
+              reconcile={(signal) => confirmedServices.recommendations.reconcilePending?.(ruleId, signal) ?? Promise.resolve({ status: "not_accredited" as const })}
               onCancel={close}
-              onConfirmed={() => {
+              onConfirmed={(outcome) => {
                 close();
                 setUpdated(true);
+                setStatusReconciled(outcome === "RECONCILED");
                 setRevision((value) => value + 1);
               }}
             />

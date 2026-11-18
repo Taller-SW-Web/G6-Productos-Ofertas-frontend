@@ -78,7 +78,9 @@ export function BatchStatusPanel({
       description={
         batch.file_name
           ? `Archivo de origen: ${batch.file_name} · Actualizado: ${new Date(batch.updated_at).toLocaleTimeString("es-PE")}`
-          : `Actualizado: ${new Date(batch.updated_at).toLocaleTimeString("es-PE")}`
+          : batch.updated_at
+            ? `Actualizado: ${new Date(batch.updated_at).toLocaleTimeString("es-PE")}`
+            : "Hora de actualización no informada por el servicio"
       }
       actions={
         <Group gap="sm">

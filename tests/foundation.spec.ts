@@ -208,7 +208,7 @@ test("commercial shell and navigation do not display foundation copy or demo gro
   page,
 }) => {
   await page.goto("/");
-  await expect(page).toHaveURL(/\/precios$/);
+  await expect(page).toHaveURL(/\/productos$/);
   await expect(page).toHaveTitle("Productos y Ofertas | Inka Athletics");
 
   // Header branding

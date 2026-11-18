@@ -22,7 +22,8 @@ export function readPositiveInteger(
   return Math.min(parsed, max);
 }
 
-export function productStatusLabel(status: ProductStatus): string {
+export function productStatusLabel(status: ProductStatus | null): string {
+  if (status === null) return "Estado administrativo no publicado";
   switch (status) {
     case "ACTIVO":
       return "Activo";
@@ -201,5 +202,11 @@ export function formatIdentifyingAttributes(
   attrs: ProductAttributeValue[],
 ): string {
   if (!attrs || attrs.length === 0) return "Sin atributos";
-  return attrs.map((a) => String(a.valor)).join(" / ");
+  return attrs.map(formatAttributeValue).join(" / ");
+}
+
+export function formatAttributeValue(attribute: ProductAttributeValue): string {
+  if (attribute.valorDisponible === false || attribute.valor === null) return "Valor no disponible";
+  if (typeof attribute.valor === "boolean") return attribute.valor ? "Sí" : "No";
+  return String(attribute.valor);
 }

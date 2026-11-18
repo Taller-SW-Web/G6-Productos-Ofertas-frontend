@@ -5,25 +5,32 @@ import type {
   TaxonomyCategory,
   TaxonomyProductType,
 } from "../services/taxonomyRepository";
+import type { DataMode } from "../../../app/config/dataMode";
 
 interface ProductFiltersProps {
   loading?: boolean;
+  categoriesUnavailable?: boolean;
+  typesUnavailable?: boolean;
   query: CatalogQuery;
   categories: TaxonomyCategory[];
   productTypes: TaxonomyProductType[];
   total: number;
   shownCount: number;
+  mode?: DataMode;
   onChange: (patch: Partial<CatalogQuery>) => void;
   onClear: () => void;
 }
 
 export function ProductFilters({
   loading,
+  categoriesUnavailable,
+  typesUnavailable,
   query,
   categories,
   productTypes,
   total,
   shownCount,
+  mode = "mock",
   onChange,
   onClear,
 }: ProductFiltersProps) {
@@ -77,14 +84,14 @@ export function ProductFilters({
         <div style={{ gridColumn: "span 2" }}>
           <SearchField
             label="Búsqueda"
-            placeholder="Buscar por nombre, SKU base o descripción..."
+            placeholder={mode === "api" ? "Buscar por nombre o SKU base..." : "Buscar por nombre, SKU base o descripción..."}
             value={query.q || ""}
             onChange={(val) => onChange({ q: val, page: 1 })}
           />
         </div>
 
         <Select
-          disabled={loading}
+          disabled={loading || categoriesUnavailable}
           label="Categoría"
           data={categoryOptions}
           value={query.categoryId || "all"}
@@ -93,13 +100,13 @@ export function ProductFilters({
 
         <Select
           label="Tipo"
-          disabled={loading}
+          disabled={loading || typesUnavailable}
           data={typeOptions}
           value={query.typeId || "all"}
           onChange={(val) => onChange({ typeId: val || "all", page: 1 })}
         />
 
-        <Select
+        {mode !== "api" && <Select
           label="Modelo"
           data={modelOptions}
           value={query.saleModel || "all"}
@@ -109,7 +116,7 @@ export function ProductFilters({
               page: 1,
             })
           }
-        />
+        />}
       </SimpleGrid>
 
       <Group justify="space-between" mt="xs" w="100%">

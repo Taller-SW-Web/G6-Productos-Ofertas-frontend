@@ -87,9 +87,9 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
       page.getByRole("heading", { name: "Nueva Variante (SKU)" }),
     ).toBeVisible();
 
-    // Fill optional SKU (or let catalog generate it)
+    // SPEC-004 requires an explicit SKU.
     const customSku = `CAM-RUN-ROJ-S-${Date.now().toString().slice(-4)}`;
-    await page.getByPlaceholder("Ej. PROD-RUN-AZUL-M (Opcional)").fill(customSku);
+    await page.getByPlaceholder("Ej. PROD-RUN-AZUL-M").fill(customSku);
 
     // Fill identifying attributes (Color and Talla)
     await fillAttributes(page, "Rojo Carmesí", "XL");
@@ -251,12 +251,12 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
     await expect(page.getByRole("button", { name: "Desactivar" })).toBeVisible();
   });
 
-  test("Regla de Negocio: Creación con SKU generado automáticamente", async ({
+  test("Regla de Negocio: SKU explícito obligatorio, sin generación automática", async ({
     page,
   }) => {
     await page.goto("/productos/PROD-RUN-001/variantes/nueva");
     await expect(page.getByRole("heading", { name: "Nueva Variante (SKU)" })).toBeVisible();
-    // Leave SKU blank to verify automatic generation
+    // Leave SKU blank: no write or generated identity is allowed.
     await fillAttributes(page, "Negro Ónix", "L");
 
     await page
@@ -270,9 +270,10 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
 
     await page.getByRole("button", { name: "Guardar Variante" }).first().click();
 
-    // Should navigate to preparation with auto-generated SKU
-    await expect(page).toHaveURL(/\/productos\/PROD-RUN-001\/variantes\/.+\/preparacion/);
-    await expect(page.getByRole("heading", { name: /Preparación de Inventario: CAM-RUN-V\d+/ })).toBeVisible();
+    await expect(page).toHaveURL(/\/productos\/PROD-RUN-001\/variantes\/nueva$/);
+    await expect(page.getByRole("textbox", { name: "SKU de la Variante" })).toHaveAttribute("required", "");
+    await expect(page.getByText("El SKU es obligatorio; ingrese un código único.")).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "URL de Imagen de la Variante" })).toHaveValue("https://ejemplo.com/imagenes/camiseta deportiva-negra.jpg");
   });
 
   test("Regla de Negocio: Rechazo de combinación identificadora duplicada (CA-03)", async ({
@@ -282,6 +283,7 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
       "/productos/PROD-RUN-001/variantes/nueva?modoRevision=1&escenario=create-duplicate-combination",
     );
     await fillAttributes(page, "Blanco", "M");
+    await page.getByRole("textbox", { name: "SKU de la Variante" }).fill("EXPLICIT-DUP-COMBINATION");
     await page
       .getByPlaceholder("https://ejemplo.com/imagenes/variante-azul.jpg")
       .fill("https://ejemplo.com/imagenes/camiseta deportiva-blanca.jpg");
@@ -297,6 +299,7 @@ test.describe("MK-004 Gestión avanzada de variantes (SKU)", () => {
   }) => {
     await page.goto("/productos/PROD-RUN-001/variantes/nueva");
     await fillAttributes(page, "Rojo Carmesí", "M");
+    await page.getByRole("textbox", { name: "SKU de la Variante" }).fill("EXPLICIT-INVALID-PHYSICAL");
     await page.getByPlaceholder("https://ejemplo.com/imagenes/variante-azul.jpg").fill("https://ejemplo.com/foto.jpg");
     await page.getByRole("textbox", { name: "Peso (kg)" }).fill("0");
     await page.getByRole("button", { name: "Guardar Variante" }).first().click();

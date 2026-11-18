@@ -10,10 +10,7 @@ import {
   Text,
 } from "@mantine/core";
 import { IconCheck, IconDeviceFloppy } from "@tabler/icons-react";
-import {
-  FeedbackAlert,
-  SectionCard,
-} from "../../../components/shared";
+import { SectionCard } from "../../../components/shared";
 import type { StockItem, ThresholdConfig } from "../services/inventoryTypes";
 
 interface ThresholdConfigFormProps {
@@ -22,6 +19,12 @@ interface ThresholdConfigFormProps {
   saving: boolean;
   onUpdateGlobal: (val: number) => Promise<boolean>;
   onUpdateSku: (sku: string, val: number) => Promise<boolean>;
+  onRemoveSkuOverride?: (sku: string) => Promise<boolean>;
+  canRemoveSkuOverride?: boolean;
+  // Limpia el feedback de la operación anterior al iniciar una nueva. El
+  // mensaje de resultado lo aporta exclusivamente el hook (CONFIRMED/VERIFIED/
+  // error); este formulario no genera confirmaciones propias.
+  onUpdateStart?: () => void;
 }
 
 export function ThresholdConfigForm({
@@ -30,6 +33,9 @@ export function ThresholdConfigForm({
   saving,
   onUpdateGlobal,
   onUpdateSku,
+  onRemoveSkuOverride,
+  canRemoveSkuOverride = false,
+  onUpdateStart,
 }: ThresholdConfigFormProps) {
   const [globalVal, setGlobalVal] = useState<number | string>(
     thresholds.globalThreshold,
@@ -40,16 +46,16 @@ export function ThresholdConfigForm({
   const [skuVal, setSkuVal] = useState<number | string>(
     selectedSku ? thresholds.skuOverrides[selectedSku] ?? thresholds.globalThreshold : 10,
   );
-  const [localFeedback, setLocalFeedback] = useState<string | null>(null);
+  const [globalDirty, setGlobalDirty] = useState(false);
+  const [skuDirty, setSkuDirty] = useState(false);
 
   const handleGlobalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const val = Number(globalVal);
-    if (!isNaN(val) && val >= 0) {
-      const ok = await onUpdateGlobal(val);
-      if (ok) {
-        setLocalFeedback("Umbral global guardado correctamente.");
-      }
+    if (globalVal !== "" && Number.isSafeInteger(val) && val >= 0) {
+      onUpdateStart?.();
+      const updated = await onUpdateGlobal(val);
+      if (updated) setGlobalDirty(false);
     }
   };
 
@@ -57,11 +63,10 @@ export function ThresholdConfigForm({
     e.preventDefault();
     if (!selectedSku) return;
     const val = Number(skuVal);
-    if (!isNaN(val) && val >= 0) {
-      const ok = await onUpdateSku(selectedSku, val);
-      if (ok) {
-        setLocalFeedback(`Umbral para ${selectedSku} guardado correctamente.`);
-      }
+    if (skuVal !== "" && Number.isSafeInteger(val) && val >= 0) {
+      onUpdateStart?.();
+      const updated = await onUpdateSku(selectedSku, val);
+      if (updated) setSkuDirty(false);
     }
   };
 
@@ -78,12 +83,6 @@ export function ThresholdConfigForm({
 
   return (
     <Stack gap="lg">
-      {localFeedback && (
-        <FeedbackAlert semantic="success" title="Cambio aplicado">
-          {localFeedback}
-        </FeedbackAlert>
-      )}
-
       <Grid gap="lg">
         <Grid.Col span={{ base: 12, md: 6 }}>
           <SectionCard
@@ -96,8 +95,10 @@ export function ThresholdConfigForm({
                   label="Unidades mínimas de stock bajo"
                   description="Valor entero mayor o igual a 0 (default normativo: 10)."
                   min={0}
-                  value={globalVal}
-                  onChange={setGlobalVal}
+                  step={1}
+                  decimalScale={0}
+                  value={globalDirty ? globalVal : thresholds.globalThreshold}
+                  onChange={(value) => { setGlobalVal(value); setGlobalDirty(true); }}
                   disabled={saving}
                   aria-label="Umbral global de stock bajo"
                 />
@@ -130,6 +131,7 @@ export function ThresholdConfigForm({
                     setSelectedSku(val);
                     if (val) {
                       setSkuVal(thresholds.skuOverrides[val] ?? thresholds.globalThreshold);
+                      setSkuDirty(false);
                     }
                   }}
                   disabled={saving}
@@ -139,8 +141,10 @@ export function ThresholdConfigForm({
                   label="Unidades de umbral para este SKU"
                   description="Si el disponible es menor o igual a este valor, se marcará STOCK_BAJO."
                   min={0}
-                  value={skuVal}
-                  onChange={setSkuVal}
+                  step={1}
+                  decimalScale={0}
+                  value={skuDirty ? skuVal : selectedSku ? thresholds.skuOverrides[selectedSku] ?? thresholds.globalThreshold : skuVal}
+                  onChange={(value) => { setSkuVal(value); setSkuDirty(true); }}
                   disabled={saving}
                   aria-label="Umbral específico por SKU"
                 />
@@ -177,6 +181,7 @@ export function ThresholdConfigForm({
                 <Table.Th>Producto</Table.Th>
                 <Table.Th style={{ textAlign: "right" }}>Umbral específico</Table.Th>
                 <Table.Th style={{ textAlign: "right" }}>Diferencia vs Global</Table.Th>
+                <Table.Th>Acciones</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -193,6 +198,7 @@ export function ThresholdConfigForm({
                     <Table.Td style={{ textAlign: "right" }} c={diff < 0 ? "orange" : "blue"}>
                       {diff === 0 ? "Igual" : diff > 0 ? `+${diff}` : `${diff}`} unidades
                     </Table.Td>
+                    <Table.Td><Button size="xs" variant="subtle" disabled={saving || !canRemoveSkuOverride || !onRemoveSkuOverride} onClick={() => { onUpdateStart?.(); void onRemoveSkuOverride?.(sku); }}>Usar global</Button></Table.Td>
                   </Table.Tr>
                 );
               })}

@@ -25,7 +25,7 @@ export function CreateCategoryPage() {
   const navigate = useNavigate();
   const { state: treeState } = useCategoryTree();
 
-  const { phase, slugCheck, slug, error, creado, setSlug, comprobar, confirmar, cerrar } =
+  const { phase, slugCheck, slug, error, creado, setSlug, comprobar, confirmar, cerrar, reconciliar } =
     useCreateCategory();
 
   const [nombre, setNombre] = useState("");
@@ -45,7 +45,7 @@ export function CreateCategoryPage() {
   );
 
   const modalAbierto =
-    phase === "comprobando" || phase === "confirmando" || phase === "guardando";
+    phase === "comprobando" || phase === "confirmando" || phase === "guardando" || phase === "incierto";
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -176,7 +176,7 @@ export function CreateCategoryPage() {
         onConfirm={handleConfirmar}
         error={
           error ? (
-            <FeedbackAlert semantic="error" title="No se pudo crear la categoría">
+            <FeedbackAlert semantic="error" title={phase === "incierto" ? "Resultado incierto" : "No se pudo crear la categoría"} actions={phase === "incierto" ? <Button variant="outline" onClick={() => void reconciliar()}>Reconciliar en el árbol</Button> : undefined}>
               {error}
             </FeedbackAlert>
           ) : undefined

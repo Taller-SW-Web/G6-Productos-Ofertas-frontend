@@ -15,6 +15,7 @@ import {
   PageHeader,
 } from "../../../components/shared";
 import { CouponForm } from "../components/CouponForm";
+import { CouponSummary } from "../components/CouponSummary";
 import { UnsavedChangesDialog } from "../components/UnsavedChangesDialog";
 import { useCoupon } from "../hooks/useCoupons";
 import { useCouponForm } from "../hooks/useCouponForm";
@@ -99,6 +100,41 @@ function CouponFormContent({ initial }: { initial: CouponView | null }) {
     navigate(initial ? `/cupones/${initial.id}${suffix}` : `/cupones${suffix}`);
   if (form.confirmed) {
     const next = clearTransientParams(params);
+    if (form.confirmed.writeOutcome === "RECONCILED") return (
+      <Stack gap="lg">
+        <PageHeader title={`Cupón — ${form.confirmed.code}`} />
+        <FeedbackAlert semantic="warning" title="Estado final conciliado">La lectura contractual coincide con la configuración esperada. Esto verifica el estado observado, no atribuye su autoría a la solicitud anterior.</FeedbackAlert>
+        <CouponSummary coupon={form.confirmed} />
+        <Button component={Link} to={`/cupones/${form.confirmed.id}?${next.toString()}`}>Consultar detalle</Button>
+      </Stack>
+    );
+    if (form.confirmed.relatedDataUnavailable)
+      return (
+        <Stack gap="lg">
+          <PageHeader title={`Cupón — ${form.confirmed.code}`} />
+          <FeedbackAlert semantic="success" title="Cupón guardado">
+            La propuesta quedó guardada.
+          </FeedbackAlert>
+          <FeedbackAlert semantic="warning" title="Datos relacionados no disponibles">
+            El cambio del cupón fue confirmado. No se pudieron consultar los
+            datos actuales de su promoción. Puedes consultar el detalle sin
+            reenviar el cambio.
+          </FeedbackAlert>
+          <CouponSummary coupon={form.confirmed} />
+          <Button component={Link} to={`/cupones/${form.confirmed.id}?${next.toString()}`}>
+            Consultar detalle
+          </Button>
+        </Stack>
+      );
+    if (form.confirmed.relatedDataAccess)
+      return (
+        <Stack gap="lg">
+          <PageHeader title={`Cupón — ${form.confirmed.code}`} />
+          <FeedbackAlert semantic="success" title="Cupón guardado">La escritura fue confirmada por Backend.</FeedbackAlert>
+          <FeedbackAlert semantic="error" title={form.confirmed.relatedDataAccess === "session" ? "Sesión requerida" : "Acceso auxiliar denegado"}>{form.confirmed.relatedDataAccess === "session" ? "El cupón se guardó; vuelve a identificarte para consultar su promoción asociada." : "El cupón se guardó; tu cuenta no tiene permiso para consultar su promoción asociada."}</FeedbackAlert>
+          <CouponSummary coupon={form.confirmed} />
+        </Stack>
+      );
     return (
       <Navigate
         to={`/cupones/${form.confirmed.id}?${next.toString()}`}

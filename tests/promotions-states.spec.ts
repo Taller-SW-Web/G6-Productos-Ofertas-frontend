@@ -160,7 +160,7 @@ test("MK-007: self-origin correction and conflict resolution retain typed candid
     .getByRole("combobox", { name: "Producto de origen", exact: true })
     .click();
   await page
-    .getByRole("option", { name: "Medias técnicas", exact: true })
+    .getByRole("option", { name: "Casaca Cortaviento Trail", exact: true })
     .click();
   await page
     .getByRole("button", { name: "Guardar cambios", exact: true })
@@ -172,13 +172,13 @@ test("MK-007: self-origin correction and conflict resolution retain typed candid
     ),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Quitar Medias técnicas", exact: true }),
+    page.getByRole("button", { name: "Quitar Casaca Cortaviento Trail", exact: true }),
   ).toBeFocused();
   await page
     .getByRole("combobox", { name: "Producto de origen", exact: true })
     .click();
   await page
-    .getByRole("option", { name: "Running Essential", exact: true })
+    .getByRole("option", { name: "Camiseta Running Endurance", exact: true })
     .click();
   await page
     .getByLabel("Nombre de la regla", { exact: true })
@@ -189,7 +189,7 @@ test("MK-007: self-origin correction and conflict resolution retain typed candid
   await page
     .getByRole("button", { name: "Consultar registro actual", exact: true })
     .click();
-  await expect(page.getByRole("table")).toContainText("Medias técnicas");
+  await expect(page.getByRole("table")).toContainText("Casaca Cortaviento Trail");
   await page
     .getByRole("button", { name: "Guardar propuesta revisada", exact: true })
     .click();

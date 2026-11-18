@@ -25,6 +25,9 @@ export function ProductCreatePage() {
     generalError,
     submitting,
     isDirty,
+    writeOutcomeUnknown,
+    reconciledProductId,
+    reconcileCreateBySku,
     categories,
     brands,
     productTypes,
@@ -40,7 +43,7 @@ export function ProductCreatePage() {
     onSuccess: (created) => {
       // FLOW-003 §4.1: On 201 BORRADOR success, navigate immediately to S06 preparation!
       navigate(`/productos/${created.id}/preparacion`, {
-        state: { justCreated: true },
+        state: { justCreated: true, createdProduct: created },
       });
     },
   });
@@ -71,6 +74,8 @@ export function ProductCreatePage() {
           {generalError}
         </FeedbackAlert>
       )}
+      {writeOutcomeUnknown && <Button variant="outline" onClick={async () => { const id = await reconcileCreateBySku(); if (id) navigate(`/productos/${id}`); }}>Consultar Catálogo por SKU</Button>}
+      {reconciledProductId && <Button variant="subtle" onClick={() => navigate(`/productos/${reconciledProductId}`)}>Abrir producto encontrado</Button>}
 
       {schemaLoading && <FeedbackAlert semantic="info" title="Cargando esquema">Confirmando las características de Taxonomía…</FeedbackAlert>}
       {schemaError && <FeedbackAlert semantic="error" title="Esquema no disponible">{schemaError}<Button onClick={retrySchema} variant="subtle">Reintentar esquema</Button></FeedbackAlert>}
@@ -93,7 +98,7 @@ export function ProductCreatePage() {
             <Button
               type="submit"
               loading={submitting}
-              disabled={!schemaConfirmed || loadingMasters}
+              disabled={!schemaConfirmed || loadingMasters || writeOutcomeUnknown}
               leftSection={<IconDeviceFloppy size={16} />}
             >
               Guardar borrador

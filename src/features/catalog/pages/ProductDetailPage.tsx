@@ -29,14 +29,17 @@ import {
   StatusBadge,
 } from "../../../components/shared";
 import { useProductDetail } from "../hooks/useProductDetail";
+import { CatalogReadError } from "../components/CatalogReadError";
 import {
   calculateVolumeCm3,
+  formatAttributeValue,
   productStatusLabel,
   readCatalogScenario,
 } from "../services/catalogPresentation";
 import { ProductActivationDialog } from "../components/ProductActivationDialog";
 import { ProductDeactivationDialog } from "../components/ProductDeactivationDialog";
 import { useMockStateRevision } from "../../shared/useMockStateRevision";
+import { useTaxonomyFilters } from "../hooks/useTaxonomyFilters";
 
 interface ProductDetailPageProps {
   initialDialog?: "activar" | "desactivar";
@@ -56,6 +59,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
   ]);
 
   const detailState = useProductDetail(productId || "", scenario, revision + mockRevision);
+  const taxonomy = useTaxonomyFilters(revision + mockRevision, true);
 
   // Dialog states
   const dialogParam = params.get("dialog");
@@ -76,6 +80,8 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
       </Stack>
     );
   }
+
+  if (["error", "forbidden", "session"].includes(detailState.status)) return <CatalogReadError error={detailState.error} />;
 
   if (detailState.status === "not_found" || !detailState.product) {
     return (
@@ -121,7 +127,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
     <Stack gap="xl">
       <PageHeader
         title={p.name}
-        description={`SKU Base: ${p.skuBase} · Modelo: ${p.hasVariants ? "Con variantes" : "Simple"}`}
+        description={`SKU Base: ${p.skuBase ?? "Sin SKU base"} · Modelo: ${p.hasVariants ? "Con variantes" : "Simple"}`}
         breadcrumbs={[
           { label: "Inicio", to: "/precios" },
           { label: "Catálogo", to: "/productos" },
@@ -148,7 +154,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
               Ver preparación
             </Button>
 
-            {p.status !== "INACTIVO" && (
+            {p.status !== "INACTIVO" && p.catalogVersion !== null && (
               <Button
                 component={Link}
                 to={`/productos/${p.id}/editar`}
@@ -159,7 +165,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
               </Button>
             )}
 
-            {p.status === "BORRADOR" && (
+            {p.status === "BORRADOR" && p.catalogVersion !== null && (
               <Button
                 onClick={() => setActivateOpened(true)}
                 leftSection={<IconCheck size={16} />}
@@ -168,7 +174,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
               </Button>
             )}
 
-            {p.status === "INACTIVO" && (
+            {p.status === "INACTIVO" && p.catalogVersion !== null && (
               <Button
                 onClick={() => setActivateOpened(true)}
                 leftSection={<IconCheck size={16} />}
@@ -177,7 +183,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
               </Button>
             )}
 
-            {p.status === "ACTIVO" && (
+            {p.status === "ACTIVO" && p.catalogVersion !== null && (
               <Button
                 color="danger"
                 variant="outline"
@@ -198,7 +204,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
             {/* Identity and general info */}
             <SectionCard title="Identidad y Clasificación">
               <Stack gap="md">
-                <Text size="sm">{p.description}</Text>
+                <Text size="sm">{p.description ?? "Descripción no publicada por esta consulta."}</Text>
 
                 <SimpleGrid cols={{ base: 2, sm: 3 }} spacing="md">
                   <div>
@@ -206,7 +212,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
                       Categoría
                     </Text>
                     <Text size="sm" fw={600}>
-                      {p.categoryName}
+                      {taxonomy.categories.find(item => item.id === p.categoryId)?.nombre ?? (p.categoryName === p.categoryId ? "Nombre no disponible" : p.categoryName)}
                     </Text>
                   </div>
                   <div>
@@ -214,7 +220,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
                       Tipo de producto
                     </Text>
                     <Text size="sm" fw={600}>
-                      {p.typeName}
+                      {taxonomy.productTypes.find(item => item.id === p.typeId)?.nombre ?? (p.typeName === p.typeId ? "Nombre no disponible" : p.typeName)}
                     </Text>
                   </div>
                   <div>
@@ -222,7 +228,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
                       Marca
                     </Text>
                     <Text size="sm" fw={600}>
-                      {p.brandName}
+                      {taxonomy.brands.find(item => item.id === p.brandId)?.nombre ?? (p.brandName === p.brandId ? "Nombre no disponible" : p.brandName)}
                     </Text>
                   </div>
                   <div>
@@ -230,7 +236,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
                       SKU Base
                     </Text>
                     <Text size="sm" ff="monospace" fw={600}>
-                      {p.skuBase}
+                      {p.skuBase ?? "Sin SKU base"}
                     </Text>
                   </div>
                   <div>
@@ -238,7 +244,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
                       Estado
                     </Text>
                     <StatusBadge semantic="neutral" size="sm">
-                      {productStatusLabel(p.status)}
+                      {p.commerciallyActive ? "Publicado comercialmente · estado administrativo no publicado" : productStatusLabel(p.status)}
                     </StatusBadge>
                   </div>
                   <div>
@@ -246,7 +252,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
                       Versión de catálogo
                     </Text>
                     <Text size="sm" fw={600}>
-                      v{p.catalogVersion}
+                      {p.catalogVersion === null ? "Versión administrativa no publicada" : `v${p.catalogVersion}`}
                     </Text>
                   </div>
                 </SimpleGrid>
@@ -401,7 +407,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
                         {attr.nombre}
                       </Text>
                       <Text size="sm" fw={600}>
-                        {attr.valor} {attr.unidad ? `(${attr.unidad})` : ""}
+                        {formatAttributeValue(attr)} {attr.unidad ? `(${attr.unidad})` : ""}
                       </Text>
                     </div>
                   ))}

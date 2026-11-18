@@ -196,7 +196,7 @@ export function VariantListPage() {
           </div>
           <Group gap="md">
             <Text size="xs" c="dimmed">
-              SKU Base: <strong>{product?.skuBase}</strong>
+              SKU Base: <strong>{product?.skuBase ?? "Sin SKU base"}</strong>
             </Text>
             <Text size="xs" c="dimmed">
               Precio inicial de Catálogo: <strong>{product?.priceInitial === undefined ? "No disponible" : `S/. ${product.priceInitial.toFixed(2)}`}</strong>. Precio vigente: consultar Pricing.

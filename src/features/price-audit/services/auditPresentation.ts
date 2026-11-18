@@ -144,7 +144,8 @@ export const typeLabel: Record<AuditEntry["priceType"], string> = {
   REGULAR: "Precio regular",
   OFERTA: "Oferta",
 };
-export function originLabel(origin: string) {
+export function originLabel(origin: string | null) {
+  if (origin === null) return "Global";
   const labels: Record<string, string> = {
     BACKOFFICE: "Gestión interna",
     BULK_IMPORT: "Carga masiva",

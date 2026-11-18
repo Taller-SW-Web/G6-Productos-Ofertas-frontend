@@ -116,7 +116,7 @@ export function AuditDetailPage() {
         ) : (
           <>
             <SectionCard title="Identificación">
-              {field("SKU", state.result.sku)}
+              {field("SKU", state.result.sku ?? "No aplica al producto")}
               {field("Asiento", displayAuditId(state.result.id))}
               {field("Producto", state.result.productId)}
               {field("Fecha y hora", dateLabel(state.result.at))}
