@@ -1,29 +1,19 @@
 # Evidencia de CI/CD — Hito 4
 
-## Evidencia actual H63-01 — 2026-11-07
+## Evidencia actual H63-01 — retención de Production demostrada (2026-11-07)
 
-- PR [#63 está fusionada](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/63) mediante merge commit `6cba771862641a9d4a7fee835e54cbb877725f44`; `origin/master` coincide con ese SHA al momento de esta actualización.
-- CI integral posterior al merge: [run 42358066533](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/42358066533), evento `push`, SHA `6cba771862641a9d4a7fee835e54cbb877725f44`, conclusión `success`. Los 17 check runs reportados por GitHub concluyeron correctamente, incluidos los cuatro fragmentos E2E.
-- Vercel asoció ese mismo SHA con el deployment `dpl_2NiJ5VN4Tjz2oEpJfZaRR2UdzWDF`, rama `master`, objetivo `production`, estado `READY`, subestado `PROMOTED`, alias `g6-productos-ofertas.vercel.app`. La metadata indica `forced: false`.
-- No se encontró evidencia de que Vercel enviara `vercel.deployment.ready` después del merge. Antes de la prueba sintética, Actions devolvía cero runs `repository_dispatch`; por tanto, GitHub no recibió un evento real que ejecutara este workflow para el deployment.
-- La causa confirmada en el proyecto Vercel era `gitProviderOptions.disableRepositoryDispatchEvents: true`. Se cambió mediante `PATCH /v9/projects/{idOrName}` a `false`; una lectura posterior por CLI confirmó el valor persistido. La conexión GitHub–Vercel, la rama productiva `master` y `autoAssignCustomDomains: true` se conservaron. El cambio se hizo después de que el deployment observado ya estuviera promovido; no reemite su evento histórico.
-- La causa quedó identificada: al crear el deployment, Vercel tenía `gitProviderOptions.disableRepositoryDispatchEvents: true`. Se cambió mediante `PATCH /v9/projects/{idOrName}` a `false`; lectura posterior confirmó el valor. La conexión GitHub–Vercel, la rama productiva `master` y `autoAssignCustomDomains: true` permanecen activos. Este cambio no reemite el evento anterior.
-- El environment GitHub `vercel-produccion` existe, permite `master` y requiere la política de rama correspondiente. Están presentes los nombres de secretos `VERCEL_TOKEN` y `VERCEL_AUTOMATION_BYPASS_SECRET` y variables `VERCEL_PROJECT_ID` y `VERCEL_TEAM_ID`; sus valores no se leyeron ni se registran aquí.
-- Diagnóstico sintético autorizado: se envió manualmente un `repository_dispatch` con tipo `vercel.deployment.ready` y el payload exacto validado contra la API de Vercel para el deployment existente. No fue un evento enviado por Vercel y no demuestra que Vercel lo haya enviado originalmente. Run [42362815465](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/42362815465) ejecutó el job completo en el SHA `6cba771862641a9d4a7fee835e54cbb877725f44`: identidad, smoke de URL inmutable y vigencia de `master` pasaron. Esto demuestra que los permisos y credenciales configurados permiten el flujo; los valores no se imprimieron.
-- Ese run publicó en el SHA ambos commit statuses `success`: `Vercel - g6-productos-ofertas: verificacion-automatizada-production` y `verificacion-despliegue-produccion`. Luego se importaron manualmente en Vercel; `GET /v2/projects/{projectIdOrName}/checks` confirma ambas definiciones activas (`deletedAt: null`), con `targets: [production]` y `blocks: deployment-alias`. Por ello bloquearán el aliasado de Production en deployments futuros. El deployment existente se creó y promovió antes de seleccionar los checks, así que `GET /v1/deployments/{deploymentId}/checks` sigue vacío para ese deployment y no prueba retención.
-- La ejecución sintética no creó un deployment ni cambió alias: el deployment activo sigue siendo `dpl_2NiJ5VN4Tjz2oEpJfZaRR2UdzWDF`, `READY`, alias `g6-productos-ofertas.vercel.app`, `forced: false`; `autoAssignCustomDomains` permanece `true`.
-- La API oficial `GET /v2/projects/{projectIdOrName}/checks` devuelve `checks: []` y `availableNativeChecks: []`; `GET /v1/deployments/{deploymentId}/checks` devuelve `checks: []`. No hay checks configurados en el proyecto ni checks corridos para el deployment. Los endpoints de checks v2 crean y gestionan definiciones de checks de integraciones; no ofrecen una operación documentada para importar/seleccionar contextos GitHub Actions como Deployment Checks requeridos. Esa selección debe hacerse en el dashboard.
-- **Estado: H63-01 pendiente de activación y prueba real.** El alias ya fue asignado sin retención para el deployment auditado, y eso no valida protección. No se ha iniciado otro deployment ni usado Force Promote.
+- La PR [#63](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/63) se fusionó en `6cba771862641a9d4a7fee835e54cbb877725f44`. La causa de que no llegara su evento fue `gitProviderOptions.disableRepositoryDispatchEvents: true`; se habilitó por API. `autoAssignCustomDomains` permaneció en `true`.
+- Antes de la prueba, los dos checks estaban activos para `production`, `sourceKind: git-provider`, `blocks: deployment-alias`, y `deletedAt: null`. La rama productiva era `master`.
+- Deployment y alias de referencia antes de la PR de prueba: `dpl_2NiJ5VN4Tjz2oEpJfZaRR2UdzWDF`, SHA `6cba771862641a9d4a7fee835e54cbb877725f44`, con `g6-productos-ofertas.vercel.app`; `forced: false`.
+- La PR documental [#71](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/71), aprobada y con `validate` exitoso, se fusionó mediante merge commit `f9c494ae1c23e7107c8b1c41c4af9f2ad40fca09` a las `10:25:55Z`. Produjo un único deployment nativo de Production: `dpl_Fgwrt4EbGYWJWVnEYexneWvkNg3P`, creado a las `10:25:57.789Z`, listo a las `10:27:15.770Z`, SHA igual al merge y `forced: false`.
+- GitHub recibió el evento real `repository_dispatch` de tipo `vercel.deployment.ready`: el run [42364017165](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/42364017165) comenzó a las `10:27:17Z` sobre `f9c494ae1c23e7107c8b1c41c4af9f2ad40fca09`, el SHA del deployment. No se envió un dispatch sintético durante esta prueba. El payload pasó la validación de identidad y el job terminó `success` a las `10:28:39Z`; smoke remoto y vigencia de `master` también pasaron.
+- Evidencia de retención mientras estaban pendientes: Vercel publicó `Vercel: pending` (“Waiting for checks to complete”) a las `10:27:16Z`. Los contexts `Vercel - g6-productos-ofertas: verificacion-automatizada-production` y `verificacion-despliegue-produccion` quedaron `pending` a las `10:27:23Z` y `10:27:28Z`. En la consulta de deployments a las `10:27:28Z`, el deployment nuevo solo tenía aliases de proyecto/master; el deployment anterior seguía teniendo `g6-productos-ofertas.vercel.app`.
+- Ambos checks pasaron: `verificacion-despliegue-produccion` a las `10:28:31Z` y `Vercel - g6-productos-ofertas: verificacion-automatizada-production` a las `10:28:37Z`. La API de alias registra el dominio Production apuntando al deployment nuevo y actualización a las `10:28:38.502Z` (`aliasAssigned: 10:28:38.567Z`), después de los dos estados `success`.
+- Resultado: el alias se mantuvo en la versión anterior mientras ambos checks estaban pendientes y pasó al deployment de prueba solo después de completarse correctamente. No se usó Force Promote ni se desactivaron checks, protecciones o aliasado automático.
+- El diagnóstico anterior [run sintético 42362815465](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/42362815465) está separado de esta evidencia: validó el workflow contra el deployment anterior y publicó los contexts para importarlos, pero no fue un evento de Vercel ni se considera prueba de retención.
+- Esta evidencia documenta la prueba de retención ya completada; no requiere crear otro deployment de prueba ni usar Force Promote.
 
-### Configuración persistida y validación pendiente
-
-1. Abrir el proyecto `g6-productos-ofertas` en el equipo `marecahu02-9205s-projects` → **Settings → Deployment Checks**. Confirmar que los despliegues de Production usan alias automático.
-2. Los dos checks ya están guardados para Production y bloquean `deployment-alias`; el aliasado automático continúa habilitado.
-3. Antes de probar retención, consultar el deployment activo y registrar su ID/alias como referencia. El deployment existente `dpl_2NiJ5VN4Tjz2oEpJfZaRR2UdzWDF` no sirve para probarla porque se promovió antes de configurar checks.
-4. Esperar autorización explícita para crear un deployment de prueba mediante el único origen nativo GitHub–Vercel. Observar que el deployment nuevo queda pendiente y que `g6-productos-ofertas.vercel.app` continúa apuntando al ID anterior. No usar Force Promote. Para probar fallo, usar una comprobación fallida únicamente en un cambio de prueba revisado.
-5. Registrar la cadena SHA → evento (real o sintético, identificado como tal) → run → deployment → ambos contextos → alias anterior/nuevo. Solo el evento real de Vercel y la retención real permiten cerrar H63-01.
-
-El mecanismo nativo GitHub–Vercel sigue siendo la única vía de publicación. No se modificó `VITE_DATA_MODE=mock` ni se usó CLI/API para crear o promover deployments.
+El mecanismo nativo GitHub–Vercel sigue siendo la única vía de publicación. No se modificó `VITE_DATA_MODE=mock`, no se creó un deployment mediante CLI/API y no se usó Force Promote.
 
 ## Evidencia histórica previa a H63
 
@@ -90,7 +80,7 @@ No se añadió caché de `node_modules` ni de Chromium: la instalación observad
 - El smoke local de 8 pruebas con dos trabajadores falló en dos verificaciones de interfaz sensibles a sincronización; los mismos casos y luego el conjunto smoke pasaron con un trabajador. Por ello, no se aumentó el paralelismo por fragmento. Se conservan `retries: 0`. FND-05 ya había mostrado intermitencia al recuperar el foco al cerrar un diálogo; se registró el fallo inicial y su aprobación posterior sin cambios de código ni reintentos.
 - La clasificación de cambios se ejecutó correctamente en el run de PR. Los cambios del run eran funcionales y de configuración, por lo que E2E corrió completo. La omisión documental se comprobó con pruebas unitarias de la clasificación, no con una ejecución real de PR exclusivamente documental.
 
-## Estado de producción de Vercel
+## Estado de producción de Vercel (registro anterior a H63)
 
 El workflow conserva el contexto final `verificacion-despliegue-produccion` y el despliegue nativo de la integración GitHub–Vercel. También usa la acción oficial fijada a un commit revisado `vercel/repository-dispatch/actions/status@30f760c6640485cd92f8c785ef361382555fb712` con el estado exacto `Vercel - g6-productos-ofertas: verificacion-automatizada-production`, requerido para que Vercel importe la comprobación del evento `repository_dispatch`. Ambos estados deben configurarse como requeridos; el contexto adicional aplica el resultado fail-closed ante cancelaciones, errores de publicación y deployments obsoletos. El permiso `statuses:write` y `actions:read` queda limitado al trabajo de verificación.
 
@@ -121,7 +111,7 @@ La prueba unitaria del publicador no sustituye la evidencia de la API remota. Ta
 
 La base previa ya contenía el merge `bb69976` de cambios anteriores de `master`. Para esta revisión H63 se sincronizó el avance posterior de `master` (`5ba4eaf`) mediante merge normal `56cb0e0`, conservando el pipeline H4 y añadiendo las pruebas de release/autenticación recientes. No se reescribió historial publicado ni se cambió el mecanismo GitHub–Vercel.
 
-## Configuración externa pendiente
+## Configuración externa pendiente en la evaluación anterior a H63
 
 1. En el entorno GitHub `vercel-produccion`, configurar las variables `VERCEL_PROJECT_ID` y `VERCEL_TEAM_ID`, y los secretos `VERCEL_TOKEN` y `VERCEL_AUTOMATION_BYPASS_SECRET`. No se modificó esta configuración.
 2. Confirmar que la integración nativa de Vercel conserva el alias automático y que Deployment Checks están disponibles para el proyecto.
