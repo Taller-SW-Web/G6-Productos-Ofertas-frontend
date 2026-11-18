@@ -2,6 +2,12 @@
 
 Aplicación web de administración para el módulo Productos y Ofertas. Permite recorrer flujos de catálogo, taxonomía, precios, auditoría de precios, promociones, cupones, recomendaciones, carga masiva, gestión de combos e inventario en modo de demostración. Usa React 19, TypeScript 6, Vite 8, Mantine 9 y Tabler Icons; este repositorio es independiente de [Docs](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs) y Backend. La presencia de puertos y adapters sustituibles facilita una futura integración, pero no acredita conexión HTTP con servicios reales.
 
+## Objetivo vigente — Hito 5
+
+> CI/CD incluyendo revision Seguridad — Evidencia de Pruebas de integración — Evidencia de Pruebas de performance — Uso de API Management y Mecanismo asincrónico entre Microservicios
+
+Frontend aporta integración autenticada por Gateway/APIM, evidencia de integración y performance de sus flujos. Las pruebas contra arneses HTTP simulados validan el consumidor, pero no equivalen a E2E con Gateway, Backend y servicios reales. La autenticación, identidad y grants dependen de G7; APIM/Gateway y esas autorizaciones deben acreditarse por separado. H4 es antecedente histórico de la demo administrativa y sus fixtures no prueban integración H5. El seguimiento de criterios está en [Docs: HITO_5.md](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/pull/130).
+
 ## Inicio rápido
 
 Requisitos: Node.js `>=22.12.0 <23` (definido en `package.json`) y npm. El lockfile fija las dependencias; usa npm para instalarlas.

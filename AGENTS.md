@@ -19,6 +19,12 @@
 - **P0:** discrepancia bloqueante de integración/consistencia; **no la resuelves inventando un payload, ruta o estado**.
 - **UI complete:** pantalla visualmente utilizable; **NO equivale a API integrada ni validada**.
 
+## Objetivo vigente — Hito 5
+
+> CI/CD incluyendo revision Seguridad — Evidencia de Pruebas de integración — Evidencia de Pruebas de performance — Uso de API Management y Mecanismo asincrónico entre Microservicios
+
+H5 es el hito objetivo; H4 es histórico. Los contratos canónicos H5 son OpenAPI y AsyncAPI `0.7.0-rc.1`, sujetos a sus estados de homologación. Los mockups y fixtures H4 no son evidencia de integración H5.
+
 ## 1. PRIMER PASO SIEMPRE: identifica dónde estás
 
 **Antes de cualquier modificación**, localiza el directorio raíz de Frontend. Nunca asumas que la terminal está en el directorio correcto.
