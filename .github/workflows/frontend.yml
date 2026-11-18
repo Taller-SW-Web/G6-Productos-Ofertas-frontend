@@ -3,6 +3,7 @@ name: Integración continua del frontend
 on:
   pull_request:
     branches: [master]
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft, edited]
   push:
     branches: [master]
   workflow_dispatch:
@@ -25,15 +26,16 @@ on:
         options: [all, Combos]
 
 concurrency:
-  group: frontend-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: frontend-${{ github.event.pull_request.number || github.ref }}-${{ inputs.performance_harness && github.run_id || 'ci' }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' || !inputs.performance_harness }}
 
 permissions:
   contents: read
 
 jobs:
   clasificar_cambios:
-    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (github.event_name != 'workflow_dispatch' || !inputs.performance_harness)
     name: Clasificar alcance de cambios
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -54,7 +56,8 @@ jobs:
         run: node scripts/clasificar-cambios-ci.mjs
 
   revision_estilo:
-    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (github.event_name != 'workflow_dispatch' || !inputs.performance_harness)
     name: Revisión de estilo
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -78,9 +81,14 @@ jobs:
         run: node --test scripts/clasificar-cambios-ci.test.mjs
       - name: Probar cobertura completa de fragmentos E2E
         run: node --test scripts/ejecutar-e2e-balanceado.test.mjs
+      - name: Probar el veredicto del agregador validate
+        run: node --test scripts/ci/verificar-resultados.test.mjs
+      - name: Probar disparadores Draft y Ready
+        run: node --test scripts/ci/draft-ready-policy.test.mjs
 
   comprobacion_tipos:
-    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (github.event_name != 'workflow_dispatch' || !inputs.performance_harness)
     name: Comprobación de tipos
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -98,7 +106,8 @@ jobs:
         run: npm run typecheck
 
   unitarias_combos:
-    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (github.event_name != 'workflow_dispatch' || !inputs.performance_harness)
     name: Pruebas unitarias - Combos
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -116,7 +125,8 @@ jobs:
         run: npm run test:unit:combos
 
   unitarias_carga_masiva:
-    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (github.event_name != 'workflow_dispatch' || !inputs.performance_harness)
     name: Pruebas unitarias - Carga masiva
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -134,7 +144,8 @@ jobs:
         run: npm run test:unit:bulk
 
   unitarias_inventario:
-    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (github.event_name != 'workflow_dispatch' || !inputs.performance_harness)
     name: Pruebas unitarias - Inventario
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -152,7 +163,8 @@ jobs:
         run: npm run test:unit:inventory
 
   unitarias_precios:
-    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (github.event_name != 'workflow_dispatch' || !inputs.performance_harness)
     name: Pruebas unitarias - Precios
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -170,7 +182,8 @@ jobs:
         run: npm run test:unit:pricing
 
   compilacion_demostracion:
-    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (github.event_name != 'workflow_dispatch' || !inputs.performance_harness)
     name: Compilación - Datos de demostración
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -197,7 +210,8 @@ jobs:
           retention-days: 1
 
   compilacion_api:
-    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (github.event_name != 'workflow_dispatch' || !inputs.performance_harness)
     name: Compilación - Integración con API
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -254,7 +268,8 @@ jobs:
           retention-days: 7
 
   verificacion_compilacion:
-    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (github.event_name != 'workflow_dispatch' || !inputs.performance_harness)
     name: Verificación de compilación local
     needs: [compilacion_demostracion]
     runs-on: ubuntu-latest
@@ -312,7 +327,8 @@ jobs:
           retention-days: 7
 
   pruebas_rapidas_interfaz:
-    if: github.event_name != 'workflow_dispatch' || !inputs.performance_harness
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (github.event_name != 'workflow_dispatch' || !inputs.performance_harness)
     name: Pruebas rápidas de interfaz
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -432,13 +448,10 @@ jobs:
           retention-days: 30
 
   pruebas_extremo_a_extremo:
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && ((github.event_name != 'workflow_dispatch' || !inputs.performance_harness) && always() && (needs.clasificar_cambios.result != 'success' || needs.clasificar_cambios.outputs.clasificacion != 'solo_documentacion'))
     name: Pruebas de extremo a extremo (parte ${{ matrix.parte }} de 4)
     needs: [clasificar_cambios]
-    if: >-
-      (github.event_name != 'workflow_dispatch' || !inputs.performance_harness) &&
-      always() &&
-      (needs.clasificar_cambios.result != 'success' ||
-       needs.clasificar_cambios.outputs.clasificacion != 'solo_documentacion')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -475,10 +488,97 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  unitarias_taxonomy:
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    name: Pruebas unitarias - Taxonomy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run test:unit:taxonomy
+
+  politica_release:
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    name: Política de release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run test:release:policy
+
+  e2e_pricing:
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    name: E2E Pricing (configuración propia)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VITE_DATA_MODE: mock
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e:pricing -- --reporter=line
+      - name: Conservar evidencia E2E Pricing
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: resultados-e2e-pricing-${{ github.sha }}
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  seguridad_dependencias:
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    name: Auditoría de dependencias High/Critical
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+      - name: Registrar SHA auditado
+        run: printf '%s\n' "$GITHUB_SHA" > dependency-audit-sha.txt
+      - name: Auditar dependencias directas y transitivas desde package-lock
+        run: npm audit --audit-level=high --json > dependency-audit.json
+      - name: Conservar evidencia por SHA incluso ante vulnerabilidades
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: dependency-audit-${{ github.sha }}
+          path: |
+            dependency-audit-sha.txt
+            dependency-audit.json
+          if-no-files-found: error
+          retention-days: 30
+
   validacion_integral:
     # La protección real de master exige el contexto de GitHub Actions `validate`.
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (always() && (github.event_name != 'workflow_dispatch' || !inputs.performance_harness))
     name: validate
-    if: always() && (github.event_name != 'workflow_dispatch' || !inputs.performance_harness)
     needs:
       - revision_estilo
       - clasificar_cambios
@@ -492,56 +592,14 @@ jobs:
       - verificacion_compilacion
       - pruebas_rapidas_interfaz
       - pruebas_extremo_a_extremo
+      - unitarias_taxonomy
+      - politica_release
+      - e2e_pricing
+      - seguridad_dependencias
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Exigir éxito de todas las comprobaciones
+      - name: Verificar resultados obligatorios y clasificación documental
         env:
-          REVISION_ESTILO: ${{ needs.revision_estilo.result }}
-          CLASIFICADOR_RESULTADO: ${{ needs.clasificar_cambios.result }}
-          CLASIFICACION: ${{ needs.clasificar_cambios.outputs.clasificacion }}
-          COMPROBACION_TIPOS: ${{ needs.comprobacion_tipos.result }}
-          UNITARIAS_COMBOS: ${{ needs.unitarias_combos.result }}
-          UNITARIAS_CARGA_MASIVA: ${{ needs.unitarias_carga_masiva.result }}
-          UNITARIAS_INVENTARIO: ${{ needs.unitarias_inventario.result }}
-          UNITARIAS_PRECIOS: ${{ needs.unitarias_precios.result }}
-          COMPILACION_DEMOSTRACION: ${{ needs.compilacion_demostracion.result }}
-          COMPILACION_API: ${{ needs.compilacion_api.result }}
-          VERIFICACION_COMPILACION: ${{ needs.verificacion_compilacion.result }}
-          PRUEBAS_RAPIDAS: ${{ needs.pruebas_rapidas_interfaz.result }}
-          PRUEBAS_EXTREMO_A_EXTREMO: ${{ needs.pruebas_extremo_a_extremo.result }}
-        run: |
-          for resultado in \
-            "Revisión de estilo:$REVISION_ESTILO" \
-            "Comprobación de tipos:$COMPROBACION_TIPOS" \
-            "Pruebas unitarias - Combos:$UNITARIAS_COMBOS" \
-            "Pruebas unitarias - Carga masiva:$UNITARIAS_CARGA_MASIVA" \
-            "Pruebas unitarias - Inventario:$UNITARIAS_INVENTARIO" \
-            "Pruebas unitarias - Precios:$UNITARIAS_PRECIOS" \
-            "Compilación - Datos de demostración:$COMPILACION_DEMOSTRACION" \
-            "Compilación - Integración con API:$COMPILACION_API" \
-            "Verificación de compilación local:$VERIFICACION_COMPILACION" \
-            "Pruebas rápidas de interfaz:$PRUEBAS_RAPIDAS"; do
-            nombre="${resultado%%:*}"
-            estado="${resultado#*:}"
-            echo "$nombre: $estado"
-            if [ "$estado" != 'success' ]; then
-              echo "::error::La comprobación '$nombre' terminó con '$estado'; la validación integral no puede aprobarse."
-              exit 1
-            fi
-          done
-          resultado_e2e="$PRUEBAS_EXTREMO_A_EXTREMO"
-          if [ "$CLASIFICADOR_RESULTADO" = 'success' ] && [ "$CLASIFICACION" = 'solo_documentacion' ]; then
-            echo "Clasificación documental confirmada; pruebas E2E: $resultado_e2e"
-            if [ "$resultado_e2e" != 'success' ] && [ "$resultado_e2e" != 'skipped' ]; then
-              echo '::error::Las pruebas E2E documentales solo pueden aprobarse si pasaron o se omitieron deliberadamente.'
-              exit 1
-            fi
-          else
-            echo "Clasificación no concluyente o con cambios funcionales; pruebas E2E completas: $resultado_e2e"
-            if [ "$resultado_e2e" != 'success' ]; then
-              echo '::error::Una clasificación no documental exige que todas las pruebas E2E pasen.'
-              exit 1
-            fi
-          fi
-          echo "Todas las comprobaciones obligatorias finalizaron correctamente."
+          RESULTADOS: ${{ toJSON(needs) }}
+        run: node scripts/ci/verificar-resultados.mjs "$RESULTADOS"
