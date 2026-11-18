@@ -407,3 +407,14 @@ ESTADO FINAL:
 ---
 
 **Mandato final:** no improvisar contratos ni decisiones de negocio. Usa fuentes verificadas, adapta código a la arquitectura real, entrega cambios pequeños comprobables y declara con precisión qué quedó implementado, simulado, bloqueado o sin probar.
+
+
+## Política CI Draft → Ready
+
+- Codex desarrolla y corrige sobre PR Draft.
+- No se ejecutan suites locales completas de manera rutinaria; se usan pruebas focalizadas para depurar.
+- La validación integral obligatoria se ejecuta en GitHub Actions al pasar el PR a Ready for Review.
+- El PR no se considera validado hasta que todos los checks obligatorios pasen para la revisión actual.
+- Cada commit nuevo en Ready invalida los resultados anteriores y vuelve a ejecutar CI; al volver a Draft, las suites pesadas quedan diferidas.
+- Toda evidencia debe identificar el código y SHA probados. No se hace merge con checks pendientes o fallidos.
+- Ready for Review no activa despliegues de producción.
