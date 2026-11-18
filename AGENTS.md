@@ -58,7 +58,7 @@ test -f ../docs/ux/mockups/DESIGN.md && echo 'Docs disponible'
 1. `frontend/AGENTS.md` (este archivo).
 2. `frontend/README.md`.
 3. Árbol real del frontend: `package.json`, `src/`, configuración, carpetas y patrones existentes **si existen**.
-4. Issue/tarea concreta; identifica su alcance, restricciones, archivos afectados y criterio de aceptación.
+4. Issue, si existe, o tarea documentada; identifica su objetivo, alcance, restricciones, archivos afectados y criterio de aceptación. No es obligatorio crear un Issue antes de comenzar.
 5. `../docs/ux/mockups/DESIGN.md` y `../docs/ux/mockups/ux/ux-guidelines.md` si trabajas en UI.
 6. `../docs/ux/mockups/ux/ux-decisions.md` si decides patrones, estructura o interacción.
 
@@ -139,7 +139,7 @@ La documentación de mockups vigente declara **Web Desktop**, con **1440 px como
 En tareas de feature, componente complejo o foundation, primero escribe una nota breve (en tu respuesta; no es obligatorio crear archivo) con el siguiente formato:
 
 ```text
-TAREA: <issue / MK-XXX / pantalla>
+TAREA: <issue / SIN ISSUE: objetivo / MK-XXX / pantalla>
 RAÍZ FRONTEND: <ruta comprobada>
 BRANCH FRONTEND: <rama real>
 DOCS ACCESIBLE: SÍ / NO
@@ -247,20 +247,26 @@ Si un contrato necesario todavía está abierto, define un **modelo de presentac
 
 ## 11. Qué puede editar el agente
 
-**Permitido si el issue lo requiere:** archivos dentro de `frontend/` necesarios para la tarea, dependencias del frontend, tests y documentación de implementación frontend.
+**Permitido para la tarea acordada o documentada en el PR:** archivos dentro de `frontend/` necesarios para su alcance, dependencias del frontend, tests y documentación de implementación frontend. No hace falta un Issue previo.
 
 **Solo lectura:** `../docs/` y `../backend/` (salvo petición explícita independiente).
 
-**No hagas sin autorización explícita:**
+**Conserva estas prohibiciones:**
 
-- `git push`, `git push --force`, borrar ramas, `reset --hard` o `clean -fd`;
+- `git push --force`, `reset --hard`, `clean -fd` u operaciones que sobrescriban trabajo propio o ajeno;
 - modificar remoto, `.git/config`, secretos o reglas de protección;
 - crear o editar SPEC/HU/Flow/DESIGN/OpenAPI/AsyncAPI en Docs;
-- refactorizar features ajenas sin necesidad relacionada con el issue;
+- mezclar cambios independientes en un mismo PR;
 - crear un monorepo raíz, submódulos o una copia completa de Docs;
 - mover MK HTML del repositorio Docs al productivo sin una razón aprobada;
 - declarar el frontend desplegado o las APIs integradas sin prueba real;
 - asignar decisiones empresariales o ownership entre módulos por cuenta propia.
+
+Para una tarea de desarrollo encargada o documentada, se permite crear ramas y worktrees, hacer commits, realizar `git push` ordinario y abrir PRs. Usa la convención obligatoria `trabajo/<desarrollador>/<descripcion-en-kebab-case>` para ramas nuevas, por ejemplo `trabajo/cueva/corregir-inventario`. Las ramas personales permanentes (`castilla`, `poma`, `cueva`, `lopez`, `vera`, `taco`) son espacios preferentes, pueden tener PRs sucesivos y nunca se eliminan durante la limpieza ordinaria. Sincronízalas de forma segura con `master` antes de comenzar otro trabajo y evita acumular en ellas cambios independientes destinados a PRs distintos. Las ramas temporales nuevas parten de `master` actualizado salvo dependencia explícita documentada; cada trabajo independiente usa su propio PR, preferentemente a `master`. No crees prefijos de herramientas o agentes (`codex/`, `claude/`, `gemini/`, `antigravity/`) ni renombres ramas históricas automáticamente.
+
+Todo desarrollador puede resolver Issues asignados a cualquier persona, Issues sin asignar, ayudar a otro integrante o iniciar mejoras justificadas sin Issue previo. Antes de un trabajo que pueda solaparse, revisa Issues y PRs abiertos y comunica la intervención cuando corresponda. La matriz de responsables y el conocimiento previo son referencias para coordinación y revisión, no permisos exclusivos para editar una feature. La colaboración no cambia controles de diseño, accesibilidad, contratos, seguridad, revisión o aprobación. Abrir una rama o PR no autoriza aprobar, fusionar ni desplegar.
+
+Tras fusionar un PR temporal, confirma el merge y que la rama no sea necesaria para otro PR o trabajo dependiente; elimina la rama temporal local y remota cuando corresponda. Las ramas temporales abandonadas se pueden eliminar tras confirmar que no contienen cambios por conservar. Nunca elimines ramas personales permanentes con este procedimiento ni habilites una limpieza automática indiscriminada que las afecte.
 
 ### Convención de mensajes de commit
 
