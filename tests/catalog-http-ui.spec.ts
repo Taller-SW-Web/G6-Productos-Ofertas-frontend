@@ -97,7 +97,7 @@ test("UI API: un 403 de categorías no bloquea los productos y un 403 filtrado p
   await expect(page.getByRole("combobox", { name: "Categoría", exact: true })).toBeDisabled();
   await expect(page.getByRole("combobox", { name: "Estado del producto" })).toBeEnabled();
   expect(requests).toContain("/api/v1/categorias/administracion");
-  expect(requests).not.toContain("/api/v1/tipos-producto");
+  expect(requests).toContain("/api/v1/tipos-producto");
   expect(requests).not.toContain("/api/v1/productos");
 });
 
@@ -106,15 +106,16 @@ test("UI API 1440: un borrador reaparece en el listado y se edita con la versió
   let description = "Descripción original";
   let version = 4;
   let created = false;
+  let typeId = "type-api";
   const sentVersions: number[] = [];
   const productWrite = () => ({
     product_id: id, status: "BORRADOR", catalog_version: version, name: "Borrador H4", description,
-    sku_base: "H4-DRAFT", categoria_id: "cat-api", marca_id: "brand-api", tipo_producto_id: "type-api",
+    sku_base: "H4-DRAFT", categoria_id: "cat-api", marca_id: "brand-api", tipo_producto_id: typeId,
     tiene_variantes: false, images: [], attributes: [], variants: [], perfil_fisico: null,
   });
   const summary = () => ({
     productId: id, estado: "BORRADOR", catalogVersion: version, nombre: "Borrador H4", descripcion: description,
-    skuBase: "H4-DRAFT", categoriaId: "cat-api", marcaId: "brand-api", tipoProductoId: "type-api", tieneVariantes: false,
+    skuBase: "H4-DRAFT", categoriaId: "cat-api", marcaId: "brand-api", tipoProductoId: typeId, tieneVariantes: false,
     slug: "borrador-h4", publicadoAlgunaVez: false, creadoEn: "2026-11-07T13:00:00Z", actualizadoEn: "2026-11-07T13:00:00Z",
   });
   await page.route("https://gateway.test/api/v1/**", async route => {
@@ -136,6 +137,8 @@ test("UI API 1440: un borrador reaparece en el listado y se edita con la versió
       const body = request.postDataJSON();
       sentVersions.push(body.catalogVersion);
       if (body.catalogVersion !== version) return respond({ code: "VERSION_CONFLICT" }, 409);
+      expect(body.tipoProductoId).toBe("type-corrected");
+      typeId = body.tipoProductoId;
       version++;
       description = body.descripcion;
       return respond(productWrite());
@@ -145,15 +148,18 @@ test("UI API 1440: un borrador reaparece en el listado y se edita con la versió
       meta: { pagina: Number(searchParams.get("pagina")), tamanio: Number(searchParams.get("tamanio")), total: Number(created), totalPaginas: Number(created) },
     });
     if (pathname === `/api/v1/productos/administracion/${id}` && created)
-      return respond({ ...summary(), imagenes: [], atributos: [], caracteristicasIdentificadoras: [], perfilFisico: null });
+      return respond({ ...summary(), elegibleCorreccionTipo: true, imagenes: [], atributos: [], caracteristicasIdentificadoras: [], perfilFisico: null });
     if (pathname.endsWith("/categorias/administracion") || pathname.endsWith("/marcas/administracion") || pathname.endsWith("/tipos-producto")) {
       const item = pathname.includes("categorias") ? { categoriaId: "cat-api", nombre: "Categoría HTTP" }
         : pathname.includes("marcas") ? { marcaId: "brand-api", nombre: "Marca HTTP" }
           : { tipoProductoId: "type-api", nombre: "Tipo HTTP" };
-      return respond({ items: [{ ...item, estado: "ACTIVO" }], meta: { pagina: 1, tamanio: Number(searchParams.get("tamanio")), total: 1, totalPaginas: 1 } });
+      const items = [{ ...item, estado: "ACTIVO" }];
+      if (pathname.endsWith("/tipos-producto"))
+        items.push({ tipoProductoId: "type-corrected", nombre: "Tipo corregido", estado: "ACTIVO" });
+      return respond({ items, meta: { pagina: 1, tamanio: Number(searchParams.get("tamanio")), total: items.length, totalPaginas: 1 } });
     }
-    if (pathname === "/api/v1/tipos-producto/type-api/caracteristicas")
-      return respond({ tipoProducto: { tipoProductoId: "type-api" }, schemaVersion: 1, caracteristicas: [] });
+    if (pathname.startsWith("/api/v1/tipos-producto/") && pathname.endsWith("/caracteristicas"))
+      return respond({ tipoProducto: { tipoProductoId: pathname.split("/")[4] }, schemaVersion: 1, caracteristicas: [] });
     return respond({ code: "PRODUCTO_NO_ENCONTRADO" }, 404);
   });
 
@@ -166,10 +172,13 @@ test("UI API 1440: un borrador reaparece en el listado y se edita con la versió
   await expect(page).toHaveURL(new RegExp(`/productos/${id}/preparacion`));
 
   await page.goto("/tests/harness/catalog-http.html?path=/productos");
+  await expect(page.getByText("Categoría HTTP · Tipo HTTP", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Ver detalle de Borrador H4" }).click();
   await page.getByRole("link", { name: "Editar", exact: true }).click();
   await expect(page.getByLabel("Descripción comercial")).toHaveValue("Descripción original");
   await page.getByLabel("Descripción comercial").fill("Descripción corregida");
+  await page.getByRole("combobox", { name: "Tipo de producto", exact: true }).click();
+  await page.getByRole("option", { name: "Tipo corregido", exact: true }).click();
   await page.getByRole("button", { name: "Guardar cambios", exact: true }).click();
   await expect(page.getByText("Descripción corregida", { exact: true })).toBeVisible();
   expect(sentVersions).toEqual([4]);

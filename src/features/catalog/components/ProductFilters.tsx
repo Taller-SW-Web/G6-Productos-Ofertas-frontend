@@ -10,6 +10,7 @@ import type { DataMode } from "../../../app/config/dataMode";
 interface ProductFiltersProps {
   loading?: boolean;
   categoriesUnavailable?: boolean;
+  typesUnavailable?: boolean;
   query: CatalogQuery;
   categories: TaxonomyCategory[];
   productTypes: TaxonomyProductType[];
@@ -23,6 +24,7 @@ interface ProductFiltersProps {
 export function ProductFilters({
   loading,
   categoriesUnavailable,
+  typesUnavailable,
   query,
   categories,
   productTypes,
@@ -96,13 +98,13 @@ export function ProductFilters({
           onChange={(val) => onChange({ categoryId: val || "all", page: 1 })}
         />
 
-        {mode !== "api" && <Select
+        <Select
           label="Tipo"
-          disabled={loading}
+          disabled={loading || typesUnavailable}
           data={typeOptions}
           value={query.typeId || "all"}
           onChange={(val) => onChange({ typeId: val || "all", page: 1 })}
-        />}
+        />
 
         {mode !== "api" && <Select
           label="Modelo"

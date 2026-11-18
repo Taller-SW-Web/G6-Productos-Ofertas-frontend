@@ -3,7 +3,7 @@ import { createCatalogFetchTransport, type CatalogHttpTransport } from "../src/f
 import { createHttpCatalogRepository } from "../src/features/catalog/adapters/httpCatalogRepository";
 import { createHttpTaxonomyRepository } from "../src/features/catalog/adapters/httpTaxonomyRepository";
 import { mapPreparation, mapProduct, mapVariant } from "../src/features/catalog/adapters/httpCatalogMapper";
-import { createOptionalCatalogHttpServices } from "../src/features/catalog/services/catalogHttpRuntime";
+import { createCatalogHttpServices, createOptionalCatalogHttpServices } from "../src/features/catalog/services/catalogHttpRuntime";
 import { MockCatalogRepository } from "../src/features/catalog/adapters/mockCatalogRepository";
 import type { ProductCreatePayload } from "../src/features/catalog/services/catalogRepository";
 
@@ -304,4 +304,8 @@ test("Transporte: origen validado, sin credenciales/redirect/JWT; configuración
   expect(createOptionalCatalogHttpServices()).toBeNull();
   const invalid = createOptionalCatalogHttpServices("https://example.com/path")!;
   await expect(invalid.catalog.getById(pid)).rejects.toThrow("configuración");
+  url = undefined;
+  const disabled = createCatalogHttpServices(transport, false);
+  await expect(disabled.catalog.list({ page: 1, pageSize: 10 })).rejects.toThrow("habilitación explícita");
+  expect(url).toBeUndefined();
 });

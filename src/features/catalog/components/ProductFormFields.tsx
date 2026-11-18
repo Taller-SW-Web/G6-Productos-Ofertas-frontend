@@ -22,7 +22,6 @@ import type {
   TaxonomyCategory,
   TaxonomyProductType,
 } from "../services/taxonomyRepository";
-import type { ProductDetailView } from "../services/catalogRepository";
 
 interface ProductFormFieldsProps {
   formData: ProductFormData;
@@ -38,7 +37,7 @@ interface ProductFormFieldsProps {
   attributeSchema: AttributeSchema[];
   schemaConfirmed: boolean;
   isEdit?: boolean;
-  initialProduct?: ProductDetailView;
+  canCorrectType?: boolean;
 }
 
 function parseNumericValue(val: string | number | undefined): number | undefined {
@@ -59,7 +58,7 @@ export function ProductFormFields({
   attributeSchema,
   schemaConfirmed,
   isEdit = false,
-  initialProduct,
+  canCorrectType = false,
 }: ProductFormFieldsProps) {
   const categoryOptions = categories.map((c) => ({
     value: c.id,
@@ -76,16 +75,6 @@ export function ProductFormFields({
     label: t.nombre,
     disabled: !t.activo,
   }));
-
-  // SPEC-010 condition Q-06 for type correction in edit mode:
-  // Eligible ONLY IF product is BORRADOR, has NO variants, and has NO commercial publications
-  // Q-06 remains open: eligibility alone does not publish a PATCH field.
-  const isTypeCorrectionEligible =
-    isEdit &&
-    initialProduct &&
-    initialProduct.status === "BORRADOR" &&
-    !initialProduct.hasVariants &&
-    initialProduct.publishedCommercially === false;
 
   const volume = calculateVolumeCm3(
     formData.largoCm,
@@ -147,13 +136,13 @@ export function ProductFormFields({
                 value={formData.tipoProductoId}
                 onChange={(val) => updateField("tipoProductoId", val || "")}
                 error={errors.tipoProductoId}
-                disabled={isEdit}
+                disabled={isEdit && !canCorrectType}
               />
               {isEdit && (
                 <Text size="xs" c="dimmed" mt={4}>
-                  {isTypeCorrectionEligible
-                    ? "El tipo de producto no se puede cambiar en este momento."
-                    : "Completa los requisitos del producto antes de cambiar el tipo."}
+                  {canCorrectType
+                    ? "Catálogo verificará la versión y los atributos antes de guardar la corrección."
+                    : "Catálogo no confirmó que este producto pueda corregir su tipo."}
                 </Text>
               )}
             </div>

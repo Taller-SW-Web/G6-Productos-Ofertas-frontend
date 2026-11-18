@@ -34,7 +34,9 @@ export function ProductsPage() {
     "taxonomy-product-types",
   ]);
   const effectiveRevision = revision + mockRevision;
-  const taxonomy = useTaxonomyFilters(effectiveRevision, mode === "mock");
+  const taxonomy = useTaxonomyFilters(effectiveRevision);
+  const categoryNames = new Map(taxonomy.categories.map(({ id, nombre }) => [id, nombre]));
+  const typeNames = new Map(taxonomy.productTypes.map(({ id, nombre }) => [id, nombre]));
 
   const query: CatalogQuery = {
     q: params.get("q") || undefined,
@@ -134,7 +136,7 @@ export function ProductsPage() {
               {row.name}
             </Text>
             <Text size="xs" c="dimmed">
-              {row.categoryName} · {row.typeName}
+              {mode === "mock" ? row.categoryName : categoryNames.get(row.categoryId) ?? "Categoría sin nombre"} · {mode === "mock" ? row.typeName : typeNames.get(row.typeId) ?? "Tipo sin nombre"}
             </Text>
           </div>
         </Group>
@@ -277,9 +279,16 @@ export function ProductsPage() {
         actions={<Button variant="outline" onClick={handleRetry}>Reintentar filtros</Button>}>
         {taxonomy.error}
       </FeedbackAlert>}
+      {taxonomy.typesUnavailable && (
+        <FeedbackAlert semantic="warning" title="Tipos de producto no disponibles"
+          actions={<Button variant="outline" onClick={handleRetry}>Reintentar tipos</Button>}>
+          El listado sigue disponible. No se pudieron consultar los tipos de Taxonomía.
+        </FeedbackAlert>
+      )}
       <ProductFilters
         loading={taxonomy.loading}
         categoriesUnavailable={Boolean(taxonomy.error)}
+        typesUnavailable={taxonomy.typesUnavailable}
         mode={mode}
         query={query}
         categories={taxonomy.categories}

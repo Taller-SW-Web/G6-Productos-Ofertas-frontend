@@ -39,6 +39,7 @@ import {
 import { ProductActivationDialog } from "../components/ProductActivationDialog";
 import { ProductDeactivationDialog } from "../components/ProductDeactivationDialog";
 import { useMockStateRevision } from "../../shared/useMockStateRevision";
+import { useTaxonomyFilters } from "../hooks/useTaxonomyFilters";
 
 interface ProductDetailPageProps {
   initialDialog?: "activar" | "desactivar";
@@ -58,6 +59,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
   ]);
 
   const detailState = useProductDetail(productId || "", scenario, revision + mockRevision);
+  const taxonomy = useTaxonomyFilters(revision + mockRevision, true);
 
   // Dialog states
   const dialogParam = params.get("dialog");
@@ -210,7 +212,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
                       Categoría
                     </Text>
                     <Text size="sm" fw={600}>
-                      {p.categoryName}
+                      {taxonomy.categories.find(item => item.id === p.categoryId)?.nombre ?? (p.categoryName === p.categoryId ? "Nombre no disponible" : p.categoryName)}
                     </Text>
                   </div>
                   <div>
@@ -218,7 +220,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
                       Tipo de producto
                     </Text>
                     <Text size="sm" fw={600}>
-                      {p.typeName}
+                      {taxonomy.productTypes.find(item => item.id === p.typeId)?.nombre ?? (p.typeName === p.typeId ? "Nombre no disponible" : p.typeName)}
                     </Text>
                   </div>
                   <div>
@@ -226,7 +228,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
                       Marca
                     </Text>
                     <Text size="sm" fw={600}>
-                      {p.brandName}
+                      {taxonomy.brands.find(item => item.id === p.brandId)?.nombre ?? (p.brandName === p.brandId ? "Nombre no disponible" : p.brandName)}
                     </Text>
                   </div>
                   <div>
