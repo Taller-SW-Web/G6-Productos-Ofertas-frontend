@@ -1,9 +1,10 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import type { ProductPreparationView } from "../services/catalogRepository";
 import { CatalogError } from "../services/catalogRepository";
 import { useCatalogServices } from "./useCatalogServices";
 
 export interface ProductPreparationState {
+  productId: string;
   status: "loading" | "success" | "error";
   data?: ProductPreparationView;
   error?: string;
@@ -19,23 +20,45 @@ export function useProductPreparation(
 ) {
   const { catalog: catalogService } = useCatalogServices();
   const [state, setState] = useState<ProductPreparationState>({
+    productId,
     status: "loading",
     retrying: false,
   });
+  const [refreshRevision, setRefreshRevision] = useState(0);
+  const retryInFlight = useRef(false);
+  const activeProductId = useRef(productId);
+  activeProductId.current = productId;
 
-  const load = useCallback(() => {
+  const reload = useCallback(() => {
+    setRefreshRevision((current) => current + 1);
+  }, []);
+
+  useEffect(() => {
     const controller = new AbortController();
-    setState((prev) => ({ ...prev, status: "loading", error: undefined }));
+    setState((prev) => {
+      const changingProduct = prev.productId !== productId;
+      return {
+        ...prev,
+        productId,
+        status: "loading",
+        retrying: false,
+        data: undefined,
+        error: undefined,
+        retryError: changingProduct ? undefined : prev.retryError,
+        retrySuccess: changingProduct ? undefined : prev.retrySuccess,
+      };
+    });
 
     catalogService
       .getPreparation(productId, scenario, controller.signal)
       .then((data) => {
-        if (!controller.signal.aborted) {
+        if (!controller.signal.aborted && activeProductId.current === productId) {
           setState((prev) => ({ ...prev, status: "success", data }));
         }
       })
       .catch((err) => {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || activeProductId.current !== productId)
+          return;
         setState((prev) => ({
           ...prev,
           status: "error",
@@ -47,14 +70,23 @@ export function useProductPreparation(
       });
 
     return () => controller.abort();
-  }, [productId, scenario, catalogService]);
+  }, [productId, scenario, catalogService, revision, refreshRevision]);
 
-  useEffect(() => {
-    const cancel = load();
-    return cancel;
-  }, [load, revision]);
-
-  const retry = async (dependencia: "PRICING" | "INVENTARIO") => {
+  const retry = useCallback(async (dependencia: "PRICING" | "INVENTARIO") => {
+    if (retryInFlight.current) return;
+    const dependency =
+      dependencia === "PRICING"
+        ? state.data?.pricing
+        : state.data?.inventario;
+    if (!dependency?.manualRetryAllowed || dependency.status === "COMPLETED") {
+      setState((prev) => ({
+        ...prev,
+        retryError: "Catálogo no autorizó el reintento de esta preparación.",
+        retrySuccess: undefined,
+      }));
+      return;
+    }
+    retryInFlight.current = true;
     setState((prev) => ({
       ...prev,
       retrying: true,
@@ -67,16 +99,16 @@ export function useProductPreparation(
         { dependencia },
         scenario,
       );
+      if (activeProductId.current !== productId) return;
       setState((prev) => ({
         ...prev,
         retrying: false,
         retrySuccess: res.message,
       }));
-      // Reload preparation after retry
-      setTimeout(() => {
-        load();
-      }, 600);
+      // A 202 confirms admission only. Re-read Catalog's durable preparation state.
+      setRefreshRevision((current) => current + 1);
     } catch (err) {
+      if (activeProductId.current !== productId) return;
       setState((prev) => ({
         ...prev,
         retrying: false,
@@ -85,12 +117,18 @@ export function useProductPreparation(
             ? err.message
             : "No se pudo reintentar la preparación.",
       }));
+    } finally {
+      retryInFlight.current = false;
     }
-  };
+  }, [catalogService, productId, scenario, state.data]);
 
+  const currentState =
+    state.productId === productId
+      ? state
+      : { productId, status: "loading" as const, retrying: false };
   return {
-    ...state,
+    ...currentState,
     retry,
-    reload: load,
+    reload,
   };
 }

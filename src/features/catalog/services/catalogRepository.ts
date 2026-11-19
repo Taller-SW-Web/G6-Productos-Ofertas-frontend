@@ -40,7 +40,6 @@ export interface VariantPreparation {
   };
   inventoryStatus?: PreparationStatus;
   manualRetryAllowed?: boolean;
-  lastCheckedAt?: string;
 }
 
 export interface ProductPreparationView {

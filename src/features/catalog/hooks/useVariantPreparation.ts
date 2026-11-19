@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type {
   ProductDetailView,
   VariantDetailView,
@@ -39,6 +39,12 @@ export function useVariantPreparation(
   }>();
 
   const [retrying, setRetrying] = useState<boolean>(false);
+  const retryInFlight = useRef(false);
+  const activeSelection = useRef(JSON.stringify([productId, variantId, scenario]));
+  const selectionKey = JSON.stringify([productId, variantId, scenario]);
+  useLayoutEffect(() => {
+    activeSelection.current = selectionKey;
+  }, [selectionKey]);
   const [retryMessage, setRetryMessage] = useState<string | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
 
@@ -54,8 +60,9 @@ export function useVariantPreparation(
     Promise.all([
       catalogService.getById(productId, scenario, controller.signal),
       catalogService.getVariantById(productId, variantId, scenario, controller.signal),
+      catalogService.getPreparation(productId, scenario, controller.signal),
     ])
-      .then(([prod, v]) => {
+      .then(([prod, v, authoritativePreparation]) => {
         if (!controller.signal.aborted) {
           if (!prod || !v) {
             setResponse({ repository: catalogService,
@@ -68,25 +75,34 @@ export function useVariantPreparation(
             return;
           }
 
-          const foundPrep = prod.preparation?.variantes?.find((p) => p.sku === v.sku);
-          const prep: VariantPreparation = foundPrep || {
-            variantId: v.variantId,
-            sku: v.sku,
-            inventario: {
-              status: v.inventoryPreparationStatus ?? v.inventoryStatus,
-              manualRetryAllowed: v.inventoryManualRetryAllowed ?? false,
-              code: v.inventoryPreparationCode ?? null,
-            },
-            inventoryStatus: v.inventoryPreparationStatus ?? v.inventoryStatus,
-            manualRetryAllowed: v.inventoryManualRetryAllowed ?? false,
-            lastCheckedAt: new Date().toISOString(),
-          };
+          const foundPrep = authoritativePreparation.variantes.find(
+            (item) => item.variantId === v.variantId && item.sku === v.sku,
+          );
+          if (
+            prod.id !== productId ||
+            v.productId !== productId ||
+            v.variantId !== variantId ||
+            authoritativePreparation.productId !== productId ||
+            !authoritativePreparation.hasVariants ||
+            !foundPrep
+          ) {
+            setResponse({
+              repository: catalogService,
+              key,
+              product: null,
+              variant: null,
+              preparation: null,
+              error:
+                "Catálogo no devolvió una preparación consistente para la variante y su SKU.",
+            });
+            return;
+          }
 
           setResponse({ repository: catalogService,
             key,
             product: prod,
             variant: v,
-            preparation: prep,
+            preparation: foundPrep,
             error: null,
           });
         }
@@ -108,8 +124,17 @@ export function useVariantPreparation(
     };
   }, [productId, variantId, scenario, revision, key, catalogService]);
 
+  const isCurrent = response?.key === key && response?.repository === catalogService;
+  const preparation = isCurrent ? response.preparation : null;
+  const canRetry = Boolean(
+    preparation?.inventario?.manualRetryAllowed &&
+      preparation.inventario.status !== "COMPLETED",
+  );
+
   const retry = useCallback(async () => {
-    if (!productId || !variantId || retrying) return;
+    if (!productId || !variantId || retryInFlight.current || !canRetry) return;
+    const selection = selectionKey;
+    retryInFlight.current = true;
     setRetrying(true);
     setRetryMessage(null);
     setRetryError(null);
@@ -119,25 +144,23 @@ export function useVariantPreparation(
         variantId,
         scenario,
       );
-      setRetryMessage(result.message);
-      setRevision((prev) => prev + 1);
+      if (activeSelection.current === selection) {
+        setRetryMessage(result.message);
+        setRevision((prev) => prev + 1);
+      }
     } catch (err) {
-      if (err instanceof CatalogError) {
-        setRetryError(err.message);
-      } else {
-        setRetryError("Error al solicitar el reintento de preparación.");
+      if (activeSelection.current === selection) {
+        if (err instanceof CatalogError) {
+          setRetryError(err.message);
+        } else {
+          setRetryError("Error al solicitar el reintento de preparación.");
+        }
       }
     } finally {
-      setRetrying(false);
+      retryInFlight.current = false;
+      if (activeSelection.current === selection) setRetrying(false);
     }
-  }, [productId, variantId, scenario, retrying, catalogService]);
-
-  const isCurrent = response?.key === key && response?.repository === catalogService;
-  const preparation = isCurrent ? response.preparation : null;
-  const canRetry = Boolean(
-    preparation?.inventario?.manualRetryAllowed &&
-      preparation.inventario.status !== "COMPLETED",
-  );
+  }, [productId, variantId, scenario, canRetry, catalogService, selectionKey]);
 
   return {
     product: isCurrent ? response.product : null,
