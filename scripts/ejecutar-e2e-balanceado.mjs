@@ -28,6 +28,7 @@ export function validarManifiestos(archivosActuales, manifiestos) {
 
   return {
     valido: faltantes.length === 0 && adicionales.length === 0 && duplicados.length === 0,
+    archivos: archivosEsperados.size,
     faltantes,
     adicionales,
     duplicados,
@@ -48,9 +49,10 @@ function terminar(resultado) {
 
 async function main() {
   const [parteTexto, totalTexto = "4"] = process.argv.slice(2);
+  const soloValidar = parteTexto === "--validar";
   const parte = Number(parteTexto);
   const total = Number(totalTexto);
-  if (!Number.isInteger(parte) || !Number.isInteger(total) || total !== 4 || parte < 1 || parte > total) {
+  if (!soloValidar && (!Number.isInteger(parte) || !Number.isInteger(total) || total !== 4 || parte < 1 || parte > total)) {
     console.error("::error::El número de fragmento E2E no es válido; se esperaba una parte entre 1 y 4.");
     process.exit(2);
   }
@@ -68,16 +70,23 @@ async function main() {
       manifiestos.push(contenido.split(/\r?\n/).map((archivo) => archivo.trim()).filter(Boolean));
     }
   } catch {
-    console.error("Falta un manifiesto E2E; se ejecutará el fragmento automático completo.");
-    terminar(ejecutar([`--shard=${parte}/${total}`, "--workers=1", "--reporter=blob"]));
+    console.error("::error::Falta uno o más manifiestos E2E en scripts/e2e-fragmentos/. No se ejecutará una distribución alternativa.");
+    process.exit(2);
   }
 
   const verificacion = validarManifiestos(extraerArchivosDeLista(listado.stdout), manifiestos);
   if (!verificacion.valido) {
-    console.warn(
-      `La lista E2E cambió (faltantes: ${verificacion.faltantes.length}, adicionales: ${verificacion.adicionales.length}, duplicados: ${verificacion.duplicados.length}); se usará la distribución automática completa.`,
-    );
-    terminar(ejecutar([`--shard=${parte}/${total}`, "--workers=1", "--reporter=blob"]));
+    console.error("::error::La distribución E2E no coincide con el inventario de Playwright:");
+    if (verificacion.faltantes.length) console.error(`  Faltantes: ${verificacion.faltantes.join(", ")}`);
+    if (verificacion.adicionales.length) console.error(`  Adicionales: ${verificacion.adicionales.join(", ")}`);
+    if (verificacion.duplicados.length) console.error(`  Duplicados: ${verificacion.duplicados.join(", ")}`);
+    console.error("Corrige los cuatro manifiestos antes de ejecutar la suite; no se usará una distribución alternativa.");
+    process.exit(2);
+  }
+
+  if (soloValidar) {
+    console.log(`Manifiestos E2E válidos: ${verificacion.archivos} archivos, sin faltantes, adicionales ni duplicados.`);
+    return;
   }
 
   console.log(`Se ejecutará el fragmento E2E equilibrado ${parte} de ${total}, con cobertura completa verificada.`);
