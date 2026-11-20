@@ -28,10 +28,10 @@ afterEach(() => {
   cleanup();
   configureTaxonomyGateway(undefined);
 });
-it("muestra 403 en la interfaz sin sustituir la respuesta por fixtures", async () => {
+it.each([401, 403, 503])("muestra %s en la interfaz sin sustituir la respuesta por fixtures", async (status) => {
   const request = vi
     .fn()
-    .mockResolvedValue(new Response(null, { status: 403 }));
+    .mockResolvedValue(new Response(null, { status }));
   configureTaxonomyGateway({ request });
   render(
     <MantineProvider>
@@ -42,7 +42,7 @@ it("muestra 403 en la interfaz sin sustituir la respuesta por fixtures", async (
       </DataModeContext.Provider>
     </MantineProvider>,
   );
-  expect(await screen.findByText(/HTTP 403/)).toBeTruthy();
+  expect(await screen.findByText(new RegExp(`HTTP ${status}`))).toBeTruthy();
   expect(request).toHaveBeenCalledTimes(1);
 });
 

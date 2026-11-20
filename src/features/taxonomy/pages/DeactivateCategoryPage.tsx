@@ -10,6 +10,8 @@ import {
 } from "../../../components/shared";
 import { CampoDato } from "../components/CampoDato";
 import { ListaBloqueos } from "../components/ListaBloqueos";
+import { SeguimientoBaja } from "../components/SeguimientoBaja";
+import { useSeguimientoBaja } from "../hooks/useSeguimientoBaja";
 import { useCategoryDetail } from "../hooks/useCategoryDetail";
 import { useSolicitarBaja } from "../hooks/useSolicitarBaja";
 import { estadoSemantic } from "../services/estadoSemantic";
@@ -32,6 +34,7 @@ export function DeactivateCategoryPage() {
 function DeactivateCategoryLoader({ id }: { id: string }) {
   const navigate = useNavigate();
   const { state } = useCategoryDetail(id);
+  const tracking = useSeguimientoBaja("categoria", id);
 
   const contenido =
     state.status === "loading" ? (
@@ -56,7 +59,7 @@ function DeactivateCategoryLoader({ id }: { id: string }) {
         La categoría solicitada no existe o ya no está disponible.
       </FeedbackAlert>
     ) : (
-      <DeactivateCategoryContent detalle={state.detalle} />
+      <DeactivateCategoryContent detalle={state.detalle} tracking={tracking} />
     );
 
   return (
@@ -69,15 +72,15 @@ function DeactivateCategoryLoader({ id }: { id: string }) {
           { label: "Desactivar" },
         ]}
       />
-      <Stack gap="lg">{contenido}</Stack>
+      <Stack gap="lg"><SeguimientoBaja seguimiento={tracking} />{contenido}</Stack>
     </>
   );
 }
 
-function DeactivateCategoryContent({ detalle }: { detalle: CategoryDetail }) {
+function DeactivateCategoryContent({ detalle, tracking }: { detalle: CategoryDetail; tracking: ReturnType<typeof useSeguimientoBaja> }) {
   const navigate = useNavigate();
   const { state, seguimiento, solicitar, consultarEstado, reiniciar } =
-    useSolicitarBaja(detalle.id);
+    useSolicitarBaja(detalle.id, tracking.registrar);
   const [confirmar, setConfirmar] = useState(false);
 
   const cerrarDialogo = () => {
@@ -120,7 +123,7 @@ function DeactivateCategoryContent({ detalle }: { detalle: CategoryDetail }) {
             </Button>
             <Button
               variant="outline"
-              disabled={detalle.estado !== "Activo"}
+              disabled={detalle.estado !== "Activo" || tracking.estado === "recuperando" || tracking.estado === "pendiente" || tracking.estado === "error"}
               onClick={() => setConfirmar(true)}
             >
               Solicitar desactivación

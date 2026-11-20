@@ -14,16 +14,19 @@ export type BajaSeguimientoState =
   | { status: "success"; result: BajaCategoriaSeguimiento }
   | { status: "error"; message: string };
 
-export function useSolicitarBaja(id: string) {
+export function useSolicitarBaja(id: string, onAccepted?: (id: string) => void) {
   const [state, setState] = useState<SolicitarBajaState>({ status: "idle" });
   const [seguimiento, setSeguimiento] = useState<BajaSeguimientoState>({
     status: "idle",
   });
   const controllerRef = useRef<AbortController | null>(null);
+  const enviandoRef = useRef(false);
 
   useEffect(() => () => controllerRef.current?.abort(), []);
 
   const solicitar = () => {
+    if (enviandoRef.current) return;
+    enviandoRef.current = true;
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -31,10 +34,13 @@ export function useSolicitarBaja(id: string) {
     setSeguimiento({ status: "idle" });
     void categoryService.solicitarBaja(id, controller.signal).then(
       (result) => {
+        enviandoRef.current = false;
         if (controller.signal.aborted) return;
+        if (result.resultado === "verificando" && result.operacionId) onAccepted?.(result.operacionId);
         setState({ status: "success", result });
       },
       (error: unknown) => {
+        enviandoRef.current = false;
         if (controller.signal.aborted) return;
         setState({
           status: "error",
