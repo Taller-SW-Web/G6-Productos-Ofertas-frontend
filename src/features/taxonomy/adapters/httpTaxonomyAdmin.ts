@@ -51,7 +51,8 @@ function brandDetail(value: unknown): BrandDetail {
 }
 function followup(value: unknown): OperationFollowUpResult {
   const dto = row(value); const current = dto.status;
-  const estado = current === "PENDING_DEACTIVATION" ? "pendiente" : current === "CLEAR" || current === "COMPLETED" ? "confirmada" : current === "REJECTED" ? "rechazada" : "no-concluyente";
+  if (current !== "PENDING_DEACTIVATION" && current !== "COMPLETED" && current !== "REJECTED") throw invalid();
+  const estado = current === "PENDING_DEACTIVATION" ? "pendiente" : current === "COMPLETED" ? "confirmada" : current === "REJECTED" ? "rechazada" : "no-concluyente";
   return { operacionId: str(dto.operation_id), estado, mensaje: typeof dto.code === "string" ? str(dto.code) : `Estado de la operación: ${String(current)}.` };
 }
 function append(path: string, query: Record<string, string | undefined>): string { const q = new URLSearchParams(); for (const [key, value] of Object.entries(query)) if (value) q.set(key, value); const suffix = q.toString(); return suffix ? `${path}?${suffix}` : path; }
@@ -128,7 +129,8 @@ export function createHttpCategoryRepository(transport: TaxonomyGatewayTransport
     async consultarEstadoOperacion(operacionId, signal) {
       const dto = row(await get(`/api/v1/taxonomia/operaciones/${encodeURIComponent(operacionId)}`, signal));
       const result = followup(dto);
-      return { ...result, ...(dto.entity_type === "CATEGORY" && result.estado === "confirmada" ? { categoria: await getCategoryDetail(str(dto.entity_id), signal) } : {}) };
+      if (result.operacionId !== operacionId || dto.entity_type !== "CATEGORY") throw invalid();
+      return result;
     },
   };
 }
@@ -194,7 +196,7 @@ export function createHttpBrandRepository(transport: TaxonomyGatewayTransport): 
     async actualizar(input, signal) { try { const current = await this.obtener(input.marcaId, signal); if (!current) return null; const resourcePath = `/api/v1/marcas/${encodeURIComponent(input.marcaId)}`; const confirmed = await send(transport, resourcePath, "PATCH", form({ ...input, version: current.version }), signal, 200, value => { const dto = brandDetail(value); if (dto.marcaId !== input.marcaId) throw invalid(); return dto; }, false, { resourcePath, entity: "brand" }); try { await this.obtener(input.marcaId, signal); } catch { /* validated 2xx DTO is the confirmed write result */ } return confirmed; } catch (error) { if (httpStatus(error) === 404) return null; throw error; } },
     async solicitarBaja(id, signal) { const operacionId = await send(transport, `/api/v1/marcas/${encodeURIComponent(id)}/desactivar`, "POST", undefined, signal, 202, value => str(row(value).operation_id)); return { resultado: "pendiente", mensaje: "Baja recibida; consulta su operación.", operacionId }; },
     async reactivar(id, signal) { try { return await send(transport, `/api/v1/marcas/${encodeURIComponent(id)}/reactivar`, "POST", undefined, signal, 200, brandDetail); } catch (error) { if (httpStatus(error) === 404) return null; throw error; } },
-    async consultarResultadoBaja(operacionId, signal) { const dto = row(await get(`/api/v1/taxonomia/operaciones/${encodeURIComponent(operacionId)}`, signal)); const result = followup(dto); return { resultado: result.estado === "confirmada" ? "exito" : result.estado === "pendiente" ? "pendiente" : result.estado === "rechazada" ? "rechazada" : "no-concluyente", mensaje: result.mensaje, operacionId }; },
+    async consultarResultadoBaja(operacionId, signal) { const dto = row(await get(`/api/v1/taxonomia/operaciones/${encodeURIComponent(operacionId)}`, signal)); const result = followup(dto); if (result.operacionId !== operacionId || dto.entity_type !== "BRAND") throw invalid(); return { resultado: result.estado === "confirmada" ? "exito" : result.estado === "pendiente" ? "pendiente" : result.estado === "rechazada" ? "rechazada" : "no-concluyente", mensaje: result.mensaje, operacionId }; },
   };
 }
 

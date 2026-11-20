@@ -10,6 +10,7 @@ function integer(value: unknown): number { if (!Number.isSafeInteger(value) || N
 function state(value: unknown): "Activo" | "Inactivo" { if (value === "ACTIVO") return "Activo"; if (value === "INACTIVO") return "Inactivo"; throw invalid(); }
 function association(value: unknown): ProductTypeAssociation {
  const dto = obj(value); const raw = dto.caracteristica; let characteristic: ProductTypeAssociationCharacteristic | null = null;
+ if (typeof dto.obligatoria !== "boolean") throw invalid();
  if (raw !== null && raw !== undefined) { const c = obj(raw); const values = c.valores; if (c.tipo !== "TEXTO" && c.tipo !== "NUMERO" && c.tipo !== "LISTA") throw invalid(); characteristic = { id: text(c.caracteristicaId), nombre: text(c.nombre), tipo: c.tipo, estado: state(c.estado), ...(typeof c.unidadMedida === "string" ? { unidad: c.unidadMedida } : {}), valoresActivos: Array.isArray(values) ? values.filter(v => obj(v).estado === "ACTIVO").length : null }; }
  return { caracteristicaId: text(dto.caracteristicaId), obligatoria: dto.obligatoria === true, estado: state(dto.estado), schemaVersion: integer(dto.schemaVersion), caracteristica: characteristic };
 }

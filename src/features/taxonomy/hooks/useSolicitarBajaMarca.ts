@@ -13,11 +13,13 @@ export type SolicitarBajaMarcaState =
 export function useSolicitarBajaMarca(
   id: string,
   onSuccess?: (result: BrandBajaResult) => void,
+  onAccepted?: (id: string) => void,
 ) {
   const [state, setState] = useState<SolicitarBajaMarcaState>({
     status: "idle",
   });
   const controllerRef = useRef<AbortController | null>(null);
+  const enviandoRef = useRef(false);
   const operacionIdRef = useRef<string | null>(null);
 
   useEffect(() => () => controllerRef.current?.abort(), []);
@@ -41,16 +43,20 @@ export function useSolicitarBajaMarca(
   };
 
   const solicitar = () => {
+    if (enviandoRef.current) return;
+    enviandoRef.current = true;
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
     setState({ status: "enviando", fase: "solicitud" });
     void brandService.solicitarBaja(id, controller.signal).then(
       (result) => {
+        enviandoRef.current = false;
         if (controller.signal.aborted) return;
+        if (result.resultado === "pendiente" && result.operacionId) onAccepted?.(result.operacionId);
         resolver(result);
       },
-      (error: unknown) => emitirError(error, controller),
+      (error: unknown) => { enviandoRef.current = false; emitirError(error, controller); },
     );
   };
 

@@ -11,6 +11,8 @@ import {
 } from "../../../components/shared";
 import { CampoDato } from "../components/CampoDato";
 import { ListaBloqueos } from "../components/ListaBloqueos";
+import { SeguimientoBaja } from "../components/SeguimientoBaja";
+import { useSeguimientoBaja } from "../hooks/useSeguimientoBaja";
 import { useBrandDetail } from "../hooks/useBrandDetail";
 import {
   useSolicitarBajaMarca,
@@ -35,9 +37,10 @@ export function BrandDetailPage() {
 function BrandDetailLoader({ id }: { id: string }) {
   const navigate = useNavigate();
   const { state, reload } = useBrandDetail(id);
+  const tracking = useSeguimientoBaja("marca", id);
   const baja = useSolicitarBajaMarca(id, (result) => {
     if (result.resultado === "exito") reload();
-  });
+  }, tracking.registrar);
 
   return (
     <>
@@ -54,6 +57,7 @@ function BrandDetailLoader({ id }: { id: string }) {
         ]}
       />
       <Stack gap="lg">
+        <SeguimientoBaja seguimiento={tracking} />
         {state.status === "loading" && (
           <Group gap="sm" role="status">
             <Loader size="sm" />
@@ -79,7 +83,7 @@ function BrandDetailLoader({ id }: { id: string }) {
           </FeedbackAlert>
         )}
         {state.status === "success" && (
-          <BrandDetailContent detalle={state.detalle} baja={baja} onReload={reload} />
+          <BrandDetailContent detalle={state.detalle} baja={baja} onReload={reload} tracking={tracking} />
         )}
       </Stack>
     </>
@@ -90,10 +94,12 @@ function BrandDetailContent({
   detalle,
   baja,
   onReload,
+  tracking,
 }: {
   detalle: BrandDetail;
   baja: ReturnType<typeof useSolicitarBajaMarca>;
   onReload: () => void;
+  tracking: ReturnType<typeof useSeguimientoBaja>;
 }) {
   const navigate = useNavigate();
   const [confirmar, setConfirmar] = useState(false);
@@ -120,7 +126,7 @@ function BrandDetailContent({
             </Button>
             {detalle.estado === "Inactivo" && <Button variant="outline" loading={reactivando} onClick={() => { setReactivando(true); setReactivacionError(null); void brandService.reactivar(detalle.marcaId).then(result => { if (!result) throw new Error("Marca no encontrada (404)."); onReload(); }).catch(error => setReactivacionError(error instanceof Error ? error.message : "No se pudo reactivar la marca.")).finally(() => setReactivando(false)); }}>Reactivar</Button>}
             {detalle.estado === "Activo" && baja.state.status === "idle" && (
-              <Button variant="outline" onClick={() => setConfirmar(true)}>
+              <Button variant="outline" disabled={tracking.estado === "recuperando" || tracking.estado === "pendiente" || tracking.estado === "error"} onClick={() => setConfirmar(true)}>
                 Solicitar desactivación
               </Button>
             )}
