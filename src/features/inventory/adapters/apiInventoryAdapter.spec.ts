@@ -2430,13 +2430,12 @@ describe("apiInventoryAdapter — operaciones sin fuente contractual", () => {
       repository.getDashboardAlerts(),
       repository.getCategories(),
       repository.getBrands(),
+      repository.getLocations(),
     ]) {
       const error = await rejection(promise);
       expect(error.code).toBe("CONTRATO_BLOQUEADO");
     }
     expect(request).not.toHaveBeenCalled();
-    await expect(repository.getLocations()).rejects.toMatchObject({ code: "RESPUESTA_INCOMPATIBLE" });
-    expect(request.mock.calls[0]?.[0]).toBe("/api/v1/inventario/dashboard");
   });
 });
 
