@@ -360,7 +360,7 @@ export function InventoryDashboardPage() {
         {/* Zona 5: Tabla analítica de inventario */}
         <SectionCard
           title="Inventario analítico por SKU"
-          description="Consulta saldos físicos por SKU y ubicación. Los filtros de categoría y marca usan los metadatos disponibles en Catálogo."
+          description="Consulta saldos físicos por SKU y ubicación. Los filtros de categoría y marca se aplican sobre los metadatos de Catálogo; el cálculo agregado de KPIs normativos no admite filtros de catálogo ni texto libre en el contrato actual."
         >
           <Stack gap="md">
             <FilterBar>

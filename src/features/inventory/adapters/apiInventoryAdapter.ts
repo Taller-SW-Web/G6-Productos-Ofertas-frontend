@@ -1011,6 +1011,10 @@ export function createHttpInventoryRepository(
 
     async getBrands() { if (!dependencies.getBrands) throw blocked("getBrands", "Catálogo no proporcionó marcas administrativas"); return dependencies.getBrands(); },
 
-    async getLocations() { return (await this.getLocationDistribution()).map(item => ({ id: item.locationId, name: `ID ${item.locationId}`, active: true })); },
+    getLocations() {
+      return Promise.reject(
+        blocked("getLocations", BLOCKED_DETAILS.getLocations),
+      );
+    },
   };
 }
