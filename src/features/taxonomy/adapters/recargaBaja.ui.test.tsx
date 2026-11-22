@@ -2,6 +2,7 @@
 import { MantineProvider } from "@mantine/core";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ obtener: vi.fn(), solicitar: vi.fn(), tracking: { estado: "pendiente", operacionId: "op-1", mensaje: "En curso", registrar: vi.fn(), reintentar: vi.fn() } }));
@@ -44,6 +45,11 @@ it.each(["marca", "categoria"] as const)("%s conserva la confirmación si recarg
   expect(screen.getByText("Confirmada")).toBeTruthy();
   expect(screen.queryByText("Activo")).toBeNull();
   expect(mocks.obtener).toHaveBeenCalledTimes(2);
+  expect(mocks.solicitar).not.toHaveBeenCalled();
+  mocks.obtener.mockResolvedValueOnce({ ...activo, estado: "Inactivo" });
+  await userEvent.click(screen.getByRole("button", { name: "Consultar detalle nuevamente" }));
+  expect(await screen.findByText("Inactivo")).toBeTruthy();
+  expect(mocks.obtener).toHaveBeenCalledTimes(3);
   expect(mocks.solicitar).not.toHaveBeenCalled();
 });
 

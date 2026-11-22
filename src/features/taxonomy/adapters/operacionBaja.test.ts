@@ -3,6 +3,15 @@ import { createHttpBrandRepository, createHttpCategoryRepository } from "./httpT
 
 describe("DTO de seguimiento de baja", () => {
   it.each([
+    ["COMPLETED", "CLEAR", "Baja confirmada"],
+    ["REJECTED", "IN_USE", "referencias activas"],
+    ["REJECTED", null, "sin una causa específica publicada"],
+  ] as const)("interpreta %s con resultado %s", async (status, result, texto) => {
+    const requestWithInit = vi.fn().mockResolvedValue(Response.json({ operation_id: "op-1", entity_type: "CATEGORY", entity_id: "cat-1", status, result, code: null }));
+    const repo = createHttpCategoryRepository({ request: vi.fn(), requestWithInit });
+    await expect(repo.consultarEstadoOperacion("op-1")).resolves.toMatchObject({ operacionId: "op-1", entityType: "CATEGORY", entityId: "cat-1", mensaje: expect.stringContaining(texto) });
+  });
+  it.each([
     ["PENDING_DEACTIVATION", "pendiente"],
     ["COMPLETED", "confirmada"],
     ["REJECTED", "rechazada"],

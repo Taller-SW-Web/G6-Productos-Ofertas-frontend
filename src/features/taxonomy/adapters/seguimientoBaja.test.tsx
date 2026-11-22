@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({ consultar: vi.fn(), owner: { id: "usuario-a" }
 vi.mock("../services/categoryService", () => ({ categoryService: { consultarEstadoOperacion: mocks.consultar } }));
 vi.mock("../services/brandService", () => ({ brandService: { consultarResultadoBaja: mocks.consultar } }));
 vi.mock("../services/taxonomyGatewayRuntime", () => ({ getTaxonomyGateway: () => ({ scopeId: () => mocks.owner.id }) }));
-import { useSeguimientoBaja } from "../hooks/useSeguimientoBaja";
+import { retrasoConJitter, useSeguimientoBaja } from "../hooks/useSeguimientoBaja";
 
 beforeEach(() => {
   sessionStorage.clear();
@@ -21,15 +21,51 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("seguimiento de baja", () => {
+  it.each(["operacionId", "entityId", "entityType"] as const)("rechaza %s diferente y conserva la referencia", async (campo) => {
+    const respuesta = { operacionId: "op-1", entityId: "cat-1", entityType: "CATEGORY", estado: "confirmada", mensaje: "Confirmada" };
+    mocks.consultar.mockResolvedValue({ ...respuesta, [campo]: "distinto" });
+    const hook = renderHook(() => useSeguimientoBaja("categoria", "cat-1"));
+    await waitFor(() => expect(hook.result.current.estado).toBe("idle"));
+    act(() => hook.result.current.registrar("op-1"));
+    await waitFor(() => expect(hook.result.current.estado).toBe("error"));
+    expect(hook.result.current.mensaje).toMatch(/inválida/);
+    expect(hook.result.current.operacionId).toBe("op-1");
+    expect(sessionStorage.length).toBe(1);
+  });
+  it("aplica jitter a intervalos crecientes con tope de 30 segundos", () => {
+    expect([2000, 4000, 8000, 16000, 30000].map((delay) => retrasoConJitter(delay, 0.5))).toEqual([1500, 3000, 6000, 12000, 22500]);
+    expect(retrasoConJitter(30000, 0)).toBe(15000);
+    expect(retrasoConJitter(30000, 1)).toBe(30000);
+  });
+
+  it("programa intervalos exponenciales con jitter y no programa tras el terminal", async () => {
+    const base = { operacionId: "op-1", entityId: "cat-1", entityType: "CATEGORY", mensaje: "En curso" };
+    for (let i = 0; i < 5; i++) mocks.consultar.mockResolvedValueOnce({ ...base, estado: "pendiente" });
+    mocks.consultar.mockResolvedValueOnce({ ...base, estado: "confirmada" });
+    const hook = renderHook(() => useSeguimientoBaja("categoria", "cat-1"));
+    await waitFor(() => expect(hook.result.current.estado).toBe("idle"));
+    const original = globalThis.setTimeout;
+    const intervalos: number[] = [];
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    vi.spyOn(globalThis, "setTimeout").mockImplementation((handler, delay, ...args) => {
+      if (typeof delay === "number" && delay >= 1500) { intervalos.push(delay); return original(handler, 1, ...args); }
+      return original(handler, delay, ...args);
+    });
+    act(() => hook.result.current.registrar("op-1"));
+    await waitFor(() => expect(hook.result.current.estado).toBe("confirmada"));
+    expect(intervalos).toEqual([1500, 3000, 6000, 12000, 22500]);
+    expect(mocks.consultar).toHaveBeenCalledTimes(6);
+  });
+
   it.each(["confirmada", "rechazada"] as const)("recupera tras recarga y detiene el seguimiento en %s", async (terminal) => {
-    mocks.consultar.mockResolvedValueOnce({ estado: "pendiente", mensaje: "En curso" });
+    mocks.consultar.mockResolvedValueOnce({ operacionId: "op-1", entityId: "cat-1", entityType: "CATEGORY", estado: "pendiente", mensaje: "En curso" });
     const first = renderHook(() => useSeguimientoBaja("categoria", "cat-1"));
     await waitFor(() => expect(first.result.current.estado).toBe("idle"));
     act(() => first.result.current.registrar("op-1"));
     await waitFor(() => expect(mocks.consultar).toHaveBeenCalledTimes(1));
     expect(sessionStorage.length).toBe(1);
     first.unmount();
-    mocks.consultar.mockResolvedValueOnce({ estado: terminal, mensaje: "Terminal" });
+    mocks.consultar.mockResolvedValueOnce({ operacionId: "op-1", entityId: "cat-1", entityType: "CATEGORY", estado: terminal, mensaje: "Terminal" });
     const second = renderHook(() => useSeguimientoBaja("categoria", "cat-1"));
     await waitFor(() => expect(second.result.current.estado).toBe(terminal));
     expect(second.result.current.mensaje).toBe("Terminal");
@@ -38,7 +74,7 @@ describe("seguimiento de baja", () => {
   });
 
   it("no recupera la referencia guardada por otra identidad", async () => {
-    mocks.consultar.mockResolvedValue({ resultado: "pendiente", mensaje: "En curso" });
+    mocks.consultar.mockResolvedValue({ operacionId: "op-1", entityId: "marca-1", entityType: "BRAND", resultado: "pendiente", mensaje: "En curso" });
     const first = renderHook(() => useSeguimientoBaja("marca", "marca-1"));
     await waitFor(() => expect(first.result.current.estado).toBe("idle"));
     act(() => first.result.current.registrar("op-1"));
@@ -52,7 +88,7 @@ describe("seguimiento de baja", () => {
   });
 
   it("conserva la referencia al fallar la consulta y permite reintentar", async () => {
-    mocks.consultar.mockRejectedValueOnce(new Error("HTTP 503")).mockResolvedValueOnce({ resultado: "exito", mensaje: "Confirmada" });
+    mocks.consultar.mockRejectedValueOnce(new Error("HTTP 503")).mockResolvedValueOnce({ operacionId: "op-1", entityId: "marca-1", entityType: "BRAND", resultado: "exito", mensaje: "Confirmada" });
     const hook = renderHook(() => useSeguimientoBaja("marca", "marca-1"));
     await waitFor(() => expect(hook.result.current.estado).toBe("idle"));
     act(() => hook.result.current.registrar("op-1"));
@@ -64,18 +100,20 @@ describe("seguimiento de baja", () => {
   });
 
   it("vuelve a consultar tras el intervalo y se detiene al completar", async () => {
-    mocks.consultar.mockResolvedValueOnce({ estado: "pendiente", mensaje: "En curso" }).mockResolvedValueOnce({ estado: "confirmada", mensaje: "Finalizada" });
+    mocks.consultar.mockResolvedValueOnce({ operacionId: "op-1", entityId: "cat-1", entityType: "CATEGORY", estado: "pendiente", mensaje: "En curso" }).mockResolvedValueOnce({ operacionId: "op-1", entityId: "cat-1", entityType: "CATEGORY", estado: "confirmada", mensaje: "Finalizada" });
     const hook = renderHook(() => useSeguimientoBaja("categoria", "cat-1"));
     await waitFor(() => expect(hook.result.current.estado).toBe("idle"));
     act(() => hook.result.current.registrar("op-1"));
     await waitFor(() => expect(mocks.consultar).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(hook.result.current.estado).toBe("confirmada"), { timeout: 3500 });
     expect(mocks.consultar).toHaveBeenCalledTimes(2);
+    await new Promise((resolve) => setTimeout(resolve, 2100));
+    expect(mocks.consultar).toHaveBeenCalledTimes(2);
   });
 
   it.each(["getItem", "setItem", "removeItem"] as const)("tolera SecurityError de %s y reconoce el terminal", async (metodo) => {
     vi.spyOn(Storage.prototype, metodo).mockImplementation(() => { throw new DOMException("bloqueado", "SecurityError"); });
-    mocks.consultar.mockResolvedValue({ estado: "confirmada", mensaje: "Finalizada" });
+    mocks.consultar.mockResolvedValue({ operacionId: "op-1", entityId: "cat-1", entityType: "CATEGORY", estado: "confirmada", mensaje: "Finalizada" });
     const hook = renderHook(() => useSeguimientoBaja("categoria", "cat-1"));
     await waitFor(() => expect(hook.result.current.estado).toBe("idle"));
     act(() => hook.result.current.registrar("op-1"));
@@ -92,7 +130,7 @@ describe("seguimiento de baja", () => {
     let resolver!: (value: { estado: string; mensaje: string }) => void;
     let signalAnterior: AbortSignal | undefined;
     mocks.consultar.mockImplementationOnce((_id: string, signal: AbortSignal) => { signalAnterior = signal; return new Promise((resolve) => { resolver = resolve; }); });
-    mocks.consultar.mockResolvedValue({ estado: "pendiente", mensaje: "B pendiente" });
+    mocks.consultar.mockResolvedValue({ operacionId: "op-b", entityId: cambio === "usuario" ? "cat-a" : "cat-b", entityType: "CATEGORY", estado: "pendiente", mensaje: "B pendiente" });
     const hook = renderHook(({ id }) => useSeguimientoBaja("categoria", id), { initialProps: { id: "cat-a" }, wrapper });
     await waitFor(() => expect(hook.result.current.estado).toBe("idle"));
     act(() => hook.result.current.registrar("op-a"));

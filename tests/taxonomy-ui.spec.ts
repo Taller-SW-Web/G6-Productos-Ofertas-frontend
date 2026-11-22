@@ -410,3 +410,86 @@ test("Flow screens stay inside the 1440 px viewport with no console errors", asy
   }
   expect(errors).toEqual([]);
 });
+
+// El transporte controlado permite observar estados intermedios sin depender del reloj del mock.
+type BajaE2E = { estado: string; mensaje: string; entityId: string; posts: number; lecturas: number; falloDetalle: boolean; falloSeguimiento: boolean };
+async function prepararBajaControlada(page: Page, initial: Partial<BajaE2E> = {}) {
+  await page.goto("/categorias/casual/desactivar");
+  await expect(page.getByRole("button", { name: "Solicitar desactivación" })).toBeEnabled();
+  await page.evaluate(async (config) => {
+    const path = "/src/features/taxonomy/services/categoryService.ts";
+    const { categoryService } = await import(path);
+    const ctx = { estado: "pendiente", mensaje: "En curso", entityId: "casual", posts: 0, lecturas: 0, falloDetalle: false, falloSeguimiento: false, ...config };
+    (window as unknown as { bajaE2E: BajaE2E }).bajaE2E = ctx;
+    const obtener = categoryService.obtener.bind(categoryService);
+    categoryService.obtener = async (id: string, signal?: AbortSignal) => {
+      ctx.lecturas++;
+      if (ctx.estado === "confirmada" && ctx.falloDetalle) { ctx.falloDetalle = false; throw new Error("HTTP 503"); }
+      const detalle = await obtener(id, signal);
+      return detalle && ctx.estado === "confirmada" ? { ...detalle, estado: "Inactivo" } : detalle;
+    };
+    categoryService.solicitarBaja = async (id: string) => {
+      ctx.posts++;
+      return { resultado: "verificando", categoria: await obtener(id), bloqueos: [], mensaje: "En curso", operacionId: "op-e2e" };
+    };
+    categoryService.consultarEstadoOperacion = async () => {
+      if (ctx.falloSeguimiento) { ctx.falloSeguimiento = false; throw new Error("HTTP 503"); }
+      return { operacionId: "op-e2e", entityId: ctx.entityId, entityType: "CATEGORY", estado: ctx.estado, mensaje: ctx.mensaje };
+    };
+  }, initial);
+  await page.getByRole("button", { name: "Solicitar desactivación" }).click();
+  await page.getByRole("button", { name: "Solicitar baja" }).click();
+}
+async function modificarBaja(page: Page, cambios: Partial<BajaE2E>) {
+  await page.evaluate((value) => Object.assign((window as unknown as { bajaE2E: BajaE2E }).bajaE2E, value), cambios);
+}
+async function estadoBaja(page: Page): Promise<BajaE2E> {
+  return page.evaluate(() => (window as unknown as { bajaE2E: BajaE2E }).bajaE2E);
+}
+
+test("baja automática espera y muestra una sola confirmación tras releer el detalle", async ({ page }) => {
+  await prepararBajaControlada(page);
+  await expect(page.getByText("PENDING_DEACTIVATION", { exact: false })).toBeVisible();
+  await modificarBaja(page, { estado: "confirmada", mensaje: "Baja confirmada por el servicio." });
+  await expect(page.getByRole("status").filter({ hasText: "Baja confirmada" })).toHaveCount(1);
+  await expect(page.getByText("PENDING_DEACTIVATION", { exact: false })).toHaveCount(0);
+  await expect(page.getByText("Inactivo", { exact: true })).toBeVisible();
+  expect((await estadoBaja(page)).posts).toBe(1);
+  expect((await estadoBaja(page)).lecturas).toBeGreaterThanOrEqual(1);
+});
+
+for (const mensaje of ["La baja fue rechazada porque existen referencias activas.", "La baja fue rechazada sin una causa específica publicada."]) {
+  test(`baja rechazada conserva el maestro activo: ${mensaje}`, async ({ page }) => {
+    await prepararBajaControlada(page, { estado: "rechazada", mensaje });
+    await expect(page.getByRole("alert").filter({ hasText: mensaje })).toHaveCount(1);
+    await expect(page.getByText("Activo", { exact: true })).toBeVisible();
+    await expect(page.getByText("PENDING_DEACTIVATION", { exact: false })).toHaveCount(0);
+    expect((await estadoBaja(page)).posts).toBe(1);
+  });
+}
+
+test("operación de otra entidad no confirma ni repite el POST", async ({ page }) => {
+  await prepararBajaControlada(page, { estado: "confirmada", entityId: "otra" });
+  await expect(page.getByRole("alert")).toContainText("inválida");
+  await expect(page.getByText("Baja confirmada", { exact: false })).toHaveCount(0);
+  expect((await estadoBaja(page)).posts).toBe(1);
+});
+
+test("503 de seguimiento permite reintentar el GET sin repetir la baja", async ({ page }) => {
+  await prepararBajaControlada(page, { estado: "confirmada", mensaje: "Confirmada", falloSeguimiento: true });
+  await expect(page.getByRole("alert")).toContainText("HTTP 503");
+  await page.getByRole("button", { name: "Consultar nuevamente" }).click();
+  await expect(page.getByText("Baja confirmada", { exact: false })).toBeVisible();
+  expect((await estadoBaja(page)).posts).toBe(1);
+});
+
+test("503 de detalle conserva confirmación y reintenta solo el GET", async ({ page }) => {
+  await prepararBajaControlada(page, { estado: "confirmada", mensaje: "Confirmada", falloDetalle: true });
+  await expect(page.getByText("Baja confirmada", { exact: false })).toBeVisible();
+  await expect(page.getByText("HTTP 503")).toBeVisible();
+  await page.getByRole("button", { name: "Consultar detalle nuevamente" }).click();
+  await expect(page.getByText("Inactivo", { exact: true })).toBeVisible();
+  const estado = await estadoBaja(page);
+  expect(estado.posts).toBe(1);
+  expect(estado.lecturas).toBe(2);
+});

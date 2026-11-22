@@ -14,6 +14,10 @@ async function clave(tipo: Tipo, id: string, owner: string): Promise<string> {
   return `g6:taxonomy:operation:${Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
+export function retrasoConJitter(retraso: number, aleatorio: number): number {
+  return Math.min(30000, retraso * (0.5 + aleatorio * 0.5));
+}
+
 export function useSeguimientoBaja(tipo: Tipo, id: string) {
   const { session, view } = useAuthSession();
   const owner = session ? view.user?.id ?? null : getTaxonomyGateway()?.scopeId?.() ?? null;
@@ -83,6 +87,7 @@ export function useSeguimientoBaja(tipo: Tipo, id: string) {
           ? await categoryService.consultarEstadoOperacion(operationId, controller.signal)
           : await brandService.consultarResultadoBaja(operationId, controller.signal);
         if (!esVigente()) return;
+        if (result.operacionId !== operationId || result.entityId !== id || result.entityType !== (tipo === "categoria" ? "CATEGORY" : "BRAND")) throw new Error("Respuesta de seguimiento inválida para la operación o entidad actual.");
         const valor = "estado" in result ? result.estado : result.resultado;
         if (valor === "confirmada" || valor === "exito" || valor === "rechazada") {
           actualizar({ estado: valor === "rechazada" ? "rechazada" : "confirmada", mensaje: result.mensaje });
@@ -94,7 +99,7 @@ export function useSeguimientoBaja(tipo: Tipo, id: string) {
         }
         if (valor !== "pendiente") { actualizar({ estado: "error", mensaje: result.mensaje }); return; }
         actualizar({ mensaje: result.mensaje });
-        timer = setTimeout(consultar, retraso);
+        timer = setTimeout(consultar, retrasoConJitter(retraso, Math.random()));
         retraso = Math.min(retraso * 2, 30000);
       } catch (error) {
         actualizar({ estado: "error", mensaje: error instanceof Error ? error.message : "No se pudo consultar la operación." });
@@ -102,7 +107,7 @@ export function useSeguimientoBaja(tipo: Tipo, id: string) {
     };
     void consultar();
     return () => { vigente = false; controller.abort(); clearTimeout(timer); if (pollRef.current === controller) pollRef.current = null; };
-  }, [actual.operacionId, actual.estado, scope, session, owner, version, tipo, intento]);
+  }, [actual.operacionId, actual.estado, scope, session, owner, version, tipo, id, intento]);
 
   const reintentar = () => {
     if (actual.operacionId) { setSnapshot({ ...actual, estado: "pendiente" }); setIntento((value) => value + 1); }

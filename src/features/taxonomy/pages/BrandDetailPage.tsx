@@ -10,7 +10,6 @@ import {
   StatusBadge,
 } from "../../../components/shared";
 import { CampoDato } from "../components/CampoDato";
-import { ListaBloqueos } from "../components/ListaBloqueos";
 import { SeguimientoBaja } from "../components/SeguimientoBaja";
 import { useSeguimientoBaja } from "../hooks/useSeguimientoBaja";
 import { useBrandDetail } from "../hooks/useBrandDetail";
@@ -19,7 +18,7 @@ import {
 } from "../hooks/useSolicitarBajaMarca";
 import { estadoSemantic } from "../services/estadoSemantic";
 import { brandService } from "../services/brandService";
-import type { BrandBajaResult, BrandDetail } from "../types";
+import type { BrandDetail } from "../types";
 
 export function BrandDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -66,7 +65,7 @@ function BrandDetailLoader({ id }: { id: string }) {
           </Group>
         )}
         {state.status === "error" && (
-          <FeedbackAlert semantic="error" title="No se pudo cargar la marca">
+          <FeedbackAlert semantic="error" title="No se pudo cargar la marca" actions={tracking.estado === "confirmada" ? <Button onClick={reload}>Consultar detalle nuevamente</Button> : undefined}>
             {state.message}
           </FeedbackAlert>
         )}
@@ -176,11 +175,7 @@ function BrandDetailContent({
       {baja.state.status === "enviando" && (
         <FeedbackAlert
           semantic="info"
-          title={
-            baja.state.fase === "verificacion"
-              ? "Verificando dependencias con Catálogo…"
-              : "Enviando solicitud de baja…"
-          }
+          title="Enviando solicitud de baja…"
         >
           La marca permanece Activa hasta que la verificación concluya.
         </FeedbackAlert>
@@ -196,12 +191,10 @@ function BrandDetailContent({
           {baja.state.message}
         </FeedbackAlert>
       )}
-      {resultado !== null && (
-        <AlertaResultadoBaja
-          result={resultado}
-          onConsultar={baja.consultar}
-          onCerrar={cerrar}
-        />
+      {resultado !== null && resultado.resultado !== "pendiente" && (
+        <FeedbackAlert semantic={resultado.resultado === "exito" ? "success" : resultado.resultado === "rechazada" ? "error" : "warning"} title={resultado.resultado === "exito" ? "Baja confirmada" : resultado.resultado === "rechazada" ? "Baja rechazada" : "Verificación no concluyente"} actions={<Button onClick={cerrar}>Entendido</Button>}>
+          {resultado.mensaje}
+        </FeedbackAlert>
       )}
 
       <ConfirmDialog
@@ -231,83 +224,5 @@ function BrandDetailContent({
         </Stack>
       </ConfirmDialog>
     </>
-  );
-}
-
-function AlertaResultadoBaja({
-  result,
-  onConsultar,
-  onCerrar,
-}: {
-  result: BrandBajaResult;
-  onConsultar: () => void;
-  onCerrar: () => void;
-}) {
-  if (result.resultado === "exito") {
-    return (
-      <FeedbackAlert
-        semantic="success"
-        title="Baja confirmada"
-        actions={<Button onClick={onCerrar}>Entendido</Button>}
-      >
-        {result.mensaje}
-      </FeedbackAlert>
-    );
-  }
-
-  if (result.resultado === "pendiente") {
-    return (
-      <FeedbackAlert
-        semantic="warning"
-        title="Solicitud admitida (202 Accepted)"
-        actions={
-          <Button onClick={onConsultar}>
-            Consultar resultado de la verificación
-          </Button>
-        }
-      >
-        <Stack gap="sm">
-          <Text size="sm">{result.mensaje}</Text>
-          <Text size="sm" c="dimmed">
-            Solo la confirmación de Catálogo completa la baja. La marca
-            permanece Activa mientras se verifica.
-          </Text>
-        </Stack>
-      </FeedbackAlert>
-    );
-  }
-
-  if (result.resultado === "rechazada") {
-    return (
-      <FeedbackAlert
-        semantic="error"
-        title="Baja rechazada"
-        actions={<Button onClick={onCerrar}>Entendido</Button>}
-      >
-        <Stack gap="sm">
-          <Text size="sm">{result.mensaje}</Text>
-          {result.bloqueos && <ListaBloqueos bloqueos={result.bloqueos} />}
-          <Text size="sm" c="dimmed">
-            La marca conserva su estado activo y sigue disponible.
-          </Text>
-        </Stack>
-      </FeedbackAlert>
-    );
-  }
-
-  return (
-    <FeedbackAlert
-      semantic="warning"
-      title="Verificación no concluyente"
-      actions={<Button onClick={onCerrar}>Entendido</Button>}
-    >
-      <Stack gap="sm">
-        <Text size="sm">{result.mensaje}</Text>
-        <Text size="sm" c="dimmed">
-          Sin confirmación vigente no se autoriza la baja. La marca conserva su
-          estado actual.
-        </Text>
-      </Stack>
-    </FeedbackAlert>
   );
 }
