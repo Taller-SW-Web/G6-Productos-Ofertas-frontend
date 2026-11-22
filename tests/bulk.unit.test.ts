@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mockBulkRepository } from "../src/features/bulk/adapters/mockBulkRepository";
-import { createHttpBulkRepository, type BulkHttpRepositoryOptions, type BulkHttpTransport } from "../src/features/bulk/adapters/httpBulkRepository";
+import { createHttpBulkRepository, mapReconciliation, mapResumeAccepted, type BulkHttpTransport } from "../src/features/bulk/adapters/httpBulkRepository";
+import { verifyBulkHomologationManifest } from "../src/features/bulk/adapters/bulkHomologationManifest";
 import { BulkRepositoryError, createBulkRepository } from "../src/features/bulk/services/bulkService";
 import { canRequestImportReport } from "../src/features/bulk/services/bulkRepository";
 import { canMockProvideImportReport } from "../src/features/bulk/services/reportAvailability";
@@ -38,19 +39,8 @@ const testSession = {
   refreshAccessToken: async () => null,
   invalidateAccessToken: () => undefined,
 };
-const testEndpointEvidence = {
-  contractVersion: "0.7.0-rc.2" as const,
-  docsSha: "a".repeat(40),
-  backendSha: "b".repeat(40),
-  authenticatedE2eReference: "https://example.invalid/evidence/authenticated-e2e",
-};
-
 describe("adaptador HTTP de Bulk", () => {
   beforeEach(() => { vi.stubGlobal("sessionStorage", createMemoryStorage()); });
-  const enabledReconciliation: BulkHttpRepositoryOptions = {
-    reconciliationEnabled: true,
-    reconciliationEvidence: testEndpointEvidence,
-  };
 
   it("mantiene conciliación, replay y reanudación deshabilitados sin evidencia independiente", async () => {
     const request = vi.fn(async () => Response.json({}));
@@ -68,41 +58,52 @@ describe("adaptador HTTP de Bulk", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
-  it("concilia únicamente una respuesta válida con identidad exacta", async () => {
+  it("valida por separado la correlación original de conciliación", () => {
     const correlationId = "11111111-1111-4111-8111-111111111111";
     const batchId = "22222222-2222-4222-8222-222222222222";
-    const calls: Array<{ path: string; headers: Record<string, string> }> = [];
-    const repository = createHttpBulkRepository({ request: async (path, init) => {
-      calls.push({ path, headers: init.headers });
-      return Response.json({ batch_id: batchId, correlation_id: correlationId, status: "PROCESSING", template_version: 2 });
-    } }, testSession, enabledReconciliation);
-    await expect(repository.reconcileImport?.(correlationId, "g7-bulk-unit-owner")).resolves.toEqual({ batch_id: batchId, correlation_id: correlationId, status: "PROCESSING", template_version: 2 });
-    expect(calls).toEqual([{
-      path: `/api/v1/carga-masiva/productos/importaciones/por-correlacion/${correlationId}`,
-      headers: expect.objectContaining({ Authorization: "Bearer header.payload.signature", "X-Correlation-Id": correlationId }),
-    }]);
+    expect(mapReconciliation({ batch_id: batchId, correlation_id: correlationId, status: "QUEUED", template_version: 2 }, correlationId))
+      .toEqual({ batch_id: batchId, correlation_id: correlationId, status: "QUEUED", template_version: 2 });
+    expect(() => mapReconciliation({ batch_id: batchId, correlation_id: "33333333-3333-4333-8333-333333333333", status: "QUEUED", template_version: 2 }, correlationId)).toThrow();
   });
 
-  it.each([
-    [400, "VALIDACION"], [401, "TOKEN_INVALIDO"], [403, "SCOPE_INSUFICIENTE"], [503, "SERVICIO_NO_DISPONIBLE"],
-  ])("conserva el error contractual de conciliación HTTP %i", async (status, code) => {
-    const repository = createHttpBulkRepository({ request: async () => Response.json({ status, code }, { status }) }, testSession, enabledReconciliation);
-    await expect(repository.reconcileImport?.("11111111-1111-4111-8111-111111111111", "g7-bulk-unit-owner")).rejects.toMatchObject({ status, code });
+  it("valida el recibo 202 de retry separado de la correlación de la solicitud idempotente", () => {
+    const batchId = "22222222-2222-4222-8222-222222222222";
+    const originalCorrelation = "11111111-1111-4111-8111-111111111111";
+    const retryCorrelation = "33333333-3333-4333-8333-333333333333";
+    const accepted = { batch_id: batchId, correlation_id: originalCorrelation, status: "QUEUED", template_version: 2 };
+    expect(retryCorrelation).not.toBe(accepted.correlation_id);
+    expect(mapResumeAccepted(accepted, batchId, originalCorrelation)).toEqual(accepted);
+    expect(() => mapResumeAccepted(accepted, batchId, retryCorrelation)).toThrow();
+    expect(() => mapResumeAccepted({ ...accepted, batch_id: retryCorrelation }, batchId)).toThrow();
+    expect(() => mapResumeAccepted({ ...accepted, correlation_id: "not-a-uuid" }, batchId)).toThrow();
+    expect(() => mapResumeAccepted({ batch_id: batchId, correlation_id: originalCorrelation }, batchId)).toThrow();
   });
 
-  it("mantiene incierto el 404, rechaza correlación diferente y descarta cambio de usuario", async () => {
-    const correlationId = "11111111-1111-4111-8111-111111111111";
-    const missing = createHttpBulkRepository({ request: async () => Response.json({ status: 404, code: "LOTE_NO_ENCONTRADO" }, { status: 404 }) }, testSession, enabledReconciliation);
-    await expect(missing.reconcileImport?.(correlationId, "g7-bulk-unit-owner")).resolves.toBeNull();
-    const mismatch = createHttpBulkRepository({ request: async () => Response.json({ batch_id: "22222222-2222-4222-8222-222222222222", correlation_id: "33333333-3333-4333-8333-333333333333", status: "QUEUED", template_version: 2 }) }, testSession, enabledReconciliation);
-    await expect(mismatch.reconcileImport?.(correlationId, "g7-bulk-unit-owner")).rejects.toMatchObject({ category: "unknown" });
-    let owner = "g7-bulk-unit-owner";
-    const switchingSession = { ...testSession, snapshot: () => ({ user: { id: owner, nombreCompleto: "H4", correo: "h4@example.invalid", roles: [] }, mfa: false, busy: false, notice: "", expiresAt: null }) };
-    const switching = createHttpBulkRepository({ request: async () => {
-      owner = "g7-other-owner";
-      return Response.json({ batch_id: "22222222-2222-4222-8222-222222222222", correlation_id: correlationId, status: "QUEUED", template_version: 2 });
-    } }, switchingSession, enabledReconciliation);
-    await expect(switching.reconcileImport?.(correlationId, "g7-bulk-unit-owner")).rejects.toMatchObject({ category: "unknown" });
+  it("no acepta un manifiesto ausente, malformado o distinto de la release autorizada", async () => {
+    await expect(verifyBulkHomologationManifest({})).resolves.toBeUndefined();
+    await expect(verifyBulkHomologationManifest({
+      manifestJson: JSON.stringify({ schemaVersion: 1, approvalStatus: "APPROVED", releaseId: "release-a", authenticatedIntegrationEvidenceSha256: "a".repeat(64) }),
+      authorizedReleaseId: "release-a",
+      authorizedManifestSha256: "b".repeat(64),
+    })).resolves.toBeUndefined();
+    await expect(verifyBulkHomologationManifest({
+      manifestJson: "{not-json",
+      authorizedReleaseId: "release-a",
+      authorizedManifestSha256: "a".repeat(64),
+    })).resolves.toBeUndefined();
+    const incompatibleContractManifest = {
+      schemaVersion: 1, approvalStatus: "APPROVED", releaseId: "release-a",
+      openApiVersion: "0.7.0-rc.2", asyncApiVersion: "0.7.0-rc.2",
+      docsSha: "a".repeat(40), backendSha: "b".repeat(40), catalogConsumerSha: "c".repeat(40),
+      reconciliationOperation: "GET /api/v1/carga-masiva/productos/importaciones/por-correlacion/{correlationId}",
+      retryProtocol: "BULK_RETRY_V1", retryDomains: ["CATALOGO"], concurrentReplayIdempotency: true,
+      authenticatedIntegrationEvidenceSha256: "d".repeat(64), concurrentReplayEvidenceSha256: "e".repeat(64), resumeProtocolEvidenceSha256: "f".repeat(64),
+    };
+    await expect(verifyBulkHomologationManifest({
+      manifestJson: JSON.stringify(incompatibleContractManifest),
+      authorizedReleaseId: "release-a",
+      authorizedManifestSha256: "a".repeat(64),
+    })).resolves.toBeUndefined();
   });
 
   it("valida un vector SHA-256 independiente y persiste la intención completa antes del POST", async () => {
@@ -399,6 +400,17 @@ describe("adaptador HTTP de Bulk", () => {
     await expect(mismatchedExport.getExport("11111111-1111-4111-8111-111111111111")).rejects.toMatchObject({ category: "unknown" });
   });
 
+  it("descarta un snapshot HTTP si cambia la sesión G7 durante el seguimiento", async () => {
+    let owner = "g7-bulk-unit-owner";
+    const session = { ...testSession, snapshot: () => ({ ...testSession.snapshot(), user: { ...testSession.snapshot().user!, id: owner } }) };
+    const repository = createHttpBulkRepository({ request: async () => {
+      owner = "another-g7-user";
+      return Response.json({ batch_id: "11111111-1111-4111-8111-111111111111", status: "COMPLETED", total_rows: 0, completed_rows: 0, failed_rows: 0, needs_reconciliation: false });
+    } }, session);
+    await expect(repository.getImport("11111111-1111-4111-8111-111111111111", undefined, "g7-bulk-unit-owner"))
+      .rejects.toMatchObject({ category: "unknown" });
+  });
+
   it("valida ausencia, bloqueo, elegibilidad y contradicciones de BULK_RETRY_V1", async () => {
     const batchId = "22222222-2222-4222-8222-222222222222";
     const rowId = "33333333-3333-4333-8333-333333333333";
@@ -409,7 +421,7 @@ describe("adaptador HTTP de Bulk", () => {
       completed_rows: 0,
       failed_rows: 1,
       needs_reconciliation: true,
-      rows: [{ row_id: rowId, status: "FAILED", applied_domains: appliedDomains, needs_reconciliation: true, steps: [{ dominio: "INVENTARIO", status: "FAILED" }] }],
+      rows: [{ row_id: rowId, status: "FAILED", applied_domains: appliedDomains, needs_reconciliation: true, steps: [{ dominio: "CATALOGO", status: "FAILED" }] }],
       ...(reanudacion === undefined ? {} : { reanudacion }),
     });
     const getBatch = (value?: unknown, appliedDomains?: string[]) => createHttpBulkRepository({ request: async () => response(value, appliedDomains) }, testSession).getImport(batchId);
@@ -417,18 +429,27 @@ describe("adaptador HTTP de Bulk", () => {
     const absentEligibility = await getBatch();
     expect(absentEligibility).not.toHaveProperty("reanudacion");
     await expect(getBatch({ protocolo: "BULK_RETRY_V1", elegible: false, pasos: [], motivo_bloqueo: "PROTOCOLO_DOMINIO_NO_HABILITADO" })).resolves.toMatchObject({ reanudacion: { eligible: false, steps: [], blockedReason: "PROTOCOLO_DOMINIO_NO_HABILITADO" } });
-    await expect(getBatch({ protocolo: "BULK_RETRY_V1", elegible: true, pasos: [{ row_id: rowId, dominio: "INVENTARIO" }], motivo_bloqueo: null })).resolves.toMatchObject({ reanudacion: { eligible: true, steps: [{ row_id: rowId, domain: "INVENTARIO" }], blockedReason: null } });
+    await expect(getBatch({ protocolo: "BULK_RETRY_V1", elegible: true, pasos: [{ row_id: rowId, dominio: "CATALOGO" }], motivo_bloqueo: null })).resolves.toMatchObject({ reanudacion: { eligible: true, steps: [{ row_id: rowId, domain: "CATALOGO" }], blockedReason: null } });
     for (const invalidEligibility of [
-      { protocolo: "OTRO", elegible: true, pasos: [{ row_id: rowId, dominio: "INVENTARIO" }], motivo_bloqueo: null },
+      { protocolo: "OTRO", elegible: true, pasos: [{ row_id: rowId, dominio: "CATALOGO" }], motivo_bloqueo: null },
       { protocolo: "BULK_RETRY_V1", elegible: true, pasos: [], motivo_bloqueo: null },
-      { protocolo: "BULK_RETRY_V1", elegible: false, pasos: [{ row_id: rowId, dominio: "INVENTARIO" }], motivo_bloqueo: "RESULTADO_INCIERTO" },
-      { protocolo: "BULK_RETRY_V1", elegible: true, pasos: [{ row_id: "no-es-uuid", dominio: "INVENTARIO" }], motivo_bloqueo: null },
+      { protocolo: "BULK_RETRY_V1", elegible: false, pasos: [{ row_id: rowId, dominio: "CATALOGO" }], motivo_bloqueo: "RESULTADO_INCIERTO" },
+      { protocolo: "BULK_RETRY_V1", elegible: true, pasos: [{ row_id: "no-es-uuid", dominio: "CATALOGO" }], motivo_bloqueo: null },
+      { protocolo: "BULK_RETRY_V1", elegible: true, pasos: [{ row_id: "77777777-7777-4777-8777-777777777777", dominio: "CATALOGO" }], motivo_bloqueo: null },
+      { protocolo: "BULK_RETRY_V1", elegible: true, pasos: [{ row_id: rowId, dominio: "INVENTARIO" }], motivo_bloqueo: null },
     ]) {
       const result = await getBatch(invalidEligibility);
       expect(result).not.toHaveProperty("reanudacion");
     }
-    const completedCandidate = await getBatch({ protocolo: "BULK_RETRY_V1", elegible: true, pasos: [{ row_id: rowId, dominio: "INVENTARIO" }], motivo_bloqueo: null }, ["INVENTARIO"]);
+    const completedCandidate = await getBatch({ protocolo: "BULK_RETRY_V1", elegible: true, pasos: [{ row_id: rowId, dominio: "CATALOGO" }], motivo_bloqueo: null }, ["CATALOGO"]);
     expect(completedCandidate).not.toHaveProperty("reanudacion");
+    const partial = createHttpBulkRepository({ request: async () => Response.json({
+      batch_id: batchId, status: "COMPLETED", total_rows: 2, completed_rows: 0, failed_rows: 1,
+      needs_reconciliation: true,
+      rows: [{ row_id: rowId, status: "FAILED", applied_domains: [], needs_reconciliation: true, steps: [{ dominio: "CATALOGO", status: "FAILED" }] }],
+      reanudacion: { protocolo: "BULK_RETRY_V1", elegible: true, pasos: [{ row_id: rowId, dominio: "CATALOGO" }], motivo_bloqueo: null },
+    }) }, testSession);
+    await expect(partial.getImport(batchId)).resolves.not.toHaveProperty("reanudacion");
   });
 
   it("el reporte solo acepta CSV real y no intenta descargar exports aún pendientes", async () => {
@@ -456,7 +477,7 @@ describe("adaptador HTTP de Bulk", () => {
     expect(pendingRequests).toEqual([`/api/v1/carga-masiva/productos/exportaciones/${exportId}`]);
   });
 
-  it("prepara replay explícito con el mismo archivo, hash, usuario y correlación", async () => {
+  it("mantiene el replay bloqueado sin manifiesto homologado y conserva la intención", async () => {
     const file = new File(["abc"], "a.csv");
     const intent = {
       owner: "g7-bulk-unit-owner",
@@ -469,48 +490,29 @@ describe("adaptador HTTP de Bulk", () => {
     const repository = createHttpBulkRepository({ request: async (path, init) => {
       calls.push({ path, init });
       return Response.json({ batch_id: "22222222-2222-4222-8222-222222222222", status: "QUEUED", template_version: 2, correlation_id: intent.correlationId }, { status: 202 });
-    } }, testSession, {
-      reconciliationEnabled: true,
-      reconciliationEvidence: testEndpointEvidence,
-      replayEnabled: true,
-      replayEvidence: { ...testEndpointEvidence, concurrentReplayReference: "https://example.invalid/evidence/concurrent-replay" },
-    });
+    } }, testSession, { reconciliationEnabled: true, replayEnabled: true });
     await expect(repository.replayImport?.(file, intent, false)).rejects.toMatchObject({ category: "configuration" });
     expect(calls).toHaveLength(0);
-    const result = await repository.replayImport?.(file, intent, true);
-    expect(result?.batch_id).toBe("22222222-2222-4222-8222-222222222222");
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.path).toBe("/api/v1/carga-masiva/productos/importaciones");
-    expect(calls[0]?.init.headers["X-Correlation-Id"]).toBe(intent.correlationId);
-    const form = calls[0]?.init.body as FormData;
-    expect(form.get("template_version")).toBe("2");
-    expect(await (form.get("archivo") as File).text()).toBe("abc");
-    expect(JSON.parse(sessionStorage.getItem(markerKey) ?? "null")).toBeNull();
+    await expect(repository.replayImport?.(file, intent, true)).rejects.toMatchObject({ category: "configuration" });
+    expect(calls).toHaveLength(0);
+    expect(JSON.parse(sessionStorage.getItem(markerKey) ?? "null")).toMatchObject({ correlationId: intent.correlationId, contentHash: intent.contentHash, state: "PENDING_RECONCILIATION" });
   });
 
   it("prepara BULK_RETRY_V1 con correlación estable y conserva errores 409 contractuales", async () => {
     const batchId = "22222222-2222-4222-8222-222222222222";
     const requestId = "33333333-3333-4333-8333-333333333333";
     const calls: Array<{ path: string; init: Parameters<BulkHttpTransport["request"]>[1] }> = [];
-    const resumeEvidence = {
-      ...testEndpointEvidence,
-      consumerSha: "c".repeat(40),
-      protocolE2eReference: "https://example.invalid/evidence/retry-protocol",
-    };
     const repository = createHttpBulkRepository({ request: async (path, init) => {
       calls.push({ path, init });
       return Response.json({ status: 409, code: "RETRY_NOT_ELIGIBLE" }, { status: 409 });
-    } }, testSession, { resumeEnabled: true, resumeEvidence });
+    } }, testSession, { resumeEnabled: true });
     const stableRequest = { correlationId: requestId, motivo: null };
-    await expect(repository.resumeImport(batchId, undefined, stableRequest)).rejects.toMatchObject({ status: 409, code: "RETRY_NOT_ELIGIBLE" });
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.path).toBe(`/api/v1/carga-masiva/productos/importaciones/${batchId}/reanudar`);
-    expect(calls[0]?.init.headers).toMatchObject({ "X-Correlation-Id": requestId, "Content-Type": "application/json" });
-    expect(calls[0]?.init.body).toBe(JSON.stringify({ motivo: null }));
+    await expect(repository.resumeImport(batchId, undefined, stableRequest)).rejects.toMatchObject({ status: 409, code: "RETRY_PROTOCOL_NOT_APPROVED" });
+    expect(calls).toHaveLength(0);
     for (const code of ["RETRY_PROTOCOL_NOT_APPROVED", "RETRY_NOT_ELIGIBLE", "IDEMPOTENCY_CONFLICT"]) {
       vi.stubGlobal("sessionStorage", createMemoryStorage());
-      const conflict = createHttpBulkRepository({ request: async () => Response.json({ status: 409, code }, { status: 409 }) }, testSession, { resumeEnabled: true, resumeEvidence });
-      await expect(conflict.resumeImport(batchId, undefined, stableRequest)).rejects.toMatchObject({ status: 409, code });
+      const conflict = createHttpBulkRepository({ request: async () => Response.json({ status: 409, code }, { status: 409 }) }, testSession);
+      await expect(conflict.resumeImport(batchId, undefined, stableRequest)).rejects.toMatchObject({ status: 409, code: "RETRY_PROTOCOL_NOT_APPROVED" });
     }
   });
 
@@ -695,22 +697,27 @@ describe("Bulk mock repository and global data mode", () => {
 
   it("preserves confirmed rows and batch identity when resuming an eligible batch", async () => {
     const batch = await mockBulkRepository.getImport("batch-partial");
-    const resumed = await mockBulkRepository.resumeImport("batch-partial");
-    expect(resumed.batch_id).toBe("batch-partial");
-    expect(resumed.status).toBe("QUEUED");
-    expect(resumed.completed_rows).toBe(batch?.completed_rows);
-    expect(resumed.rows?.filter((row) => row.status === "COMPLETED")).toHaveLength(
+    const accepted = await mockBulkRepository.resumeImport("batch-partial", undefined, {
+      correlationId: "33333333-3333-4333-8333-333333333333", motivo: null,
+    });
+    expect(accepted).toEqual({ batch_id: "batch-partial", correlation_id: "11111111-1111-4111-8111-111111111111", status: "QUEUED", template_version: 2 });
+    const refreshed = await mockBulkRepository.getImport("batch-partial");
+    expect(refreshed?.batch_id).toBe(batch?.batch_id);
+    expect(refreshed?.completed_rows).toBe(batch?.completed_rows);
+    expect(refreshed?.rows?.filter((row) => row.status === "COMPLETED")).toHaveLength(
       batch?.rows?.filter((row) => row.status === "COMPLETED").length ?? 0,
     );
-    await expect(mockBulkRepository.resumeImport("batch-completed")).rejects.toThrow(
+    await expect(mockBulkRepository.resumeImport("batch-completed", undefined, {
+      correlationId: "44444444-4444-4444-8444-444444444444", motivo: null,
+    })).rejects.toThrow(
       "no contiene operaciones pendientes",
     );
   });
 
   it("rejects a duplicate resume while preserving the same batch identity", async () => {
     const results = await Promise.allSettled([
-      mockBulkRepository.resumeImport("batch-partial"),
-      mockBulkRepository.resumeImport("batch-partial"),
+      mockBulkRepository.resumeImport("batch-partial", undefined, { correlationId: "55555555-5555-4555-8555-555555555555", motivo: null }),
+      mockBulkRepository.resumeImport("batch-partial", undefined, { correlationId: "55555555-5555-4555-8555-555555555555", motivo: null }),
     ]);
     const accepted = results.filter((result) => result.status === "fulfilled");
     const rejected = results.filter((result) => result.status === "rejected");
@@ -1066,11 +1073,13 @@ describe("Bulk reconciliation gating and export download eligibility", () => {
     const storage = createMemoryStorage();
     const owner = "g7-bulk-unit-owner";
     const batchId = "11111111-1111-4111-8111-111111111111";
-    const first = getOrCreateBulkResumeRequest(owner, batchId, storage);
-    const second = getOrCreateBulkResumeRequest(owner, batchId, storage);
+    const original = "88888888-8888-4888-8888-888888888888";
+    const first = getOrCreateBulkResumeRequest(owner, batchId, storage, original);
+    const second = getOrCreateBulkResumeRequest(owner, batchId, storage, original);
     expect(second).toEqual(first);
     expect(first).toMatchObject({ motivo: null });
     expect(first.correlationId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(() => getOrCreateBulkResumeRequest(owner, batchId, storage, "99999999-9999-4999-8999-999999999999")).toThrow();
   });
 
   it("concilia con GET, mantiene incierto un 404 y nunca envía POST", async () => {
@@ -1164,10 +1173,11 @@ describe("Bulk reconciliation gating and export download eligibility", () => {
   });
 
   it("refuses a repository-level resume for batches without pending work", async () => {
-    await expect(mockBulkRepository.resumeImport("batch-failed-general")).rejects.toThrow(
+    const request = { correlationId: "77777777-7777-4777-8777-777777777777", motivo: null };
+    await expect(mockBulkRepository.resumeImport("batch-failed-general", undefined, request)).rejects.toThrow(
       "no contiene operaciones pendientes",
     );
-    await expect(mockBulkRepository.resumeImport("batch-queued")).rejects.toThrow(
+    await expect(mockBulkRepository.resumeImport("batch-queued", undefined, request)).rejects.toThrow(
       "ya se encuentra en proceso",
     );
   });

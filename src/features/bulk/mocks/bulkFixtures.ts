@@ -52,7 +52,7 @@ export const sampleCompletedRows: BulkImportRow[] = [
   },
 ];
 
-// 6 failed rows for batch-partial (114 completed + 6 failed = 120 total)
+// Six explicit failed-row fixtures complete the three successful rows below.
 export const samplePartialFailedRows: BulkImportRow[] = [
   {
     row_id: "00000000-0000-4000-8000-000000000004",
@@ -403,20 +403,26 @@ export const mockBatches: Record<string, BulkImportBatch> = {
   },
   "batch-partial": {
     batch_id: "batch-partial",
+    correlation_id: "11111111-1111-4111-8111-111111111111",
     status: "COMPLETED",
-    total_rows: 120,
-    completed_rows: 114,
+    total_rows: 9,
+    completed_rows: 3,
     failed_rows: 6,
     needs_reconciliation: true,
     created_at: "2026-10-10T11:30:00Z",
     updated_at: "2026-10-10T11:33:40Z",
     file_name: "lote_parcial_120.csv",
     file_size: 46200,
-    rows: samplePartialRows,
+    rows: samplePartialRows.map((row) => String(row.row_id) === "6" ? {
+      ...row,
+      applied_domains: [],
+      failed_domain: "CATALOGO",
+      steps: row.steps.map((step) => step.domain === "CATALOGO" ? { ...step, status: "FAILED" as const } : step),
+    } : row),
     reanudacion: {
       protocol: "BULK_RETRY_V1",
       eligible: true,
-      steps: [{ row_id: "00000000-0000-4000-8000-000000000004", domain: "INVENTARIO" }],
+      steps: [{ row_id: "6", domain: "CATALOGO" }],
       blockedReason: null,
     },
   },

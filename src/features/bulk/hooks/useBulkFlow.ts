@@ -29,6 +29,7 @@ import { clearBulkResumeRequest, getOrCreateBulkResumeRequest } from "../utils/b
 export function useBulkBatch(batchId: string | undefined) {
   const repository = useBulkRepository();
   const session = useContext(PromotionSessionContext);
+  const [sessionIdentity, setSessionIdentity] = useState(() => session?.snapshot().user?.id);
   const [revision, setRevision] = useState(0);
   const mockRevision = useMockStateRevision(["bulk"]);
   const [response, setResponse] = useState<{
@@ -38,15 +39,25 @@ export function useBulkBatch(batchId: string | undefined) {
   const [lastSuccess, setLastSuccess] = useState<{
     batchId: string;
     batch: BulkImportBatch;
+    owner?: string;
   }>();
   const [resuming, setResuming] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
+  const [resumeRefreshStatus, setResumeRefreshStatus] = useState<"accepted_refreshing" | "accepted_refresh_failed" | null>(null);
   const [downloadingReport, setDownloadingReport] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const resumeInFlight = useRef(false);
+  const resumeAcceptedRef = useRef(false);
   const reportInFlight = useRef(false);
 
-  const requestKey = JSON.stringify([batchId, revision + mockRevision]);
+  useEffect(() => {
+    if (!session) return;
+    const updateIdentity = () => setSessionIdentity(session.snapshot().user?.id);
+    updateIdentity();
+    return session.subscribe(updateIdentity);
+  }, [session]);
+
+  const requestKey = JSON.stringify([batchId, revision + mockRevision, sessionIdentity]);
 
   useEffect(() => {
     if (!batchId) return;
@@ -64,13 +75,20 @@ export function useBulkBatch(batchId: string | undefined) {
     const poll = async () => {
       while (!controller.signal.aborted) {
         try {
-          const result = await repository.getImport(batchId, controller.signal);
-          if (controller.signal.aborted) return;
+          const result = await repository.getImport(batchId, controller.signal, sessionIdentity);
+          if (controller.signal.aborted || session?.snapshot().user?.id !== sessionIdentity) return;
           if (!result) {
-            setResponse({ key: requestKey, state: { status: "not_found" } });
+            if (resumeAcceptedRef.current) {
+              setResponse({ key: requestKey, state: { status: "error", message: "La reanudación fue aceptada, pero no se pudo recuperar el lote actualizado." } });
+              setResumeRefreshStatus("accepted_refresh_failed");
+            } else {
+              setResponse({ key: requestKey, state: { status: "not_found" } });
+            }
             return;
           }
-          setLastSuccess({ batchId, batch: result });
+          resumeAcceptedRef.current = false;
+          setResumeRefreshStatus(null);
+          setLastSuccess({ batchId, batch: result, owner: sessionIdentity });
           setResponse({ key: requestKey, state: { status: "success", batch: result } });
           if (!shouldPollBatch(result)) return;
           attempt = 0;
@@ -78,6 +96,7 @@ export function useBulkBatch(batchId: string | undefined) {
           if (controller.signal.aborted) return;
           const message = err instanceof Error ? err.message : "No se pudo consultar la información del lote.";
           setResponse({ key: requestKey, state: { status: "error", message } });
+          if (resumeAcceptedRef.current) setResumeRefreshStatus("accepted_refresh_failed");
           const status = typeof err === "object" && err !== null && "status" in err ? (err as { status?: unknown }).status : undefined;
           if (typeof status === "number" && status < 500 && status !== 408 && status !== 429) return;
         }
@@ -86,11 +105,12 @@ export function useBulkBatch(batchId: string | undefined) {
     };
     void poll();
     return () => controller.abort();
-  }, [batchId, requestKey, repository]);
+  }, [batchId, requestKey, repository, session, sessionIdentity]);
 
   const batchView = selectBatchQueryView({
     batchId,
     requestKey,
+    owner: sessionIdentity,
     response,
     lastSuccess,
   });
@@ -107,26 +127,37 @@ export function useBulkBatch(batchId: string | undefined) {
     isNotFound: batchView.isNotFound,
     resuming,
   }) && repository.resumeSupported !== false;
+  const canResumeNow = canResume && resumeRefreshStatus === null;
 
   const refreshBatch = useCallback(() => {
     setRevision((prev) => prev + 1);
   }, []);
 
   const resumeBatch = useCallback(async () => {
-    return resumeBatchWhenAllowed(canResume, async () => {
+    return resumeBatchWhenAllowed(canResumeNow, async () => {
       if (!batchId || resumeInFlight.current) return undefined;
       resumeInFlight.current = true;
       setResuming(true);
       setResumeError(null);
       try {
-        const owner = session?.snapshot().user?.id ?? "mock";
-        const request = getOrCreateBulkResumeRequest(owner, batchId);
-        const resumed = await repository.resumeImport(batchId, undefined, request);
+        const owner = sessionIdentity ?? "mock";
+        const request = getOrCreateBulkResumeRequest(owner, batchId, sessionStorage, batchView.batch?.correlation_id);
+        const accepted = await repository.resumeImport(batchId, undefined, request);
+        if (sessionIdentity && session?.snapshot().user?.id !== sessionIdentity) {
+          throw new Error("La sesión cambió durante la reanudación; se conserva la identidad original de la solicitud.");
+        }
+        if (accepted.batch_id !== batchId || accepted.status !== "QUEUED" || accepted.template_version !== 2 ||
+            (batchView.batch?.correlation_id !== undefined && accepted.correlation_id !== batchView.batch.correlation_id)) {
+          throw new Error("La respuesta no confirmó el retry del lote solicitado; se conserva la correlación.");
+        }
         clearBulkResumeRequest(owner, batchId);
-        setLastSuccess({ batchId, batch: resumed });
-        setResponse({ key: requestKey, state: { status: "success", batch: resumed } });
-        return resumed;
+        resumeAcceptedRef.current = true;
+        setResumeRefreshStatus("accepted_refreshing");
+        setResumeError(null);
+        setRevision((prev) => prev + 1);
+        return accepted;
       } catch (err: unknown) {
+        if (sessionIdentity && session?.snapshot().user?.id !== sessionIdentity) return undefined;
         const message =
           err instanceof Error
             ? err.message
@@ -138,7 +169,7 @@ export function useBulkBatch(batchId: string | undefined) {
         setResuming(false);
       }
     });
-  }, [batchId, canResume, repository, requestKey, session]);
+  }, [batchId, batchView.batch, canResumeNow, repository, session, sessionIdentity]);
 
   const downloadReport = useCallback(async () => {
     if (!batchId || reportInFlight.current) return;
@@ -172,7 +203,8 @@ export function useBulkBatch(batchId: string | undefined) {
     isStale: batchView.isStale,
     resuming,
     resumeError,
-    canResume,
+    resumeRefreshStatus,
+    canResume: canResumeNow,
     downloadingReport,
     reportError,
     reportAvailable,

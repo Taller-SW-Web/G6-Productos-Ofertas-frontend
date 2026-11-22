@@ -1,5 +1,6 @@
 import type { G7Session } from "../../promotions/adapters/g7Session";
 import { isGatewayTokenInvalid } from "../../shared/isGatewayTokenInvalid";
+import { isVerifiedBulkHomologationManifest, type VerifiedBulkHomologationManifest } from "./bulkHomologationManifest";
 import type { BulkRepository, DownloadResource } from "../services/bulkRepository";
 import { BulkRepositoryError } from "../services/bulkErrors";
 import type {
@@ -9,6 +10,7 @@ import type {
   BulkExportJob,
   BulkImportBatch,
   BulkImportRow,
+  BulkResumeAccepted,
   BulkResumeBlockReason,
   BulkResumeStep,
 } from "../types/bulk";
@@ -45,34 +47,12 @@ const exportStatuses = batchStatuses;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const resumeBlockReasons = ["LOTE_NO_TERMINAL", "SIN_PASOS_REINTENTABLES", "RESULTADO_INCIERTO", "PROTOCOLO_DOMINIO_NO_HABILITADO"] as const;
 
-export interface BulkEndpointCompatibilityEvidence {
-  contractVersion: "0.7.0-rc.2";
-  docsSha: string;
-  backendSha: string;
-  authenticatedE2eReference: string;
-}
-
-export interface BulkReplayCompatibilityEvidence extends BulkEndpointCompatibilityEvidence {
-  concurrentReplayReference: string;
-}
-
-export interface BulkResumeCompatibilityEvidence extends BulkEndpointCompatibilityEvidence {
-  consumerSha: string;
-  protocolE2eReference: string;
-}
-
 export interface BulkHttpRepositoryOptions {
   publicReads?: boolean;
   reconciliationEnabled?: boolean;
-  reconciliationEvidence?: BulkEndpointCompatibilityEvidence;
   replayEnabled?: boolean;
-  replayEvidence?: BulkReplayCompatibilityEvidence;
   resumeEnabled?: boolean;
-  resumeEvidence?: BulkResumeCompatibilityEvidence;
-}
-
-function hasCompatibilityEvidence(evidence: BulkEndpointCompatibilityEvidence | undefined): evidence is BulkEndpointCompatibilityEvidence {
-  return Boolean(evidence && evidence.contractVersion === "0.7.0-rc.2" && /^[0-9a-f]{40}$/i.test(evidence.docsSha) && /^[0-9a-f]{40}$/i.test(evidence.backendSha) && /^https:\/\//i.test(evidence.authenticatedE2eReference));
+  homologationManifest?: VerifiedBulkHomologationManifest;
 }
 
 function mapStep(value: unknown): BulkDomainStep {
@@ -117,11 +97,18 @@ function mapResumeEligibility(value: unknown, batch: BulkImportBatch) {
     if (uniqueSteps.size !== steps.length) return undefined;
     const blockedReason = item.motivo_bloqueo;
     if (item.elegible) {
-      if (steps.length === 0 || blockedReason !== null || batch.status !== "COMPLETED") return undefined;
-      const completedStep = steps.some((candidate) => batch.rows?.some((row) =>
-        String(row.row_id) === candidate.row_id && (row.applied_domains.includes(candidate.domain) || row.steps.some((step) => step.domain === candidate.domain && step.status === "COMPLETED")),
-      ));
-      if (completedStep) return undefined;
+      if (steps.length === 0 || blockedReason !== null || batch.status !== "COMPLETED" ||
+          typeof batch.total_rows !== "number" || !batch.rows || batch.rows.length !== batch.total_rows) return undefined;
+      if (steps.some((candidate) => candidate.domain !== "CATALOGO")) return undefined;
+      const candidatesAreVerifiable = steps.every((candidate) => {
+        const matchingRows = batch.rows!.filter((row) => String(row.row_id) === candidate.row_id);
+        if (matchingRows.length !== 1) return false;
+        const row = matchingRows[0]!;
+        if (row.status === "COMPLETED" || row.applied_domains.includes(candidate.domain)) return false;
+        const matchingSteps = row.steps.filter((step) => step.domain === candidate.domain);
+        return matchingSteps.length === 1 && matchingSteps[0]?.status !== "COMPLETED";
+      });
+      if (!candidatesAreVerifiable) return undefined;
       return { protocol: "BULK_RETRY_V1" as const, eligible: true, steps, blockedReason: null };
     }
     if (steps.length !== 0 || typeof blockedReason !== "string" || !(resumeBlockReasons as readonly string[]).includes(blockedReason)) return undefined;
@@ -143,6 +130,11 @@ function mapBatch(value: unknown): BulkImportBatch {
     created_at: typeof item.created_at === "string" ? item.created_at : "",
     updated_at: typeof item.updated_at === "string" ? item.updated_at : "",
   };
+  if (item.correlation_id !== undefined) {
+    const correlationId = text(item.correlation_id);
+    if (!uuidPattern.test(correlationId)) return invalid("La correlación del lote consultado no es válida.");
+    batch.correlation_id = correlationId;
+  }
   if (Array.isArray(item.rows)) batch.rows = item.rows.map(mapRow);
   const eligibility = mapResumeEligibility(item.reanudacion, batch);
   if (eligibility) batch.reanudacion = eligibility;
@@ -162,7 +154,19 @@ function mapAccepted(value: unknown, expectedCorrelationId: string): BulkImportB
     created_at: "", updated_at: "",
   };
 }
-function mapReconciliation(value: unknown, expectedCorrelationId: string): BulkAdmissionReconciliation {
+export function mapResumeAccepted(value: unknown, expectedBatchId: string, expectedOriginalCorrelationId?: string): BulkResumeAccepted {
+  const accepted = record(value);
+  const status = oneOf(accepted.status, ["QUEUED"] as const);
+  const batchId = text(accepted.batch_id);
+  const originalCorrelationId = text(accepted.correlation_id);
+  if (status !== "QUEUED" || count(accepted.template_version) !== 2 ||
+      !uuidPattern.test(batchId) || batchId !== expectedBatchId || !uuidPattern.test(originalCorrelationId) ||
+      (expectedOriginalCorrelationId !== undefined && originalCorrelationId !== expectedOriginalCorrelationId)) {
+    return invalid("La aceptación de reanudación tiene una identidad incompleta o no corresponde al lote original.");
+  }
+  return { batch_id: batchId, correlation_id: originalCorrelationId, status: "QUEUED", template_version: 2 };
+}
+export function mapReconciliation(value: unknown, expectedCorrelationId: string): BulkAdmissionReconciliation {
   const item = record(value);
   const batchId = text(item.batch_id);
   const correlationId = text(item.correlation_id);
@@ -208,9 +212,10 @@ export function createBulkFetchTransport(origin: string, fetcher: typeof fetch =
 }
 
 export function createHttpBulkRepository(transport: BulkHttpTransport, session: AuthSession, options: BulkHttpRepositoryOptions = {}): BulkRepository {
-  const reconciliationEnabled = options.reconciliationEnabled === true && hasCompatibilityEvidence(options.reconciliationEvidence);
-  const replaySupported = options.replayEnabled === true && reconciliationEnabled && hasCompatibilityEvidence(options.replayEvidence) && typeof options.replayEvidence.concurrentReplayReference === "string" && /^https:\/\//i.test(options.replayEvidence.concurrentReplayReference);
-  const resumeSupported = options.resumeEnabled === true && hasCompatibilityEvidence(options.resumeEvidence) && /^[0-9a-f]{40}$/i.test(options.resumeEvidence.consumerSha) && /^https:\/\//i.test(options.resumeEvidence.protocolE2eReference);
+  const manifest = isVerifiedBulkHomologationManifest(options.homologationManifest) ? options.homologationManifest : undefined;
+  const reconciliationEnabled = options.reconciliationEnabled === true && manifest !== undefined;
+  const replaySupported = options.replayEnabled === true && reconciliationEnabled && manifest !== undefined;
+  const resumeSupported = options.resumeEnabled === true && manifest !== undefined;
   const exportIntentKey = async (format: BulkExportFormat, userId: string) => {
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${userId}\u0000${format}`)));
     return `g6:bulk:export-uncertain:${[...digest].map(byte => byte.toString(16).padStart(2, "0")).join("")}`;
@@ -362,7 +367,10 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
       const key = `g6:bulk:resume-blocked:${encodeURIComponent(session.snapshot?.().user?.id ?? "anonymous")}:${encodeURIComponent(batchId)}`;
       if (sessionStorage.getItem(key) === "1") throw new BulkRepositoryError("Backend no habilitó el protocolo de reanudación para este lote.", "rejected", 409, "RETRY_PROTOCOL_NOT_APPROVED");
       const owner = session.snapshot?.().user?.id;
-      try { return mapAccepted(await json(await send(`${root}/importaciones/${encodeURIComponent(batchId)}/reanudar`, "POST", signal, JSON.stringify({ motivo: request.motivo }), true, request.correlationId, owner), 202, signal), request.correlationId); }
+      try {
+        const accepted = await json(await send(`${root}/importaciones/${encodeURIComponent(batchId)}/reanudar`, "POST", signal, JSON.stringify({ motivo: request.motivo }), true, request.correlationId, owner), 202, signal);
+        return mapResumeAccepted(accepted, batchId, request.originalCorrelationId);
+      }
       catch (error) {
         if (error instanceof BulkRepositoryError && error.code === "RETRY_PROTOCOL_NOT_APPROVED") { try { sessionStorage.setItem(key, "1"); } catch { /* backend rejection remains visible */ } }
         throw error;

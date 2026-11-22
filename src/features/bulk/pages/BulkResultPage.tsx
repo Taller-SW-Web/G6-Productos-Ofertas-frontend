@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { Button, Group, Skeleton, Stack, Text } from "@mantine/core";
 import {
   IconDownload,
@@ -20,7 +20,6 @@ import { useBulkBatch } from "../hooks/useBulkFlow";
 
 export function BulkResultPage() {
   const { batchId } = useParams<{ batchId: string }>();
-  const navigate = useNavigate();
   const [confirmResumeOpen, setConfirmResumeOpen] = useState(false);
   const { clearSelection } = useBulkUploadContext();
 
@@ -32,6 +31,7 @@ export function BulkResultPage() {
     isStale,
     resuming,
     resumeError,
+    resumeRefreshStatus,
     canResume,
     downloadingReport,
     reportError,
@@ -48,8 +48,6 @@ export function BulkResultPage() {
     try {
       await resumeBatch();
       setConfirmResumeOpen(false);
-      // After resuming, navigate to progress tracking S03 with same batchId
-      navigate(`/carga-masiva/importaciones/${batchId}`);
     } catch {
       // Error handled in hook state
     }
@@ -107,6 +105,20 @@ export function BulkResultPage() {
       />
 
       <Stack gap="lg">
+        {resumeRefreshStatus === "accepted_refreshing" && (
+          <FeedbackAlert semantic="info" title="Reanudación aceptada, actualizando lote">
+            La admisión del retry fue confirmada. Los contadores y resultados se actualizarán únicamente cuando llegue una consulta GET válida.
+          </FeedbackAlert>
+        )}
+        {resumeRefreshStatus === "accepted_refresh_failed" && (
+          <FeedbackAlert
+            semantic="warning"
+            title="Reanudación aceptada; no se pudo actualizar el lote"
+            actions={<Button size="xs" variant="outline" onClick={refreshBatch}>Consultar lote de nuevo</Button>}
+          >
+            Se conserva el último snapshot confirmado como histórico. No se permitirá otra reanudación basada en estos datos hasta obtener un GET válido.
+          </FeedbackAlert>
+        )}
         {loading && !batch && (
           <Stack gap="md" role="status" aria-label="Cargando resultado del lote">
             <Text size="sm">Cargando resultado del lote…</Text>

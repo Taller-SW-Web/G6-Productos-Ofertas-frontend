@@ -4,6 +4,7 @@ import type {
   BulkAdmissionReconciliation,
   BulkImportIntent,
   BulkImportBatch,
+  BulkResumeAccepted,
   BulkResumeRequest,
 } from "../types/bulk";
 
@@ -61,7 +62,7 @@ export interface BulkRepository {
     batchId: string,
     signal?: AbortSignal,
     request?: BulkResumeRequest,
-  ): Promise<BulkImportBatch>;
+  ): Promise<BulkResumeAccepted>;
 
   createExport(
     format: BulkExportFormat,

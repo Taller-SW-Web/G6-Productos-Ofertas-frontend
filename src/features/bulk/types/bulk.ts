@@ -106,10 +106,20 @@ export interface BulkImportIntent {
 export interface BulkResumeRequest {
   correlationId: string;
   motivo: null;
+  originalCorrelationId?: string;
+}
+
+/** Durable admission receipt for a retry POST; it is not a batch snapshot. */
+export interface BulkResumeAccepted {
+  batch_id: string;
+  correlation_id: string;
+  status: "QUEUED";
+  template_version: 2;
 }
 
 export interface BulkImportBatch {
   batch_id: string;
+  correlation_id?: string;
   status: BulkImportStatus;
   total_rows?: number | null;
   completed_rows: number;

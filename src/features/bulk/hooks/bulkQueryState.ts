@@ -28,11 +28,13 @@ export interface BatchQueryResponse {
 export interface LastSuccessfulBatch {
   batchId: string;
   batch: BulkImportBatch;
+  owner?: string;
 }
 
 export function selectBatchQueryView(input: {
   batchId: string | undefined;
   requestKey: string;
+  owner?: string;
   response?: BatchQueryResponse;
   lastSuccess?: LastSuccessfulBatch;
 }) {
@@ -44,7 +46,7 @@ export function selectBatchQueryView(input: {
     ? null
     : state?.status === "success"
       ? state.batch
-      : lastSuccess && lastSuccess.batchId === input.batchId
+      : lastSuccess && lastSuccess.batchId === input.batchId && lastSuccess.owner === input.owner
         ? lastSuccess.batch
         : null;
   const error = state?.status === "error" ? state.message : null;
@@ -84,9 +86,17 @@ export function isExportSnapshotStale(input: {
 export function hasReconcilableOperations(batch: BulkImportBatch): boolean {
   const eligibility = batch.reanudacion;
   if (eligibility?.protocol !== "BULK_RETRY_V1" || !eligibility.eligible || eligibility.steps.length === 0 || eligibility.blockedReason !== null) return false;
-  return !eligibility.steps.some((candidate) => batch.rows?.some((row) =>
-    String(row.row_id) === candidate.row_id && (row.applied_domains.includes(candidate.domain) || row.steps.some((step) => step.domain === candidate.domain && step.status === "COMPLETED")),
-  ));
+  if (batch.status !== "COMPLETED" || typeof batch.total_rows !== "number" || !batch.rows || batch.rows.length !== batch.total_rows) return false;
+  if (new Set(eligibility.steps.map((step) => `${step.row_id}:${step.domain}`)).size !== eligibility.steps.length) return false;
+  return eligibility.steps.every((candidate) => {
+    if (candidate.domain !== "CATALOGO") return false;
+    const rows = batch.rows!.filter((row) => String(row.row_id) === candidate.row_id);
+    if (rows.length !== 1) return false;
+    const row = rows[0]!;
+    if (row.status === "COMPLETED" || row.applied_domains.includes(candidate.domain)) return false;
+    const steps = row.steps.filter((step) => step.domain === candidate.domain);
+    return steps.length === 1 && steps[0]?.status !== "COMPLETED";
+  });
 }
 
 // Single source of truth for "resume is allowed". It refuses to operate on a
