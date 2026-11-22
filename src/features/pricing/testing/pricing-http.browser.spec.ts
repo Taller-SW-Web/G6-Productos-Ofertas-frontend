@@ -233,7 +233,7 @@ test("API: la galería no muestra controles ni datos de demostración de Pricing
   ).toHaveCount(0);
 });
 
-test("API: prevalidación CSV por teclado muestra errores por fila y mantiene bloqueada la admisión", async ({ page }) => {
+test("API: prevalidación CSV por teclado distingue rechazo total de una admisión parcial", async ({ page }) => {
   let previews = 0;
   let admissions = 0;
   await page.route("**/api/v1/precios/importaciones**", async (route) => {
@@ -263,7 +263,7 @@ test("API: prevalidación CSV por teclado muestra errores por fila y mantiene bl
     mimeType: "text/csv",
     buffer: Buffer.from("sku\nSKU-A"),
   });
-  await page.getByRole("radio", { name: "Permitir resultados parciales" }).check();
+  await page.getByRole("radio", { name: "Rechazar el lote si hay errores" }).check();
   await prevalidate.focus();
   await expect(prevalidate).toBeFocused();
   await page.keyboard.press("Enter");
@@ -273,18 +273,81 @@ test("API: prevalidación CSV por teclado muestra errores por fila y mantiene bl
     path: test.info().outputPath("prevalidacion-http-1440.png"),
     fullPage: true,
   });
-  await page.getByRole("radio", { name: "Rechazar el lote si hay errores" }).check();
+  await page.getByRole("radio", { name: "Permitir resultados parciales" }).check();
   await expect(page.getByRole("region", { name: "Revisión de prevalidación" })).toHaveCount(0);
-  expect(previews).toBe(1);
+  await prevalidate.click();
+  await expect(page.getByRole("button", { name: "Confirmar importación" })).toBeEnabled();
+  expect(previews).toBe(2);
   expect(admissions).toBe(0);
 });
 
-test("API: un lote existente pasa de en cola a terminal, se recupera al recargar y descarga el CSV", async ({ page }) => {
+test("API: conserva la clave tras timeout y recarga, impide duplicados y abre el mismo lote", async ({ page }) => {
+  const id = "12345678-1234-4234-8234-123456789abc";
+  const path = "/precios/importar";
+  const keys: string[] = [];
+  await page.route("**/api/v1/precios/importaciones/prevalidar", (route) =>
+    route.fulfill({ json: { valid: true, total_rows: 1, errors: [] } }),
+  );
+  await page.route("**/api/v1/precios/importaciones", async (route) => {
+    const key = await route.request().headerValue("idempotency-key");
+    if (!key) throw new Error("La admisión debe enviar Idempotency-Key.");
+    keys.push(key);
+    expect(route.request().postData()).toMatch(/name="allow_partial"\r\n\r\nfalse/);
+    if (keys.length === 1) return route.abort("timedout");
+    if (keys.length === 2)
+      return route.fulfill({ status: 409, json: { code: "IDEMPOTENCY_CONFLICT" } });
+    return route.fulfill({ status: 202, json: {
+      batch_id: id, status: "QUEUED", allow_partial: false, correlation_id: id,
+    } });
+  });
+  await page.route(`**/api/v1/precios/importaciones/${id}`, (route) =>
+    route.fulfill({ json: {
+      batch_id: id, status: "COMPLETED", allow_partial: false,
+      total_rows: 1, completed_rows: 1, failed_rows: 0, rows: [],
+    } }),
+  );
+  const select = (content: string) => page.locator('input[type="file"]').setInputFiles({
+    name: "precios.csv", mimeType: "text/csv", buffer: Buffer.from(content),
+  });
+  await mount(page, path);
+  await select("sku\nSKU-A");
+  await page.getByRole("radio", { name: "Rechazar el lote si hay errores" }).check();
+  await page.getByRole("button", { name: "Prevalidar archivo" }).click();
+  const confirm = page.getByRole("button", { name: "Confirmar importación" });
+  await expect(confirm).toBeEnabled();
+  await confirm.evaluate((button: HTMLButtonElement) => { button.click(); button.click(); });
+  await expect(page.getByText("El resultado no está confirmado.", { exact: false })).toBeVisible();
+  expect(keys).toHaveLength(1);
+
+  await page.route((url) => url.pathname === path, (route) =>
+    route.fulfill({ status: 302, headers: { location: harnessUrl(path) } }),
+  );
+  await page.reload();
+  const recover = page.getByRole("button", { name: "Recuperar importación" });
+  await expect(recover).toBeDisabled();
+  await select("sku\nSKU-DIFERENTE");
+  await recover.click();
+  await expect(page.getByText("Selecciona el mismo archivo y la misma política de la importación pendiente.")).toBeVisible();
+  expect(keys).toHaveLength(1);
+  await select("sku\nSKU-A");
+  await recover.click();
+  await expect(page.getByText("La clave de importación corresponde a otro archivo o política.")).toBeVisible();
+  await recover.click();
+  await expect(page.getByRole("heading", { name: "Resultado de importación" })).toBeVisible();
+  await expect(page.getByText("Completado", { exact: true })).toBeVisible();
+  expect(keys[0]).toMatch(/^[\da-f-]{36}$/i);
+  expect(keys).toEqual([keys[0], keys[0], keys[0]]);
+});
+
+test("API: un lote existente se recupera de 503, vuelve a consultarse al recargar y descarga el CSV", async ({ page }) => {
   const id = "12345678-1234-4234-8234-123456789abc";
   const path = `/precios/importaciones/${id}`;
   let reads = 0;
   await page.route(`**/api/v1/precios/importaciones/${id}`, (route) => {
-    const terminal = ++reads > 1;
+    reads++;
+    if (reads === 2)
+      return route.fulfill({ status: 503, json: { code: "SERVICIO_NO_DISPONIBLE" } });
+    const terminal = reads > 2;
     return route.fulfill({
       json: {
         batch_id: id,
@@ -305,8 +368,9 @@ test("API: un lote existente pasa de en cola a terminal, se recupera al recargar
   await mount(page, path);
   const download = page.getByRole("button", { name: "Descargar reporte" });
   await expect(download).toBeDisabled();
-  await expect(page.getByText("Completado parcialmente", { exact: true })).toBeVisible();
-  expect(reads).toBe(2);
+  await expect(page.getByText("No se pudo actualizar el lote", { exact: true })).toBeVisible();
+  await expect(page.getByText("Completado parcialmente", { exact: true })).toBeVisible({ timeout: 10_000 });
+  expect(reads).toBe(3);
   await page.route((url) => url.pathname === path, (route) =>
     route.fulfill({ status: 302, headers: { location: harnessUrl(path) } }),
   );

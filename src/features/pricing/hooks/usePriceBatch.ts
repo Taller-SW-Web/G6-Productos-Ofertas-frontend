@@ -18,8 +18,9 @@ export function usePriceBatch(id: string) {
   );
   const response = usePricingRead(`${id}:${poll.revision}:${update}`, read, id);
   const status = response.state.status === "success" ? response.state.result?.status : undefined;
+  const retryable = response.state.status === "error" && response.state.retryable;
   useEffect(() => {
-    if (mode !== "api" || (status !== "QUEUED" && status !== "PROCESSING"))
+    if (mode !== "api" || (!retryable && status !== "QUEUED" && status !== "PROCESSING"))
       return;
     const timer = setTimeout(() => {
       setPoll(({ revision, delay }) => ({
@@ -28,7 +29,7 @@ export function usePriceBatch(id: string) {
       }));
     }, poll.delay);
     return () => clearTimeout(timer);
-  }, [mode, status, poll.delay, poll.revision, update]);
+  }, [mode, status, retryable, poll.delay, poll.revision, update]);
   const report = usePricingAction<ReportFile>();
   return {
     ...response,

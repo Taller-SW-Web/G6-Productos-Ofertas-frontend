@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Button,
   Group,
@@ -8,7 +8,7 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   FeedbackAlert,
   FileSelection,
@@ -24,15 +24,22 @@ import { useUnsavedPriceNavigation } from "../hooks/useUnsavedPriceNavigation";
 export function ImportPricesPage() {
   const context = usePricingContext();
   const form = usePriceImport();
+  const navigate = useNavigate();
   const [batchId, setBatchId] = useState("");
-  const blocker = useUnsavedPriceNavigation(!!form.file, form.preview.busy);
+  const confirmed = form.admission.result;
+  const suffix = context.suffix;
+  const blocker = useUnsavedPriceNavigation(!!form.file && !confirmed, form.busy);
+  useEffect(() => {
+    if (confirmed)
+      void navigate(`/precios/importaciones/${encodeURIComponent(confirmed)}${suffix}`);
+  }, [confirmed, navigate, suffix]);
   return (
     <PricingPageFrame
       title="Importar precios"
       description="Selecciona un archivo y una política antes de solicitar su prevalidación."
       requiresTarget={false}
     >
-      <UnsavedPriceGuard blocker={blocker} busy={form.preview.busy} />
+      <UnsavedPriceGuard blocker={blocker} busy={form.busy} />
       <Stepper active={form.step}>
         <Stepper.Step
           label="Archivo y validación"
@@ -52,7 +59,7 @@ export function ImportPricesPage() {
           accept=".csv,text/csv"
           value={form.file}
           onChange={form.changeFile}
-          disabled={form.preview.busy}
+          disabled={form.busy}
           description="Seleccionar otro archivo invalida la revisión anterior."
         />
         <Radio.Group
@@ -64,32 +71,37 @@ export function ImportPricesPage() {
             <Radio
               value="all"
               label="Rechazar el lote si hay errores"
-              disabled={form.preview.busy}
+              disabled={form.busy || form.pending}
             />
             <Radio
               value="partial"
               label="Permitir resultados parciales"
-              disabled={form.preview.busy}
+              disabled={form.busy || form.pending}
             />
           </Stack>
         </Radio.Group>
-        <Text size="sm">
-          Cambiar de política exige revisar el archivo de nuevo.
-        </Text>
-        <Button
-          style={{ alignSelf: "flex-start" }}
-          variant="outline"
-          disabled={!form.file || !form.policy || form.preview.busy}
-          loading={form.preview.busy}
-          onClick={() => void form.prevalidate()}
-        >
-          Prevalidar archivo
-        </Button>
-        {(!form.file || !form.policy) && (
-          <Text size="sm">
-            Selecciona un archivo y una política para solicitar la
-            prevalidación.
-          </Text>
+        {form.pending ? (
+          <>
+            <FeedbackAlert semantic="warning" title="Importación pendiente de confirmación">
+              Selecciona el mismo CSV para recuperar el lote con la clave anterior.
+            </FeedbackAlert>
+            <Button onClick={form.confirm} disabled={!form.canConfirm} loading={form.admission.busy}>
+              Recuperar importación
+            </Button>
+          </>
+        ) : (
+          <>
+            <Text size="sm">Cambiar de política exige revisar el archivo de nuevo.</Text>
+            <Button
+              style={{ alignSelf: "flex-start" }}
+              variant="outline"
+              disabled={!form.file || !form.policy || form.busy}
+              loading={form.preview.busy}
+              onClick={() => void form.prevalidate()}
+            >
+              Prevalidar archivo
+            </Button>
+          </>
         )}
         {form.preview.error && (
           <FeedbackAlert
@@ -104,7 +116,7 @@ export function ImportPricesPage() {
           </FeedbackAlert>
         )}
       </SectionCard>
-      {form.step === 1 && form.preview.result && (
+      {!form.pending && form.step === 1 && form.preview.result && (
         <SectionCard title="Revisión de prevalidación">
           <Text size="sm">
             Archivo: {form.file?.name}. Política:{" "}
@@ -127,23 +139,41 @@ export function ImportPricesPage() {
             caption="Errores de prevalidación"
             rows={form.preview.result.errors}
           />
-          <Text size="sm" id="price-import-confirmation-status">
-            La admisión de lotes está pendiente de habilitación en Gateway.
-          </Text>
+          {!form.admissionAvailable && (
+            <Text size="sm">La sesión actual no tiene acceso a la admisión de lotes.</Text>
+          )}
           <Group justify="space-between">
-            <Button variant="outline" onClick={form.back}>
+            <Button variant="outline" onClick={form.back} disabled={form.busy}>
               Volver al archivo
             </Button>
-            <Button disabled aria-describedby="price-import-confirmation-status">
+            <Button disabled={!form.canConfirm} loading={form.admission.busy} onClick={form.confirm}>
               Confirmar importación
             </Button>
           </Group>
         </SectionCard>
       )}
+      {form.admission.error && (
+        <FeedbackAlert
+          semantic={form.admission.error.kind === "unknown" ? "warning" : "error"}
+          title="No se pudo confirmar la importación"
+        >
+          {form.admission.error.message}
+        </FeedbackAlert>
+      )}
       <SectionCard
         title="Consultar un lote existente"
         description="Utiliza la referencia recibida de una importación previamente admitida."
       >
+        {form.lastBatchId && (
+          <Button
+            component={Link}
+            to={`/precios/importaciones/${encodeURIComponent(form.lastBatchId)}${suffix}`}
+            variant="outline"
+            style={{ alignSelf: "flex-start" }}
+          >
+            Consultar último lote admitido
+          </Button>
+        )}
         <TextInput
           label="Referencia de lote"
           value={batchId}
