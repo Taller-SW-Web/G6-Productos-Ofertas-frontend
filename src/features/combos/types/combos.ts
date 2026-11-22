@@ -10,6 +10,8 @@ export type AvailabilityFreshness =
 // be sold out, stale, incomplete or unverifiable.
 export type AvailabilityState =
   | "DISPONIBLE"
+  | "NO_DISPONIBLE"
+  | "INDETERMINADO"
   | "AGOTADO"
   | "DESACTUALIZADA"
   | "INCOMPLETA"
@@ -140,6 +142,7 @@ export interface ComboPayload {
 export interface CombosRepository {
   list(query: ComboQuery, signal?: AbortSignal): Promise<ComboPage>;
   getById(id: string, signal?: AbortSignal): Promise<Combo | null>;
+  readAvailability(id: string, status: ComboStatus, signal?: AbortSignal): Promise<ComboAvailability>;
   create(payload: ComboPayload, scenario?: string): Promise<Combo>;
   update(id: string, payload: ComboPayload, scenario?: string): Promise<Combo>;
   deactivate(id: string): Promise<Combo>;

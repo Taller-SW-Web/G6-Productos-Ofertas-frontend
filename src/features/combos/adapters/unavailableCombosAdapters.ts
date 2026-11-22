@@ -11,6 +11,7 @@ const unavailable = () => new ComboError("unavailable", "La información de comb
 const combos: CombosRepository = {
   async list() { throw unavailable(); },
   async getById() { throw unavailable(); },
+  async readAvailability() { throw unavailable(); },
   async create() { throw unavailable(); },
   async update() { throw unavailable(); },
   async deactivate() { throw unavailable(); },

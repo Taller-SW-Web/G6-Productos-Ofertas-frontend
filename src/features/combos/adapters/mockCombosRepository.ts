@@ -131,6 +131,12 @@ export class MockCombosRepository implements CombosRepository {
     return this.withCurrentAvailability(found, signal);
   }
 
+  async readAvailability(id: string, _status: ComboStatus, signal?: AbortSignal): Promise<ComboAvailability> {
+    const combo = await this.getById(id, signal);
+    if (!combo) throw new ComboError("not_found", "No se encontró el combo.");
+    return combo.availability;
+  }
+
   async create(payload: ComboPayload, scenario?: string): Promise<Combo> {
     if (scenario === "server-price-rejected") {
       throw new ComboError("price_invalid", "El precio del combo no cumple la regla económica.");

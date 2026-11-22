@@ -6,7 +6,6 @@ import { useCombosRuntime } from "../hooks/useCombosRuntime";
 import { formatMoney } from "../services/comboRules";
 import {
   availabilityMessageText,
-  calculateInformativeAvailability,
   isVerifiedPositiveAvailability,
   isUnavailableForNewSales,
 } from "../services/availability";
@@ -36,7 +35,7 @@ export function ComboDetailPage({ unavailable = false }: { unavailable?: boolean
 }
 
 function ComboDetailForId({ comboId, unavailable }: { comboId: string; unavailable: boolean }) {
-  const { combos, catalog, pricing, availability: availabilityPort } = useCombosRuntime();
+  const { combos, pricing } = useCombosRuntime();
   const [params] = useSearchParams();
   const scenario = params.get("scenario");
   const [state, setState] = useState<DetailState>({ key: "", status: "loading" });
@@ -118,32 +117,21 @@ function ComboDetailForId({ comboId, unavailable }: { comboId: string; unavailab
     return () => controller.abort();
   }, [combo, pricing, priceKey, scenario]);
 
-  // COM-03: recompute informative availability from the injectable snapshot and
-  // the shared Catalog activity.
+  // The API runtime uses the contractual availability read; the explicit mock
+  // repository computes from its isolated fixture snapshot.
   useEffect(() => {
     if (!combo || comboStatus === undefined) return;
     let active = true;
     const controller = new AbortController();
-    const components = combo.components.map((component) => ({ sku: component.sku, quantity: component.quantity }));
-    void Promise.all([
-      catalog.resolveSkus(components.map((component) => component.sku), controller.signal),
-      availabilityPort.readStocks(components.map((component) => component.sku), controller.signal),
-    ]).then(([resolved, readings]) => {
+    void combos.readAvailability(comboId, comboStatus, controller.signal).then((availability) => {
       if (!active) return;
-      const sellable = new Map(resolved.map((entry) => [entry.sku, entry.sellable]));
-      const computed = calculateInformativeAvailability(
-        comboStatus,
-        components.map((component) => ({ sku: component.sku, quantity: component.quantity, active: sellable.get(component.sku) ?? null })),
-        new Map(readings.map((reading) => [reading.sku, reading])),
-      );
-      setAvailabilityState({ key: availabilityKey, status: "success", availability: applyAvailabilityScenario(computed, scenario) });
+      setAvailabilityState({ key: availabilityKey, status: "success", availability: applyAvailabilityScenario(availability, scenario) });
     }).catch((reason: unknown) => {
       if (!active) return;
       setAvailabilityState({ key: availabilityKey, status: "error", message: reason instanceof Error ? reason.message : "La disponibilidad no está disponible." });
     });
     return () => { active = false; controller.abort(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [availabilityPort, catalog, comboStatus, availabilityKey, scenario]);
+  }, [combos, combo, comboId, comboStatus, availabilityKey, scenario]);
 
   async function deactivate() {
     const current = state.status === "success" ? state.combo : null;

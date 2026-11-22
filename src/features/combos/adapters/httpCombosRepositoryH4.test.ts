@@ -35,10 +35,83 @@ describe("Combos HTTP reconciliation H4", () => {
     ];
     const { repository, request } = setup(async () => jsonResponse(200, { items, meta: { pagina: 1, tamanio: 20, total: 3 } }));
     const result = await repository.list(query);
-    expect(result.items.map(item => item.availability.state)).toEqual(["NO_VERIFICABLE", "AGOTADO", "DESACTUALIZADA"]);
+    expect(result.items.map(item => item.availability.state)).toEqual(["NO_VERIFICABLE", "NO_DISPONIBLE", "DESACTUALIZADA"]);
     expect(result.items[0]?.availability.quantity).toBeNull();
     expect(request).toHaveBeenCalledTimes(1);
     expect(request.mock.calls.some(([path]) => path.includes("/disponibilidad"))).toBe(false);
+  });
+
+  it.each([
+    [{ comboId: "combo-h4", verificable: true, cantidadInformativa: 2, calculated_at: "2026-11-20T12:00:00Z", estadoActualizacion: "ACTUALIZADA" }, "DISPONIBLE"],
+    [{ comboId: "combo-h4", verificable: true, cantidadInformativa: 0, calculated_at: "2026-11-20T12:00:00Z", estadoActualizacion: "ACTUALIZADA" }, "NO_DISPONIBLE"],
+    [{ comboId: "combo-h4", verificable: false, cantidadInformativa: null, calculated_at: "2026-11-20T12:00:00Z", estadoActualizacion: "INCOMPLETA" }, "INDETERMINADO"],
+  ] as const)("lee disponibilidad por el GET contractual y distingue el DTO (%j)", async (dto, state) => {
+    const { repository, request } = setup(async (path, init) => {
+      expect(path).toBe("/api/v1/combos/combo-h4/disponibilidad");
+      expect(init.method).toBe("GET");
+      return jsonResponse(200, dto);
+    });
+    await expect(repository.readAvailability("combo-h4", "ACTIVO")).resolves.toMatchObject({ state });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("falla cerrado cuando el DTO de disponibilidad no corresponde al combo", async () => {
+    const { repository } = setup(async () => jsonResponse(200, {
+      comboId: "otro-combo", verificable: true, cantidadInformativa: 4,
+      calculated_at: "2026-11-20T12:00:00Z", estadoActualizacion: "ACTUALIZADA",
+    }));
+    await expect(repository.readAvailability("combo-h4", "ACTIVO")).rejects.toThrow(/otra identidad/);
+  });
+
+  it.each([401, 403, 409, 422, 503])("propaga el estado contractual HTTP %i", async (status) => {
+    const { repository, request } = setup(async () => jsonResponse(status, { code: `ERROR_${status}` }));
+    await expect(repository.list(query)).rejects.toThrow(`HTTP ${status} (ERROR_${status})`);
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("rechaza un DTO de lista malformado como error de contrato, no como lista vacía", async () => {
+    const { repository } = setup(async () => jsonResponse(200, {
+      items: [comboDto("combo-h4", { components: [{ sku: "SKU-H4-001", quantity: 0 }] })],
+      meta: { pagina: 1, tamanio: 20, total: 1 },
+    }));
+    await expect(repository.list(query)).rejects.toThrow(/inválida|incompletos/);
+  });
+
+  it("mantiene la creación incierta y bloquea otro payload antes de emitir otro POST", async () => {
+    const posts: string[] = [];
+    const first = setup(async (_path, init) => {
+      if (init.method === "POST") posts.push(String(init.body));
+      throw new Error("timeout");
+    });
+    await expect(first.repository.create(payload)).rejects.toThrow(/No se confirmó el alta/);
+    const second = setup(async (_path, init) => {
+      if (init.method === "POST") posts.push(String(init.body));
+      return jsonResponse(201, comboDto("combo-h4"));
+    });
+    await expect(second.repository.create({ ...payload, name: "Otra intención" })).rejects.toThrow(/creación anterior con resultado incierto/);
+    expect(posts).toHaveLength(1);
+    expect(second.request).not.toHaveBeenCalled();
+  });
+
+  it("bloquea un segundo submit concurrente de la misma intención", async () => {
+    let release!: (response: Response) => void;
+    const response = new Promise<Response>((resolve) => { release = resolve; });
+    const { repository, request } = setup(async () => response);
+    const first = repository.create(payload);
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    await expect(repository.create(payload)).rejects.toThrow(/ya está en curso/);
+    release(jsonResponse(201, comboDto("combo-h4")));
+    await expect(first).resolves.toMatchObject({ id: "combo-h4" });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([202, 401, 403, 409, 422, 503])("no interpreta HTTP %i como creación terminada", async (status) => {
+    const { repository, request } = setup(async () => jsonResponse(status, { code: "ERROR_PRUEBA" }));
+    await expect(repository.create(payload)).rejects.toThrow(`HTTP ${status}`);
+    expect(request).toHaveBeenCalledTimes(1);
+    if (status === 202 || status === 503) {
+      expect(Object.keys(storage).some(key => key.startsWith("g6:combos:uncertain:v2:"))).toBe(true);
+    }
   });
 
   it("COM-H4-03: recupera el mismo combo después de perder el 201 con la clave y cuerpo originales", async () => {

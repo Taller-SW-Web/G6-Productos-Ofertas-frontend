@@ -38,15 +38,49 @@ function mapAvailability(dto: ComboAvailabilityDto, status: Combo["status"]): Co
     ? dto.freshness : "NO_VERIFICABLE";
   const verifiable = status === "ACTIVO" && freshness === "ACTUALIZADA" && quantity !== null && calculatedAt !== null;
   const state = status === "INACTIVO" ? "COMBO_INACTIVO"
-    : !verifiable ? freshness === "DESACTUALIZADA" ? "DESACTUALIZADA" : freshness === "INCOMPLETA" ? "INCOMPLETA" : "NO_VERIFICABLE"
-    : quantity === 0 ? "AGOTADO" : "DISPONIBLE";
+    : freshness === "DESACTUALIZADA" ? "DESACTUALIZADA"
+      : !verifiable ? freshness === "INCOMPLETA" ? "INDETERMINADO" : "NO_VERIFICABLE"
+        : quantity === 0 ? "NO_DISPONIBLE" : "DISPONIBLE";
   return {
     state,
     verifiable,
     quantity,
     freshness,
     calculatedAt,
-    reason: verifiable ? null : "La API de Combos no ofrece una disponibilidad informativa verificable para este registro.",
+    reason: state === "DISPONIBLE" ? null : state === "NO_DISPONIBLE" ? "La disponibilidad informativa confirmada es cero."
+      : state === "COMBO_INACTIVO" ? "El combo está administrativamente inactivo."
+        : "La API de Combos no ofrece una disponibilidad informativa verificable para este registro.",
+  };
+}
+
+function mapContractAvailability(value: unknown, comboId: string, status: Combo["status"]): ComboAvailability {
+  const dto = object(value);
+  if (text(dto.comboId) !== comboId) throw new Error("Combos devolvió disponibilidad para otra identidad.");
+  if (typeof dto.verificable !== "boolean") throw new Error("Combos devolvió un estado de disponibilidad inválido.");
+  const freshness = dto.estadoActualizacion;
+  if (freshness !== "ACTUALIZADA" && freshness !== "DESACTUALIZADA" && freshness !== "INCOMPLETA")
+    throw new Error("Combos devolvió una actualización de disponibilidad desconocida.");
+  const quantity = dto.cantidadInformativa === null || dto.cantidadInformativa === undefined
+    ? null : integer(dto.cantidadInformativa);
+  if (dto.verificable && quantity === null) throw new Error("Combos marcó la disponibilidad como verificable sin informar una cantidad.");
+  if (typeof dto.calculated_at !== "string" || !Number.isFinite(Date.parse(dto.calculated_at)))
+    throw new Error("Combos devolvió una fecha de disponibilidad inválida.");
+  const calculatedAt = dto.calculated_at;
+  const verifiable = status === "ACTIVO" && dto.verificable && freshness === "ACTUALIZADA" && quantity !== null;
+  const state: ComboAvailability["state"] = status === "INACTIVO" ? "COMBO_INACTIVO"
+    : freshness === "DESACTUALIZADA" ? "DESACTUALIZADA"
+      : !verifiable ? "INDETERMINADO"
+        : quantity === 0 ? "NO_DISPONIBLE" : "DISPONIBLE";
+  return {
+    state,
+    verifiable,
+    quantity,
+    freshness,
+    calculatedAt,
+    reason: state === "DISPONIBLE" ? null : state === "NO_DISPONIBLE" ? "La disponibilidad informativa confirmada es cero."
+      : state === "COMBO_INACTIVO" ? "El combo está administrativamente inactivo."
+        : state === "DESACTUALIZADA" ? "La última disponibilidad conocida está desactualizada."
+          : "No hay información suficiente para determinar la disponibilidad del combo.",
   };
 }
 
@@ -226,11 +260,17 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
       catch (error) { if (error instanceof Error && error.message.includes("HTTP 404")) return null; throw error; }
       return mapCombo(dto, signal);
     },
+    async readAvailability(comboId, status, signal) {
+      const value = await request(`/api/v1/combos/${encodeURIComponent(comboId)}/disponibilidad`, "GET", signal);
+      return mapContractAvailability(value, comboId, status);
+    },
     async create(payload) {
       const owner = scopeId();
       if (!owner) throw new Error("Inicia sesión para crear un combo.");
       const body = JSON.stringify(toPayload(payload));
       const key = `create:${await createFingerprint(owner, body)}`;
+      const otherUncertainCreate = [...uncertain].find((intent) => intent.startsWith(`${owner}:create:`) && intent !== `${owner}:${key}`);
+      if (otherUncertainCreate) throw new Error("Hay una creación anterior con resultado incierto. Consulta/reconcilia esa intención antes de iniciar otra; no se envió un nuevo POST.");
       try {
         const legacyKey = `g6:combos:uncertain:create:${key.slice("create:".length)}`;
         if (sessionStorage.getItem(legacyKey) !== null) throw new Error("Existe una intención histórica sin propietario verificable; no se reenvía.");

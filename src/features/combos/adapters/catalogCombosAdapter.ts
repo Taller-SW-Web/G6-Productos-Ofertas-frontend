@@ -127,7 +127,10 @@ export class CatalogCombosAdapter implements CombosCatalogPort {
     signal?: AbortSignal,
   ): Promise<ResolvedSku[]> {
     signal?.throwIfAborted();
-    const requested = [...new Set(skus)];
+    // The provider contract accepts an ordered list and does not declare
+    // uniqueItems. Keep duplicate opaque SKUs so response identity/order map
+    // one-to-one to the caller's input.
+    const requested = [...skus];
     if (!this.allowMockCatalogScan) {
       if (!this.catalog.resolveComboSkus)
         throw new Error(
