@@ -6,7 +6,7 @@ export function SeguimientoBaja({ seguimiento }: { seguimiento: ReturnType<typeo
   const { estado, mensaje, operacionId, reintentar } = seguimiento;
   if (estado === "idle" || estado === "recuperando") return null;
   return (
-    <div role="status" aria-live="polite">
+    <div aria-live="polite">
       <FeedbackAlert
         semantic={estado === "confirmada" ? "success" : estado === "rechazada" || estado === "error" ? "error" : "warning"}
         title={estado === "pendiente" ? "PENDING_DEACTIVATION — solicitud en verificación" : estado === "confirmada" ? "Baja confirmada" : estado === "rechazada" ? "Baja rechazada" : "No se pudo consultar la operación"}

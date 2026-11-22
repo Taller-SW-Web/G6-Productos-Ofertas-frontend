@@ -20,7 +20,7 @@ it("permite consultar nuevamente con teclado y anuncia el error", async () => {
   const reintentar = vi.fn();
   const user = userEvent.setup();
   render(<MantineProvider><SeguimientoBaja seguimiento={{ estado: "error", mensaje: "HTTP 503", operacionId: "op-1", registrar: vi.fn(), reintentar }} /></MantineProvider>);
-  expect(screen.getByRole("status").textContent).toContain("HTTP 503");
+  expect(screen.getByRole("alert").textContent).toContain("HTTP 503");
   await user.tab();
   expect(document.activeElement).toBe(screen.getByRole("button", { name: "Consultar nuevamente" }));
   await user.keyboard("{Enter}");

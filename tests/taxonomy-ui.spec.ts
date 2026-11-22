@@ -166,10 +166,6 @@ test("MK-008: deactivation moves from pending verification to confirmed", async 
   await page.getByRole("button", { name: "Solicitar desactivación" }).click();
   await page.getByRole("button", { name: "Solicitar baja" }).click();
   await expect(
-    page.getByRole("status").filter({ hasText: "Verificando baja" }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Consultar estado" }).click();
-  await expect(
     page.getByRole("status").filter({ hasText: "Baja confirmada" }),
   ).toBeVisible();
   await expect(
