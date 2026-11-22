@@ -47,7 +47,7 @@ test("creación de un combo directo y desactivación conservando el histórico",
   await page.getByRole("textbox", { name: "Precio del combo (PEN)" }).fill("279.90");
   await expect(page.getByText("El precio es menor que las sumas regular y pública vigente para los componentes seleccionados.")).toBeVisible();
 
-  await page.getByRole("button", { name: "Crear combo" }).click();
+  await page.getByRole("button", { name: "Crear combo" }).dblclick();
   await expect(page.getByRole("heading", { name: "Combo smoke de prueba" })).toBeVisible();
   await expect(page.getByText("4 combos estimados")).toBeVisible();
 
@@ -60,6 +60,8 @@ test("creación de un combo directo y desactivación conservando el histórico",
   await expect(page).toHaveURL(/\/combos\/combo-4\/no-disponible$/);
   await expect(page.getByRole("heading", { name: "Combo no disponible" })).toBeVisible();
   await expect(page.getByText("La definición administrativa se conserva y no se ofrece para nuevas ventas.")).toBeVisible();
+  await page.getByRole("link", { name: "Volver a combos" }).click();
+  await expect(page.getByRole("row").filter({ hasText: "Combo smoke de prueba" })).toHaveCount(1);
 });
 
 test("COM-B5: conserva el producto seleccionado al cambiar la búsqueda debounced", async ({ page }) => {
