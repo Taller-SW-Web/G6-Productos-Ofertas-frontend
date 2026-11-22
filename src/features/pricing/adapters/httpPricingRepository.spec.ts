@@ -227,7 +227,7 @@ describe("createHttpPricingRepository", () => {
     const saved = await repository.update(change(), new AbortController().signal);
     const patchCall = calls.at(-1);
     if (!patchCall) throw new Error("No se envió PATCH.");
-    const sent = JSON.parse(patchCall.request.body ?? "{}");
+    const sent = JSON.parse(String(patchCall.request.body ?? "{}"));
 
     expect(patchCall.request.method).toBe("PATCH");
     expect(patchCall.path).toBe("/api/v1/precios/skus/SKU%2FA");
@@ -293,7 +293,7 @@ describe("createHttpPricingRepository", () => {
     ).resolves.toMatchObject({ channel: "retail", version: 5 });
     expect(calls.map(({ request }) => request.method)).toEqual(["GET", "PATCH"]);
     expect(firstCall(calls).path).toBe("/api/v1/precios/administracion/skus/SKU%2FA?channelId=RETAIL");
-    expect(JSON.parse(firstCall(calls.slice(1)).request.body ?? "{}")).toMatchObject({
+    expect(JSON.parse(String(firstCall(calls.slice(1)).request.body ?? "{}"))).toMatchObject({
       channelId: "RETAIL",
       priceVersion: 4,
     });
@@ -316,7 +316,7 @@ describe("createHttpPricingRepository", () => {
       "/api/v1/precios/administracion/productos/product-a?channelId=RETAIL",
       "/api/v1/precios/productos/product-a",
     ]);
-    expect(JSON.parse(calls[2]!.request.body!)).toMatchObject({ channelId: "RETAIL", priceVersion: 7 });
+    expect(JSON.parse(String(calls[2]!.request.body))).toMatchObject({ channelId: "RETAIL", priceVersion: 7 });
   });
 
   it.each([null, "MARKETPLACE"])(
@@ -471,7 +471,7 @@ describe("createHttpPricingRepository", () => {
       new AbortController().signal,
     );
     expect(calls.map(({ request }) => request.method)).toEqual(["GET", "POST"]);
-    const body = JSON.parse(calls[1]?.request.body ?? "{}");
+    const body = JSON.parse(String(calls[1]?.request.body ?? "{}"));
     expect(body).toEqual({
       tipoPrecio: "OFERTA",
       importe: 10,
@@ -484,15 +484,58 @@ describe("createHttpPricingRepository", () => {
     expect(body).not.toHaveProperty("priceVersion");
   });
 
-  it("no envía archivos a la prevalidación bloqueada", async () => {
-    const { repository, request } = setup();
+  it("envía el archivo en multipart y devuelve los errores publicados por fila", async () => {
+    const { repository, calls } = setup(async () =>
+      jsonResponse({
+        valid: false,
+        total_rows: 2,
+        errors: [{ row_id: "3", sku: "SKU-A", status: "FAILED", code: "VERSION_CONFLICT" }],
+      }),
+    );
+    const file = new File(["sample"], "sample.csv", { type: "text/csv" });
+    const signal = new AbortController().signal;
+    await expect(repository.prevalidate({ file, allowPartial: true }, signal)).resolves.toEqual({
+      valid: false,
+      total: 2,
+      errors: [{ id: "3", sku: "SKU-A", status: "FAILED", code: "VERSION_CONFLICT", detail: null }],
+    });
+    const call = firstCall(calls);
+    expect(call.path).toBe("/api/v1/precios/importaciones/prevalidar");
+    expect(call.request).toMatchObject({ method: "POST", signal });
+    expect(call.request.headers).toBeUndefined();
+    expect(call.request.body).toBeInstanceOf(FormData);
+    if (!(call.request.body instanceof FormData)) throw new Error("Se esperaba multipart.");
+    expect([...call.request.body.entries()]).toEqual([["archivo", file]]);
+    expect(calls).toHaveLength(1);
+  });
+
+  it.each([
+    [401, "TOKEN_INVALIDO", "unauthorized"],
+    [403, "SCOPE_INSUFICIENTE", "forbidden"],
+    [413, "ARCHIVO_EXCEDE_LIMITE", "error"],
+    [422, "PLANTILLA_INCOMPATIBLE", "error"],
+    [503, "SERVICIO_NO_DISPONIBLE", "error"],
+  ])("propaga el rechazo de prevalidación HTTP %s sin sustituirlo por datos locales", async (status, code, kind) => {
+    const { repository, request } = setup(async () => jsonResponse({ code }, status));
     await expect(
       repository.prevalidate(
         { file: new File(["sample"], "sample.csv"), allowPartial: false },
         new AbortController().signal,
       ),
-    ).rejects.toMatchObject({ kind: "blocked_contract" });
-    expect(request).not.toHaveBeenCalled();
+    ).rejects.toMatchObject({ kind });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { valid: true, total_rows: "1", errors: [] },
+    { valid: false, total_rows: 1, errors: [] },
+    { valid: false, total_rows: 1, errors: [{ row_id: "2", status: "PENDING" }] },
+  ])("rechaza una prevalidación incompatible con el contrato", async (dto) => {
+    const { repository } = setup(async () => jsonResponse(dto));
+    await expect(repository.prevalidate(
+      { file: new File(["sample"], "sample.csv"), allowPartial: false },
+      new AbortController().signal,
+    )).rejects.toThrow("respuesta incompatible");
   });
 
   it("mapea lotes reales y obtiene el CSV desde el endpoint de reporte", async () => {

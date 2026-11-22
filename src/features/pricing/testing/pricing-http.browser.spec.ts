@@ -13,11 +13,12 @@ const price = {
   price_version: 4,
 };
 
+function harnessUrl(path: string) {
+  return "/src/features/pricing/testing/pricing-http.html?" + new URLSearchParams({ path });
+}
+
 async function mount(page: Page, path = "/precios?target=http-test") {
-  await page.goto(
-    "/src/features/pricing/testing/pricing-http.html?" +
-      new URLSearchParams({ path }),
-  );
+  await page.goto(harnessUrl(path));
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 }
 
@@ -230,4 +231,89 @@ test("API: la galería no muestra controles ni datos de demostración de Pricing
   await expect(
     page.getByRole("textbox", { name: "Nuevo precio regular", exact: true }),
   ).toHaveCount(0);
+});
+
+test("API: prevalidación CSV por teclado muestra errores por fila y mantiene bloqueada la admisión", async ({ page }) => {
+  let previews = 0;
+  let admissions = 0;
+  await page.route("**/api/v1/precios/importaciones**", async (route) => {
+    if (!route.request().url().endsWith("/prevalidar")) {
+      admissions++;
+      await route.abort();
+      return;
+    }
+    previews++;
+    expect(route.request().method()).toBe("POST");
+    expect(route.request().headers()["content-type"]).toContain("multipart/form-data; boundary=");
+    expect(route.request().postData()).toContain('name="archivo"; filename="precios.csv"');
+    expect(route.request().postData()).toContain("SKU-A");
+    await route.fulfill({
+      json: {
+        valid: false,
+        total_rows: 2,
+        errors: [{ row_id: "3", sku: "SKU-A", status: "FAILED", code: "VERSION_CONFLICT" }],
+      },
+    });
+  });
+  await mount(page, "/precios/importar");
+  const prevalidate = page.getByRole("button", { name: "Prevalidar archivo" });
+  await expect(prevalidate).toBeDisabled();
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "precios.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("sku\nSKU-A"),
+  });
+  await page.getByRole("radio", { name: "Permitir resultados parciales" }).check();
+  await prevalidate.focus();
+  await expect(prevalidate).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("row").filter({ hasText: "SKU-A" })).toContainText("VERSION_CONFLICT");
+  await expect(page.getByRole("button", { name: "Confirmar importación" })).toBeDisabled();
+  await page.screenshot({
+    path: test.info().outputPath("prevalidacion-http-1440.png"),
+    fullPage: true,
+  });
+  await page.getByRole("radio", { name: "Rechazar el lote si hay errores" }).check();
+  await expect(page.getByRole("region", { name: "Revisión de prevalidación" })).toHaveCount(0);
+  expect(previews).toBe(1);
+  expect(admissions).toBe(0);
+});
+
+test("API: un lote existente pasa de en cola a terminal, se recupera al recargar y descarga el CSV", async ({ page }) => {
+  const id = "12345678-1234-4234-8234-123456789abc";
+  const path = `/precios/importaciones/${id}`;
+  let reads = 0;
+  await page.route(`**/api/v1/precios/importaciones/${id}`, (route) => {
+    const terminal = ++reads > 1;
+    return route.fulfill({
+      json: {
+        batch_id: id,
+        status: terminal ? "PARTIAL" : "QUEUED",
+        allow_partial: true,
+        total_rows: 2,
+        completed_rows: terminal ? 1 : 0,
+        failed_rows: terminal ? 1 : 0,
+        rows: terminal
+          ? [{ row_id: "3", sku: "SKU-A", status: "FAILED", code: "VERSION_CONFLICT" }]
+          : [],
+      },
+    });
+  });
+  await page.route(`**/api/v1/precios/importaciones/${id}/reporte`, (route) =>
+    route.fulfill({ contentType: "text/csv", body: "row_id,sku,status,code\n3,SKU-A,FAILED,VERSION_CONFLICT\n" }),
+  );
+  await mount(page, path);
+  const download = page.getByRole("button", { name: "Descargar reporte" });
+  await expect(download).toBeDisabled();
+  await expect(page.getByText("Completado parcialmente", { exact: true })).toBeVisible();
+  expect(reads).toBe(2);
+  await page.route((url) => url.pathname === path, (route) =>
+    route.fulfill({ status: 302, headers: { location: harnessUrl(path) } }),
+  );
+  await page.reload();
+  await expect(download).toBeEnabled();
+  const downloaded = page.waitForEvent("download");
+  await download.click();
+  expect((await downloaded).suggestedFilename()).toBe("reporte-precios.csv");
+  await expect(page.getByText("Reporte descargado: reporte-precios.csv.")).toBeVisible();
 });

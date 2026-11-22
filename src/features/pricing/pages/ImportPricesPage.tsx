@@ -49,6 +49,7 @@ export function ImportPricesPage() {
       >
         <FileSelection
           label="Seleccionar archivo de precios"
+          accept=".csv,text/csv"
           value={form.file}
           onChange={form.changeFile}
           disabled={form.preview.busy}
@@ -73,8 +74,7 @@ export function ImportPricesPage() {
           </Stack>
         </Radio.Group>
         <Text size="sm">
-          Cambiar de política exige una nueva revisión. Su elección no habilita
-          admisión con errores.
+          Cambiar de política exige revisar el archivo de nuevo.
         </Text>
         <Button
           style={{ alignSelf: "flex-start" }}
@@ -127,11 +127,16 @@ export function ImportPricesPage() {
             caption="Errores de prevalidación"
             rows={form.preview.result.errors}
           />
+          <Text size="sm" id="price-import-confirmation-status">
+            La admisión de lotes está pendiente de habilitación en Gateway.
+          </Text>
           <Group justify="space-between">
             <Button variant="outline" onClick={form.back}>
               Volver al archivo
             </Button>
-            <Button disabled>Confirmar importación</Button>
+            <Button disabled aria-describedby="price-import-confirmation-status">
+              Confirmar importación
+            </Button>
           </Group>
         </SectionCard>
       )}
