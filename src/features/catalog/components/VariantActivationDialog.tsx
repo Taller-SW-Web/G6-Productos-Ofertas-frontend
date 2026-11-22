@@ -33,8 +33,8 @@ export function VariantActivationDialog({
       return;
     }
     try {
-      await activate(product.id, variant.variantId, scenario);
-      onSuccess();
+      const result = await activate(product.id, variant.variantId, scenario);
+      if (result) onSuccess();
     } catch {
       // Error handled in hook state
     }

@@ -38,8 +38,8 @@ export function VariantDeactivationDialog({
       return;
     }
     try {
-      await deactivate(product.id, variant.variantId, scenario);
-      onSuccess();
+      const result = await deactivate(product.id, variant.variantId, scenario);
+      if (result) onSuccess();
     } catch {
       // Error is stored in mutation state
     }

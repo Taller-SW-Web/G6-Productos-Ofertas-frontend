@@ -1,4 +1,5 @@
 import { createCatalogFetchTransport } from "./catalogHttp";
+import { catalogChannels, type CatalogChannel } from "../services/catalogRepository";
 
 export interface DemoCategory {
   id: string;
@@ -24,7 +25,7 @@ export interface DemoPage {
   pageSize: number;
   total: number;
 }
-export type DemoChannel = "MARKETPLACE" | "CHATBOT" | "RETAIL";
+export type DemoChannel = CatalogChannel;
 export class DemoApiError extends Error {
   constructor(
     readonly status: number,
@@ -162,7 +163,7 @@ export function createDemoCatalogApi(fetcher: typeof fetch = fetch, origin = "")
       },
       signal?: AbortSignal,
     ): Promise<DemoPage> {
-      if (!["MARKETPLACE", "CHATBOT", "RETAIL"].includes(input.channel))
+      if (!catalogChannels.includes(input.channel))
         throw new Error("Canal comercial inválido.");
       const query = new URLSearchParams({
         canal: input.channel,
@@ -187,7 +188,7 @@ export function createDemoCatalogApi(fetcher: typeof fetch = fetch, origin = "")
       channel: DemoChannel,
       signal?: AbortSignal,
     ): Promise<DemoProduct> {
-      if (!["MARKETPLACE", "CHATBOT", "RETAIL"].includes(channel))
+      if (!catalogChannels.includes(channel))
         throw new Error("Canal comercial inválido.");
       return product(
         await get(
