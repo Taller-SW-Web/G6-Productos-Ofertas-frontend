@@ -55,7 +55,7 @@ export const sampleCompletedRows: BulkImportRow[] = [
 // 6 failed rows for batch-partial (114 completed + 6 failed = 120 total)
 export const samplePartialFailedRows: BulkImportRow[] = [
   {
-    row_id: 4,
+    row_id: "00000000-0000-4000-8000-000000000004",
     sku: "PUM-FT-004-L",
     nombre: "Short Futbol Pro - Talla L",
     status: "FAILED",
@@ -413,6 +413,12 @@ export const mockBatches: Record<string, BulkImportBatch> = {
     file_name: "lote_parcial_120.csv",
     file_size: 46200,
     rows: samplePartialRows,
+    reanudacion: {
+      protocol: "BULK_RETRY_V1",
+      eligible: true,
+      steps: [{ row_id: "00000000-0000-4000-8000-000000000004", domain: "INVENTARIO" }],
+      blockedReason: null,
+    },
   },
   "batch-catalog-failed": {
     batch_id: "batch-catalog-failed",

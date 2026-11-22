@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button, Group, Stack } from "@mantine/core";
 import {
@@ -15,22 +15,28 @@ import { BulkFileReview } from "../components/BulkFileReview";
 import { useBulkUploadContext } from "../context/BulkUploadContext";
 import { BulkRepositoryError } from "../services/bulkService";
 import { useBulkRepository } from "../hooks/useBulkRepository";
+import { useBulkAdmissionRecovery } from "../hooks/useBulkAdmissionRecovery";
 import { runSingleFlight } from "../utils/asyncGuards";
 
 export function BulkReviewPage() {
   const navigate = useNavigate();
   const bulkRepository = useBulkRepository();
+  const { view: reconciliationView, reconcileAgain } = useBulkAdmissionRecovery();
   const isSubmittingRef = useRef(false);
   const pageIsActiveRef = useRef(true);
+  const [replaySubmitting, setReplaySubmitting] = useState(false);
+  const [replayError, setReplayError] = useState<string | null>(null);
   const {
     selectedFile,
     fileCheck,
     admissionStatus,
     pendingCorrelationId,
+    pendingAdmission,
     expectedBatchId,
     recoveryOwnerIsCurrent,
     beginAdmission,
     finishAdmission,
+    confirmReconciliation,
     submissionError,
   } = useBulkUploadContext();
 
@@ -55,6 +61,15 @@ export function BulkReviewPage() {
           ]}
         />
         <Stack gap="lg">
+          {pendingAdmission && (
+            <FeedbackAlert semantic="warning" title="Admisión incierta recuperada">
+              <p>{reconciliationView.message}</p>
+              <p>Correlación conservada: {pendingAdmission.correlationId}</p>
+              {(reconciliationView.status === "timed_out" || reconciliationView.status === "authentication_required" || reconciliationView.status === "blocked") && (
+                <Button variant="outline" onClick={reconcileAgain}>Volver a conciliar</Button>
+              )}
+            </FeedbackAlert>
+          )}
           <EmptyState
             title="Ningún archivo seleccionado"
             description="Para revisar la estructura debe seleccionar primero un archivo CSV o XLSX en la pantalla de carga masiva."
@@ -104,6 +119,30 @@ export function BulkReviewPage() {
         finishAdmission(task, status, { category, message });
       }
     });
+  };
+
+  const handleReplaySameIntent = async () => {
+    if (!selectedFile || !pendingAdmission || !bulkRepository.replaySupported || !recoveryOwnerIsCurrent() || replaySubmitting) return;
+    if (!window.confirm("¿Reintentar exactamente la misma intención? Se conservarán el archivo, SHA-256, usuario y X-Correlation-Id originales.")) return;
+    setReplaySubmitting(true);
+    setReplayError(null);
+    try {
+      const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", await selectedFile.arrayBuffer()));
+      const contentHash = [...digest].map((value) => value.toString(16).padStart(2, "0")).join("");
+      if (contentHash !== pendingAdmission.contentHash) throw new Error("Selecciona el archivo original; su SHA-256 no coincide con la intención incierta.");
+      const batch = await bulkRepository.replayImport?.(selectedFile, {
+        owner: pendingAdmission.owner,
+        contentHash,
+        correlationId: pendingAdmission.correlationId,
+      }, true);
+      if (!batch) throw new Error("El repositorio no habilitó el replay idempotente.");
+      if (confirmReconciliation(pendingAdmission, batch.batch_id)) navigate(`/carga-masiva/importaciones/${batch.batch_id}`);
+      else throw new Error("La sesión o el marcador cambiaron; se conserva la admisión incierta.");
+    } catch (error) {
+      setReplayError(error instanceof Error ? error.message : "No se pudo repetir la misma intención.");
+    } finally {
+      setReplaySubmitting(false);
+    }
   };
 
   const hasBlockingErrors = !fileCheck.valid;
@@ -162,8 +201,27 @@ export function BulkReviewPage() {
             {submissionError.message}
             {admissionUncertain && (
               <>
-                <div>El contrato no ofrece búsqueda por correlación. La operación queda bloqueada hasta conciliación del servicio; no se crea ni reenvía otra importación.</div>
+                <div>{reconciliationView.message}</div>
                 {pendingCorrelationId && <div>Correlación recuperada: {pendingCorrelationId}</div>}
+                {reconciliationView.status === "timed_out" && (
+                  <Group mt="sm" gap="sm">
+                    <Button variant="outline" onClick={reconcileAgain}>
+                      Volver a conciliar
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => void handleReplaySameIntent()}
+                      loading={replaySubmitting}
+                      disabled={!bulkRepository.replaySupported || !selectedFile || !pendingAdmission || !recoveryOwnerIsCurrent()}
+                    >
+                      Reintentar la misma intención
+                    </Button>
+                  </Group>
+                )}
+                {replayError && <div role="alert">{replayError}</div>}
+                {reconciliationView.status === "timed_out" && !bulkRepository.replaySupported && (
+                  <div>El replay permanece bloqueado hasta acreditar idempotencia concurrente del backend.</div>
+                )}
               </>
             )}
           </FeedbackAlert>

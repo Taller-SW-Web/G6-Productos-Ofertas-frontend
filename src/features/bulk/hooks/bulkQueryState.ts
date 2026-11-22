@@ -79,14 +79,14 @@ export function isExportSnapshotStale(input: {
   );
 }
 
-// A batch only has reconcilable work when it still holds failed rows flagged for
-// reconciliation. When the provider returned row detail we trust it; otherwise we
-// fall back to the aggregate counters, never inventing pending operations.
+// Retry eligibility is a server decision. Batch status and reconciliation flags
+// are not enough evidence to expose a retry action.
 export function hasReconcilableOperations(batch: BulkImportBatch): boolean {
-  if (batch.rows && batch.rows.length > 0) {
-    return batch.rows.some((row) => row.status === "FAILED" && row.needs_reconciliation);
-  }
-  return batch.needs_reconciliation && batch.failed_rows > 0;
+  const eligibility = batch.reanudacion;
+  if (eligibility?.protocol !== "BULK_RETRY_V1" || !eligibility.eligible || eligibility.steps.length === 0 || eligibility.blockedReason !== null) return false;
+  return !eligibility.steps.some((candidate) => batch.rows?.some((row) =>
+    String(row.row_id) === candidate.row_id && (row.applied_domains.includes(candidate.domain) || row.steps.some((step) => step.domain === candidate.domain && step.status === "COMPLETED")),
+  ));
 }
 
 // Single source of truth for "resume is allowed". It refuses to operate on a
@@ -105,8 +105,7 @@ export function canResumeBatch(input: {
   if (input.loading || input.error !== null || input.isStale || input.isNotFound || input.resuming) {
     return false;
   }
-  if (batch.status !== "COMPLETED" && batch.status !== "FAILED_GENERAL") return false;
-  if (!batch.needs_reconciliation) return false;
+  if (batch.status !== "COMPLETED") return false;
   return hasReconcilableOperations(batch);
 }
 

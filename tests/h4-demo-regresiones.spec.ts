@@ -229,14 +229,14 @@ test("E2E-07: Bulk incierto conserva la intención y bloquea conciliación no so
   const state = await attachBulkApi(page, "recover");
   await openBulkHarness(page); await selectCsv(page);
   await page.getByRole("button", { name: "Confirmar importación", exact: true }).first().click();
-  await expect(page.getByText(/El contrato no ofrece búsqueda por correlación/)).toBeVisible();
+  await expect(page.getByText(/conciliación permanece deshabilitada hasta acreditar el endpoint compatible/i)).toBeVisible();
   const beforeReload = await page.evaluate(() => Object.entries(sessionStorage).find(([key]) => key.startsWith("g6:bulk:admission:v1:"))?.[1] ?? null);
   expect(beforeReload).not.toBeNull();
   expect(JSON.parse(beforeReload!)).toMatchObject({ owner: "g7-h4-owner-a", state: "uncertain" });
   await page.reload();
-  await page.getByRole("link", { name: "Ir a selección de archivo" }).click();
+  await openBulkHarness(page);
   await selectCsv(page);
-  await expect(page.getByText(/El contrato no ofrece búsqueda por correlación/)).toBeVisible();
+  await expect(page.getByText(/conciliación permanece deshabilitada hasta acreditar el endpoint compatible/i)).toBeVisible();
   const after404 = await page.evaluate(() => Object.entries(sessionStorage).find(([key]) => key.startsWith("g6:bulk:admission:v1:"))?.[1] ?? null);
   expect(JSON.parse(after404!)).toMatchObject({ owner: "g7-h4-owner-a", state: "uncertain" });
   expect(state.reads()).toBe(0);
@@ -244,6 +244,11 @@ test("E2E-07: Bulk incierto conserva la intención y bloquea conciliación no so
   const afterRecovery = await page.evaluate(() => Object.entries(sessionStorage).find(([key]) => key.startsWith("g6:bulk:admission:v1:"))?.[1] ?? null);
   expect(JSON.parse(afterRecovery!)).toMatchObject({ owner: "g7-h4-owner-a", state: "uncertain" });
   expect(await page.evaluate(() => Object.keys(sessionStorage).some(key => key.startsWith("g6:bulk:import-pending:")))).toBe(true);
+  await openBulkHarness(page);
+  await page.locator('input[type="file"]').setInputFiles({ name: "otro.csv", mimeType: "text/csv", buffer: Buffer.from("sku,nombre\nSKU-OTHER,Otro producto\n") });
+  await page.getByRole("button", { name: "Continuar a revisión", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Confirmar importación", exact: true }).first()).toBeDisabled();
+  expect(state.posts()).toBe(1);
 });
 
 test("E2E-08: cambio A→B mientras el POST Bulk está pendiente conserva aislada la intención de A", async ({ page }) => {

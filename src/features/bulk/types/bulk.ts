@@ -1,5 +1,5 @@
 // Domain & UI models for MK-001 (Bulk Upload and Export)
-// Aligned with OpenAPI 0.5.0 schemas (ImportacionGeneralAceptada, EstadoImportacionGeneral, FilaBulk, PasoDominioBulk)
+// Base HTTP models aligned with the frontend's verified OpenAPI 0.7.0-rc.2 reference.
 
 export type BulkImportStatus =
   | "QUEUED"
@@ -40,7 +40,10 @@ export type BulkErrorCode =
   | "PRECIO_INVALIDO"
   | "CATEGORIA_NO_ENCONTRADA"
   | "CATEGORIA_DUPLICADA"
-  | "PROFUNDIDAD_CATEGORIA_EXCEDIDA";
+  | "PROFUNDIDAD_CATEGORIA_EXCEDIDA"
+  | "RETRY_PROTOCOL_NOT_APPROVED"
+  | "RETRY_NOT_ELIGIBLE"
+  | "IDEMPOTENCY_CONFLICT";
 
 export interface BulkDomainStep {
   domain: BulkDomain;
@@ -69,6 +72,42 @@ export interface BulkImportRow {
   moneda?: string;
 }
 
+export type BulkResumeBlockReason =
+  | "LOTE_NO_TERMINAL"
+  | "SIN_PASOS_REINTENTABLES"
+  | "RESULTADO_INCIERTO"
+  | "PROTOCOLO_DOMINIO_NO_HABILITADO";
+
+export interface BulkResumeStep {
+  row_id: string;
+  domain: "CATALOGO" | "INVENTARIO";
+}
+
+export interface BulkResumeEligibility {
+  protocol: "BULK_RETRY_V1";
+  eligible: boolean;
+  steps: BulkResumeStep[];
+  blockedReason: BulkResumeBlockReason | null;
+}
+
+export interface BulkAdmissionReconciliation {
+  batch_id: string;
+  correlation_id: string;
+  status: BulkImportStatus;
+  template_version: 2;
+}
+
+export interface BulkImportIntent {
+  owner: string;
+  contentHash: string;
+  correlationId: string;
+}
+
+export interface BulkResumeRequest {
+  correlationId: string;
+  motivo: null;
+}
+
 export interface BulkImportBatch {
   batch_id: string;
   status: BulkImportStatus;
@@ -81,6 +120,7 @@ export interface BulkImportBatch {
   file_name?: string;
   file_size?: number;
   rows?: BulkImportRow[];
+  reanudacion?: BulkResumeEligibility;
 }
 
 export type BulkExportFormat = "CSV" | "XLSX";

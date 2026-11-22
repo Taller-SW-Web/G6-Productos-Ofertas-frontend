@@ -204,7 +204,12 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
     scopeId,
   });
   const bulkRepository = mode === "api" && gateway && session
-    ? createHttpBulkRepository(createBulkFetchTransport(gateway), session)
+    ? createHttpBulkRepository(createBulkFetchTransport(gateway), session, {
+      reconciliationEnabled: import.meta.env.VITE_BULK_RECONCILIATION_ENABLED === "true",
+      replayEnabled: import.meta.env.VITE_BULK_REPLAY_ENABLED === "true",
+      resumeEnabled: import.meta.env.VITE_BULK_RESUME_ENABLED === "true",
+      // Compatibility evidence is deliberately absent until an authenticated provider E2E is approved.
+    })
     : null;
   root.render(
     <StrictMode>

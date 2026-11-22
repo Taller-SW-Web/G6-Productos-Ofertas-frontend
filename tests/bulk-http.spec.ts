@@ -42,11 +42,12 @@ function uploadedFileBytes(multipart: Buffer, contentType: string): Buffer {
   if (end < 0) throw new Error("El multipart no cierra la parte del archivo.");
   return multipart.subarray(headerEnd + 4, end);
 }
-async function withServer(work: (origin: string, requests: Array<{ method?: string; url?: string; contentType?: string; auth?: string; correlation?: string }>) => Promise<void>, scenario: "actual-backend" | "future-contract" | "batch-mismatch" | "polling" = "actual-backend") {
+async function withServer(work: (origin: string, requests: Array<{ method?: string; url?: string; contentType?: string; auth?: string; correlation?: string }>) => Promise<void>, scenario: "actual-backend" | "future-contract" | "batch-mismatch" | "polling" | "uncertain-reconcile" | "uncertain-reconcile-reload" = "actual-backend") {
   const requests: Array<{ method?: string; url?: string; contentType?: string; auth?: string; correlation?: string }> = [];
   let admittedBatchId = batchId;
   let batchReads = 0;
   let exportReads = 0;
+  let reconciliationReads = 0;
   const server = createServer(async (request, response) => {
     if (request.method === "OPTIONS") {
       response.writeHead(204, { "access-control-allow-origin": `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? 5173}`, "access-control-allow-methods": "GET, POST", "access-control-allow-headers": "authorization, content-type, x-correlation-id" });
@@ -64,7 +65,14 @@ async function withServer(work: (origin: string, requests: Array<{ method?: stri
       const uploaded = uploadedFileBytes(multipart, contentType);
       if (!contentType.startsWith("multipart/form-data; boundary=") || !multipart.toString().includes('name="archivo"') || !uploaded.equals(Buffer.from(validBulkV2Csv)) || !multipart.toString().includes('name="template_version"')) return json(response, 400, { status: 400, code: "ARCHIVO_INVALIDO" });
       admittedBatchId = batchId;
-      return json(response, 202, { batch_id: admittedBatchId, status: "QUEUED", template_version: 2, correlation_id: request.headers["x-correlation-id"] });
+      const responseCorrelation = scenario === "uncertain-reconcile" || scenario === "uncertain-reconcile-reload" ? "99999999-9999-4999-8999-999999999999" : request.headers["x-correlation-id"];
+      return json(response, 202, { batch_id: admittedBatchId, status: "QUEUED", template_version: 2, correlation_id: responseCorrelation });
+    }
+    const reconciliationMatch = new RegExp(`^${root}/importaciones/por-correlacion/([0-9a-f-]+)$`, "i").exec(path);
+    if (request.method === "GET" && reconciliationMatch && (scenario === "uncertain-reconcile" || scenario === "uncertain-reconcile-reload")) {
+      reconciliationReads += 1;
+      if (reconciliationReads === 1 || (scenario === "uncertain-reconcile-reload" && reconciliationReads <= 3)) return json(response, 404, { status: 404, code: "LOTE_NO_ENCONTRADO" });
+      return json(response, 200, { batch_id: admittedBatchId, correlation_id: reconciliationMatch[1], status: "QUEUED", template_version: 2 });
     }
     if (request.method === "GET" && path === `${root}/importaciones/${admittedBatchId}`) {
       batchReads += 1;
@@ -156,6 +164,26 @@ test("Bulk API contra servidor HTTP aislado simula rutas, upload válido, errore
   }, "actual-backend");
 });
 
+test("Bulk permite una nueva intención explícita con los mismos bytes tras confirmar el lote previo", async ({ page }) => {
+  await withServer(async (gateway, requests) => {
+    await page.goto(`/tests/harness/bulk-http.html?gateway=${encodeURIComponent(gateway)}#/carga-masiva`);
+    const file = { name: "upload.csv", mimeType: "text/csv", buffer: Buffer.from(validBulkV2Csv) };
+    await page.locator('input[type="file"]').setInputFiles(file);
+    await page.getByRole("button", { name: "Continuar a revisión" }).click();
+    await page.getByRole("button", { name: "Confirmar importación" }).first().click();
+    await expect(page).toHaveURL(new RegExp(`${batchId}$`));
+    await page.goto(`/tests/harness/bulk-http.html?gateway=${encodeURIComponent(gateway)}#/carga-masiva`);
+    await page.locator('input[type="file"]').setInputFiles(file);
+    await page.getByRole("button", { name: "Continuar a revisión" }).click();
+    await page.getByRole("button", { name: "Confirmar importación" }).first().click();
+    await expect.poll(() => requests.filter((request) => request.method === "POST" && request.url === `${root}/importaciones`).length).toBe(2);
+    const correlations = requests.filter((request) => request.method === "POST" && request.url === `${root}/importaciones`).map((request) => request.correlation);
+    expect(correlations[0]).toBeTruthy();
+    expect(correlations[1]).toBeTruthy();
+    expect(correlations[1]).not.toBe(correlations[0]);
+  });
+});
+
 test("Bulk HTTP aislado conserva descarga COMPLETED como escenario de contrato futuro simulado", async ({ page }) => {
   await withServer(async (gateway, requests) => {
     await page.goto(`/tests/harness/bulk-http.html?gateway=${encodeURIComponent(gateway)}#/carga-masiva/descargas`);
@@ -179,6 +207,37 @@ test("Bulk sigue el batchId real automáticamente hasta un estado terminal", asy
     await expect(page.getByRole("link", { name: "Ver resultado final" }).first()).toBeVisible({ timeout: 10_000 });
     expect(requests.filter((request) => request.url === `${root}/importaciones/${batchId}`)).toHaveLength(2);
   }, "polling");
+});
+
+test("Bulk concilia una admisión incierta mediante GET y navega con el batchId real", async ({ page }) => {
+  await withServer(async (gateway, requests) => {
+    await page.goto(`/tests/harness/bulk-http.html?gateway=${encodeURIComponent(gateway)}&reconciliation=fixture#/carga-masiva`);
+    await page.locator('input[type="file"]').setInputFiles({ name: "upload.csv", mimeType: "text/csv", buffer: Buffer.from(validBulkV2Csv) });
+    await page.getByRole("button", { name: "Continuar a revisión" }).click();
+    await page.getByRole("button", { name: "Confirmar importación" }).first().click();
+    await expect(page).toHaveURL(new RegExp(`${batchId}$`), { timeout: 12_000 });
+    const posts = requests.filter((request) => request.method === "POST" && request.url === `${root}/importaciones`);
+    const lookups = requests.filter((request) => request.method === "GET" && request.url?.includes("/importaciones/por-correlacion/"));
+    expect(posts).toHaveLength(1);
+    expect(lookups.length).toBeGreaterThanOrEqual(2);
+    expect(lookups.every((request) => request.correlation === posts[0]?.correlation)).toBe(true);
+    expect(requests.some((request) => request.method === "POST" && request.url?.includes("por-correlacion"))).toBe(false);
+  }, "uncertain-reconcile");
+});
+
+test("Bulk recupera la intención incierta después de recargar y solo repite el GET", async ({ page }) => {
+  await withServer(async (gateway, requests) => {
+    const url = `/tests/harness/bulk-http.html?gateway=${encodeURIComponent(gateway)}&reconciliation=fixture#/carga-masiva`;
+    await page.goto(url);
+    await page.locator('input[type="file"]').setInputFiles({ name: "upload.csv", mimeType: "text/csv", buffer: Buffer.from(validBulkV2Csv) });
+    await page.getByRole("button", { name: "Continuar a revisión" }).click();
+    await page.getByRole("button", { name: "Confirmar importación" }).first().click();
+    await expect.poll(() => requests.filter((request) => request.method === "GET" && request.url?.includes("/importaciones/por-correlacion/")).length).toBeGreaterThan(0);
+    await page.reload();
+    await expect(page).toHaveURL(new RegExp(`${batchId}$`), { timeout: 12_000 });
+    expect(requests.filter((request) => request.method === "POST" && request.url === `${root}/importaciones`)).toHaveLength(1);
+    expect(requests.some((request) => request.method === "POST" && request.url?.includes("por-correlacion"))).toBe(false);
+  }, "uncertain-reconcile-reload");
 });
 
 test("Bulk sigue la exportación y solo habilita la descarga al completarse", async ({ page }) => {

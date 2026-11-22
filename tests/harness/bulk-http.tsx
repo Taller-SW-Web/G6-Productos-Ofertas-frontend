@@ -19,6 +19,7 @@ import type { G7Session, SessionUser, SessionView } from "../../src/features/pro
 
 const gateway = new URLSearchParams(location.search).get("gateway");
 if (!gateway) throw new Error("Falta servidor HTTP de prueba.");
+const reconciliationFixture = new URLSearchParams(location.search).get("reconciliation") === "fixture";
 let currentUser: SessionUser = {
   id: "g7-h4-owner-a",
   nombreCompleto: "Usuario H4 A",
@@ -41,7 +42,15 @@ const session = {
   snapshot: () => sessionView,
   subscribe: (notify: () => void) => { listeners.add(notify); return () => listeners.delete(notify); },
 } as unknown as G7Session;
-const repository = createHttpBulkRepository(createBulkFetchTransport(gateway), session);
+const repository = createHttpBulkRepository(createBulkFetchTransport(gateway), session, reconciliationFixture ? {
+  reconciliationEnabled: true,
+  reconciliationEvidence: {
+    contractVersion: "0.7.0-rc.2",
+    docsSha: "a".repeat(40),
+    backendSha: "b".repeat(40),
+    authenticatedE2eReference: "https://example.invalid/isolated-test-only",
+  },
+} : {});
 createRoot(document.getElementById("root")!).render(
   <StrictMode><MantineProvider theme={theme} cssVariablesResolver={cssVariablesResolver} forceColorScheme="light">
     <DataModeContext.Provider value="api"><PromotionSessionContext.Provider value={session}><BulkRepositoryContext.Provider value={repository}><HashRouter>

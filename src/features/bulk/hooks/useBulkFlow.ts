@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import type {
   BulkExportFormat,
   BulkExportJob,
@@ -23,9 +23,12 @@ import {
   type BatchQueryState,
 } from "./bulkQueryState";
 import { useMockStateRevision } from "../../shared/useMockStateRevision";
+import { PromotionSessionContext } from "../../../app/config/PromotionSessionContext";
+import { clearBulkResumeRequest, getOrCreateBulkResumeRequest } from "../utils/bulkResumeIntent";
 
 export function useBulkBatch(batchId: string | undefined) {
   const repository = useBulkRepository();
+  const session = useContext(PromotionSessionContext);
   const [revision, setRevision] = useState(0);
   const mockRevision = useMockStateRevision(["bulk"]);
   const [response, setResponse] = useState<{
@@ -116,7 +119,10 @@ export function useBulkBatch(batchId: string | undefined) {
       setResuming(true);
       setResumeError(null);
       try {
-        const resumed = await repository.resumeImport(batchId);
+        const owner = session?.snapshot().user?.id ?? "mock";
+        const request = getOrCreateBulkResumeRequest(owner, batchId);
+        const resumed = await repository.resumeImport(batchId, undefined, request);
+        clearBulkResumeRequest(owner, batchId);
         setLastSuccess({ batchId, batch: resumed });
         setResponse({ key: requestKey, state: { status: "success", batch: resumed } });
         return resumed;
@@ -132,7 +138,7 @@ export function useBulkBatch(batchId: string | undefined) {
         setResuming(false);
       }
     });
-  }, [batchId, canResume, repository, requestKey]);
+  }, [batchId, canResume, repository, requestKey, session]);
 
   const downloadReport = useCallback(async () => {
     if (!batchId || reportInFlight.current) return;
