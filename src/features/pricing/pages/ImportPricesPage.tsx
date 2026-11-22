@@ -10,6 +10,7 @@ import {
 } from "@mantine/core";
 import { Link, useNavigate } from "react-router-dom";
 import {
+  ConfirmDialog,
   FeedbackAlert,
   FileSelection,
   SectionCard,
@@ -26,6 +27,7 @@ export function ImportPricesPage() {
   const form = usePriceImport();
   const navigate = useNavigate();
   const [batchId, setBatchId] = useState("");
+  const [discardKey, setDiscardKey] = useState<string>();
   const confirmed = form.admission.result;
   const suffix = context.suffix;
   const blocker = useUnsavedPriceNavigation(!!form.file && !confirmed, form.busy);
@@ -40,6 +42,30 @@ export function ImportPricesPage() {
       requiresTarget={false}
     >
       <UnsavedPriceGuard blocker={blocker} busy={form.busy} />
+      <ConfirmDialog
+        opened={discardKey !== undefined}
+        title="Descartar intento pendiente"
+        confirmLabel="Descartar intento"
+        destructive
+        submitting={form.discardAction.busy}
+        onCancel={() => setDiscardKey(undefined)}
+        onConfirm={() => {
+          if (discardKey)
+            void form.discard(discardKey).then((discarded) => {
+              if (discarded) setDiscardKey(undefined);
+            });
+        }}
+        error={form.discardAction.error && (
+          <FeedbackAlert semantic="error" title="No se pudo descartar el intento">
+            {form.discardAction.error.message}
+          </FeedbackAlert>
+        )}
+      >
+        <Text>
+          Es posible que el servidor ya haya admitido este lote. Descartar el intento
+          elimina su recuperación en este navegador y el servidor puede seguir procesándolo.
+        </Text>
+      </ConfirmDialog>
       <Stepper active={form.step}>
         <Stepper.Step
           label="Archivo y validación"
@@ -71,12 +97,12 @@ export function ImportPricesPage() {
             <Radio
               value="all"
               label="Rechazar el lote si hay errores"
-              disabled={form.busy || form.pending}
+              disabled={form.busy || !!form.pending}
             />
             <Radio
               value="partial"
               label="Permitir resultados parciales"
-              disabled={form.busy || form.pending}
+              disabled={form.busy || !!form.pending}
             />
           </Stack>
         </Radio.Group>
@@ -85,9 +111,21 @@ export function ImportPricesPage() {
             <FeedbackAlert semantic="warning" title="Importación pendiente de confirmación">
               Selecciona el mismo CSV para recuperar el lote con la clave anterior.
             </FeedbackAlert>
-            <Button onClick={form.confirm} disabled={!form.canConfirm} loading={form.admission.busy}>
-              Recuperar importación
-            </Button>
+            <Group>
+              <Button onClick={form.confirm} disabled={!form.canConfirm} loading={form.admission.busy}>
+                Recuperar importación
+              </Button>
+              <Button
+                variant="outline"
+                disabled={form.busy}
+                onClick={() => {
+                  form.discardAction.clear();
+                  setDiscardKey(form.pending?.key);
+                }}
+              >
+                Descartar intento pendiente
+              </Button>
+            </Group>
           </>
         ) : (
           <>
@@ -165,14 +203,17 @@ export function ImportPricesPage() {
         description="Utiliza la referencia recibida de una importación previamente admitida."
       >
         {form.lastBatchId && (
-          <Button
-            component={Link}
-            to={`/precios/importaciones/${encodeURIComponent(form.lastBatchId)}${suffix}`}
-            variant="outline"
-            style={{ alignSelf: "flex-start" }}
-          >
-            Consultar último lote admitido
-          </Button>
+          <>
+            <Text size="sm">Último lote admitido: {form.lastBatchId}</Text>
+            <Button
+              component={Link}
+              to={`/precios/importaciones/${encodeURIComponent(form.lastBatchId)}${suffix}`}
+              variant="outline"
+              style={{ alignSelf: "flex-start" }}
+            >
+              Consultar último lote admitido
+            </Button>
+          </>
         )}
         <TextInput
           label="Referencia de lote"

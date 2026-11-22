@@ -46,8 +46,8 @@ export interface ImportInput {
   allowPartial: boolean;
 }
 export interface ImportRecovery {
-  allowPartial: boolean;
-  batchId?: string;
+  pending?: { key: string; allowPartial: boolean };
+  lastBatchId?: string;
 }
 export interface ReportFile {
   data: Blob;
@@ -83,7 +83,8 @@ export interface PricingRepository {
   importAdmission?: {
     canSubmit(): boolean;
     recovery(): ImportRecovery | null;
-    submit(input: ImportInput, signal: AbortSignal, recover: boolean): Promise<string>;
+    submit(input: ImportInput, signal: AbortSignal, recoveryKey?: string): Promise<string>;
+    discard(key: string, signal: AbortSignal): Promise<void>;
   };
   readBatch(id: string, signal: AbortSignal): Promise<BatchView | null>;
   report(id: string, signal: AbortSignal): Promise<ReportFile>;

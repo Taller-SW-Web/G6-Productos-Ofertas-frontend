@@ -10,14 +10,15 @@ export function usePriceImport() {
   const [step, setStep] = useState(0);
   const preview = usePricingAction<PrevalidationView>();
   const admission = usePricingAction<string>();
+  const discardAction = usePricingAction<boolean>();
   const imports = service.importAdmission;
   const recovery = imports?.recovery();
-  const pending = !!recovery && !recovery.batchId;
-  const policy = pending ? (recovery.allowPartial ? "partial" : "all") : selectedPolicy;
-  const busy = preview.busy || admission.busy;
+  const pending = recovery?.pending;
+  const policy = pending ? (pending.allowPartial ? "partial" : "all") : selectedPolicy;
+  const busy = preview.busy || admission.busy || discardAction.busy;
   const reviewed = step === 1 ? preview.result : undefined;
   const canConfirm =
-    !!imports?.canSubmit() && !!file && !!policy && !busy &&
+    !!imports?.canSubmit() && !!file && !!policy && !busy && !admission.result &&
     (pending || (!!reviewed && (reviewed.valid ||
       (policy === "partial" && reviewed.total > reviewed.errors.length))));
   function invalidate() {
@@ -34,7 +35,8 @@ export function usePriceImport() {
     busy,
     pending,
     canConfirm,
-    lastBatchId: recovery?.batchId,
+    discardAction,
+    lastBatchId: recovery?.lastBatchId,
     admissionAvailable: !!imports?.canSubmit(),
     changeFile: (value: File | null) => {
       if (!busy) {
@@ -62,8 +64,20 @@ export function usePriceImport() {
     confirm: () => {
       if (!canConfirm || !imports || !file) return;
       void admission.run((signal) =>
-        imports.submit({ file, allowPartial: policy === "partial" }, signal, pending),
+        imports.submit({ file, allowPartial: policy === "partial" }, signal, pending?.key),
       );
+    },
+    discard: async (key: string) => {
+      if (!imports || busy) return false;
+      const discarded = await discardAction.run(async (signal) => {
+        await imports.discard(key, signal);
+        return true;
+      });
+      if (!discarded) return false;
+      setFile(null);
+      setPolicy("");
+      invalidate();
+      return true;
     },
   };
 }

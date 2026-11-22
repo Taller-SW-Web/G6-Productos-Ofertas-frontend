@@ -23,7 +23,7 @@ const params = new URLSearchParams(location.search);
 const runtime = await createPricingRuntime("api", {
   api: async () =>
     createHttpPricingRepository({
-      scopeId: () => "pricing-http-fixture",
+      scopeId: () => params.get("actor") ?? "pricing-http-fixture",
       canManagePricing: () => true,
       // Fixture explícita de la frontera de Catálogo; no es un proveedor real.
       listCatalogTargets: async () => [
