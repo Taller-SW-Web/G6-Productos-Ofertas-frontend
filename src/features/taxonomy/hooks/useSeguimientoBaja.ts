@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useAuthSession } from "../../../app/config/useAuthSession";
 import { brandService } from "../services/brandService";
 import { categoryService } from "../services/categoryService";
 import { getTaxonomyGateway } from "../services/taxonomyGatewayRuntime";
 
 type Tipo = "categoria" | "marca";
 type Estado = "recuperando" | "idle" | "pendiente" | "confirmada" | "rechazada" | "error";
+type Snapshot = { scope: string; estado: Estado; operacionId: string | null; mensaje: string };
 
 async function clave(tipo: Tipo, id: string, owner: string): Promise<string> {
   const bytes = new TextEncoder().encode(`${owner}\0${tipo}\0${id}`);
@@ -12,76 +14,98 @@ async function clave(tipo: Tipo, id: string, owner: string): Promise<string> {
   return `g6:taxonomy:operation:${Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
-/** Solo guarda la referencia confirmada por el 202 y la aísla por usuario y entidad. */
 export function useSeguimientoBaja(tipo: Tipo, id: string) {
-  const [estado, setEstado] = useState<Estado>("recuperando");
-  const [operacionId, setOperacionId] = useState<string | null>(null);
-  const [mensaje, setMensaje] = useState("");
+  const { session, view } = useAuthSession();
+  const owner = session ? view.user?.id ?? null : getTaxonomyGateway()?.scopeId?.() ?? null;
+  const version = session?.getSessionVersion() ?? 0;
+  const scope = JSON.stringify([owner, version, tipo, id]);
+  const [snapshot, setSnapshot] = useState<Snapshot>({ scope, estado: "recuperando", operacionId: null, mensaje: "" });
   const [intento, setIntento] = useState(0);
-  const keyRef = useRef<string | null>(null);
-  const ownerRef = useRef<string | null>(null);
+  const keyRef = useRef<{ scope: string; key: string } | null>(null);
+  const pollRef = useRef<AbortController | null>(null);
+  const scopeRef = useRef(scope);
+  const actual = snapshot.scope === scope ? snapshot : { scope, estado: "recuperando" as const, operacionId: null, mensaje: "" };
+
+  useEffect(() => {
+    if (!session) return;
+    return session.subscribe(() => {
+      if ((session.snapshot().user?.id ?? null) !== owner || session.getSessionVersion() !== version) pollRef.current?.abort();
+    });
+  }, [session, owner, version]);
 
   useEffect(() => {
     let vigente = true;
-    const owner = getTaxonomyGateway()?.scopeId?.() ?? null;
-    ownerRef.current = owner;
+    scopeRef.current = scope;
     keyRef.current = null;
-    if (!owner) {
-      void Promise.resolve().then(() => { if (vigente) setEstado("idle"); });
-      return () => { vigente = false; };
-    }
-    void clave(tipo, id, owner).then((key) => {
-      if (!vigente || getTaxonomyGateway()?.scopeId?.() !== owner) return;
-      keyRef.current = key;
-      const guardada = sessionStorage.getItem(key);
-      if (guardada) { setOperacionId(guardada); setEstado("pendiente"); }
-      else setEstado("idle");
-    }).catch(() => { if (vigente) { setMensaje("No se pudo recuperar el seguimiento guardado."); setEstado("error"); } });
-    return () => { vigente = false; };
-  }, [tipo, id]);
+    const esActual = () => vigente && scopeRef.current === scope && (!session || ((session.snapshot().user?.id ?? null) === owner && session.getSessionVersion() === version));
+    const recuperar = async () => {
+      await Promise.resolve();
+      let guardada: string | null = null;
+      if (owner) {
+        try {
+          const key = await clave(tipo, id, owner);
+          if (!esActual()) return;
+          keyRef.current = { scope, key };
+          try { guardada = sessionStorage.getItem(key); } catch { /* continuar en memoria */ }
+        } catch { /* permitir operar sin persistencia */ }
+      }
+      if (esActual()) setSnapshot({ scope, estado: guardada ? "pendiente" : "idle", operacionId: guardada, mensaje: "" });
+    };
+    void recuperar();
+    return () => { vigente = false; pollRef.current?.abort(); };
+  }, [scope, owner, tipo, id, session, version]);
 
   const registrar = useCallback((operationId: string) => {
-    setOperacionId(operationId);
-    setEstado("pendiente");
-    if (keyRef.current && ownerRef.current === (getTaxonomyGateway()?.scopeId?.() ?? null)) {
-      try { sessionStorage.setItem(keyRef.current, operationId); }
-      catch { setMensaje("No se pudo guardar la referencia para recuperarla al recargar."); }
+    if (scopeRef.current !== scope) return;
+    if (session && ((session.snapshot().user?.id ?? null) !== owner || session.getSessionVersion() !== version)) return;
+    const referencia = keyRef.current;
+    if (referencia?.scope === scope) {
+      try { sessionStorage.setItem(referencia.key, operationId); } catch { /* conservar la operación en memoria */ }
     }
-  }, []);
+    setSnapshot({ scope, estado: "pendiente", operacionId: operationId, mensaje: "" });
+  }, [session, owner, version, scope]);
 
   useEffect(() => {
-    if (!operacionId || estado !== "pendiente") return;
+    if (!actual.operacionId || actual.estado !== "pendiente") return;
+    const operationId = actual.operacionId;
     const controller = new AbortController();
+    pollRef.current = controller;
+    let vigente = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let retraso = 2000;
+    const esVigente = () => vigente && !controller.signal.aborted && (!session || ((session.snapshot().user?.id ?? null) === owner && session.getSessionVersion() === version));
+    const actualizar = (cambio: Partial<Snapshot>) => {
+      if (esVigente()) setSnapshot((prev) => prev.scope === scope && prev.operacionId === operationId ? { ...prev, ...cambio } : prev);
+    };
     const consultar = async () => {
       try {
         const result = tipo === "categoria"
-          ? await categoryService.consultarEstadoOperacion(operacionId, controller.signal)
-          : await brandService.consultarResultadoBaja(operacionId, controller.signal);
-        if (controller.signal.aborted) return;
-        if (ownerRef.current !== (getTaxonomyGateway()?.scopeId?.() ?? null)) throw new Error("La sesión cambió durante la consulta.");
+          ? await categoryService.consultarEstadoOperacion(operationId, controller.signal)
+          : await brandService.consultarResultadoBaja(operationId, controller.signal);
+        if (!esVigente()) return;
         const valor = "estado" in result ? result.estado : result.resultado;
-        setMensaje(result.mensaje);
         if (valor === "confirmada" || valor === "exito" || valor === "rechazada") {
-          setEstado(valor === "rechazada" ? "rechazada" : "confirmada");
-          if (keyRef.current) sessionStorage.removeItem(keyRef.current);
+          actualizar({ estado: valor === "rechazada" ? "rechazada" : "confirmada", mensaje: result.mensaje });
+          const referencia = keyRef.current;
+          if (referencia?.scope === scope && esVigente()) {
+            try { sessionStorage.removeItem(referencia.key); } catch { /* no ocultar una decisión terminal */ }
+          }
           return;
         }
-        if (valor !== "pendiente") { setEstado("error"); return; }
+        if (valor !== "pendiente") { actualizar({ estado: "error", mensaje: result.mensaje }); return; }
+        actualizar({ mensaje: result.mensaje });
         timer = setTimeout(consultar, retraso);
         retraso = Math.min(retraso * 2, 30000);
       } catch (error) {
-        if (!controller.signal.aborted) {
-          setMensaje(error instanceof Error ? error.message : "No se pudo consultar la operación.");
-          setEstado("error");
-        }
+        actualizar({ estado: "error", mensaje: error instanceof Error ? error.message : "No se pudo consultar la operación." });
       }
     };
     void consultar();
-    return () => { controller.abort(); clearTimeout(timer); };
-  }, [operacionId, estado, tipo, intento]);
+    return () => { vigente = false; controller.abort(); clearTimeout(timer); if (pollRef.current === controller) pollRef.current = null; };
+  }, [actual.operacionId, actual.estado, scope, session, owner, version, tipo, intento]);
 
-  const reintentar = () => { if (operacionId) { setEstado("pendiente"); setIntento((value) => value + 1); } };
-  return { estado, operacionId, mensaje, registrar, reintentar };
+  const reintentar = () => {
+    if (actual.operacionId) { setSnapshot({ ...actual, estado: "pendiente" }); setIntento((value) => value + 1); }
+  };
+  return { estado: actual.estado, operacionId: actual.operacionId, mensaje: actual.mensaje, registrar, reintentar };
 }

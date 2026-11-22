@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Avatar, Button, Group, Loader, Stack, Text } from "@mantine/core";
 import { IconPencil } from "@tabler/icons-react";
@@ -38,6 +38,7 @@ function BrandDetailLoader({ id }: { id: string }) {
   const navigate = useNavigate();
   const { state, reload } = useBrandDetail(id);
   const tracking = useSeguimientoBaja("marca", id);
+  useEffect(() => { if (tracking.estado === "confirmada") reload(); }, [tracking.estado, reload]);
   const baja = useSolicitarBajaMarca(id, (result) => {
     if (result.resultado === "exito") reload();
   }, tracking.registrar);
@@ -82,7 +83,10 @@ function BrandDetailLoader({ id }: { id: string }) {
             La marca solicitada no existe o ya no está disponible.
           </FeedbackAlert>
         )}
-        {state.status === "success" && (
+        {state.status === "success" && tracking.estado === "confirmada" && state.detalle.estado === "Activo" && (
+          <FeedbackAlert semantic="warning" title="Detalle aún no actualizado">La baja está confirmada; consulta nuevamente el detalle antes de modificar la marca.</FeedbackAlert>
+        )}
+        {state.status === "success" && !(tracking.estado === "confirmada" && state.detalle.estado === "Activo") && (
           <BrandDetailContent detalle={state.detalle} baja={baja} onReload={reload} tracking={tracking} />
         )}
       </Stack>
@@ -126,7 +130,7 @@ function BrandDetailContent({
             </Button>
             {detalle.estado === "Inactivo" && <Button variant="outline" loading={reactivando} onClick={() => { setReactivando(true); setReactivacionError(null); void brandService.reactivar(detalle.marcaId).then(result => { if (!result) throw new Error("Marca no encontrada (404)."); onReload(); }).catch(error => setReactivacionError(error instanceof Error ? error.message : "No se pudo reactivar la marca.")).finally(() => setReactivando(false)); }}>Reactivar</Button>}
             {detalle.estado === "Activo" && baja.state.status === "idle" && (
-              <Button variant="outline" disabled={tracking.estado === "recuperando" || tracking.estado === "pendiente" || tracking.estado === "error"} onClick={() => setConfirmar(true)}>
+              <Button variant="outline" disabled={tracking.estado === "recuperando" || tracking.estado === "pendiente" || tracking.estado === "error" || tracking.estado === "confirmada"} onClick={() => setConfirmar(true)}>
                 Solicitar desactivación
               </Button>
             )}

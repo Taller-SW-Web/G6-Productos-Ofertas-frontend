@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Button, Group, Loader, Stack, Text } from "@mantine/core";
 import {
@@ -33,8 +33,9 @@ export function DeactivateCategoryPage() {
 
 function DeactivateCategoryLoader({ id }: { id: string }) {
   const navigate = useNavigate();
-  const { state } = useCategoryDetail(id);
+  const { state, reload } = useCategoryDetail(id);
   const tracking = useSeguimientoBaja("categoria", id);
+  useEffect(() => { if (tracking.estado === "confirmada") reload(); }, [tracking.estado, reload]);
 
   const contenido =
     state.status === "loading" ? (
@@ -58,6 +59,8 @@ function DeactivateCategoryLoader({ id }: { id: string }) {
       >
         La categoría solicitada no existe o ya no está disponible.
       </FeedbackAlert>
+    ) : tracking.estado === "confirmada" && state.detalle.estado === "Activo" ? (
+      <FeedbackAlert semantic="warning" title="Detalle aún no actualizado">La baja está confirmada; consulta nuevamente el detalle antes de modificar la categoría.</FeedbackAlert>
     ) : (
       <DeactivateCategoryContent detalle={state.detalle} tracking={tracking} />
     );
@@ -123,7 +126,7 @@ function DeactivateCategoryContent({ detalle, tracking }: { detalle: CategoryDet
             </Button>
             <Button
               variant="outline"
-              disabled={detalle.estado !== "Activo" || tracking.estado === "recuperando" || tracking.estado === "pendiente" || tracking.estado === "error"}
+              disabled={detalle.estado !== "Activo" || tracking.estado === "recuperando" || tracking.estado === "pendiente" || tracking.estado === "error" || tracking.estado === "confirmada"}
               onClick={() => setConfirmar(true)}
             >
               Solicitar desactivación
