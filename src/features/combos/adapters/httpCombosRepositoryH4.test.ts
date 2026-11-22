@@ -11,6 +11,14 @@ afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 const payload: ComboPayload = { name: "Combo H4", description: "Prueba", components: [{ sku: "SKU-H4-001", quantity: 1 }, { sku: "SKU-H4-002", quantity: 2 }], priceMinor: 4990 };
 const comboDto = (id: string, overrides: Record<string, unknown> = {}) => ({ combo_id: id, name: "Combo H4", description: "Prueba", status: "ACTIVO", price: 49.9, version: 1, components: [{ sku: "SKU-H4-001", quantity: 1 }, { sku: "SKU-H4-002", quantity: 2 }], ...overrides });
 const catalog: CombosCatalogPort = { listProducts: async (_query: string, page: number, pageSize: number) => ({ items: [], total: 0, page, pageSize }), getProduct: async () => null, resolveSkus: async () => [] };
+async function fingerprint(userId: string, body: string) {
+  const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${userId}\u0000${body}`)));
+  return [...bytes].map(value => value.toString(16).padStart(2, "0")).join("");
+}
+async function markerKey(userId: string, intent: string) {
+  const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${userId}\u0000${intent}`)));
+  return `g6:combos:uncertain:v2:${[...bytes].map(value => value.toString(16).padStart(2, "0")).join("")}`;
+}
 function setup(request: AuthenticatedGatewayClient["request"], catalogPort = catalog) {
   const client: AuthenticatedGatewayClient = { request: vi.fn(request) };
   return { repository: createHttpCombosRepository(client, catalogPort, () => owner), request: client.request as ReturnType<typeof vi.fn> };
@@ -194,6 +202,86 @@ describe("Combos HTTP reconciliation H4", () => {
     expect(sent[1]?.key).toMatch(/^[0-9a-f-]{36}$/);
   });
 
+  it("atribuye una confirmación antigua por ID simple al marcador incierto coincidente y solo hace GET", async () => {
+    const first = setup(async () => { throw new Error("timeout"); });
+    await expect(first.repository.create(payload)).rejects.toThrow(/No se confirmó/);
+    const uncertaintyKey = Object.keys(storage).find(key => key.startsWith("g6:combos:uncertain:v2:"))!;
+    const uncertainty = JSON.parse(storage.getItem(uncertaintyKey)!);
+    const fingerprintValue = uncertainty.intent.slice("create:".length);
+    storage.setItem(`g6:combos:confirmed:create:${fingerprintValue}`, "combo-legacy");
+    const requests: string[] = [];
+    const reloaded = setup(async (path, init) => { requests.push(`${init.method} ${path}`); return jsonResponse(200, comboDto("combo-legacy")); });
+    await expect(reloaded.repository.getPendingCreate()).resolves.toMatchObject({ owner: fakeOwnerA, comboId: "combo-legacy", idempotencyKey: uncertainty.idempotencyKey, body: uncertainty.body });
+    await expect(reloaded.repository.recoverPendingCreate()).resolves.toMatchObject({ id: "combo-legacy" });
+    expect(requests).toEqual(["GET /api/v1/combos/combo-legacy"]);
+  });
+
+  it("bloquea una confirmación antigua sin identidad atribuible y no emite POST", async () => {
+    storage.setItem(`g6:combos:confirmed:create:${"a".repeat(64)}`, "combo-historico");
+    const { repository, request } = setup(vi.fn(async () => jsonResponse(201, comboDto("no-post"))));
+    await expect(repository.getPendingCreate()).rejects.toThrow(/confirmación histórica no atribuible/);
+    await expect(repository.create(payload)).rejects.toThrow(/confirmación histórica no atribuible/);
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("consolida marcador incierto y confirmación estructurada coincidentes en una sola intención", async () => {
+    const first = setup(async () => { throw new Error("timeout"); });
+    await expect(first.repository.create(payload)).rejects.toThrow(/No se confirmó/);
+    const uncertaintyKey = Object.keys(storage).find(key => key.startsWith("g6:combos:uncertain:v2:"))!;
+    const uncertainty = JSON.parse(storage.getItem(uncertaintyKey)!);
+    const fingerprintValue = uncertainty.intent.slice("create:".length);
+    storage.setItem(`g6:combos:confirmed:create:${fingerprintValue}`, JSON.stringify({ ...uncertainty, comboId: "combo-consolidado" }));
+    const reloaded = setup(async (path, init) => {
+      expect(init.method).toBe("GET");
+      expect(path).toBe("/api/v1/combos/combo-consolidado");
+      return jsonResponse(200, comboDto("combo-consolidado"));
+    });
+    await expect(reloaded.repository.getPendingCreate()).resolves.toMatchObject({ comboId: "combo-consolidado", body: uncertainty.body, idempotencyKey: uncertainty.idempotencyKey });
+    await expect(reloaded.repository.recoverPendingCreate()).resolves.toMatchObject({ id: "combo-consolidado" });
+  });
+
+  it("rehidrata la confirmación estructurada tras recarga y recupera por GET sin POST", async () => {
+    const body = JSON.stringify({ nombre: payload.name, descripcion: payload.description, componentes: payload.components.map(({ sku, quantity }) => ({ sku, cantidad: quantity })), precioCombo: payload.priceMinor / 100 });
+    const fingerprintValue = await fingerprint(fakeOwnerA, body);
+    const intent = `create:${fingerprintValue}`;
+    storage.setItem(`g6:combos:confirmed:create:${fingerprintValue}`, JSON.stringify({ user: fakeOwnerA, intent, body, idempotencyKey: crypto.randomUUID(), comboId: "combo-confirmado" }));
+    const paths: string[] = [];
+    const reloaded = setup(async (path, init) => { paths.push(`${init.method} ${path}`); return jsonResponse(200, comboDto("combo-confirmado")); });
+    await expect(reloaded.repository.getPendingCreate()).resolves.toMatchObject({ comboId: "combo-confirmado", owner: fakeOwnerA });
+    await expect(reloaded.repository.recoverPendingCreate()).resolves.toMatchObject({ id: "combo-confirmado" });
+    expect(paths).toEqual(["GET /api/v1/combos/combo-confirmado"]);
+    expect(Object.keys(storage).filter(key => key.startsWith("g6:combos:confirmed:create:"))).toHaveLength(0);
+  });
+
+  it("bloquea dos intenciones distintas en vez de seleccionar una", async () => {
+    const first = setup(async () => { throw new Error("timeout"); });
+    await expect(first.repository.create(payload)).rejects.toThrow(/No se confirmó/);
+    const body = JSON.stringify({ nombre: "Otra intención", descripcion: null, componentes: [{ sku: "SKU-X", cantidad: 1 }, { sku: "SKU-Y", cantidad: 1 }], precioCombo: 10 });
+    const fingerprintValue = await fingerprint(fakeOwnerA, body);
+    const intent = `create:${fingerprintValue}`;
+    storage.setItem(await markerKey(fakeOwnerA, intent), JSON.stringify({ user: fakeOwnerA, intent, body, idempotencyKey: crypto.randomUUID() }));
+    const { repository, request } = setup(vi.fn(async () => jsonResponse(201, comboDto("must-not-post"))));
+    await expect(repository.getPendingCreate()).rejects.toThrow(/varias intenciones/);
+    await expect(repository.create(payload)).rejects.toThrow(/varias intenciones/);
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it.each(["key", "body"] as const)("bloquea confirmación cuyo %s contradice la intención incierta sin escribir", async mismatch => {
+    const first = setup(async () => { throw new Error("timeout"); });
+    await expect(first.repository.create(payload)).rejects.toThrow(/No se confirmó/);
+    const uncertaintyKey = Object.keys(storage).find(key => key.startsWith("g6:combos:uncertain:v2:"))!;
+    const uncertainty = JSON.parse(storage.getItem(uncertaintyKey)!);
+    const fingerprintValue = uncertainty.intent.slice("create:".length);
+    const confirmed = { ...uncertainty, comboId: "combo-conflict" };
+    if (mismatch === "key") confirmed.idempotencyKey = crypto.randomUUID();
+    else confirmed.body = JSON.stringify({ ...JSON.parse(confirmed.body), nombre: "otro cuerpo" });
+    storage.setItem(`g6:combos:confirmed:create:${fingerprintValue}`, JSON.stringify(confirmed));
+    const { repository, request } = setup(vi.fn(async () => jsonResponse(201, comboDto("must-not-post"))));
+    await expect(repository.getPendingCreate()).rejects.toThrow(/contradicen|no corresponde a su fingerprint/);
+    await expect(repository.create(payload)).rejects.toThrow(/contradicen|no corresponde a su fingerprint/);
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it.each([202, 503])("conserva y permite conciliar la intención tras HTTP %i", async status => {
     const initial = setup(async () => jsonResponse(status, { code: "PENDIENTE" }));
     await expect(initial.repository.create(payload)).rejects.toThrow();
@@ -247,7 +335,7 @@ describe("Combos HTTP reconciliation H4", () => {
     const key = Object.keys(storage).find(item => item.startsWith("g6:combos:uncertain:v2:"))!;
     const stored = JSON.parse(storage.getItem(key)!);
     storage.setItem(key, JSON.stringify({ ...stored, body: "{}" }));
-    await expect(conflict.repository.create(payload)).rejects.toThrow(/corrupto|No se envió/);
+    await expect(conflict.repository.create(payload)).rejects.toThrow(/corrupto|No se envió|no corresponde a su fingerprint/);
     expect(calls).toHaveLength(2);
   });
 

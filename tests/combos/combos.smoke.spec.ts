@@ -209,6 +209,7 @@ test("COM-F06: cancelar el diálogo de detalle devuelve foco y confirmar lo llev
   const edit = content.getByRole("link", { name: "Editar" });
   await deactivate.click();
   await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(deactivate).toBeFocused();
   await deactivate.click();
   await page.getByRole("dialog").getByRole("button", { name: "Desactivar combo" }).press("Enter");

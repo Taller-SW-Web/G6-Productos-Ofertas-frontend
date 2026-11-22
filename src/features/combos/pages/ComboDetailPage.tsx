@@ -82,10 +82,17 @@ function ComboDetailForId({ comboId, unavailable }: { comboId: string; unavailab
   const isLoading = state.key !== requestKey || state.status === "loading";
   useEffect(() => {
     if (confirm || !focusAfterClose.current) return;
-    const destination = focusAfterClose.current === "edit" ? editButton.current : deactivateButton.current;
-    if (!destination?.isConnected) return;
-    focusAfterClose.current = null;
-    const frame = requestAnimationFrame(() => destination.focus());
+    let frame = 0;
+    const restore = () => {
+      const destination = focusAfterClose.current === "edit" ? editButton.current : deactivateButton.current;
+      if (document.querySelector('[role="dialog"]') || !destination?.isConnected) {
+        frame = requestAnimationFrame(restore);
+        return;
+      }
+      focusAfterClose.current = null;
+      destination.focus();
+    };
+    frame = requestAnimationFrame(restore);
     return () => cancelAnimationFrame(frame);
   }, [combo?.status, confirm, isLoading]);
   const error = state.key === requestKey && state.status === "error" ? state.message : null;

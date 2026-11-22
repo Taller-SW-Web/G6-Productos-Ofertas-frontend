@@ -140,6 +140,7 @@ export interface ComboPayload {
 }
 
 export interface PendingComboCreate {
+  owner: string;
   name: string;
   componentSkus: string[];
   body: string;

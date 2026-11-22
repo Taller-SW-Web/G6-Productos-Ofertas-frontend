@@ -87,11 +87,27 @@ function mapContractAvailability(value: unknown, comboId: string, status: Combo[
 export function createHttpCombosRepository(client: AuthenticatedGatewayClient, catalog: CombosCatalogPort, scopeId: () => string | null): CombosRepository {
   const uncertaintyPrefix = "g6:combos:uncertain:v2:";
   const confirmedPrefix = "g6:combos:confirmed:create:";
+  const uncertaintyStorageKey = async (userId: string, intent: string) => {
+    const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${userId}\u0000${intent}`)))].map(value => value.toString(16).padStart(2, "0")).join("");
+    return `${uncertaintyPrefix}${digest}`;
+  };
   const storedUncertaintyKeys = () => { try { return typeof sessionStorage === "undefined" ? [] : Object.keys(sessionStorage).filter(key => key.startsWith(uncertaintyPrefix)).flatMap(key => { try { const value = JSON.parse(sessionStorage.getItem(key) ?? "null") as { user?: string; intent?: string } | null; return value?.user === scopeId() && value.intent ? [`${value.user}:${value.intent}`] : []; } catch { return [`corrupt:${key}`]; } }); } catch { return ["storage-inaccessible"]; } };
   const uncertain = new Set<string>(storedUncertaintyKeys());
   const activeWrites = new Set<string>();
   const confirmedCreates = new Map<string, string>();
-  try { if (typeof sessionStorage !== "undefined") for (const key of Object.keys(sessionStorage).filter(item => item.startsWith(confirmedPrefix))) { const id = sessionStorage.getItem(key); if (id) confirmedCreates.set(key.slice(confirmedPrefix.length), id); } } catch { /* storage is optional; runtime latches still apply */ }
+  try {
+    if (typeof sessionStorage !== "undefined") for (const storageKey of Object.keys(sessionStorage).filter(item => item.startsWith(confirmedPrefix))) {
+      const fingerprint = storageKey.slice(confirmedPrefix.length);
+      const raw = sessionStorage.getItem(storageKey);
+      if (!raw || !/^[a-f0-9]{64}$/.test(fingerprint)) continue;
+      try {
+        const record = object(JSON.parse(raw));
+        if (record.user === scopeId() && record.intent === `create:${fingerprint}` && typeof record.body === "string" &&
+          typeof record.idempotencyKey === "string" && /^[0-9a-f-]{36}$/.test(record.idempotencyKey) &&
+          typeof record.comboId === "string" && record.comboId.trim()) confirmedCreates.set(fingerprint, record.comboId);
+      } catch { /* legacy ID-only records are attributed only by readPendingCreate */ }
+    }
+  } catch { /* storage is optional; runtime latches still apply */ }
   class UnconfirmedComboWrite extends Error {
     constructor(message: string, options?: ErrorOptions) { super(message, options); }
   }
@@ -189,8 +205,10 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
     activeWrites.add(scopedIntent);
     try {
       const result = await work(attempt);
-      uncertain.delete(scopedIntent);
-      try { sessionStorage.removeItem(markerKey); } catch { /* in-memory latch remains authoritative */ }
+      if (!create) {
+        uncertain.delete(scopedIntent);
+        try { sessionStorage.removeItem(markerKey); } catch { /* in-memory latch remains authoritative */ }
+      }
       if (scopeId() !== userId) throw new Error("Combos confirmó la escritura bajo la identidad original; no se presenta el resultado en la sesión actual.");
       return result;
     }
@@ -223,60 +241,102 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
     }
     catch (error) { throw new Error(`La escritura de Combos quedó confirmada para ${comboId}, pero falló el enriquecimiento o la disponibilidad. Consulta ese combo antes de cualquier otra acción. ${error instanceof Error ? error.message : "Error de presentación."}`, { cause: error }); }
   }
-  async function presentConfirmedCreate(value: unknown, key: string): Promise<Combo> {
+  async function presentConfirmedCreate(value: unknown, key: string, owner: string): Promise<Combo> {
     const rawId = object(value).combo_id;
     if (typeof rawId !== "string" || !rawId.trim()) throw new ConfirmedComboWrite("Combos confirmó HTTP 201, pero el DTO no contiene un combo_id válido. La intención queda protegida para reconciliación; no la repitas.");
     const id = rawId; const fingerprint = key.slice("create:".length);
     confirmedCreates.set(fingerprint, id);
-    try { if (typeof sessionStorage !== "undefined" && sessionStorage.getItem(`${confirmedPrefix}${fingerprint}`) === null) sessionStorage.setItem(`${confirmedPrefix}${fingerprint}`, id); } catch { /* runtime latch retains the confirmed resource id */ }
     const result = await presentConfirmed(value);
-    confirmedCreates.delete(fingerprint);
-    try { if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(`${confirmedPrefix}${fingerprint}`); } catch { /* current runtime already reconciled */ }
+    await clearPendingIntent(owner, key);
     return result;
   }
-  function readPendingCreate(): PendingComboCreate | null {
+  async function readPendingCreate(): Promise<PendingComboCreate | null> {
     const userId = scopeId();
     if (!userId) throw new Error("Inicia sesión para consultar una creación pendiente.");
     let keys: string[];
     try { keys = typeof sessionStorage === "undefined" ? [] : Object.keys(sessionStorage).filter(key => key.startsWith(uncertaintyPrefix) || key.startsWith(confirmedPrefix)); }
     catch (error) { throw new Error("No se pudo verificar el almacenamiento de recuperación; creación bloqueada.", { cause: error }); }
-    const records: PendingComboCreate[] = [];
-    for (const storageKey of keys) {
-      let stored: Record<string, unknown>;
-      try { stored = object(JSON.parse(sessionStorage.getItem(storageKey) ?? "null")); }
-      catch (error) { throw new Error("Hay un registro de creación pendiente corrupto. La creación está bloqueada para evitar duplicados.", { cause: error }); }
-      if (storageKey.startsWith(confirmedPrefix)) {
-        if (typeof stored.intent !== "string" || !stored.intent.startsWith("create:")) throw new Error("El registro de confirmación de creación está corrupto. La operación queda bloqueada.");
-      } else if (typeof stored.intent !== "string" || !stored.intent.startsWith("create:")) continue;
-      if (stored.user !== userId) throw new Error("Hay una creación pendiente asociada a otra identidad. Inicia sesión con esa identidad para recuperarla.");
-      if (typeof stored.body !== "string" || typeof stored.idempotencyKey !== "string" || !/^[0-9a-f-]{36}$/.test(stored.idempotencyKey))
-        throw new Error("El registro de creación pendiente está incompleto o corrupto. La operación queda bloqueada.");
+    type StoredIntent = { user: string; intent: string; body: string; idempotencyKey: string; comboId: string | null; name: string; componentSkus: string[] };
+    const byIntent = new Map<string, StoredIntent>();
+    const parseIntent = async (value: Record<string, unknown>, fingerprint: string, source: string): Promise<StoredIntent> => {
+      const user = value.user;
+      const intent = value.intent;
+      const bodyString = value.body;
+      const key = value.idempotencyKey;
+      if (typeof user !== "string" || !user || typeof intent !== "string" || intent !== `create:${fingerprint}` ||
+        typeof bodyString !== "string" || typeof key !== "string" || !/^[0-9a-f-]{36}$/.test(key))
+        throw new Error(`El registro ${source} de creación está incompleto o corrupto. La operación queda bloqueada.`);
+      if (user !== userId) throw new Error("Hay una creación pendiente asociada a otra identidad. Inicia sesión con esa identidad para recuperarla.");
+      if (await createFingerprint(user, bodyString) !== fingerprint) throw new Error(`El cuerpo del registro ${source} no corresponde a su fingerprint. La operación queda bloqueada.`);
       let body: Record<string, unknown>;
-      try { body = object(JSON.parse(stored.body)); } catch (error) { throw new Error("El payload guardado de creación está corrupto. La operación queda bloqueada.", { cause: error }); }
+      try { body = object(JSON.parse(bodyString)); } catch (error) { throw new Error("El payload guardado de creación está corrupto. La operación queda bloqueada.", { cause: error }); }
       if (typeof body.nombre !== "string" || !Array.isArray(body.componentes)) throw new Error("El payload guardado de creación está incompleto o corrupto. La operación queda bloqueada.");
-      const components = Array.isArray(body.componentes) ? body.componentes : [];
-      const componentSkus = components.map(item => text(object(item).sku));
-      const confirmedRaw = storageKey.startsWith(confirmedPrefix) ? JSON.stringify(stored) : sessionStorage.getItem(`${confirmedPrefix}${stored.intent.slice("create:".length)}`);
-      let confirmedId: string | null = null;
-      if (confirmedRaw) { try { const confirmedValue = object(JSON.parse(confirmedRaw)); confirmedId = confirmedValue.user === userId && confirmedValue.intent === stored.intent ? text(confirmedValue.comboId) : null; } catch { confirmedId = confirmedRaw; } }
-      records.push({ name: body.nombre, componentSkus, body: stored.body, idempotencyKey: stored.idempotencyKey, comboId: typeof stored.comboId === "string" ? stored.comboId : confirmedId });
+      const componentSkus = body.componentes.map(item => text(object(item).sku));
+      if (value.comboId !== undefined && (typeof value.comboId !== "string" || !value.comboId.trim())) throw new Error(`El comboId del registro ${source} es inválido. La operación queda bloqueada.`);
+      return { user, intent, body: bodyString, idempotencyKey: key, comboId: typeof value.comboId === "string" ? value.comboId : null, name: body.nombre, componentSkus };
+    };
+    const mergeIntent = (incoming: StoredIntent, source: string) => {
+      const identity = `${incoming.user}\u0000${incoming.intent}`;
+      const existing = byIntent.get(identity);
+      if (!existing) { byIntent.set(identity, incoming); return; }
+      if (existing.body !== incoming.body || existing.idempotencyKey !== incoming.idempotencyKey)
+        throw new Error(`Los registros incierto y confirmado de ${incoming.intent} se contradicen (${source}). La operación queda bloqueada.`);
+      if (existing.comboId && incoming.comboId && existing.comboId !== incoming.comboId)
+        throw new Error(`Los registros de ${incoming.intent} confirman comboId distintos. La operación queda bloqueada.`);
+      existing.comboId ??= incoming.comboId;
+    };
+
+    for (const storageKey of keys.filter(key => key.startsWith(uncertaintyPrefix))) {
+      let value: Record<string, unknown>;
+      try { value = object(JSON.parse(sessionStorage.getItem(storageKey) ?? "null")); }
+      catch (error) { throw new Error("Hay un registro de creación pendiente corrupto. La operación queda bloqueada.", { cause: error }); }
+      if (typeof value.intent !== "string" || !value.intent.startsWith("create:")) continue;
+      const fingerprint = value.intent.slice("create:".length);
+      if (!/^[a-f0-9]{64}$/.test(fingerprint)) throw new Error("El fingerprint de la creación pendiente está corrupto. La operación queda bloqueada.");
+      mergeIntent(await parseIntent(value, fingerprint, "incierto"), "incierto");
     }
-    if (records.length > 1) throw new Error("Hay varias creaciones pendientes; la recuperación está bloqueada para evitar seleccionar una intención incorrecta.");
-    return records[0] ?? null;
+
+    for (const storageKey of keys.filter(key => key.startsWith(confirmedPrefix))) {
+      const fingerprint = storageKey.slice(confirmedPrefix.length);
+      if (!/^[a-f0-9]{64}$/.test(fingerprint)) throw new Error("El fingerprint de la confirmación histórica es inválido. La operación queda bloqueada.");
+      const raw = sessionStorage.getItem(storageKey);
+      if (raw === null) continue;
+      let parsed: unknown;
+      try { parsed = JSON.parse(raw); }
+      catch {
+        const legacyId = raw.trim();
+        const legacyIntent = `create:${fingerprint}`;
+        const matching = byIntent.get(`${userId}\u0000${legacyIntent}`);
+        if (!legacyId || !matching || await createFingerprint(userId, matching.body) !== fingerprint)
+          throw new Error("Existe una confirmación histórica no atribuible a esta identidad; la operación queda bloqueada y no se enviará un POST.");
+        if (matching.comboId && matching.comboId !== legacyId) throw new Error("La confirmación histórica contradice el comboId del marcador incierto. La operación queda bloqueada.");
+        matching.comboId = legacyId;
+        continue;
+      }
+      let record: Record<string, unknown>;
+      try { record = object(parsed); }
+      catch { throw new Error("La confirmación histórica no tiene un formato canónico atribuible; la operación queda bloqueada."); }
+      if (typeof record.comboId !== "string" || !record.comboId.trim()) throw new Error("El registro de confirmación canónico no contiene un comboId válido. La operación queda bloqueada.");
+      mergeIntent(await parseIntent(record, fingerprint, "confirmado"), "confirmado");
+    }
+    if (byIntent.size > 1) throw new Error("Hay varias intenciones de creación pendientes; la recuperación está bloqueada para evitar elegir una distinta.");
+    const pending = [...byIntent.values()][0];
+    return pending ? { owner: pending.user, name: pending.name, componentSkus: pending.componentSkus, body: pending.body, idempotencyKey: pending.idempotencyKey, comboId: pending.comboId } : null;
   }
   async function recoverPendingCreate(): Promise<Combo> {
-    const pending = readPendingCreate();
+    const pending = await readPendingCreate();
     if (!pending) throw new Error("No hay una creación pendiente para recuperar.");
     if (pending.comboId) {
       const combo = await repository.getById(pending.comboId);
       if (!combo) throw new Error(`La creación ${pending.comboId} fue confirmada, pero el detalle aún no está disponible. Reintenta la conciliación.`);
-      await clearPendingCreate(pending);
+      if (scopeId() !== pending.owner) throw new Error("La identidad cambió durante la conciliación. La intención se conserva para su propietario original.");
+      await clearPendingIntent(pending.owner, `create:${await createFingerprint(pending.owner, pending.body)}`);
       return combo;
     }
     const userId = scopeId();
     const digest = await createFingerprint(userId!, pending.body);
     const intent = `create:${digest}`;
-    const markerKey = `${uncertaintyPrefix}${[...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${userId}\u0000${intent}`)))].map(value => value.toString(16).padStart(2, "0")).join("")}`;
+    const markerKey = await uncertaintyStorageKey(userId!, intent);
     const marker = object(JSON.parse(sessionStorage.getItem(markerKey) ?? "null"));
     if (marker.user !== userId || marker.intent !== intent || marker.body !== pending.body || marker.idempotencyKey !== pending.idempotencyKey)
       throw new Error("La creación pendiente cambió durante la recuperación. No se envió una solicitud.");
@@ -289,20 +349,21 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
       const comboId = text(object(dto).combo_id);
       marker.comboId = comboId;
       sessionStorage.setItem(markerKey, JSON.stringify(marker));
+      sessionStorage.setItem(`${confirmedPrefix}${digest}`, JSON.stringify({ user: userId, intent, body: pending.body, idempotencyKey: pending.idempotencyKey, comboId }));
+      confirmedCreates.set(digest, comboId);
       const result = await presentConfirmed(dto);
-      await clearPendingCreate(pending);
+      await clearPendingIntent(userId!, intent);
       return result;
     } finally { activeWrites.delete(`${userId}:${intent}`); }
   }
-  async function clearPendingCreate(pending: PendingComboCreate): Promise<void> {
-    const userId = scopeId();
-    if (!userId) return;
-    const fingerprint = await createFingerprint(userId, pending.body);
-    const intent = `create:${fingerprint}`;
-    const markerDigest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${userId}\u0000${intent}`)))].map(value => value.toString(16).padStart(2, "0")).join("");
+  async function clearPendingIntent(userId: string, intent: string): Promise<void> {
+    if (scopeId() !== userId) throw new Error("La identidad cambió antes de cerrar la recuperación. El registro se conserva.");
+    const fingerprint = intent.slice("create:".length);
+    const markerKey = await uncertaintyStorageKey(userId, intent);
     uncertain.delete(`${userId}:${intent}`);
+    confirmedCreates.delete(fingerprint);
     try {
-      sessionStorage.removeItem(`${uncertaintyPrefix}${markerDigest}`);
+      sessionStorage.removeItem(markerKey);
       sessionStorage.removeItem(`${confirmedPrefix}${fingerprint}`);
     } catch { /* local recovery metadata remains non-authoritative */ }
   }
@@ -348,7 +409,7 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
       const owner = scopeId();
       if (!owner) throw new Error("Inicia sesión para crear un combo.");
       const body = JSON.stringify(toPayload(payload));
-      const pending = readPendingCreate();
+      const pending = await readPendingCreate();
       if (pending?.comboId) throw new Error(`La creación ${pending.comboId} ya tiene identidad confirmada. Recupera su detalle antes de iniciar otra intención.`);
       if (pending && pending.body !== body) throw new Error("Hay una creación anterior pendiente. Recupera exactamente esa intención antes de iniciar otra; no se envió un nuevo POST.");
       const key = `create:${await createFingerprint(owner, body)}`;
@@ -368,12 +429,12 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
         try { id = object(dto).combo_id; } catch { throw new ConfirmedComboWrite("Combos confirmó HTTP 201, pero el DTO no contiene una identidad reconciliable."); }
         if (typeof id !== "string" || !id.trim()) throw new ConfirmedComboWrite("Combos confirmó HTTP 201, pero el DTO no contiene un combo_id válido.");
         const fingerprint = key.slice("create:".length);
-        confirmedCreates.set(fingerprint, id);
         try { sessionStorage.setItem(`${confirmedPrefix}${fingerprint}`, JSON.stringify({ user: owner, intent: key, body: attempt.body, idempotencyKey: attempt.idempotencyKey, comboId: id })); }
         catch { throw new ConfirmedComboWrite("Combos confirmó HTTP 201, pero no se pudo guardar la referencia de reconciliación."); }
+        confirmedCreates.set(fingerprint, id);
         return dto;
       }, { owner, body });
-      const result = await presentConfirmedCreate(confirmed, key);
+      const result = await presentConfirmedCreate(confirmed, key, owner);
       if (scopeId() !== owner) throw new Error("La sesión cambió durante la presentación del combo confirmado.");
       return result;
     },
