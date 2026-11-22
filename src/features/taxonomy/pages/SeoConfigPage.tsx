@@ -85,6 +85,7 @@ function SeoConfigContent({ detalle }: { detalle: SeoCategory }) {
   const navigate = useNavigate();
   const [detalleActual, setDetalleActual] = useState(detalle);
   const [slug, setSlug] = useState(detalle.slug);
+  const [slugInvalido, setSlugInvalido] = useState(false);
   const [metaTitulo, setMetaTitulo] = useState(detalle.metaTitulo ?? "");
   const [metaDescripcion, setMetaDescripcion] = useState(
     detalle.metaDescripcion ?? "",
@@ -134,7 +135,11 @@ function SeoConfigContent({ detalle }: { detalle: SeoCategory }) {
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (slug.trim() === "") return;
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug.trim())) {
+      setSlugInvalido(true);
+      return;
+    }
+    setSlugInvalido(false);
     setGuardadoS(false);
     guardarS.guardar({
       id: detalleActual.id,
@@ -165,8 +170,10 @@ function SeoConfigContent({ detalle }: { detalle: SeoCategory }) {
           )}
           <TextInput
             label="Slug (editable)"
+            form="seo-form"
             value={slug}
-            onChange={(e) => setSlug(e.currentTarget.value)}
+            onChange={(e) => { setSlug(e.currentTarget.value); setSlugInvalido(false); }}
+            error={slugInvalido ? "Usa letras minúsculas, números y guiones entre palabras." : undefined}
             disabled={guardando}
           />
           <Group gap="sm">
@@ -247,7 +254,7 @@ function SeoConfigContent({ detalle }: { detalle: SeoCategory }) {
               {guardarS.state.message}
             </FeedbackAlert>
           )}
-          <form onSubmit={handleSubmit}>
+          <form id="seo-form" onSubmit={handleSubmit}>
             <Stack gap="md">
               <TextInput
                 label="Meta-título"

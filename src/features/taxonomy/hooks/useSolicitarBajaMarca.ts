@@ -2,29 +2,26 @@ import { useEffect, useRef, useState } from "react";
 import { brandService } from "../services/brandService";
 import type { BrandBajaResult } from "../types";
 
-export type SolicitarBajaMarcaFase = "solicitud" | "verificacion";
-
 export type SolicitarBajaMarcaState =
   | { status: "idle" }
-  | { status: "enviando"; fase: SolicitarBajaMarcaFase }
+  | { status: "enviando" }
   | { status: "success"; result: BrandBajaResult }
   | { status: "error"; message: string };
 
 export function useSolicitarBajaMarca(
   id: string,
   onSuccess?: (result: BrandBajaResult) => void,
+  onAccepted?: (id: string) => void,
 ) {
   const [state, setState] = useState<SolicitarBajaMarcaState>({
     status: "idle",
   });
   const controllerRef = useRef<AbortController | null>(null);
-  const operacionIdRef = useRef<string | null>(null);
+  const enviandoRef = useRef(false);
 
   useEffect(() => () => controllerRef.current?.abort(), []);
 
   const resolver = (result: BrandBajaResult) => {
-    operacionIdRef.current =
-      result.resultado === "pendiente" ? (result.operacionId ?? null) : null;
     setState({ status: "success", result });
     onSuccess?.(result);
   };
@@ -41,40 +38,27 @@ export function useSolicitarBajaMarca(
   };
 
   const solicitar = () => {
+    if (enviandoRef.current) return;
+    enviandoRef.current = true;
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
-    setState({ status: "enviando", fase: "solicitud" });
+    setState({ status: "enviando" });
     void brandService.solicitarBaja(id, controller.signal).then(
       (result) => {
+        enviandoRef.current = false;
         if (controller.signal.aborted) return;
+        if (result.resultado === "pendiente" && result.operacionId) onAccepted?.(result.operacionId);
         resolver(result);
       },
-      (error: unknown) => emitirError(error, controller),
-    );
-  };
-
-  const consultar = () => {
-    const operacionId = operacionIdRef.current;
-    if (!operacionId) return;
-    controllerRef.current?.abort();
-    const controller = new AbortController();
-    controllerRef.current = controller;
-    setState({ status: "enviando", fase: "verificacion" });
-    void brandService.consultarResultadoBaja(operacionId, controller.signal).then(
-      (result) => {
-        if (controller.signal.aborted) return;
-        resolver(result);
-      },
-      (error: unknown) => emitirError(error, controller),
+      (error: unknown) => { enviandoRef.current = false; emitirError(error, controller); },
     );
   };
 
   const reiniciar = () => {
     controllerRef.current?.abort();
-    operacionIdRef.current = null;
     setState({ status: "idle" });
   };
 
-  return { state, solicitar, consultar, reiniciar };
+  return { state, solicitar, reiniciar };
 }
