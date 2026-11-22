@@ -115,6 +115,15 @@ it("CAT-F05 recarga/cambio de sesión: la nueva identidad no reenvía ni reconci
   await act(async () => { await first.result.current.product.activate(productId); });
   first.unmount();
 
+  const reloadRead = vi.fn().mockResolvedValue(product("ACTIVO", 9));
+  const reloadWrite = vi.fn();
+  const reloaded = mount({ getById: reloadRead, activate: reloadWrite });
+  await act(async () => { await reloaded.result.current.product.activate(productId); });
+  expect(reloadWrite).not.toHaveBeenCalled();
+  expect(reloadRead).not.toHaveBeenCalled();
+  expect(reloaded.result.current.product.isUnknown(productId)).toBe(true);
+  reloaded.unmount();
+
   const getById = vi.fn().mockResolvedValue(product("ACTIVO", 9));
   const activate = vi.fn();
   const second = mount({ getById, activate }, { id: "user-b", nombreCompleto: "Otra persona", correo: "other@example.invalid", roles: ["GESTOR_COMERCIAL"] });
