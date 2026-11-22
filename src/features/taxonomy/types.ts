@@ -323,6 +323,8 @@ export interface BrandBajaResult {
   resultado: BrandBajaResultado;
   mensaje: string;
   operacionId?: string;
+  entityId?: string;
+  entityType?: string;
   bloqueos?: BloqueoDependencia[];
 }
 
@@ -365,6 +367,8 @@ export type OperationFollowUpStatus =
 
 export interface OperationFollowUpResult {
   operacionId: string;
+  entityId?: string;
+  entityType?: string;
   estado: OperationFollowUpStatus;
   mensaje: string;
 }

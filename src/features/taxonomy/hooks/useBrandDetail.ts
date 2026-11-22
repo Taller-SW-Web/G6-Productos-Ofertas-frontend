@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { brandService } from "../services/brandService";
 import type { BrandDetail } from "../types";
 
@@ -40,7 +40,7 @@ export function useBrandDetail(id: string): {
     return () => controller.abort();
   }, [id, reloadToken]);
 
-  const reload = () => setReloadToken((token) => token + 1);
+  const reload = useCallback(() => { setState({ status: "loading" }); setReloadToken((token) => token + 1); }, []);
 
   return { state, reload };
 }
