@@ -69,6 +69,13 @@ describe("Combos HTTP reconciliation H4", () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 
+  it("representa 404 de detalle como recurso ausente y no recurre a datos simulados", async () => {
+    const { repository, request } = setup(async () => jsonResponse(404, { code: "COMBO_NO_ENCONTRADO" }));
+    await expect(repository.getById("combo-ausente")).resolves.toBeNull();
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0]?.[0]).toBe("/api/v1/combos/combo-ausente");
+  });
+
   it("rechaza un DTO de lista malformado como error de contrato, no como lista vacía", async () => {
     const { repository } = setup(async () => jsonResponse(200, {
       items: [comboDto("combo-h4", { components: [{ sku: "SKU-H4-001", quantity: 0 }] })],
