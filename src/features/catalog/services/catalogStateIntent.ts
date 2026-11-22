@@ -27,7 +27,7 @@ function key(intent: Pick<CatalogStateIntent, "entity" | "userId" | "sessionExpi
 }
 
 export function readCatalogStateIntent(
-  identity: { userId: string; sessionExpiresAt: number | null; sessionVersion: number; sessionRoles: readonly string[] },
+  identity: { userId: string; sessionVersion: number; sessionRoles: readonly string[] },
   entity: CatalogStateIntent["entity"],
   productId: string,
   variantId?: string,
@@ -50,14 +50,10 @@ export function readCatalogStateIntent(
         (intent.phase !== "dispatching" && intent.phase !== "uncertain" && intent.phase !== "acknowledged")
       ) continue;
 
-      // A server-acknowledged receipt belongs to the same G7 user even when a
-      // renewed token changed the local expiry/session version. The current
-      // caller must still complete a fresh authorized admin read in the hook.
-      if (intent.phase === "acknowledged") return intent;
-      if (
-        intent.sessionExpiresAt === identity.sessionExpiresAt &&
-        intent.sessionVersion === identity.sessionVersion
-      ) return intent;
+      // Token refresh changes expiry but preserves the active G7 session
+      // generation. Every phase remains scoped to the same user, generation,
+      // roles and entity.
+      if (intent.sessionVersion === identity.sessionVersion) return intent;
     }
     return null;
   } catch {

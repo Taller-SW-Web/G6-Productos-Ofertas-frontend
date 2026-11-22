@@ -8,16 +8,16 @@ import { CatalogStateLockUnavailable, clearCatalogStateIntent, hasCatalogStateIn
 
 type SessionIdentity = { userId: string; sessionExpiresAt: number | null; sessionVersion: number; sessionRoles: readonly string[] };
 function sameIdentity(a: SessionIdentity | null, b: SessionIdentity): boolean {
-  return Boolean(a && a.userId === b.userId && a.sessionExpiresAt === b.sessionExpiresAt && a.sessionVersion === b.sessionVersion && JSON.stringify(a.sessionRoles) === JSON.stringify(b.sessionRoles));
+  return Boolean(a && a.userId === b.userId && a.sessionVersion === b.sessionVersion && JSON.stringify([...a.sessionRoles].sort()) === JSON.stringify([...b.sessionRoles].sort()));
 }
 
 export interface UseVariantStateMutationResult {
   loading: boolean;
   error: string | null;
   result: VariantMutationResult | null;
-  activate: (productId: string, variantId: string, scenario?: string) => Promise<VariantMutationResult>;
-  deactivate: (productId: string, variantId: string, scenario?: string) => Promise<VariantMutationResult>;
-  reactivate: (productId: string, variantId: string, scenario?: string) => Promise<VariantMutationResult>;
+  activate: (productId: string, variantId: string, scenario?: string) => Promise<VariantMutationResult | null>;
+  deactivate: (productId: string, variantId: string, scenario?: string) => Promise<VariantMutationResult | null>;
+  reactivate: (productId: string, variantId: string, scenario?: string) => Promise<VariantMutationResult | null>;
   clearError: () => void;
   isUnknownError: boolean;
   reconcile: (productId: string, variantId: string, expected: "ACTIVA" | "INACTIVA") => Promise<VariantMutationResult | null>;
@@ -46,7 +46,8 @@ export function useVariantStateMutation(): UseVariantStateMutationResult {
     return sessionBound && owner ? hasCatalogStateIntent("variant", productId, variantId) : false;
   }, [identity, sessionBound]);
 
-  const execute = useCallback(async (productId: string, variantId: string, action: CatalogStateAction, scenario?: string): Promise<VariantMutationResult> => {
+  const execute = useCallback(async (productId: string, variantId: string, action: CatalogStateAction, scenario?: string): Promise<VariantMutationResult | null> => {
+    setResult(null);
     const owner = identity();
     if (sessionBound && !owner) throw new CatalogError("session", "Se requiere una sesión administrativa vigente para cambiar el estado.");
     const run = async () => {
@@ -73,7 +74,13 @@ export function useVariantStateMutation(): UseVariantStateMutationResult {
         const response = action === "activate" ? await catalogService.activateVariant(productId, variantId, scenario)
           : action === "deactivate" ? await catalogService.deactivateVariant(productId, variantId, scenario)
             : await catalogService.reactivateVariant(productId, variantId, scenario);
-        if (sessionBound && (!owner || !sameIdentity(identity(), owner))) return response;
+        if (sessionBound && (!owner || !sameIdentity(identity(), owner))) {
+          if (intent) {
+            intent = { ...intent, phase: "acknowledged", updatedAt: Date.now() };
+            saveCatalogStateIntent(intent);
+          }
+          return null;
+        }
         if (intent) clearCatalogStateIntent(intent); setResult(response); return response;
       } catch (err) {
         if (intent) {

@@ -8,7 +8,7 @@ import { CatalogStateLockUnavailable, clearCatalogStateIntent, hasCatalogStateIn
 
 type SessionIdentity = { userId: string; sessionExpiresAt: number | null; sessionVersion: number; sessionRoles: readonly string[] };
 function sameIdentity(a: SessionIdentity | null, b: SessionIdentity): boolean {
-  return Boolean(a && a.userId === b.userId && a.sessionExpiresAt === b.sessionExpiresAt && a.sessionVersion === b.sessionVersion && JSON.stringify(a.sessionRoles) === JSON.stringify(b.sessionRoles));
+  return Boolean(a && a.userId === b.userId && a.sessionVersion === b.sessionVersion && JSON.stringify([...a.sessionRoles].sort()) === JSON.stringify([...b.sessionRoles].sort()));
 }
 
 export interface UseProductStateMutationResult {
@@ -75,7 +75,13 @@ export function useProductStateMutation(): UseProductStateMutationResult {
         const result = action === "activate" ? await catalogService.activate(id, payload, scenario)
           : action === "deactivate" ? await catalogService.deactivate(id, payload, scenario)
             : await catalogService.reactivate(id, payload, scenario);
-        if (sessionBound && (!owner || !sameIdentity(identity(), owner))) return null;
+        if (sessionBound && (!owner || !sameIdentity(identity(), owner))) {
+          if (intent) {
+            intent = { ...intent, phase: "acknowledged", updatedAt: Date.now() };
+            saveCatalogStateIntent(intent);
+          }
+          return null;
+        }
         if (intent) clearCatalogStateIntent(intent);
         return result;
       } catch (err) {

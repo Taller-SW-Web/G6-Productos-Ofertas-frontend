@@ -16,7 +16,7 @@ const variantId = "22222222-2222-4222-8222-222222222222";
 const product = (status: ProductDetailView["status"], catalogVersion: number) => ({ id: productId, status, catalogVersion }) as ProductDetailView;
 const variant = (status: VariantDetailView["status"], catalogVersion: number) => ({ productId, variantId, status, catalogVersion }) as VariantDetailView;
 
-function mount(catalog: Partial<CatalogRepository>, currentUser = { id: "user-a", nombreCompleto: "Gestora", correo: "qa@example.invalid", roles: ["GESTOR_COMERCIAL"] }) {
+function mount(catalog: Partial<CatalogRepository>, currentUser: { id: string; nombreCompleto: string; correo: string; roles: string[] } | null = { id: "user-a", nombreCompleto: "Gestora", correo: "qa@example.invalid", roles: ["GESTOR_COMERCIAL"] }) {
   let sessionVersion = 1;
   let sessionExpiresAt = 2_000_000_000_000;
   const session = {
@@ -31,7 +31,7 @@ function mount(catalog: Partial<CatalogRepository>, currentUser = { id: "user-a"
       </DataModeContext.Provider>
     </AuthSessionContext.Provider>
   );
-  return { ...renderHook(() => ({ product: useProductStateMutation(), variant: useVariantStateMutation() }), { wrapper }), changeSession: (userId: string) => { currentUser = { ...currentUser!, id: userId }; sessionVersion++; }, renewSession: () => { sessionExpiresAt += 60_000; sessionVersion++; } };
+  return { ...renderHook(() => ({ product: useProductStateMutation(), variant: useVariantStateMutation() }), { wrapper }), changeSession: (userId: string | null) => { currentUser = userId ? { ...(currentUser ?? { nombreCompleto: "Gestora", correo: "qa@example.invalid", roles: ["GESTOR_COMERCIAL"] }), id: userId } : null; sessionVersion++; }, renewSession: () => { sessionExpiresAt += 60_000; } };
 }
 
 function intent() {
@@ -193,4 +193,141 @@ it("CAT-F05 recarga/cambio de sesión: la nueva identidad no reenvía ni reconci
   expect(reconciled).toBeNull();
   expect(getById).not.toHaveBeenCalled();
   expect(intent()).toMatchObject({ userId: "user-a", phase: "uncertain", correlationId: "reload-corr" });
+});
+
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+it("CAT-F05 producto: un refresh durante GET conserva la identidad y permite un único POST", async () => {
+  const read = deferred<ProductDetailView>();
+  const getById = vi.fn(() => read.promise);
+  const activate = vi.fn().mockResolvedValue(product("ACTIVO", 6));
+  const hook = mount({ getById, activate });
+  let operation!: Promise<unknown>;
+  await act(async () => { operation = hook.result.current.product.activate(productId); });
+  hook.renewSession();
+  await act(async () => { read.resolve(product("BORRADOR", 5)); await operation; });
+  expect(getById).toHaveBeenCalledOnce();
+  expect(activate).toHaveBeenCalledOnce();
+  expect(intent()).toBeNull();
+});
+
+it("CAT-F05 producto: un refresh durante POST exitoso no abandona dispatching ni duplica la escritura", async () => {
+  const write = deferred<ProductDetailView>();
+  const getById = vi.fn().mockResolvedValue(product("BORRADOR", 5));
+  const activate = vi.fn(() => write.promise);
+  const hook = mount({ getById, activate });
+  let operation!: Promise<unknown>;
+  await act(async () => { operation = hook.result.current.product.activate(productId); await Promise.resolve(); await Promise.resolve(); });
+  expect(activate).toHaveBeenCalledOnce();
+  hook.renewSession();
+  await act(async () => { write.resolve(product("ACTIVO", 6)); await operation; });
+  expect(activate).toHaveBeenCalledOnce();
+  expect(intent()).toBeNull();
+});
+
+it("CAT-F05 producto: refresh durante POST incierto conserva la intención y no reenvía", async () => {
+  const write = deferred<ProductDetailView>();
+  const getById = vi.fn().mockResolvedValue(product("BORRADOR", 5));
+  const activate = vi.fn(() => write.promise);
+  const hook = mount({ getById, activate });
+  let operation!: Promise<unknown>;
+  await act(async () => { operation = hook.result.current.product.activate(productId); await Promise.resolve(); await Promise.resolve(); });
+  expect(intent()).toMatchObject({ phase: "dispatching", sessionVersion: 1 });
+  hook.renewSession();
+  await act(async () => { write.reject(new CatalogError("write_unknown", "timeout")); await operation; });
+  expect(activate).toHaveBeenCalledOnce();
+  expect(intent()).toMatchObject({ phase: "uncertain", sessionVersion: 1 });
+});
+
+it("CAT-F05 producto: logout durante POST aceptado suprime resultado y conserva recibo atribuible", async () => {
+  const write = deferred<ProductDetailView>();
+  const getById = vi.fn().mockResolvedValue(product("BORRADOR", 5));
+  const activate = vi.fn(() => write.promise);
+  const hook = mount({ getById, activate });
+  let operation!: Promise<unknown>;
+  await act(async () => { operation = hook.result.current.product.activate(productId); await Promise.resolve(); await Promise.resolve(); });
+  hook.changeSession(null);
+  let result: unknown;
+  await act(async () => { write.resolve(product("ACTIVO", 6)); result = await operation; });
+  expect(result).toBeNull();
+  expect(activate).toHaveBeenCalledOnce();
+  expect(intent()).toMatchObject({ userId: "user-a", phase: "acknowledged" });
+  hook.changeSession("user-b");
+  let reconciliation: unknown;
+  await act(async () => { reconciliation = await hook.result.current.product.reconcile(productId, "ACTIVO"); });
+  expect(reconciliation).toBeNull();
+  expect(getById).toHaveBeenCalledOnce();
+  expect(intent()).toMatchObject({ userId: "user-a", phase: "acknowledged" });
+});
+
+it("CAT-F05 variante: un refresh durante GET conserva la identidad y permite un único POST", async () => {
+  const read = deferred<VariantDetailView>();
+  const getVariantById = vi.fn(() => read.promise);
+  const activateVariant = vi.fn().mockResolvedValue({ variant: variant("ACTIVA", 3) });
+  const hook = mount({ getVariantById, activateVariant });
+  let operation!: Promise<unknown>;
+  await act(async () => { operation = hook.result.current.variant.activate(productId, variantId); });
+  hook.renewSession();
+  await act(async () => { read.resolve(variant("BORRADOR", 2)); await operation; });
+  expect(getVariantById).toHaveBeenCalledOnce();
+  expect(activateVariant).toHaveBeenCalledOnce();
+  expect(intent()).toBeNull();
+});
+
+it("CAT-F05 variante: un refresh durante POST exitoso no abandona dispatching ni duplica la escritura", async () => {
+  const write = deferred<{ variant: VariantDetailView }>();
+  const getVariantById = vi.fn().mockResolvedValue(variant("BORRADOR", 2));
+  const activateVariant = vi.fn(() => write.promise);
+  const hook = mount({ getVariantById, activateVariant });
+  let operation!: Promise<unknown>;
+  await act(async () => { operation = hook.result.current.variant.activate(productId, variantId); await Promise.resolve(); await Promise.resolve(); });
+  expect(activateVariant).toHaveBeenCalledOnce();
+  hook.renewSession();
+  await act(async () => { write.resolve({ variant: variant("ACTIVA", 3) }); await operation; });
+  expect(activateVariant).toHaveBeenCalledOnce();
+  expect(intent()).toBeNull();
+});
+
+it("CAT-F05 variante: refresh durante POST incierto conserva intención y no reenvía", async () => {
+  const write = deferred<{ variant: VariantDetailView }>();
+  const getVariantById = vi.fn().mockResolvedValue(variant("BORRADOR", 2));
+  const activateVariant = vi.fn(() => write.promise);
+  const hook = mount({ getVariantById, activateVariant });
+  let operation!: Promise<unknown>;
+  await act(async () => { operation = hook.result.current.variant.activate(productId, variantId); await Promise.resolve(); await Promise.resolve(); });
+  expect(intent()).toMatchObject({ phase: "dispatching", sessionVersion: 1 });
+  hook.renewSession();
+  await act(async () => { write.reject(new CatalogError("write_unknown", "timeout")); await expect(operation).rejects.toMatchObject({ kind: "write_unknown" }); });
+  expect(activateVariant).toHaveBeenCalledOnce();
+  expect(intent()).toMatchObject({ phase: "uncertain", sessionVersion: 1 });
+});
+
+it("CAT-F05 variante: cambio de identidad durante POST aceptado no expone resultado ni permite conciliar", async () => {
+  const write = deferred<{ variant: VariantDetailView }>();
+  const getVariantById = vi.fn().mockResolvedValue(variant("BORRADOR", 2));
+  const activateVariant = vi.fn(() => write.promise);
+  const hook = mount({ getVariantById, activateVariant });
+  let operation!: Promise<unknown>;
+  await act(async () => { operation = hook.result.current.variant.activate(productId, variantId); await Promise.resolve(); await Promise.resolve(); });
+  hook.changeSession("user-b");
+  let result: unknown;
+  await act(async () => { write.resolve({ variant: variant("ACTIVA", 3) }); result = await operation; });
+  expect(result).toBeNull();
+  expect(hook.result.current.variant.result).toBeNull();
+  expect(activateVariant).toHaveBeenCalledOnce();
+  expect(intent()).toMatchObject({ userId: "user-a", phase: "acknowledged" });
+  let reconciliation: unknown;
+  await act(async () => { reconciliation = await hook.result.current.variant.reconcile(productId, variantId, "ACTIVA"); });
+  expect(reconciliation).toBeNull();
+  expect(getVariantById).toHaveBeenCalledOnce();
+  expect(intent()).toMatchObject({ userId: "user-a", phase: "acknowledged" });
 });
