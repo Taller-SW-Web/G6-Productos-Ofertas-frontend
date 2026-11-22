@@ -1,4 +1,4 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { AuthSessionContext } from "../../../app/config/AuthSessionContext";
@@ -18,8 +18,9 @@ const variant = (status: VariantDetailView["status"], catalogVersion: number) =>
 
 function mount(catalog: Partial<CatalogRepository>, currentUser = { id: "user-a", nombreCompleto: "Gestora", correo: "qa@example.invalid", roles: ["GESTOR_COMERCIAL"] }) {
   let sessionVersion = 1;
+  let sessionExpiresAt = 2_000_000_000_000;
   const session = {
-    snapshot: () => ({ expiresAt: 2_000_000_000_000, user: currentUser, mfa: false, busy: false, notice: "" }),
+    snapshot: () => ({ expiresAt: sessionExpiresAt, user: currentUser, mfa: false, busy: false, notice: "" }),
     getSessionVersion: () => sessionVersion,
   } as unknown as G7Session;
   const services = { catalog: catalog as CatalogRepository, taxonomy: {} } as CatalogServices;
@@ -30,7 +31,7 @@ function mount(catalog: Partial<CatalogRepository>, currentUser = { id: "user-a"
       </DataModeContext.Provider>
     </AuthSessionContext.Provider>
   );
-  return { ...renderHook(() => ({ product: useProductStateMutation(), variant: useVariantStateMutation() }), { wrapper }), changeSession: (userId: string) => { currentUser = { ...currentUser!, id: userId }; sessionVersion++; } };
+  return { ...renderHook(() => ({ product: useProductStateMutation(), variant: useVariantStateMutation() }), { wrapper }), changeSession: (userId: string) => { currentUser = { ...currentUser!, id: userId }; sessionVersion++; }, renewSession: () => { sessionExpiresAt += 60_000; sessionVersion++; } };
 }
 
 function intent() {
@@ -38,7 +39,27 @@ function intent() {
   return key ? JSON.parse(localStorage.getItem(key)!) as Record<string, unknown> : null;
 }
 
-afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); });
+const originalLocks = Object.getOwnPropertyDescriptor(navigator, "locks");
+let heldLocks = new Set<string>();
+
+beforeEach(() => {
+  heldLocks = new Set();
+  const manager = {
+    request: async (name: string, _options: { ifAvailable?: boolean }, callback: (lock: Lock | null) => Promise<unknown>) => {
+      if (heldLocks.has(name)) return callback(null);
+      heldLocks.add(name);
+      try { return await callback({ name, mode: "exclusive" } as Lock); }
+      finally { heldLocks.delete(name); }
+    },
+  } as unknown as LockManager;
+  Object.defineProperty(navigator, "locks", { configurable: true, value: manager });
+});
+
+afterEach(() => {
+  cleanup(); localStorage.clear(); vi.restoreAllMocks();
+  if (originalLocks) Object.defineProperty(navigator, "locks", originalLocks);
+  else Reflect.deleteProperty(navigator, "locks");
+});
 
 it("CAT-F05 producto: persiste acción/estado/version e impide reenvío ante resultado incierto", async () => {
   const getById = vi.fn().mockResolvedValue(product("BORRADOR", 7));
@@ -62,6 +83,7 @@ it("CAT-F05 producto: una respuesta 2xx reconocida se conserva y sólo se libera
   const hook = mount({ getById, activate });
   await act(async () => { await hook.result.current.product.activate(productId); });
   expect(intent()).toMatchObject({ phase: "acknowledged", operationId: "op-1", correlationId: "corr-2", priorVersion: 3 });
+  hook.renewSession();
   let reconciled: unknown;
   await act(async () => { reconciled = await hook.result.current.product.reconcile(productId, "ACTIVO"); });
   expect(reconciled).toMatchObject({ id: productId, status: "ACTIVO", catalogVersion: 4 });
@@ -107,11 +129,10 @@ it("CAT-F05 doble submit: sólo una lectura precondición y una mutación quedan
   expect(activate).toHaveBeenCalledOnce();
 });
 
-it("CAT-F05 dos pestañas: una intención incierta bloquea la mutación concurrente de la otra pestaña", async () => {
+it("CAT-F05 exclusión atómica: Web Locks bloquea la segunda pestaña antes del GET o POST", async () => {
   let releaseFirst!: (value: ProductDetailView) => void;
-  let releaseSecond!: (value: ProductDetailView) => void;
   const firstRead = vi.fn(() => new Promise<ProductDetailView>(resolve => { releaseFirst = resolve; }));
-  const secondRead = vi.fn(() => new Promise<ProductDetailView>(resolve => { releaseSecond = resolve; }));
+  const secondRead = vi.fn().mockResolvedValue(product("BORRADOR", 1));
   const firstWrite = vi.fn().mockRejectedValue(new CatalogError("write_unknown", "timeout", { correlationId: "tab-a" }));
   const secondWrite = vi.fn().mockResolvedValue(product("ACTIVO", 2));
   const tabA = mount({ getById: firstRead, activate: firstWrite });
@@ -119,15 +140,28 @@ it("CAT-F05 dos pestañas: una intención incierta bloquea la mutación concurre
   let first!: Promise<unknown>;
   let second!: Promise<unknown>;
   await act(async () => { first = tabA.result.current.product.activate(productId); second = tabB.result.current.product.activate(productId); });
+  await act(async () => { await second; });
   releaseFirst(product("BORRADOR", 1));
   await act(async () => { await first; });
-  releaseSecond(product("BORRADOR", 1));
-  await act(async () => { await second; });
   expect(firstWrite).toHaveBeenCalledOnce();
   expect(secondWrite).not.toHaveBeenCalled();
+  expect(firstRead).toHaveBeenCalledOnce();
+  expect(secondRead).not.toHaveBeenCalled();
+  expect(tabB.result.current.product.error).toContain("Ya hay una operación de Catálogo en curso");
   expect(localStorage.length).toBe(1);
   tabA.unmount();
   tabB.unmount();
+});
+
+it("CAT-F05: bloquea mutaciones API si Web Locks no está disponible", async () => {
+  Object.defineProperty(navigator, "locks", { configurable: true, value: undefined });
+  const getById = vi.fn().mockResolvedValue(product("BORRADOR", 1));
+  const activate = vi.fn();
+  const hook = mount({ getById, activate });
+  await act(async () => { await hook.result.current.product.activate(productId); });
+  expect(getById).not.toHaveBeenCalled();
+  expect(activate).not.toHaveBeenCalled();
+  expect(hook.result.current.product.error).toContain("no se envió la mutación");
 });
 
 it("CAT-F05 recarga/cambio de sesión: la nueva identidad no reenvía ni reconcilia la intención ajena", async () => {

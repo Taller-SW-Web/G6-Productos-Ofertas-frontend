@@ -149,7 +149,7 @@ test("UI API 1440: un borrador reaparece en el listado y se edita con la versió
   let typeId = "type-api";
   const sentVersions: number[] = [];
   const productWrite = () => ({
-    product_id: id, status: "BORRADOR", catalog_version: version, name: "Borrador H4", description,
+    product_id: id, slug: "borrador-h4", status: "BORRADOR", catalog_version: version, name: "Borrador H4", description,
     sku_base: "H4-DRAFT", categoria_id: "cat-api", marca_id: "brand-api", tipo_producto_id: typeId,
     tiene_variantes: false, images: [], attributes: [], variants: [], perfil_fisico: null,
   });

@@ -20,8 +20,10 @@ export interface CatalogStateIntent {
   updatedAt: number;
 }
 
+const intentPrefix = "g6:catalog:state-intent:v2:";
+
 function key(intent: Pick<CatalogStateIntent, "entity" | "userId" | "sessionExpiresAt" | "sessionVersion" | "sessionRoles" | "productId" | "variantId">) {
-  return ["g6:catalog:state-intent:v2", intent.entity, encodeURIComponent(intent.userId), intent.sessionExpiresAt ?? "unknown", intent.sessionVersion, encodeURIComponent([...intent.sessionRoles].sort().join(",")), intent.productId, intent.variantId ?? "product"].join(":");
+  return [intentPrefix.slice(0, -1), intent.entity, encodeURIComponent(intent.userId), intent.sessionExpiresAt ?? "unknown", intent.sessionVersion, encodeURIComponent([...intent.sessionRoles].sort().join(",")), intent.productId, intent.variantId ?? "product"].join(":");
 }
 
 export function readCatalogStateIntent(
@@ -31,14 +33,33 @@ export function readCatalogStateIntent(
   variantId?: string,
 ): CatalogStateIntent | null {
   try {
-    const storageKey = key({ ...identity, entity, productId, variantId });
-    const value: unknown = JSON.parse(localStorage.getItem(storageKey) ?? "null");
-    if (!value || typeof value !== "object") return null;
-    const intent = value as CatalogStateIntent;
-    return intent.schemaVersion === 2 && intent.userId === identity.userId &&
-      intent.sessionExpiresAt === identity.sessionExpiresAt && JSON.stringify([...intent.sessionRoles].sort()) === JSON.stringify([...identity.sessionRoles].sort()) && intent.entity === entity &&
-      intent.sessionVersion === identity.sessionVersion &&
-      intent.productId === productId && intent.variantId === variantId ? intent : null;
+    for (let index = 0; index < localStorage.length; index++) {
+      const storageKey = localStorage.key(index);
+      if (!storageKey?.startsWith(intentPrefix)) continue;
+      const value: unknown = JSON.parse(localStorage.getItem(storageKey) ?? "null");
+      if (!value || typeof value !== "object") continue;
+      const intent = value as CatalogStateIntent;
+      if (
+        intent.schemaVersion !== 2 ||
+        intent.userId !== identity.userId ||
+        !Array.isArray(intent.sessionRoles) ||
+        JSON.stringify([...intent.sessionRoles].sort()) !== JSON.stringify([...identity.sessionRoles].sort()) ||
+        intent.entity !== entity ||
+        intent.productId !== productId ||
+        intent.variantId !== variantId ||
+        (intent.phase !== "dispatching" && intent.phase !== "uncertain" && intent.phase !== "acknowledged")
+      ) continue;
+
+      // A server-acknowledged receipt belongs to the same G7 user even when a
+      // renewed token changed the local expiry/session version. The current
+      // caller must still complete a fresh authorized admin read in the hook.
+      if (intent.phase === "acknowledged") return intent;
+      if (
+        intent.sessionExpiresAt === identity.sessionExpiresAt &&
+        intent.sessionVersion === identity.sessionVersion
+      ) return intent;
+    }
+    return null;
   } catch {
     return null;
   }
@@ -79,6 +100,42 @@ export function saveCatalogStateIntent(intent: CatalogStateIntent): boolean {
 
 export function clearCatalogStateIntent(intent: CatalogStateIntent): void {
   try { localStorage.removeItem(key(intent)); } catch { /* fail closed: marker remains */ }
+}
+
+export class CatalogStateLockUnavailable extends Error {
+  constructor(message = "No se pudo garantizar exclusión entre pestañas; no se envió la mutación.") {
+    super(message);
+    this.name = "CatalogStateLockUnavailable";
+  }
+}
+
+export async function withCatalogEntityLock<T>(
+  entity: CatalogStateIntent["entity"],
+  productId: string,
+  variantId: string | undefined,
+  operation: () => Promise<T>,
+): Promise<T> {
+  if (typeof navigator === "undefined" || !navigator.locks)
+    throw new CatalogStateLockUnavailable();
+
+  let callbackStarted = false;
+  try {
+    const outcome = await navigator.locks.request(
+      ["g6:catalog:state", entity, encodeURIComponent(productId), encodeURIComponent(variantId ?? "product")].join(":"),
+      { mode: "exclusive", ifAvailable: true },
+      async lock => {
+        if (!lock) return { acquired: false as const };
+        callbackStarted = true;
+        return { acquired: true as const, value: await operation() };
+      },
+    );
+    if (!outcome.acquired) throw new CatalogStateLockUnavailable("Ya hay una operación de Catálogo en curso para esta entidad; no se envió otra mutación.");
+    return outcome.value;
+  } catch (error) {
+    if (error instanceof CatalogStateLockUnavailable) throw error;
+    if (!callbackStarted) throw new CatalogStateLockUnavailable();
+    throw error;
+  }
 }
 
 export function nextCatalogStatus(action: CatalogStateAction): "ACTIVO" | "INACTIVO" {

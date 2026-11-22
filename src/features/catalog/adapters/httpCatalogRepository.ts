@@ -255,7 +255,7 @@ export function createHttpCatalogRepository(
     const dto = object(value);
     const id = string(dto.product_id);
     if (expectedId && id !== expectedId) blockedCatalog("La respuesta pertenece a otro producto.");
-    optional(dto, "slug", item => { string(item); });
+    string(dto.slug);
     string(dto.name);
     choice(dto.status, ["BORRADOR", "ACTIVO", "INACTIVO"] as const);
     boolean(dto.tiene_variantes);

@@ -48,6 +48,19 @@ test("CAT-F01/F02: POST/PATCH aceptan campos opcionales omitidos por OpenAPI y r
   await expect(invalidVariant.catalog.createVariant(pid, { sku: "000-partial" })).rejects.toMatchObject({ kind: "write_unknown", details: { responseReceived: "true", payloadValid: "false" } });
 });
 
+test("CAT-F02: ProductoResumen rechaza slug ausente, nulo, vacío o de tipo incorrecto", async () => {
+  for (const invalidSlug of [undefined, null, "", 7]) {
+    const response = { ...productDto } as Record<string, unknown>;
+    if (invalidSlug === undefined) delete response.slug;
+    else response.slug = invalidSlug;
+    const h = harness((_path, init) => init.method === "POST" ? json(response, 201) : json(prep));
+    await expect(h.catalog.create({ ...payload, atributos: [] })).rejects.toMatchObject({
+      kind: "write_unknown",
+      details: { responseReceived: "true", payloadValid: "false" },
+    });
+  }
+});
+
 test("Mapper producto: null y SKU opcional ausente conservan ausencia; no genera códigos", () => {
   for (const hasVariants of [false, true]) {
     const preparation = mapPreparation(hasVariants ? variantPrep : prep);
@@ -179,7 +192,7 @@ test("HTTP: preparación conserva manual_retry_allowed y 202 solo admite; 409 no
 });
 
 test("HTTP: alta confirmada usa respuesta y preparación; fallo posterior no se presenta como rechazo ni reenvía", async () => {
-  const product = { product_id: pid, name: "Servidor", sku_base: "000-base", status: "BORRADOR", tiene_variantes: false, categoria_id: "category", marca_id: "brand", tipo_producto_id: "type", catalog_version: 12, description: "Desc", attributes: [], images: [], variants: [], perfil_fisico: null };
+  const product = { product_id: pid, slug: "servidor", name: "Servidor", sku_base: "000-base", status: "BORRADOR", tiene_variantes: false, categoria_id: "category", marca_id: "brand", tipo_producto_id: "type", catalog_version: 12, description: "Desc", attributes: [], images: [], variants: [], perfil_fisico: null };
   const h = harness((_path, init) => init.method === "POST" ? json(product, 201) : json(prep));
   const result = await h.catalog.create({ ...payload, atributos: [] });
   expect(result).toMatchObject({ id: pid, name: "Servidor", catalogVersion: 12, status: "BORRADOR", preparation: { inventario: { status: "REJECTED" } } });
