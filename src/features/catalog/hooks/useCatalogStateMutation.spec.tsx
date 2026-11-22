@@ -106,3 +106,25 @@ it("CAT-F05 doble submit: sólo una lectura precondición y una mutación quedan
   expect(getById).toHaveBeenCalledOnce();
   expect(activate).toHaveBeenCalledOnce();
 });
+
+it("CAT-F05 recarga/cambio de sesión: la nueva identidad no reenvía ni reconcilia la intención ajena", async () => {
+  const first = mount({
+    getById: vi.fn().mockResolvedValue(product("BORRADOR", 8)),
+    activate: vi.fn().mockRejectedValue(new CatalogError("write_unknown", "timeout", { correlationId: "reload-corr" })),
+  });
+  await act(async () => { await first.result.current.product.activate(productId); });
+  first.unmount();
+
+  const getById = vi.fn().mockResolvedValue(product("ACTIVO", 9));
+  const activate = vi.fn();
+  const second = mount({ getById, activate }, { id: "user-b", nombreCompleto: "Otra persona", correo: "other@example.invalid", roles: ["GESTOR_COMERCIAL"] });
+  await act(async () => { await second.result.current.product.activate(productId); });
+  expect(activate).not.toHaveBeenCalled();
+  expect(getById).not.toHaveBeenCalled();
+  expect(second.result.current.product.isUnknown(productId)).toBe(true);
+  let reconciled: unknown;
+  await act(async () => { reconciled = await second.result.current.product.reconcile(productId, "ACTIVO"); });
+  expect(reconciled).toBeNull();
+  expect(getById).not.toHaveBeenCalled();
+  expect(intent()).toMatchObject({ userId: "user-a", phase: "uncertain", correlationId: "reload-corr" });
+});

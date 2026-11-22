@@ -3,7 +3,7 @@ import type { VariantMutationResult } from "../services/catalogRepository";
 import { CatalogError } from "../services/catalogRepository";
 import { useCatalogServices } from "./useCatalogServices";
 import { PromotionSessionContext } from "../../../app/config/PromotionSessionContext";
-import { clearCatalogStateIntent, isVariantStatus, nextCatalogStatus, readCatalogStateIntent, saveCatalogStateIntent, type CatalogStateAction, type CatalogStateIntent } from "../services/catalogStateIntent";
+import { clearCatalogStateIntent, hasCatalogStateIntent, isVariantStatus, nextCatalogStatus, readCatalogStateIntent, saveCatalogStateIntent, type CatalogStateAction, type CatalogStateIntent } from "../services/catalogStateIntent";
 
 type SessionIdentity = { userId: string; sessionExpiresAt: number | null; sessionVersion: number; sessionRoles: readonly string[] };
 function sameIdentity(a: SessionIdentity | null, b: SessionIdentity): boolean {
@@ -40,14 +40,14 @@ export function useVariantStateMutation(): UseVariantStateMutationResult {
   const clearError = useCallback(() => { setError(null); setIsUnknownError(false); }, []);
   const isUnknown = useCallback((productId: string, variantId: string) => {
     const owner = identity();
-    return owner ? readCatalogStateIntent(owner, "variant", productId, variantId) !== null : false;
+    return owner ? hasCatalogStateIntent("variant", productId, variantId) : false;
   }, [identity]);
 
   const execute = useCallback(async (productId: string, variantId: string, action: CatalogStateAction, scenario?: string): Promise<VariantMutationResult> => {
     const owner = identity();
     if (!owner) throw new CatalogError("session", "Se requiere una sesión administrativa vigente para cambiar el estado.");
     if (inFlight.current) throw new CatalogError("conflict", "La mutación ya está en curso.");
-    const existing = readCatalogStateIntent(owner, "variant", productId, variantId);
+    const existing = hasCatalogStateIntent("variant", productId, variantId);
     if (existing) { setIsUnknownError(true); throw new CatalogError("write_unknown", "Existe una intención pendiente para esta variante; no se reenviará automáticamente."); }
     inFlight.current = true; setLoading(true); clearError();
     let intent: CatalogStateIntent | null = null;

@@ -3,7 +3,7 @@ import type { ProductDetailView, ProductStatus, StateMutationPayload } from "../
 import { CatalogError } from "../services/catalogRepository";
 import { useCatalogServices } from "./useCatalogServices";
 import { PromotionSessionContext } from "../../../app/config/PromotionSessionContext";
-import { clearCatalogStateIntent, isProductStatus, nextCatalogStatus, readCatalogStateIntent, saveCatalogStateIntent, type CatalogStateAction, type CatalogStateIntent } from "../services/catalogStateIntent";
+import { clearCatalogStateIntent, hasCatalogStateIntent, isProductStatus, nextCatalogStatus, readCatalogStateIntent, saveCatalogStateIntent, type CatalogStateAction, type CatalogStateIntent } from "../services/catalogStateIntent";
 
 type SessionIdentity = { userId: string; sessionExpiresAt: number | null; sessionVersion: number; sessionRoles: readonly string[] };
 function sameIdentity(a: SessionIdentity | null, b: SessionIdentity): boolean {
@@ -40,14 +40,14 @@ export function useProductStateMutation(): UseProductStateMutationResult {
   const clearError = useCallback(() => { setError(undefined); setIsUnknownError(false); }, []);
   const isUnknown = useCallback((id: string) => {
     const owner = identity();
-    return owner ? readCatalogStateIntent(owner, "product", id) !== null : false;
+    return owner ? hasCatalogStateIntent("product", id) : false;
   }, [identity]);
 
   const execute = useCallback(async (id: string, action: CatalogStateAction, scenario?: string): Promise<ProductDetailView | null> => {
     const owner = identity();
     if (!owner) { setError("Se requiere una sesión administrativa vigente para cambiar el estado."); return null; }
     if (inFlight.current) return null;
-    const existing = readCatalogStateIntent(owner, "product", id);
+    const existing = hasCatalogStateIntent("product", id);
     if (existing) { setIsUnknownError(true); setError("Hay una intención anterior pendiente. Consulte la lectura administrativa antes de volver a operar."); return null; }
     inFlight.current = true;
     setSubmitting(true); clearError();

@@ -44,6 +44,30 @@ export function readCatalogStateIntent(
   }
 }
 
+/**
+ * An intent from another login in this tab still blocks a second write for
+ * the same entity. It cannot be reconciled because reconciliation uses the
+ * full identity/session tuple through readCatalogStateIntent.
+ */
+export function hasCatalogStateIntent(entity: CatalogStateIntent["entity"], productId: string, variantId?: string): boolean {
+  try {
+    for (let index = 0; index < sessionStorage.length; index++) {
+      const storageKey = sessionStorage.key(index);
+      if (!storageKey?.startsWith("g6:catalog:state-intent:v2:")) continue;
+      const value: unknown = JSON.parse(sessionStorage.getItem(storageKey) ?? "null");
+      if (!value || typeof value !== "object") continue;
+      const intent = value as Partial<CatalogStateIntent>;
+      if (intent.schemaVersion === 2 && intent.entity === entity && intent.productId === productId && intent.variantId === variantId &&
+          typeof intent.userId === "string" && typeof intent.sessionVersion === "number" &&
+          (intent.phase === "dispatching" || intent.phase === "uncertain" || intent.phase === "acknowledged")) return true;
+    }
+  } catch {
+    // Fail closed: storage errors must not enable an unsafe retry.
+    return true;
+  }
+  return false;
+}
+
 export function saveCatalogStateIntent(intent: CatalogStateIntent): boolean {
   try {
     sessionStorage.setItem(key(intent), JSON.stringify(intent));
