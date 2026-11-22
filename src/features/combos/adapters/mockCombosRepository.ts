@@ -93,6 +93,9 @@ export class MockCombosRepository implements CombosRepository {
     }
   }
 
+  async getPendingCreate() { return null; }
+  async recoverPendingCreate(): Promise<Combo> { throw new ComboError("unavailable", "No hay una creación HTTP pendiente en el adaptador de demostración."); }
+
   private persist(): boolean {
     let ok = true;
     if (this.persistEnabled) {

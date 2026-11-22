@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHttpCombosRepository } from "./httpCombosRepository";
 import type { AuthenticatedGatewayClient } from "../../../app/config/authenticatedGatewayClient";
-import type { ComboPayload } from "../types/combos";
+import type { ComboPayload, CombosCatalogPort } from "../types/combos";
 import { createMemoryStorage, fakeOwnerA, fakeOwnerB, jsonResponse } from "../../../../tests/fixtures/h4Controlled";
 
 let owner = fakeOwnerA;
@@ -10,10 +10,10 @@ beforeEach(() => { owner = fakeOwnerA; storage = createMemoryStorage(); vi.stubG
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 const payload: ComboPayload = { name: "Combo H4", description: "Prueba", components: [{ sku: "SKU-H4-001", quantity: 1 }, { sku: "SKU-H4-002", quantity: 2 }], priceMinor: 4990 };
 const comboDto = (id: string, overrides: Record<string, unknown> = {}) => ({ combo_id: id, name: "Combo H4", description: "Prueba", status: "ACTIVO", price: 49.9, version: 1, components: [{ sku: "SKU-H4-001", quantity: 1 }, { sku: "SKU-H4-002", quantity: 2 }], ...overrides });
-const catalog = { listProducts: async (_query: string, page: number, pageSize: number) => ({ items: [], total: 0, page, pageSize }), getProduct: async () => null, resolveSkus: async () => [] };
-function setup(request: AuthenticatedGatewayClient["request"]) {
+const catalog: CombosCatalogPort = { listProducts: async (_query: string, page: number, pageSize: number) => ({ items: [], total: 0, page, pageSize }), getProduct: async () => null, resolveSkus: async () => [] };
+function setup(request: AuthenticatedGatewayClient["request"], catalogPort = catalog) {
   const client: AuthenticatedGatewayClient = { request: vi.fn(request) };
-  return { repository: createHttpCombosRepository(client, catalog, () => owner), request: client.request as ReturnType<typeof vi.fn> };
+  return { repository: createHttpCombosRepository(client, catalogPort, () => owner), request: client.request as ReturnType<typeof vi.fn> };
 }
 const query = { status: "TODOS" as const, page: 1, pageSize: 20 };
 
@@ -63,6 +63,39 @@ describe("Combos HTTP reconciliation H4", () => {
     await expect(repository.readAvailability("combo-h4", "ACTIVO")).rejects.toThrow(/otra identidad/);
   });
 
+  it.each(["comboId", "verificable", "calculated_at", "estadoActualizacion"])("rechaza DTO sin el campo obligatorio %s", async field => {
+    const dto: Record<string, unknown> = { comboId: "combo-h4", verificable: false, cantidadInformativa: null, calculated_at: "2026-11-20T12:00:00Z", estadoActualizacion: "INCOMPLETA" };
+    delete dto[field];
+    const { repository } = setup(async () => jsonResponse(200, dto));
+    await expect(repository.readAvailability("combo-h4", "ACTIVO")).rejects.toThrow();
+  });
+
+  it("resuelve una vez todos los SKU de la página y muestra los nombres compartidos", async () => {
+    const resolver = vi.fn(async (skus: string[]) => skus.map(sku => ({ sku, productId: `p-${sku}`, productName: `Producto ${sku}`, isCombo: false, productActive: true, variantActive: true, sellable: true, isVariantParentSku: false })));
+    const items = [comboDto("combo-a"), comboDto("combo-b", { components: [{ sku: "SKU-H4-002", quantity: 1 }, { sku: "SKU-H4-003", quantity: 2 }] })];
+    const { repository, request } = setup(async () => jsonResponse(200, { items, meta: { pagina: 1, tamanio: 20, total: 2 } }), { ...catalog, resolveSkus: resolver });
+    const page = await repository.list(query);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(resolver).toHaveBeenCalledTimes(1);
+    expect(resolver).toHaveBeenCalledWith(["SKU-H4-001", "SKU-H4-002", "SKU-H4-002", "SKU-H4-003"], undefined);
+    expect(page.items.map(combo => combo.components.map(component => component.productName))).toEqual([["Producto SKU-H4-001", "Producto SKU-H4-002"], ["Producto SKU-H4-002", "Producto SKU-H4-003"]]);
+  });
+
+  it("muestra nombres no verificados y conserva SKU cuando Catalog falla", async () => {
+    const resolver = vi.fn(async () => { throw new Error("Catalog offline"); });
+    const { repository } = setup(async () => jsonResponse(200, { items: [comboDto("combo-a")], meta: { pagina: 1, tamanio: 20, total: 1 } }), { ...catalog, resolveSkus: resolver });
+    const page = await repository.list(query);
+    expect(page.items[0]?.components).toMatchObject([{ sku: "SKU-H4-001", productName: "Nombre no verificado" }, { sku: "SKU-H4-002", productName: "Nombre no verificado" }]);
+  });
+
+  it("el detalle ejecuta una sola resolución batch", async () => {
+    const resolver = vi.fn(async (skus: string[]) => skus.map(sku => ({ sku, productId: sku, productName: `Producto ${sku}`, isCombo: false, productActive: true, variantActive: true, sellable: true, isVariantParentSku: false })));
+    const { repository } = setup(async () => jsonResponse(200, comboDto("combo-a")), { ...catalog, resolveSkus: resolver });
+    await expect(repository.getById("combo-a")).resolves.toMatchObject({ components: [{ productName: "Producto SKU-H4-001" }, { productName: "Producto SKU-H4-002" }] });
+    expect(resolver).toHaveBeenCalledTimes(1);
+    expect(resolver).toHaveBeenCalledWith(["SKU-H4-001", "SKU-H4-002"], undefined);
+  });
+
   it.each([401, 403, 409, 422, 503])("propaga el estado contractual HTTP %i", async (status) => {
     const { repository, request } = setup(async () => jsonResponse(status, { code: `ERROR_${status}` }));
     await expect(repository.list(query)).rejects.toThrow(`HTTP ${status} (ERROR_${status})`);
@@ -95,7 +128,7 @@ describe("Combos HTTP reconciliation H4", () => {
       if (init.method === "POST") posts.push(String(init.body));
       return jsonResponse(201, comboDto("combo-h4"));
     });
-    await expect(second.repository.create({ ...payload, name: "Otra intención" })).rejects.toThrow(/creación anterior con resultado incierto/);
+    await expect(second.repository.create({ ...payload, name: "Otra intención" })).rejects.toThrow(/creación anterior/);
     expect(posts).toHaveLength(1);
     expect(second.request).not.toHaveBeenCalled();
   });
@@ -146,6 +179,62 @@ describe("Combos HTTP reconciliation H4", () => {
     expect(Object.keys(storage).filter(key => key.startsWith("g6:combos:uncertain:v2:"))).toHaveLength(0);
   });
 
+  it("expone la intención tras recarga y la recupera con cuerpo y clave originales", async () => {
+    const sent: { key?: string; body?: string }[] = [];
+    const first = setup(async (_path, init) => { sent.push({ key: init.headers?.["Idempotency-Key"], body: String(init.body) }); throw new Error("timeout"); });
+    await expect(first.repository.create(payload)).rejects.toThrow(/No se confirmó/);
+    const second = setup(async (_path, init) => {
+      sent.push({ key: init.headers?.["Idempotency-Key"], body: String(init.body) });
+      return jsonResponse(201, comboDto("combo-recovered"));
+    });
+    await expect(second.repository.getPendingCreate()).resolves.toMatchObject({ name: "Combo H4", componentSkus: ["SKU-H4-001", "SKU-H4-002"] });
+    await expect(second.repository.recoverPendingCreate()).resolves.toMatchObject({ id: "combo-recovered" });
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toEqual(sent[0]);
+    expect(sent[1]?.key).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it.each([202, 503])("conserva y permite conciliar la intención tras HTTP %i", async status => {
+    const initial = setup(async () => jsonResponse(status, { code: "PENDIENTE" }));
+    await expect(initial.repository.create(payload)).rejects.toThrow();
+    const calls: { key?: string; body?: string }[] = [];
+    const recovery = setup(async (_path, init) => { calls.push({ key: init.headers?.["Idempotency-Key"], body: String(init.body) }); return jsonResponse(503, { code: "UPSTREAM" }); });
+    await expect(recovery.repository.recoverPendingCreate()).rejects.toThrow();
+    await expect(recovery.repository.getPendingCreate()).resolves.not.toBeNull();
+    expect(calls).toHaveLength(1);
+    expect(Object.keys(storage).some(key => key.startsWith("g6:combos:uncertain:v2:"))).toBe(true);
+  });
+
+  it("bloquea lectura y recuperación de una intención de otra identidad", async () => {
+    const first = setup(async () => { throw new Error("timeout"); });
+    await expect(first.repository.create(payload)).rejects.toThrow();
+    owner = fakeOwnerB;
+    const second = setup(vi.fn(async () => jsonResponse(201, comboDto("no-post"))));
+    await expect(second.repository.getPendingCreate()).rejects.toThrow(/otra identidad/);
+    await expect(second.repository.recoverPendingCreate()).rejects.toThrow(/otra identidad/);
+    expect(second.request).not.toHaveBeenCalled();
+  });
+
+  it("un registro local corrupto bloquea explícitamente la lectura y cualquier nuevo POST", async () => {
+    storage.setItem("g6:combos:uncertain:v2:corrupt", "{");
+    const { repository, request } = setup(vi.fn(async () => jsonResponse(201, comboDto("must-not-create"))));
+    await expect(repository.getPendingCreate()).rejects.toThrow(/corrupto/);
+    await expect(repository.create(payload)).rejects.toThrow(/corrupto/);
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("si el ID ya está confirmado recupera por GET sin emitir un segundo POST", async () => {
+    const first = setup(async (_path, init) => {
+      if (init.method === "POST") { const malformed = comboDto("combo-confirmado"); delete (malformed as Record<string, unknown>).name; return jsonResponse(201, malformed); }
+      throw new Error("Catalog offline");
+    });
+    await expect(first.repository.create(payload)).rejects.toThrow(/confirmada/);
+    const paths: string[] = [];
+    const second = setup(async (path, init) => { paths.push(`${init.method} ${path}`); return jsonResponse(200, comboDto("combo-confirmado")); });
+    await expect(second.repository.recoverPendingCreate()).resolves.toMatchObject({ id: "combo-confirmado" });
+    expect(paths).toEqual(["GET /api/v1/combos/combo-confirmado"]);
+  });
+
   it("COM-H4-07: un 409 de idempotencia conserva la intención y no cambia el cuerpo ni la clave", async () => {
     const calls: { key?: string; body?: string }[] = [];
     const conflict = setup(async (_path, init) => {
@@ -158,7 +247,7 @@ describe("Combos HTTP reconciliation H4", () => {
     const key = Object.keys(storage).find(item => item.startsWith("g6:combos:uncertain:v2:"))!;
     const stored = JSON.parse(storage.getItem(key)!);
     storage.setItem(key, JSON.stringify({ ...stored, body: "{}" }));
-    await expect(conflict.repository.create(payload)).rejects.toThrow(/No se envió/);
+    await expect(conflict.repository.create(payload)).rejects.toThrow(/corrupto|No se envió/);
     expect(calls).toHaveLength(2);
   });
 

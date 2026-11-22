@@ -176,3 +176,56 @@ test("COM-03: la disponibilidad informativa no se presenta como verificación in
   await page.goto("/combos/combo-001?scenario=detail-active-zero");
   await expect(page.getByText("Agotado (0 confirmado)").first()).toBeVisible();
 });
+
+test("COM-F06: el diálogo de lista atrapa foco y lo devuelve al activador con Escape y Enter", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/combos");
+  const row = page.getByRole("row").filter({ hasText: "Conjunto Trail Esencial" });
+  const actions = row.getByRole("button", { name: "Más acciones de Conjunto Trail Esencial" });
+  await actions.click();
+  await page.getByRole("menuitem", { name: "Desactivar" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Shift+Tab");
+  await expect(dialog).toContainText("Conjunto Trail Esencial");
+  expect(await dialog.evaluate(element => element.contains(document.activeElement))).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(actions).toBeFocused();
+
+  await actions.click();
+  await page.getByRole("menuitem", { name: "Desactivar" }).click();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Enter");
+  await expect(row).toContainText("INACTIVO");
+  await expect(actions).toBeFocused();
+});
+
+test("COM-F06: cancelar el diálogo de detalle devuelve foco y confirmar lo lleva a Editar", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/combos/combo-001");
+  const content = page.locator("#contenido");
+  const deactivate = content.getByRole("button", { name: "Desactivar combo" });
+  const edit = content.getByRole("link", { name: "Editar" });
+  await deactivate.click();
+  await page.keyboard.press("Escape");
+  await expect(deactivate).toBeFocused();
+  await deactivate.click();
+  await page.getByRole("dialog").getByRole("button", { name: "Desactivar combo" }).press("Enter");
+  await expect(page.getByText("INACTIVO", { exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(edit).toBeFocused();
+});
+
+test("COM-F06: el diálogo de reconciliación devuelve foco al activador al cancelar", async ({ page }) => {
+  await page.goto("/combos/combo-001/editar?scenario=version-conflict");
+  await page.getByRole("textbox", { name: "Nombre" }).fill("Cambio de foco local");
+  await page.getByRole("button", { name: "Guardar cambios" }).click();
+  const trigger = page.getByRole("button", { name: "Conservar borrador y reconciliar" });
+  await trigger.click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+});

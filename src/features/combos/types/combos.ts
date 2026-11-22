@@ -139,6 +139,14 @@ export interface ComboPayload {
   version?: number;
 }
 
+export interface PendingComboCreate {
+  name: string;
+  componentSkus: string[];
+  body: string;
+  idempotencyKey: string;
+  comboId: string | null;
+}
+
 export interface CombosRepository {
   list(query: ComboQuery, signal?: AbortSignal): Promise<ComboPage>;
   getById(id: string, signal?: AbortSignal): Promise<Combo | null>;
@@ -146,6 +154,8 @@ export interface CombosRepository {
   create(payload: ComboPayload, scenario?: string): Promise<Combo>;
   update(id: string, payload: ComboPayload, scenario?: string): Promise<Combo>;
   deactivate(id: string): Promise<Combo>;
+  getPendingCreate(): Promise<PendingComboCreate | null>;
+  recoverPendingCreate(): Promise<Combo>;
 }
 
 export interface CombosCatalogPort {

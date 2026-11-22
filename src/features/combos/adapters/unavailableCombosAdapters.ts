@@ -15,6 +15,8 @@ const combos: CombosRepository = {
   async create() { throw unavailable(); },
   async update() { throw unavailable(); },
   async deactivate() { throw unavailable(); },
+  async getPendingCreate() { throw unavailable(); },
+  async recoverPendingCreate() { throw unavailable(); },
 };
 const catalog: CombosCatalogPort = {
   async listProducts() { throw unavailable(); },

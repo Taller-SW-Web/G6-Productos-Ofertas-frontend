@@ -26,6 +26,8 @@ export function ComboListPage() {
   const [deactivating, setDeactivating] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const identity = useRef(new RequestIdentity());
+  const actionButtons = useRef(new Map<string, HTMLButtonElement>());
+  const focusAfterClose = useRef<string | null>(null);
   const rawPage = params.get("pagina");
   const page = parseComboPage(rawPage);
   const rawStatus = params.get("estado");
@@ -66,6 +68,14 @@ export function ComboListPage() {
   const pageCount = Math.max(1, Math.ceil((result?.total ?? 0) / 5));
 
   useEffect(() => {
+    if (deactivationTarget || !focusAfterClose.current || currentState.status !== "success") return;
+    const id = focusAfterClose.current;
+    focusAfterClose.current = null;
+    const frame = requestAnimationFrame(() => actionButtons.current.get(id)?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [currentState.status, deactivationTarget, queryKey]);
+
+  useEffect(() => {
     if (!result || page <= pageCount) return;
     const next = new URLSearchParams(params);
     if (pageCount > 1) next.set("pagina", String(pageCount));
@@ -86,7 +96,9 @@ export function ComboListPage() {
     setDeactivating(true);
     setMutationError(null);
     try {
+      const id = deactivationTarget.id;
       await combos.deactivate(deactivationTarget.id);
+      focusAfterClose.current = id;
       setDeactivationTarget(null);
       setRefresh((value) => value + 1);
     } catch (reason) {
@@ -108,11 +120,11 @@ export function ComboListPage() {
       <Table.ScrollContainer minWidth={1000}><Table highlightOnHover><Table.Thead><Table.Tr><Table.Th>Combo</Table.Th><Table.Th>Precio</Table.Th><Table.Th>Componentes</Table.Th><Table.Th>Disponibilidad estimada</Table.Th><Table.Th>Estado</Table.Th><Table.Th style={{ width: 120, textAlign: "right" }}>Acciones</Table.Th></Table.Tr></Table.Thead><Table.Tbody>{rows.map((combo) => <Table.Tr key={combo.id}>
         <Table.Td><Text fw={600}>{combo.name}</Text><Text size="sm" c="dimmed" lineClamp={1}>{combo.description}</Text></Table.Td>
         <Table.Td>{formatMoney(combo.priceMinor)}</Table.Td><Table.Td>{combo.components.length} SKU</Table.Td><Table.Td><ComboAvailability combo={combo} /></Table.Td><Table.Td>{combo.status}</Table.Td>
-        <Table.Td style={{ textAlign: "right" }}><Group gap="xs" justify="flex-end" wrap="nowrap"><ActionIcon component={Link} to={`/combos/${combo.id}`} aria-label={`Ver detalle de ${combo.name}`} title="Ver detalle"><IconEye size={16} /></ActionIcon><Menu position="bottom-end" shadow="md"><Menu.Target><ActionIcon aria-label={`Más acciones de ${combo.name}`} title="Más acciones"><IconDotsVertical size={16} /></ActionIcon></Menu.Target><Menu.Dropdown><Menu.Item component={Link} to={`/combos/${combo.id}/editar`} leftSection={<IconEdit size={16} />}>Editar</Menu.Item>{combo.status === "ACTIVO" && <Menu.Item color="danger" leftSection={<IconPower size={16} />} onClick={() => { setMutationError(null); setDeactivationTarget(combo); }}>Desactivar</Menu.Item>}</Menu.Dropdown></Menu></Group></Table.Td>
+        <Table.Td style={{ textAlign: "right" }}><Group gap="xs" justify="flex-end" wrap="nowrap"><ActionIcon component={Link} to={`/combos/${combo.id}`} aria-label={`Ver detalle de ${combo.name}`} title="Ver detalle"><IconEye size={16} /></ActionIcon><Menu position="bottom-end" shadow="md"><Menu.Target><ActionIcon ref={element => { if (element) actionButtons.current.set(combo.id, element); else actionButtons.current.delete(combo.id); }} aria-label={`Más acciones de ${combo.name}`} title="Más acciones"><IconDotsVertical size={16} /></ActionIcon></Menu.Target><Menu.Dropdown><Menu.Item component={Link} to={`/combos/${combo.id}/editar`} leftSection={<IconEdit size={16} />}>Editar</Menu.Item>{combo.status === "ACTIVO" && <Menu.Item color="danger" leftSection={<IconPower size={16} />} onClick={() => { focusAfterClose.current = combo.id; setMutationError(null); setDeactivationTarget(combo); }}>Desactivar</Menu.Item>}</Menu.Dropdown></Menu></Group></Table.Td>
       </Table.Tr>)}</Table.Tbody></Table></Table.ScrollContainer>
       <Group justify="space-between" mt="md"><Text size="sm" c="dimmed">{result?.total ?? 0} combos</Text><Pagination value={page} total={pageCount} onChange={(value) => change("pagina", String(value))} /></Group>
     </>}
-    <ConfirmDialog opened={deactivationTarget !== null} title="Desactivar combo" confirmLabel="Desactivar combo" destructive submitting={deactivating} onCancel={() => { if (!deactivating) setDeactivationTarget(null); }} onConfirm={() => void confirmDeactivation()} error={mutationError ? <Text c="red" role="alert">{mutationError}</Text> : undefined}>
+    <ConfirmDialog opened={deactivationTarget !== null} title="Desactivar combo" confirmLabel="Desactivar combo" destructive submitting={deactivating} returnFocus={false} onCancel={() => { if (!deactivating && deactivationTarget) { focusAfterClose.current = deactivationTarget.id; setDeactivationTarget(null); } }} onConfirm={() => void confirmDeactivation()} error={mutationError ? <Text c="red" role="alert">{mutationError}</Text> : undefined}>
       {deactivationTarget && <Text>El combo <strong>{deactivationTarget.name}</strong> dejará de ofrecerse para nuevas ventas. Su definición histórica y sus componentes permanecerán conservados.</Text>}
     </ConfirmDialog>
   </>;

@@ -1,5 +1,5 @@
 import type { AuthenticatedGatewayClient } from "../../../app/config/authenticatedGatewayClient";
-import type { CombosRepository, Combo, ComboAvailability, ComboPayload, ComboPage, ComboQuery, CombosCatalogPort } from "../types/combos";
+import type { CombosRepository, Combo, ComboAvailability, ComboPayload, ComboPage, ComboQuery, CombosCatalogPort, ResolvedSku, PendingComboCreate } from "../types/combos";
 
 type ComboAvailabilityDto = { informative_availability?: unknown; calculated_at?: unknown; freshness?: unknown };
 
@@ -60,7 +60,7 @@ function mapContractAvailability(value: unknown, comboId: string, status: Combo[
   const freshness = dto.estadoActualizacion;
   if (freshness !== "ACTUALIZADA" && freshness !== "DESACTUALIZADA" && freshness !== "INCOMPLETA")
     throw new Error("Combos devolvió una actualización de disponibilidad desconocida.");
-  const quantity = dto.cantidadInformativa === null || dto.cantidadInformativa === undefined
+  const quantity = !Object.prototype.hasOwnProperty.call(dto, "cantidadInformativa") || dto.cantidadInformativa === null
     ? null : integer(dto.cantidadInformativa);
   if (dto.verificable && quantity === null) throw new Error("Combos marcó la disponibilidad como verificable sin informar una cantidad.");
   if (typeof dto.calculated_at !== "string" || !Number.isFinite(Date.parse(dto.calculated_at)))
@@ -128,7 +128,7 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
     try { return await response.json(); }
     catch { throw method === "GET" ? new Error("Combos devolvió JSON ilegible.") : new ConfirmedComboWrite("Combos confirmó la escritura, pero su DTO es ilegible. No la repitas; consulta el recurso."); }
   }
-  function mapCombo(value: unknown, signal?: AbortSignal): Combo {
+  function mapCombo(value: unknown, resolved: ResolvedSku[] = []): Combo {
     const dto = object(value);
     const id = text(dto.combo_id);
     if (dto.status !== "ACTIVO" && dto.status !== "INACTIVO") throw new Error("Combos devolvió un estado desconocido.");
@@ -137,13 +137,8 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
       const component = object(item);
       return { sku: text(component.sku), quantity: integer(component.quantity, 1) };
     });
-    const skus = rawComponents.map((item) => item.sku);
-    const resolved = catalog.peekResolvedSkus?.(skus) ?? [];
     const names = new Map(resolved.map((item) => [item.sku, item.productName]));
     const status = dto.status;
-    // Name enrichment is auxiliary. Return the authoritative Combo DTO first;
-    // subsequent reads can use the bounded resolver cache.
-    void catalog.resolveSkus(skus, signal).catch(() => undefined);
     return {
       id,
       name: text(dto.name),
@@ -151,7 +146,7 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
       status,
       priceMinor: minor(dto.price),
       version: integer(dto.version),
-      components: rawComponents.map((item) => ({ sku: item.sku, productName: names.get(item.sku) ?? item.sku, quantity: item.quantity, regularUnitMinor: null, publicUnitMinor: null })),
+      components: rawComponents.map((item) => ({ sku: item.sku, productName: names.get(item.sku) ?? "Nombre no verificado", quantity: item.quantity, regularUnitMinor: null, publicUnitMinor: null })),
       availability: mapAvailability(dto as ComboAvailabilityDto, status),
     };
   }
@@ -219,7 +214,13 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
   });
   async function presentConfirmed(value: unknown): Promise<Combo> {
     const comboId = text(object(value).combo_id);
-    try { return await mapCombo(value); }
+    try {
+      const dto = object(value);
+      const skus = Array.isArray(dto.components) ? dto.components.map(item => text(object(item).sku)) : [];
+      let resolved: ResolvedSku[] = [];
+      try { resolved = await catalog.resolveSkus(skus); } catch { /* explicit unverified name is safer than hiding the confirmed combo */ }
+      return mapCombo(value, resolved);
+    }
     catch (error) { throw new Error(`La escritura de Combos quedó confirmada para ${comboId}, pero falló el enriquecimiento o la disponibilidad. Consulta ese combo antes de cualquier otra acción. ${error instanceof Error ? error.message : "Error de presentación."}`, { cause: error }); }
   }
   async function presentConfirmedCreate(value: unknown, key: string): Promise<Combo> {
@@ -227,13 +228,87 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
     if (typeof rawId !== "string" || !rawId.trim()) throw new ConfirmedComboWrite("Combos confirmó HTTP 201, pero el DTO no contiene un combo_id válido. La intención queda protegida para reconciliación; no la repitas.");
     const id = rawId; const fingerprint = key.slice("create:".length);
     confirmedCreates.set(fingerprint, id);
-    try { if (typeof sessionStorage !== "undefined") sessionStorage.setItem(`${confirmedPrefix}${fingerprint}`, id); } catch { /* runtime latch retains the confirmed resource id */ }
+    try { if (typeof sessionStorage !== "undefined" && sessionStorage.getItem(`${confirmedPrefix}${fingerprint}`) === null) sessionStorage.setItem(`${confirmedPrefix}${fingerprint}`, id); } catch { /* runtime latch retains the confirmed resource id */ }
     const result = await presentConfirmed(value);
     confirmedCreates.delete(fingerprint);
     try { if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(`${confirmedPrefix}${fingerprint}`); } catch { /* current runtime already reconciled */ }
     return result;
   }
-  return {
+  function readPendingCreate(): PendingComboCreate | null {
+    const userId = scopeId();
+    if (!userId) throw new Error("Inicia sesión para consultar una creación pendiente.");
+    let keys: string[];
+    try { keys = typeof sessionStorage === "undefined" ? [] : Object.keys(sessionStorage).filter(key => key.startsWith(uncertaintyPrefix) || key.startsWith(confirmedPrefix)); }
+    catch (error) { throw new Error("No se pudo verificar el almacenamiento de recuperación; creación bloqueada.", { cause: error }); }
+    const records: PendingComboCreate[] = [];
+    for (const storageKey of keys) {
+      let stored: Record<string, unknown>;
+      try { stored = object(JSON.parse(sessionStorage.getItem(storageKey) ?? "null")); }
+      catch (error) { throw new Error("Hay un registro de creación pendiente corrupto. La creación está bloqueada para evitar duplicados.", { cause: error }); }
+      if (storageKey.startsWith(confirmedPrefix)) {
+        if (typeof stored.intent !== "string" || !stored.intent.startsWith("create:")) throw new Error("El registro de confirmación de creación está corrupto. La operación queda bloqueada.");
+      } else if (typeof stored.intent !== "string" || !stored.intent.startsWith("create:")) continue;
+      if (stored.user !== userId) throw new Error("Hay una creación pendiente asociada a otra identidad. Inicia sesión con esa identidad para recuperarla.");
+      if (typeof stored.body !== "string" || typeof stored.idempotencyKey !== "string" || !/^[0-9a-f-]{36}$/.test(stored.idempotencyKey))
+        throw new Error("El registro de creación pendiente está incompleto o corrupto. La operación queda bloqueada.");
+      let body: Record<string, unknown>;
+      try { body = object(JSON.parse(stored.body)); } catch (error) { throw new Error("El payload guardado de creación está corrupto. La operación queda bloqueada.", { cause: error }); }
+      if (typeof body.nombre !== "string" || !Array.isArray(body.componentes)) throw new Error("El payload guardado de creación está incompleto o corrupto. La operación queda bloqueada.");
+      const components = Array.isArray(body.componentes) ? body.componentes : [];
+      const componentSkus = components.map(item => text(object(item).sku));
+      const confirmedRaw = storageKey.startsWith(confirmedPrefix) ? JSON.stringify(stored) : sessionStorage.getItem(`${confirmedPrefix}${stored.intent.slice("create:".length)}`);
+      let confirmedId: string | null = null;
+      if (confirmedRaw) { try { const confirmedValue = object(JSON.parse(confirmedRaw)); confirmedId = confirmedValue.user === userId && confirmedValue.intent === stored.intent ? text(confirmedValue.comboId) : null; } catch { confirmedId = confirmedRaw; } }
+      records.push({ name: body.nombre, componentSkus, body: stored.body, idempotencyKey: stored.idempotencyKey, comboId: typeof stored.comboId === "string" ? stored.comboId : confirmedId });
+    }
+    if (records.length > 1) throw new Error("Hay varias creaciones pendientes; la recuperación está bloqueada para evitar seleccionar una intención incorrecta.");
+    return records[0] ?? null;
+  }
+  async function recoverPendingCreate(): Promise<Combo> {
+    const pending = readPendingCreate();
+    if (!pending) throw new Error("No hay una creación pendiente para recuperar.");
+    if (pending.comboId) {
+      const combo = await repository.getById(pending.comboId);
+      if (!combo) throw new Error(`La creación ${pending.comboId} fue confirmada, pero el detalle aún no está disponible. Reintenta la conciliación.`);
+      await clearPendingCreate(pending);
+      return combo;
+    }
+    const userId = scopeId();
+    const digest = await createFingerprint(userId!, pending.body);
+    const intent = `create:${digest}`;
+    const markerKey = `${uncertaintyPrefix}${[...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${userId}\u0000${intent}`)))].map(value => value.toString(16).padStart(2, "0")).join("")}`;
+    const marker = object(JSON.parse(sessionStorage.getItem(markerKey) ?? "null"));
+    if (marker.user !== userId || marker.intent !== intent || marker.body !== pending.body || marker.idempotencyKey !== pending.idempotencyKey)
+      throw new Error("La creación pendiente cambió durante la recuperación. No se envió una solicitud.");
+    if (scopeId() !== userId) throw new Error("La identidad cambió antes de conciliar la creación. No se envió una solicitud.");
+    if (activeWrites.has(`${userId}:${intent}`)) throw new Error("La recuperación de esta creación ya está en curso.");
+    activeWrites.add(`${userId}:${intent}`);
+    try {
+      const dto = await request("/api/v1/combos/administracion", "POST", undefined, pending.body, 201, pending.idempotencyKey);
+      if (scopeId() !== userId) throw new Error("La identidad cambió durante la recuperación. La respuesta no se presenta en esta sesión.");
+      const comboId = text(object(dto).combo_id);
+      marker.comboId = comboId;
+      sessionStorage.setItem(markerKey, JSON.stringify(marker));
+      const result = await presentConfirmed(dto);
+      await clearPendingCreate(pending);
+      return result;
+    } finally { activeWrites.delete(`${userId}:${intent}`); }
+  }
+  async function clearPendingCreate(pending: PendingComboCreate): Promise<void> {
+    const userId = scopeId();
+    if (!userId) return;
+    const fingerprint = await createFingerprint(userId, pending.body);
+    const intent = `create:${fingerprint}`;
+    const markerDigest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${userId}\u0000${intent}`)))].map(value => value.toString(16).padStart(2, "0")).join("");
+    uncertain.delete(`${userId}:${intent}`);
+    try {
+      sessionStorage.removeItem(`${uncertaintyPrefix}${markerDigest}`);
+      sessionStorage.removeItem(`${confirmedPrefix}${fingerprint}`);
+    } catch { /* local recovery metadata remains non-authoritative */ }
+  }
+  const repository: CombosRepository = {
+    getPendingCreate: async () => readPendingCreate(),
+    recoverPendingCreate,
     async list(query: ComboQuery, signal): Promise<ComboPage> {
       const params = new URLSearchParams({ pagina: String(query.page), tamanio: String(query.pageSize) });
       if (query.status !== "TODOS") params.set("estado", query.status);
@@ -243,22 +318,27 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
       const rawItems: unknown[] = dto.items;
       const page = integer(meta.pagina, 1), pageSize = integer(meta.tamanio, 1), total = integer(meta.total);
       if (page !== query.page || pageSize !== query.pageSize) throw new Error("Combos devolvió una página distinta de la solicitada.");
-      const items: Combo[] = new Array(rawItems.length);
-      let next = 0;
-      await Promise.all(Array.from({ length: Math.min(4, rawItems.length) }, async () => {
-        for (;;) {
-          const index = next++;
-          if (index >= rawItems.length) return;
-          items[index] = mapCombo(rawItems[index], signal);
-        }
-      }));
+      const skuGroups = rawItems.map(value => {
+        const item = object(value);
+        if (!Array.isArray(item.components)) throw new Error("Combos devolvió componentes incompletos.");
+        return item.components.map(component => text(object(component).sku));
+      });
+      const skus = skuGroups.flat();
+      let resolved: ResolvedSku[] = [];
+      try { resolved = skus.length ? await catalog.resolveSkus(skus, signal) : []; } catch { /* fail closed: retain SKU identity, mark product name unverified */ }
+      const items = rawItems.map(value => mapCombo(value, resolved));
       return { items, page, pageSize, total };
     },
     async getById(id, signal) {
       let dto: unknown;
       try { dto = await request(`/api/v1/combos/${encodeURIComponent(id)}`, "GET", signal); }
       catch (error) { if (error instanceof Error && error.message.includes("HTTP 404")) return null; throw error; }
-      return mapCombo(dto, signal);
+      const value = object(dto);
+      if (!Array.isArray(value.components)) throw new Error("Combos devolvió componentes incompletos.");
+      const skus = value.components.map(component => text(object(component).sku));
+      let resolved: ResolvedSku[] = [];
+      try { resolved = await catalog.resolveSkus(skus, signal); } catch { /* explicit unverified product name below */ }
+      return mapCombo(dto, resolved);
     },
     async readAvailability(comboId, status, signal) {
       const value = await request(`/api/v1/combos/${encodeURIComponent(comboId)}/disponibilidad`, "GET", signal);
@@ -268,6 +348,9 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
       const owner = scopeId();
       if (!owner) throw new Error("Inicia sesión para crear un combo.");
       const body = JSON.stringify(toPayload(payload));
+      const pending = readPendingCreate();
+      if (pending?.comboId) throw new Error(`La creación ${pending.comboId} ya tiene identidad confirmada. Recupera su detalle antes de iniciar otra intención.`);
+      if (pending && pending.body !== body) throw new Error("Hay una creación anterior pendiente. Recupera exactamente esa intención antes de iniciar otra; no se envió un nuevo POST.");
       const key = `create:${await createFingerprint(owner, body)}`;
       const otherUncertainCreate = [...uncertain].find((intent) => intent.startsWith(`${owner}:create:`) && intent !== `${owner}:${key}`);
       if (otherUncertainCreate) throw new Error("Hay una creación anterior con resultado incierto. Consulta/reconcilia esa intención antes de iniciar otra; no se envió un nuevo POST.");
@@ -286,7 +369,7 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
         if (typeof id !== "string" || !id.trim()) throw new ConfirmedComboWrite("Combos confirmó HTTP 201, pero el DTO no contiene un combo_id válido.");
         const fingerprint = key.slice("create:".length);
         confirmedCreates.set(fingerprint, id);
-        try { sessionStorage.setItem(`${confirmedPrefix}${fingerprint}`, id); }
+        try { sessionStorage.setItem(`${confirmedPrefix}${fingerprint}`, JSON.stringify({ user: owner, intent: key, body: attempt.body, idempotencyKey: attempt.idempotencyKey, comboId: id })); }
         catch { throw new ConfirmedComboWrite("Combos confirmó HTTP 201, pero no se pudo guardar la referencia de reconciliación."); }
         return dto;
       }, { owner, body });
@@ -297,4 +380,5 @@ export function createHttpCombosRepository(client: AuthenticatedGatewayClient, c
     async update(id, payload) { const key = `update:${id}`; const confirmed = await write(key, () => request(`/api/v1/combos/${encodeURIComponent(id)}`, "PATCH", undefined, toPayload(payload))); return presentConfirmed(confirmed); },
     async deactivate(id) { const key = `deactivate:${id}`; const confirmed = await write(key, () => request(`/api/v1/combos/${encodeURIComponent(id)}/desactivar`, "POST", undefined, {}, 200)); return presentConfirmed(confirmed); },
   };
+  return repository;
 }
