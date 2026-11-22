@@ -32,10 +32,8 @@ export function ProductDeactivationDialog({
 
   const handleConfirm = async () => {
     if (isUnknownError || isUnknown(product.id)) {
-      const ok = await reconcile(product.id, "INACTIVO");
-      if (ok) {
-        onSuccess({ ...product, status: "INACTIVO" });
-      }
+      const current = await reconcile(product.id, "INACTIVO");
+      if (current) onSuccess(current);
       return;
     }
 

@@ -60,10 +60,8 @@ export function ProductActivationDialog({
 
   const handleConfirm = async () => {
     if (isUnknownError || isUnknown(product.id)) {
-      const ok = await reconcile(product.id, "ACTIVO");
-      if (ok) {
-        onSuccess({ ...product, status: "ACTIVO" });
-      }
+      const current = await reconcile(product.id, "ACTIVO");
+      if (current) onSuccess(current);
       return;
     }
 

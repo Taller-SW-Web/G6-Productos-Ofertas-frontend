@@ -10,6 +10,8 @@ import {
   array,
   blockedCatalog,
   boolean,
+  CATALOG_RETRY_AFTER_MS,
+  CATALOG_RESPONSE_CORRELATION_ID,
   choice,
   createCatalogHttp,
   encoded,
@@ -40,12 +42,14 @@ export function createHttpCatalogRepository(
   const variantPath = (pid: string, vid?: string) =>
     `${productPath(pid)}/variantes${vid === undefined ? "" : "/" + encoded(vid)}`;
   const preparation = async (id: string, signal?: AbortSignal) => {
-    const result = mapPreparation(
-      await request(`${productPath(id)}/preparacion`, "GET", undefined, signal),
-    );
+    const raw = await request(`${productPath(id)}/preparacion`, "GET", undefined, signal);
+    const result = mapPreparation(raw);
     if (result.productId !== id)
       return blockedCatalog("La preparación pertenece a otro producto.");
-    return result;
+    const retryAfterMs = raw && typeof raw === "object"
+      ? (raw as Record<PropertyKey, unknown>)[CATALOG_RETRY_AFTER_MS]
+      : undefined;
+    return typeof retryAfterMs === "number" ? { ...result, retryAfterMs } : result;
   };
   // Type/unit come from the published characteristic GET. The response already
   // separates identifying/non-identifying values; no roles are inferred here.
@@ -200,16 +204,69 @@ export function createHttpCatalogRepository(
     signal: AbortSignal | undefined,
     map: (value: unknown) => Promise<T>,
     status = 200,
+    validate?: (value: unknown) => void,
   ): Promise<T> => {
     const result = await request(path, method, body, signal, status);
     try {
-      return await map(result);
-    } catch {
+      validate?.(result);
+    } catch (error) {
+      const response = result && typeof result === "object" && !Array.isArray(result)
+        ? result as Record<PropertyKey, unknown>
+        : {};
+      const operationId = response.operation_id;
+      const bodyCorrelationId = response.correlation_id;
+      const headerCorrelationId = response[CATALOG_RESPONSE_CORRELATION_ID];
       throw new CatalogError(
         "write_unknown",
-        "El servicio confirmó la escritura, pero no se pudo recuperar toda la vista administrativa. No repita el envío; consulte el registro y su preparación.",
+        "El servidor respondió con éxito, pero el payload no cumple el contrato. El resultado de negocio permanece incierto; consulte el estado antes de cualquier reenvío.",
+        { responseReceived: "true", payloadValid: "false", reason: error instanceof Error ? error.message : "invalid_payload", ...(typeof operationId === "string" ? { operationId } : {}), ...(typeof bodyCorrelationId === "string" ? { correlationId: bodyCorrelationId } : typeof headerCorrelationId === "string" ? { correlationId: headerCorrelationId } : {}) },
       );
     }
+    try {
+      return await map(result);
+    } catch {
+      const response = result && typeof result === "object" && !Array.isArray(result)
+        ? result as Record<PropertyKey, unknown>
+        : {};
+      const operationId = response.operation_id;
+      const bodyCorrelationId = response.correlation_id;
+      const headerCorrelationId = response[CATALOG_RESPONSE_CORRELATION_ID];
+      throw new CatalogError(
+        validate ? "write_acknowledged" : "write_unknown",
+        validate
+          ? "Catálogo reconoció la escritura con una respuesta contractual válida, pero falló una lectura administrativa de enriquecimiento. Consulte nuevamente el estado administrativo antes de otra mutación."
+          : "La respuesta fue exitosa, pero no hay evidencia contractual suficiente para confirmar el resultado. No repita el envío; consulte el estado administrativo.",
+        {
+          serverAcknowledged: String(Boolean(validate)),
+          ...(typeof operationId === "string" ? { operationId } : {}),
+          ...(typeof bodyCorrelationId === "string" ? { correlationId: bodyCorrelationId } : typeof headerCorrelationId === "string" ? { correlationId: headerCorrelationId } : {}),
+        },
+      );
+    }
+  };
+  const validateProductWrite = (value: unknown, expectedId?: string) => {
+    const dto = object(value);
+    const id = string(dto.product_id);
+    if (expectedId && id !== expectedId) blockedCatalog("La respuesta pertenece a otro producto.");
+    string(dto.name);
+    if (dto.description !== null && typeof dto.description !== "string") blockedCatalog("Descripción contractual inválida.");
+    if (dto.sku_base !== null && typeof dto.sku_base !== "string") blockedCatalog("SKU base contractual inválido.");
+    choice(dto.status, ["BORRADOR", "ACTIVO", "INACTIVO"] as const);
+    integer(dto.catalog_version);
+    boolean(dto.tiene_variantes);
+    string(dto.categoria_id); string(dto.marca_id); string(dto.tipo_producto_id);
+    array(dto.attributes); array(dto.images); array(dto.variants);
+    if (dto.perfil_fisico !== null && (typeof dto.perfil_fisico !== "object" || Array.isArray(dto.perfil_fisico))) blockedCatalog("Perfil físico contractual inválido.");
+  };
+  const validateVariantWrite = (value: unknown, expectedId?: string) => {
+    const dto = object(value);
+    const id = string(dto.variant_id);
+    if (expectedId && id !== expectedId) blockedCatalog("La respuesta pertenece a otra variante.");
+    string(dto.sku);
+    choice(dto.status, ["BORRADOR", "ACTIVA", "INACTIVA"] as const);
+    integer(dto.catalog_version);
+    array(dto.identifying_attributes); array(dto.non_identifying_attributes); array(dto.images);
+    if (dto.physical_profile !== null && (typeof dto.physical_profile !== "object" || Array.isArray(dto.physical_profile))) blockedCatalog("Perfil físico contractual inválido.");
   };
   const productBody = (p: ProductCreatePayload | ProductUpdatePayload) => ({
     ...p,
@@ -240,6 +297,8 @@ export function createHttpCatalogRepository(
       undefined,
       signal,
       (value) => variantResult(value, pid, signal, vid),
+      200,
+      value => validateVariantWrite(value, vid),
     ),
     // Variante does not publish the updated parent status. Do not derive it from a page.
   });
@@ -279,6 +338,7 @@ export function createHttpCatalogRepository(
       if (q.q) params.set("q", q.q);
       if (categoryId) params.set("categoriaId", categoryId);
       if (status) params.set("estado", status);
+      if (q.channel) params.set("canal", q.channel);
       for (const id of typeIdsIncluded)
         params.append("tipoProductoIdsIncluidos", id);
       for (const id of typeIdsExcluded)
@@ -598,22 +658,31 @@ export function createHttpCatalogRepository(
         sig,
         (value) => productResult(value, sig),
         201,
+        value => validateProductWrite(value),
       ),
     update: (id, p, _sc, sig) =>
       write(productPath(id), "PATCH", productBody(p), sig, (value) =>
         productResult(value, sig, id),
+        200,
+        value => validateProductWrite(value, id),
       ),
     activate: (id, p, _sc, sig) =>
       write(`${productPath(id)}/activar`, "POST", p ?? {}, sig, (value) =>
         productResult(value, sig, id),
+        200,
+        value => validateProductWrite(value, id),
       ),
     deactivate: (id, p, _sc, sig) =>
       write(`${productPath(id)}/desactivar`, "POST", p ?? {}, sig, (value) =>
         productResult(value, sig, id),
+        200,
+        value => validateProductWrite(value, id),
       ),
     reactivate: (id, p, _sc, sig) =>
       write(`${productPath(id)}/reactivar`, "POST", p ?? {}, sig, (value) =>
         productResult(value, sig, id),
+        200,
+        value => validateProductWrite(value, id),
       ),
     getPreparation: (id, _sc, sig) => preparation(id, sig),
     retryPreparation: (id, p, _sc, sig) =>
@@ -707,6 +776,7 @@ export function createHttpCatalogRepository(
         sig,
         (value) => variantResult(value, pid, sig),
         201,
+        value => validateVariantWrite(value),
       );
     },
     updateVariant: (pid, vid, p, _sc, sig) =>
@@ -727,6 +797,8 @@ export function createHttpCatalogRepository(
         },
         sig,
         (value) => variantResult(value, pid, sig, vid),
+        200,
+        value => validateVariantWrite(value, vid),
       ),
     activateVariant: (pid, vid, _sc, sig) =>
       variantState(pid, vid, "activar", sig),

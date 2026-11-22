@@ -1,157 +1,113 @@
-import { useState, useCallback } from "react";
+import { useCallback, useContext, useRef, useState } from "react";
 import type { VariantMutationResult } from "../services/catalogRepository";
 import { CatalogError } from "../services/catalogRepository";
 import { useCatalogServices } from "./useCatalogServices";
 import { PromotionSessionContext } from "../../../app/config/PromotionSessionContext";
-import { useContext } from "react";
+import { clearCatalogStateIntent, isVariantStatus, nextCatalogStatus, readCatalogStateIntent, saveCatalogStateIntent, type CatalogStateAction, type CatalogStateIntent } from "../services/catalogStateIntent";
 
-const unknownKey = (user: string, productId: string, variantId: string) => `g6:catalog:uncertain:variant:${encodeURIComponent(user)}:${productId}:${variantId}`;
-const unknownVariants = new Set<string>();
-const intentKey = (productId: string, variantId: string) => `${productId}\u0000${variantId}`;
-const hasUnknown = (user: string, productId: string, variantId: string) => unknownVariants.has(`${user}:${intentKey(productId, variantId)}`) || (() => {
-  try { return typeof sessionStorage !== "undefined" && sessionStorage.getItem(unknownKey(user, productId, variantId)) === "1"; } catch { return false; }
-})();
+type SessionIdentity = { userId: string; sessionExpiresAt: number | null; sessionVersion: number; sessionRoles: readonly string[] };
+function sameIdentity(a: SessionIdentity | null, b: SessionIdentity): boolean {
+  return Boolean(a && a.userId === b.userId && a.sessionExpiresAt === b.sessionExpiresAt && a.sessionVersion === b.sessionVersion && JSON.stringify(a.sessionRoles) === JSON.stringify(b.sessionRoles));
+}
 
 export interface UseVariantStateMutationResult {
   loading: boolean;
   error: string | null;
   result: VariantMutationResult | null;
-  activate: (
-    productId: string,
-    variantId: string,
-    scenario?: string,
-  ) => Promise<VariantMutationResult>;
-  deactivate: (
-    productId: string,
-    variantId: string,
-    scenario?: string,
-  ) => Promise<VariantMutationResult>;
-  reactivate: (
-    productId: string,
-    variantId: string,
-    scenario?: string,
-  ) => Promise<VariantMutationResult>;
+  activate: (productId: string, variantId: string, scenario?: string) => Promise<VariantMutationResult>;
+  deactivate: (productId: string, variantId: string, scenario?: string) => Promise<VariantMutationResult>;
+  reactivate: (productId: string, variantId: string, scenario?: string) => Promise<VariantMutationResult>;
   clearError: () => void;
   isUnknownError: boolean;
-  reconcile: (productId: string, variantId: string, expected: "ACTIVA" | "INACTIVA") => Promise<boolean>;
+  reconcile: (productId: string, variantId: string, expected: "ACTIVA" | "INACTIVA") => Promise<VariantMutationResult | null>;
   isUnknown: (productId: string, variantId: string) => boolean;
 }
 
 export function useVariantStateMutation(): UseVariantStateMutationResult {
   const { catalog: catalogService } = useCatalogServices();
   const session = useContext(PromotionSessionContext);
-  const userId = useCallback(() => session?.snapshot().user?.id ?? "session-unavailable", [session]);
+  const identity = useCallback(() => {
+    const view = session?.snapshot();
+    const userId = view?.user?.id;
+    return userId ? { userId, sessionExpiresAt: view.expiresAt, sessionVersion: session?.getSessionVersion() ?? 0, sessionRoles: [...(view.user?.roles ?? [])].sort() } : null;
+  }, [session]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<VariantMutationResult | null>(null);
   const [isUnknownError, setIsUnknownError] = useState(false);
+  const inFlight = useRef(false);
 
-  const clearError = useCallback(() => {
-    setError(null);
-  }, []);
-  const reconcile = useCallback(async (productId: string, variantId: string, expected: "ACTIVA" | "INACTIVA") => {
-    const owner = userId();
+  const clearError = useCallback(() => { setError(null); setIsUnknownError(false); }, []);
+  const isUnknown = useCallback((productId: string, variantId: string) => {
+    const owner = identity();
+    return owner ? readCatalogStateIntent(owner, "variant", productId, variantId) !== null : false;
+  }, [identity]);
+
+  const execute = useCallback(async (productId: string, variantId: string, action: CatalogStateAction, scenario?: string): Promise<VariantMutationResult> => {
+    const owner = identity();
+    if (!owner) throw new CatalogError("session", "Se requiere una sesión administrativa vigente para cambiar el estado.");
+    if (inFlight.current) throw new CatalogError("conflict", "La mutación ya está en curso.");
+    const existing = readCatalogStateIntent(owner, "variant", productId, variantId);
+    if (existing) { setIsUnknownError(true); throw new CatalogError("write_unknown", "Existe una intención pendiente para esta variante; no se reenviará automáticamente."); }
+    inFlight.current = true; setLoading(true); clearError();
+    let intent: CatalogStateIntent | null = null;
+    try {
+      // Only the current authorized administrative read can establish the version/status precondition.
+      const current = await catalogService.getVariantById(productId, variantId, scenario);
+      if (!sameIdentity(identity(), owner)) throw new CatalogError("session", "La sesión o sus permisos cambiaron durante la lectura; no se envió la mutación.");
+      if (!current || current.productId !== productId || current.variantId !== variantId || !isVariantStatus(current.status)) throw new CatalogError("blocked_contract", "La lectura administrativa no confirma identidad y estado de la variante.");
+      const allowed = action === "activate" ? current.status === "BORRADOR" : action === "reactivate" ? current.status === "INACTIVA" : current.status === "ACTIVA";
+      if (!allowed) throw new CatalogError("conflict", "El estado administrativo actual no permite esta acción.");
+      intent = { schemaVersion: 2, entity: "variant", ...owner, productId, variantId, action, priorStatus: current.status, expectedStatus: nextCatalogStatus(action) === "ACTIVO" ? "ACTIVA" : "INACTIVA", priorVersion: current.catalogVersion, phase: "dispatching", updatedAt: Date.now() };
+      if (!saveCatalogStateIntent(intent)) throw new CatalogError("write_unknown", "No se pudo preservar la intención en esta sesión; no se envió la mutación.");
+      if (!sameIdentity(identity(), owner)) throw new CatalogError("session", "La sesión o sus permisos cambiaron antes del envío; no se envió la mutación.");
+      // OpenAPI 0.7.0-rc.2 publishes these variant state POSTs without a request body.
+      const response = action === "activate" ? await catalogService.activateVariant(productId, variantId, scenario)
+        : action === "deactivate" ? await catalogService.deactivateVariant(productId, variantId, scenario)
+          : await catalogService.reactivateVariant(productId, variantId, scenario);
+      if (!sameIdentity(identity(), owner)) return response;
+      clearCatalogStateIntent(intent); setResult(response); return response;
+    } catch (err) {
+      if (intent) {
+        if (err instanceof CatalogError && (err.kind === "write_unknown" || err.kind === "write_acknowledged")) {
+          intent = { ...intent, phase: err.kind === "write_acknowledged" ? "acknowledged" : "uncertain", correlationId: err.details?.correlationId, operationId: err.details?.operationId, updatedAt: Date.now() };
+          saveCatalogStateIntent(intent);
+        } else clearCatalogStateIntent(intent);
+      }
+      if (sameIdentity(identity(), owner)) {
+        setError(err instanceof Error ? err.message : "Error inesperado al cambiar el estado de la variante.");
+        setIsUnknownError(intent !== null && (intent.phase === "uncertain" || intent.phase === "acknowledged"));
+      }
+      throw err;
+    } finally { inFlight.current = false; setLoading(false); }
+  }, [catalogService, clearError, identity]);
+
+  const reconcile = useCallback(async (productId: string, variantId: string, expected: "ACTIVA" | "INACTIVA"): Promise<VariantMutationResult | null> => {
+    const owner = identity();
+    if (!owner) return null;
+    const intent = readCatalogStateIntent(owner, "variant", productId, variantId);
+    if (!intent || intent.expectedStatus !== expected) return null;
     try {
       const current = await catalogService.getVariantById(productId, variantId);
-      if (userId() !== owner) { setError("La sesión cambió durante la reconciliación; la intención original se conserva."); return false; }
-      if (current?.status === expected) {
-        try { sessionStorage.removeItem(unknownKey(owner, productId, variantId)); } catch { /* current session state is authoritative */ }
-        unknownVariants.delete(`${owner}:${intentKey(productId, variantId)}`);
-        setIsUnknownError(false); setError(null); return true;
+      if (!sameIdentity(identity(), owner)) return null;
+      if (!current || current.productId !== productId || current.variantId !== variantId || current.status !== expected || current.catalogVersion <= intent.priorVersion) {
+        setError("La lectura administrativa no confirma el estado y la versión esperados; la intención se conserva."); setIsUnknownError(true); return null;
       }
-      setError(`La consulta no confirmó el estado ${expected}; no se reenviará la mutación.`); return false;
-    } catch { setError("No se pudo consultar el estado de la variante; no se reenviará la mutación."); return false; }
-  }, [catalogService, userId]);
-  const isUnknown = useCallback((productId: string, variantId: string) => hasUnknown(userId(), productId, variantId), [userId]);
-
-  const activate = useCallback(
-    async (productId: string, variantId: string, scenario?: string) => {
-      const owner = userId();
-      if (isUnknownError || hasUnknown(owner, productId, variantId)) throw new Error("Resultado de escritura incierto; consulta el estado antes de volver a operar.");
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await catalogService.activateVariant(productId, variantId, scenario);
-        if (userId() !== owner) throw new Error("La variante fue modificada por otra identidad; no se muestra el resultado en la sesión actual.");
-        setResult(res);
-        return res;
-      } catch (err) {
-        const msg =
-          err instanceof CatalogError
-            ? err.message
-            : "Error inesperado al activar la variante.";
-        if (userId() === owner) setError(msg);
-        if (err instanceof CatalogError && err.kind === "write_unknown") { unknownVariants.add(`${owner}:${intentKey(productId, variantId)}`); try { sessionStorage.setItem(unknownKey(owner, productId, variantId), "1"); } catch { /* module latch */ } if (userId() === owner) setIsUnknownError(true); }
-        throw err;
-      } finally {
-        setLoading(false);
+      if (intent.phase !== "acknowledged") {
+        setError("El estado observado es compatible, pero no atribuye la operación pendiente. La intención se conserva y no se reenvía."); setIsUnknownError(true); return null;
       }
-    },
-    [catalogService, isUnknownError, userId],
-  );
-
-  const deactivate = useCallback(
-    async (productId: string, variantId: string, scenario?: string) => {
-      const owner = userId();
-      if (isUnknownError || hasUnknown(owner, productId, variantId)) throw new Error("Resultado de escritura incierto; consulta el estado antes de volver a operar.");
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await catalogService.deactivateVariant(productId, variantId, scenario);
-        if (userId() !== owner) throw new Error("La variante fue modificada por otra identidad; no se muestra el resultado en la sesión actual.");
-        setResult(res);
-        return res;
-      } catch (err) {
-        const msg =
-          err instanceof CatalogError
-            ? err.message
-            : "Error inesperado al desactivar la variante.";
-        if (userId() === owner) setError(msg);
-        if (err instanceof CatalogError && err.kind === "write_unknown") { unknownVariants.add(`${owner}:${intentKey(productId, variantId)}`); try { sessionStorage.setItem(unknownKey(owner, productId, variantId), "1"); } catch { /* module latch */ } if (userId() === owner) setIsUnknownError(true); }
-        throw err;
-      } finally {
-        setLoading(false);
-      }
-    },
-    [catalogService, isUnknownError, userId],
-  );
-
-  const reactivate = useCallback(
-    async (productId: string, variantId: string, scenario?: string) => {
-      const owner = userId();
-      if (isUnknownError || hasUnknown(owner, productId, variantId)) throw new Error("Resultado de escritura incierto; consulta el estado antes de volver a operar.");
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await catalogService.reactivateVariant(productId, variantId, scenario);
-        if (userId() !== owner) throw new Error("La variante fue modificada por otra identidad; no se muestra el resultado en la sesión actual.");
-        setResult(res);
-        return res;
-      } catch (err) {
-        const msg =
-          err instanceof CatalogError
-            ? err.message
-            : "Error inesperado al reactivar la variante.";
-        if (userId() === owner) setError(msg);
-        if (err instanceof CatalogError && err.kind === "write_unknown") { unknownVariants.add(`${owner}:${intentKey(productId, variantId)}`); try { sessionStorage.setItem(unknownKey(owner, productId, variantId), "1"); } catch { /* module latch */ } if (userId() === owner) setIsUnknownError(true); }
-        throw err;
-      } finally {
-        setLoading(false);
-      }
-    },
-    [catalogService, isUnknownError, userId],
-  );
+      clearCatalogStateIntent(intent); setError(null); setIsUnknownError(false);
+      const reconciled = { variant: current };
+      setResult(reconciled); return reconciled;
+    } catch {
+      setError("No se pudo completar la lectura administrativa autorizada; la intención se conserva."); setIsUnknownError(true); return null;
+    }
+  }, [catalogService, identity]);
 
   return {
-    loading,
-    error,
-    result,
-    activate,
-    deactivate,
-    reactivate,
-    clearError,
-    isUnknownError,
-    reconcile,
-    isUnknown,
+    loading, error, result, clearError, isUnknownError, reconcile, isUnknown,
+    activate: (productId, variantId, scenario) => execute(productId, variantId, "activate", scenario),
+    deactivate: (productId, variantId, scenario) => execute(productId, variantId, "deactivate", scenario),
+    reactivate: (productId, variantId, scenario) => execute(productId, variantId, "reactivate", scenario),
   };
 }

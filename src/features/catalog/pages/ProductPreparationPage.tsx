@@ -36,7 +36,6 @@ import {
   readCatalogScenario,
 } from "../services/catalogPresentation";
 import { ProductActivationDialog } from "../components/ProductActivationDialog";
-import type { ProductDetailView } from "../services/catalogRepository";
 
 export function ProductPreparationPage() {
   const { productId } = useParams<{ productId: string }>();
@@ -49,11 +48,7 @@ export function ProductPreparationPage() {
   const [activateOpened, setActivateOpened] = useState(false);
 
   const fetchedDetailState = useProductDetail(productId || "", scenario, revision);
-  const createdProduct = location.state?.createdProduct as ProductDetailView | undefined;
-  const transientCreated = createdProduct?.id === productId ? createdProduct : undefined;
-  const detailState = transientCreated && ["not_found", "error"].includes(fetchedDetailState.status)
-    ? { status: "success" as const, product: transientCreated }
-    : fetchedDetailState;
+  const detailState = fetchedDetailState;
   const prepState = useProductPreparation(productId || "", scenario, revision);
 
   if (detailState.status === "loading" || prepState.status === "loading") {
