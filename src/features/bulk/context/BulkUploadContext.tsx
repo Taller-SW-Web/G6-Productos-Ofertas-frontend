@@ -24,8 +24,8 @@ export interface BulkSubmissionError {
   category: BulkFailureCategory;
   message: string;
 }
-export type BulkAdmissionTask = AdmissionTask<File> & { owner?: string; contentHash?: string; expectedBatchId?: string };
-type AdmissionIntent = Readonly<{ owner: string; key: string; contentHash: string; batchId: string; correlationId: string }>;
+export type BulkAdmissionTask = AdmissionTask<File> & { owner?: string; contentHash?: string };
+type AdmissionIntent = Readonly<{ owner: string; key: string; contentHash: string; correlationId: string; batchId?: string }>;
 
 interface BulkUploadContextValue {
   selectedFile: File | null;
@@ -39,13 +39,12 @@ interface BulkUploadContextValue {
     task: BulkAdmissionTask,
     status: "ready" | "accepted" | "uncertain",
     error?: BulkSubmissionError | null,
+    batchId?: string,
   ) => boolean;
   submissionError: BulkSubmissionError | null;
   pendingCorrelationId: string | null;
   expectedBatchId: string | null;
-  confirmRecoveredBatch: (batchId: string) => boolean;
   recoveryOwnerIsCurrent: () => boolean;
-  recoveryOwnerId: () => string | null;
 }
 
 const BulkUploadContext = createContext<BulkUploadContextValue | null>(null);
@@ -65,13 +64,6 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
   const selectedIntent = useRef<AdmissionIntent | null>(null);
   const selectedFileRef = useRef<File | null>(null);
   const selectionGenerationRef = useRef(0);
-
-  const deriveBatchId = async (correlationId: string, contentHash: string) => {
-    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${correlationId}:${contentHash}`)));
-    const hex = [...digest].map(value => value.toString(16).padStart(2, "0")).join("");
-    const value = hex.slice(0, 12) + "4" + hex.slice(13, 16) + "8" + hex.slice(17, 20) + hex.slice(20, 32);
-    return [value.slice(0, 8), value.slice(8, 12), value.slice(12, 16), value.slice(16, 20), value.slice(20)].join("-");
-  };
 
   const admissionCoordinatorRef = useRef<AdmissionCoordinator<File> | null>(null);
   if (admissionCoordinatorRef.current == null) {
@@ -104,12 +96,12 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
         const raw = sessionStorage.getItem(intentKey);
         if (raw) {
           const saved = JSON.parse(raw) as { owner?: string; key?: string; contentHash?: string; correlationId?: string; batchId?: string; state?: string };
-          if (saved.owner !== owner || saved.key !== intentKey || saved.contentHash !== fingerprint || !saved.correlationId || !saved.batchId || !["accepted", "uncertain"].includes(saved.state ?? "")) throw new Error("Marcador de admisión incompatible.");
+          if (saved.owner !== owner || saved.key !== intentKey || saved.contentHash !== fingerprint || !saved.correlationId || !["accepted", "uncertain"].includes(saved.state ?? "") || (saved.state === "accepted" && !saved.batchId)) throw new Error("Marcador de admisión incompatible.");
           restored = { correlationId: saved.correlationId, status: saved.state === "accepted" ? "accepted" : "uncertain" };
-          selectedIntent.current = Object.freeze({ owner, key: intentKey, contentHash: fingerprint, batchId: saved.batchId, correlationId: saved.correlationId });
+          selectedIntent.current = Object.freeze({ owner, key: intentKey, contentHash: fingerprint, ...(saved.batchId ? { batchId: saved.batchId } : {}), correlationId: saved.correlationId });
           setPendingCorrelationId(saved.correlationId);
-          setExpectedBatchId(saved.batchId);
-          setSubmissionError(restored.status === "accepted" ? null : { category: "unknown", message: "Importación sin respuesta recuperada. Se consultará el batchId determinista; un 404 no acredita que el POST no se haya aplicado." });
+          setExpectedBatchId(saved.batchId ?? null);
+          setSubmissionError(restored.status === "accepted" ? null : { category: "unknown", message: "La admisión quedó incierta. El contrato no permite consultar por correlación; no se reenviará el archivo." });
         } else setPendingCorrelationId(null);
       } catch {
         restored = { correlationId: "", status: "uncertain" };
@@ -121,10 +113,7 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
     admissionCoordinator?.select(file, restored);
     const correlation = restored?.correlationId ?? admissionCoordinator?.correlationId;
     if (file && owner && intentKey && correlation && fingerprint && !selectedIntent.current) {
-      const batchId = await deriveBatchId(correlation, fingerprint);
-      if (generation !== selectionGenerationRef.current || selectedFileRef.current !== file || session?.snapshot().user?.id !== owner) return;
-      selectedIntent.current = Object.freeze({ owner, key: intentKey, contentHash: fingerprint, batchId, correlationId: correlation });
-      setExpectedBatchId(batchId);
+      selectedIntent.current = Object.freeze({ owner, key: intentKey, contentHash: fingerprint, correlationId: correlation });
     }
     setAdmissionStatus(admissionCoordinator?.status ?? "idle");
     if (!restored) setSubmissionError(null);
@@ -190,38 +179,45 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
           const existingRaw = sessionStorage.getItem(intent.key);
           if (existingRaw !== null) {
             const existing = JSON.parse(existingRaw) as Partial<AdmissionIntent>;
-            if (existing.owner !== immutableIntent.owner || existing.contentHash !== immutableIntent.contentHash || existing.correlationId !== immutableIntent.correlationId || existing.batchId !== immutableIntent.batchId) throw new Error("Marcador distinto para esta intención.");
+            if (existing.owner !== immutableIntent.owner || existing.contentHash !== immutableIntent.contentHash || existing.correlationId !== immutableIntent.correlationId) throw new Error("Marcador distinto para esta intención.");
           }
           sessionStorage.setItem(intent.key, JSON.stringify({ ...immutableIntent, state: "uncertain" }));
         }
         catch {
           admissionCoordinatorRef.current?.finish(task, "ready");
           setAdmissionStatus("ready");
-          setSubmissionError({ category: "unknown", message: "No se pudo guardar la correlación y el batchId; no se envió el archivo." });
+          setSubmissionError({ category: "unknown", message: "No se pudo guardar la correlación; no se envió el archivo." });
           return null;
       }
       }
     }
     if (task) setAdmissionStatus(admissionCoordinatorRef.current?.status ?? "idle");
-    return task ? { ...task, ...(intent ? { owner: intent.owner, contentHash: intent.contentHash, expectedBatchId: intent.batchId } : {}) } : null;
+    return task ? { ...task, ...(intent ? { owner: intent.owner, contentHash: intent.contentHash } : {}) } : null;
   }, [dataMode, session]);
 
   const finishAdmission = useCallback((
     task: BulkAdmissionTask,
     status: "ready" | "accepted" | "uncertain",
     error: BulkSubmissionError | null = null,
+    batchId?: string,
   ) => {
     const coordinator = admissionCoordinatorRef.current;
     const intent = admissionOwnerByCorrelation.current.get(task.correlationId);
-    if (intent && (task.correlationId !== intent.correlationId || task.owner !== intent.owner || task.contentHash !== intent.contentHash || task.expectedBatchId !== intent.batchId || session?.snapshot().user?.id !== intent.owner)) {
+    if (intent && (task.correlationId !== intent.correlationId || task.owner !== intent.owner || task.contentHash !== intent.contentHash || session?.snapshot().user?.id !== intent.owner)) {
       coordinator?.finish(task, status);
       return false;
     }
     if (intent?.key) {
       try {
         const existing = JSON.parse(sessionStorage.getItem(intent.key) ?? "null") as Partial<AdmissionIntent> | null;
-        if (!existing || existing.owner !== intent.owner || existing.key !== intent.key || existing.contentHash !== intent.contentHash || existing.correlationId !== intent.correlationId || existing.batchId !== intent.batchId) return false;
-        if (status === "accepted" || status === "uncertain") sessionStorage.setItem(intent.key, JSON.stringify({ ...intent, state: status }));
+        if (!existing || existing.owner !== intent.owner || existing.key !== intent.key || existing.contentHash !== intent.contentHash || existing.correlationId !== intent.correlationId) return false;
+        if (status === "accepted") {
+          if (!batchId) return false;
+          const acceptedIntent = Object.freeze({ ...intent, batchId });
+          selectedIntent.current = acceptedIntent;
+          setExpectedBatchId(batchId);
+          sessionStorage.setItem(intent.key, JSON.stringify({ ...acceptedIntent, state: status }));
+        } else if (status === "uncertain") sessionStorage.setItem(intent.key, JSON.stringify({ ...intent, state: status }));
         else sessionStorage.removeItem(intent.key);
       } catch { /* repository-level marker remains fail-closed */ }
       if (status !== "uncertain") setPendingCorrelationId(null);
@@ -232,20 +228,7 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
     return true;
   }, [session]);
 
-  const confirmRecoveredBatch = useCallback((batchId: string) => {
-    const intent = selectedIntent.current;
-    if (!intent || intent.batchId !== batchId || session?.snapshot().user?.id !== intent.owner) return false;
-    try {
-      const existing = JSON.parse(sessionStorage.getItem(intent.key) ?? "null") as Partial<AdmissionIntent> | null;
-      if (!existing || existing.owner !== intent.owner || existing.key !== intent.key || existing.contentHash !== intent.contentHash || existing.correlationId !== intent.correlationId || existing.batchId !== intent.batchId) return false;
-      sessionStorage.setItem(intent.key, JSON.stringify({ ...intent, state: "accepted" }));
-    } catch { /* confirmed GET remains available in the current route */ }
-    setAdmissionStatus("accepted");
-    setSubmissionError(null);
-    return true;
-  }, [session]);
   const recoveryOwnerIsCurrent = useCallback(() => selectedIntent.current?.owner === session?.snapshot().user?.id, [session]);
-  const recoveryOwnerId = useCallback(() => selectedIntent.current?.owner ?? null, []);
 
   return (
     <BulkUploadContext.Provider
@@ -261,9 +244,7 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
         submissionError,
         pendingCorrelationId,
         expectedBatchId,
-        confirmRecoveredBatch,
         recoveryOwnerIsCurrent,
-        recoveryOwnerId,
       }}
     >
       {children}

@@ -7,6 +7,19 @@ export type BatchQueryState =
   | { status: "not_found" }
   | { status: "error"; message: string };
 
+export function shouldPollBatch(batch: BulkImportBatch | null | undefined): boolean {
+  return batch?.status === "QUEUED" || batch?.status === "PROCESSING";
+}
+
+export function shouldPollExport(job: BulkExportJob | null | undefined): boolean {
+  return job?.status === "QUEUED" || job?.status === "PROCESSING";
+}
+
+export function getBulkPollDelay(attempt: number, random = Math.random): number {
+  const base = Math.min(2_000 * 2 ** Math.max(0, attempt), 30_000);
+  return Math.round(base * (0.8 + random() * 0.4));
+}
+
 export interface BatchQueryResponse {
   key: string;
   state: BatchQueryState;

@@ -16,6 +16,9 @@ import {
   canResumeBatch,
   isExportSnapshotStale,
   resumeBatchWhenAllowed,
+  getBulkPollDelay,
+  shouldPollBatch,
+  shouldPollExport,
   selectBatchQueryView,
   type BatchQueryState,
 } from "./bulkQueryState";
@@ -45,25 +48,40 @@ export function useBulkBatch(batchId: string | undefined) {
   useEffect(() => {
     if (!batchId) return;
     const controller = new AbortController();
-    void repository.getImport(batchId, controller.signal).then(
-      (result) => {
-        if (controller.signal.aborted) return;
-        if (result) {
+    let attempt = 0;
+    const wait = (delay: number) => new Promise<void>((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        controller.signal.removeEventListener("abort", done);
+        resolve();
+      };
+      const timer = setTimeout(done, delay);
+      controller.signal.addEventListener("abort", done, { once: true });
+    });
+    const poll = async () => {
+      while (!controller.signal.aborted) {
+        try {
+          const result = await repository.getImport(batchId, controller.signal);
+          if (controller.signal.aborted) return;
+          if (!result) {
+            setResponse({ key: requestKey, state: { status: "not_found" } });
+            return;
+          }
           setLastSuccess({ batchId, batch: result });
           setResponse({ key: requestKey, state: { status: "success", batch: result } });
-        } else {
-          setResponse({ key: requestKey, state: { status: "not_found" } });
+          if (!shouldPollBatch(result)) return;
+          attempt = 0;
+        } catch (err: unknown) {
+          if (controller.signal.aborted) return;
+          const message = err instanceof Error ? err.message : "No se pudo consultar la información del lote.";
+          setResponse({ key: requestKey, state: { status: "error", message } });
+          const status = typeof err === "object" && err !== null && "status" in err ? (err as { status?: unknown }).status : undefined;
+          if (typeof status === "number" && status < 500 && status !== 408 && status !== 429) return;
         }
-      },
-      (err: unknown) => {
-        if (controller.signal.aborted) return;
-        const message =
-          err instanceof Error
-            ? err.message
-            : "No se pudo consultar la información del lote.";
-        setResponse({ key: requestKey, state: { status: "error", message } });
-      },
-    );
+        await wait(getBulkPollDelay(attempt++));
+      }
+    };
+    void poll();
     return () => controller.abort();
   }, [batchId, requestKey, repository]);
 
@@ -188,7 +206,7 @@ export function useBulkDownloads(initialExportId?: string) {
   const exportInFlight = useRef(false);
 
   useEffect(() => {
-    if (!initialExportId) return;
+    if (!initialExportId || createdJob?.job.export_id === initialExportId) return;
     const controller = new AbortController();
     void repository.getExport(initialExportId, controller.signal).then(
       (job) => {
@@ -217,7 +235,7 @@ export function useBulkDownloads(initialExportId?: string) {
       },
     );
     return () => controller.abort();
-  }, [initialExportId, queryRevision, repository]);
+  }, [initialExportId, queryRevision, repository, createdJob?.job.export_id]);
 
   const queryMatches = Boolean(
     queryState &&
@@ -226,7 +244,7 @@ export function useBulkDownloads(initialExportId?: string) {
   );
   const matchingQuery = queryMatches ? queryState : undefined;
   const createdJobMatches = Boolean(
-    createdJob && createdJob.routeExportId === initialExportId,
+    createdJob && (createdJob.routeExportId === initialExportId || createdJob.job.export_id === initialExportId),
   );
   const jobMatchesCurrentRoute =
     exportJobState?.routeExportId === initialExportId;
@@ -237,6 +255,49 @@ export function useBulkDownloads(initialExportId?: string) {
       : jobMatchesCurrentRoute
         ? exportJobState?.job ?? null
         : null;
+  useEffect(() => {
+    if (!visibleJob || !shouldPollExport(visibleJob)) return;
+    const controller = new AbortController();
+    let attempt = 0;
+    const wait = (delay: number) => new Promise<void>((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        controller.signal.removeEventListener("abort", done);
+        resolve();
+      };
+      const timer = setTimeout(done, delay);
+      controller.signal.addEventListener("abort", done, { once: true });
+    });
+    const poll = async () => {
+      let job = visibleJob;
+      while (!controller.signal.aborted && shouldPollExport(job)) {
+        await wait(getBulkPollDelay(attempt++));
+        if (controller.signal.aborted) return;
+        try {
+          const updated = await repository.getExport(job.export_id, controller.signal);
+          if (controller.signal.aborted) return;
+          if (!updated) {
+            setRefreshErrorForExport({ exportId: job.export_id, message: "El trabajo de exportación ya no está disponible." });
+            return;
+          }
+          job = updated;
+          setRefreshErrorForExport(undefined);
+          if (createdJobMatches) setCreatedJob({ routeExportId: initialExportId, job: updated });
+          else setExportJobState({ routeExportId: initialExportId, job: updated });
+          if (initialExportId === updated.export_id) setQueryState({ exportId: updated.export_id, revision: queryRevision, status: "success", job: updated });
+          attempt = 0;
+        } catch (err: unknown) {
+          if (controller.signal.aborted) return;
+          const message = err instanceof Error ? err.message : "No se pudo consultar el trabajo de exportación.";
+          setRefreshErrorForExport({ exportId: job.export_id, message });
+          const status = typeof err === "object" && err !== null && "status" in err ? (err as { status?: unknown }).status : undefined;
+          if (typeof status === "number" && status < 500 && status !== 408 && status !== 429) return;
+        }
+      }
+    };
+    void poll();
+    return () => controller.abort();
+  }, [visibleJob, repository, createdJobMatches, initialExportId, queryRevision]);
   const initialQueryStatus = initialExportId && !createdJobMatches
     ? matchingQuery
       ? matchingQuery.status

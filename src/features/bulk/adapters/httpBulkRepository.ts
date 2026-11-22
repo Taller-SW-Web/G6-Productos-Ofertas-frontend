@@ -103,14 +103,19 @@ function mapExport(value: unknown): BulkExportJob {
     ...(typeof item.download_url === "string" ? { download_url: item.download_url } : {}),
   };
 }
-function safeFileName(value: string | null, fallback: string): string {
+function safeFileName(value: string | null, fallback: string, expectedExtension: string): string {
   const candidate = value?.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
   let decoded = candidate?.[2];
   if (candidate?.[1]) {
     try { decoded = decodeURIComponent(candidate[1]); }
     catch { decoded = undefined; }
   }
-  return decoded && !/[\\/\r\n]/.test(decoded) ? decoded : fallback;
+  const leaf = decoded?.split(/[\\/]/).pop();
+  const safe = leaf ? [...leaf].map((char) => {
+    const code = char.charCodeAt(0);
+    return code < 32 || code === 127 || '<>:"|?*'.includes(char) ? "_" : char;
+  }).join("").replace(/^\.+/, "").replace(/[. ]+$/, "").trim().slice(0, 180) : undefined;
+  return safe && safe.toLowerCase().endsWith(expectedExtension) ? safe : fallback;
 }
 
 export function createBulkFetchTransport(origin: string, fetcher: typeof fetch = fetch): BulkHttpTransport {
@@ -183,33 +188,26 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
     const type = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
     if (response.status !== 200 || (type !== "text/csv" && type !== xlsxMime)) invalid("El servicio no entregó un archivo CSV o XLSX válido.");
     if (expectedMime && type !== expectedMime) invalid("El tipo MIME del archivo no coincide con el formato solicitado.");
-    return { blob: await response.blob(), fileName: safeFileName(response.headers.get("content-disposition"), fallback) };
+    const blob = await response.blob();
+    if (blob.size === 0) invalid("El servicio entregó un archivo vacío.");
+    const extension = expectedMime === xlsxMime ? ".xlsx" : ".csv";
+    return { blob, fileName: safeFileName(response.headers.get("content-disposition"), fallback, extension) };
   }
   return {
     resumeSupported: false,
-    confirmRecoveredImport(batchId, owner, correlationId) {
-      if (session.snapshot?.().user?.id !== owner) return;
-      const key = `g6:bulk:import-pending:${encodeURIComponent(owner)}:${encodeURIComponent(correlationId)}`;
-      try { const marker = JSON.parse(sessionStorage.getItem(key) ?? "null") as { userId?: string; correlationId?: string; expectedBatchId?: string } | null; if (marker?.userId === owner && marker.correlationId === correlationId && marker.expectedBatchId === batchId) sessionStorage.removeItem(key); } catch { /* inaccessible intent stays fail-closed */ }
-    },
-    async getTemplate(format, signal) { return download(`${root}/plantilla?formato=${format}`, `plantilla-productos.${format.toLowerCase()}`, signal); },
+    async getTemplate(format, signal) { return download(`${root}/plantilla?formato=${format}`, `plantilla-productos.${format.toLowerCase()}`, signal, format === "XLSX" ? xlsxMime : "text/csv"); },
     async createImport(file, summary, signal) {
       const userId = session.snapshot?.().user?.id;
       if (!userId) throw new BulkRepositoryError("Inicia sesión antes de importar.", "configuration");
       const correlationId = summary?.correlationId ?? crypto.randomUUID();
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(correlationId)) throw new BulkRepositoryError("La correlación no es un UUID válido.", "configuration");
-      if (!summary?.expectedBatchId || summary.owner !== userId || !summary.contentHash || !/^[0-9a-f]{64}$/i.test(summary.contentHash)) throw new BulkRepositoryError("La identidad G7, el hash y el lote esperado no pertenecen a una intención API validada.", "configuration");
+      if (summary?.owner !== userId || !summary.contentHash || !/^[0-9a-f]{64}$/i.test(summary.contentHash)) throw new BulkRepositoryError("La identidad G7 y el hash no pertenecen a una intención API validada.", "configuration");
       const actualHash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", await file.arrayBuffer()))].map(value => value.toString(16).padStart(2, "0")).join("");
       if (actualHash !== summary.contentHash) throw new BulkRepositoryError("El archivo seleccionado no coincide con el hash de la intención persistida.", "configuration");
-      const batchDigest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${correlationId}:${actualHash}`)))].map(value => value.toString(16).padStart(2, "0")).join("");
-      const uuidValue = batchDigest.slice(0, 12) + "4" + batchDigest.slice(13, 16) + "8" + batchDigest.slice(17, 20) + batchDigest.slice(20, 32);
-      const computedBatchId = [uuidValue.slice(0, 8), uuidValue.slice(8, 12), uuidValue.slice(12, 16), uuidValue.slice(16, 20), uuidValue.slice(20)].join("-");
-      if (computedBatchId !== summary.expectedBatchId) throw new BulkRepositoryError("El batchId no coincide con la correlación, el hash ni el propietario actuales.", "configuration");
-      if (!summary?.expectedBatchId) throw new BulkRepositoryError("Falta el batchId determinista persistido antes del envío.", "configuration");
       const intentKey = `g6:bulk:import-pending:${encodeURIComponent(userId)}:${encodeURIComponent(correlationId)}`;
       try {
         if (sessionStorage.getItem(intentKey)) throw new BulkRepositoryError("Esta importación tiene una intención previa pendiente. Se conserva su correlación y no se reenvió.", "unknown");
-        sessionStorage.setItem(intentKey, JSON.stringify({ userId, correlationId, expectedBatchId: summary.expectedBatchId, contentHash: actualHash, state: "IN_FLIGHT", at: Date.now() }));
+        sessionStorage.setItem(intentKey, JSON.stringify({ userId, correlationId, contentHash: actualHash, state: "IN_FLIGHT", at: Date.now() }));
       } catch (error) {
         if (error instanceof BulkRepositoryError) throw error;
         throw new BulkRepositoryError("No se pudo persistir la correlación; no se envió la importación.", "unknown");
@@ -217,7 +215,6 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
       const form = new FormData(); form.append("archivo", file); form.append("template_version", "2");
       try {
         const accepted = mapAccepted(await json(await send(`${root}/importaciones`, "POST", signal, form, false, correlationId, userId), 202, signal));
-        if (accepted.batch_id !== summary.expectedBatchId) throw new BulkRepositoryError("El lote admitido no coincide con el batchId determinista; requiere verificación externa.", "unknown", 202, "BATCH_ID_MISMATCH");
         try { sessionStorage.removeItem(intentKey); } catch { /* accepted response retains the batch id in URL */ }
         return accepted;
       } catch (error) {
