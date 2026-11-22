@@ -17,7 +17,7 @@ export function shouldPollExport(job: BulkExportJob | null | undefined): boolean
 
 export function getBulkPollDelay(attempt: number, random = Math.random): number {
   const base = Math.min(2_000 * 2 ** Math.max(0, attempt), 30_000);
-  return Math.round(base * (0.8 + random() * 0.4));
+  return Math.min(30_000, Math.round(base * (0.8 + random() * 0.4)));
 }
 
 export interface BatchQueryResponse {

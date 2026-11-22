@@ -64,7 +64,7 @@ async function withServer(work: (origin: string, requests: Array<{ method?: stri
       const uploaded = uploadedFileBytes(multipart, contentType);
       if (!contentType.startsWith("multipart/form-data; boundary=") || !multipart.toString().includes('name="archivo"') || !uploaded.equals(Buffer.from(validBulkV2Csv)) || !multipart.toString().includes('name="template_version"')) return json(response, 400, { status: 400, code: "ARCHIVO_INVALIDO" });
       admittedBatchId = batchId;
-      return json(response, 202, { batch_id: admittedBatchId, status: "QUEUED", template_version: 2 });
+      return json(response, 202, { batch_id: admittedBatchId, status: "QUEUED", template_version: 2, correlation_id: request.headers["x-correlation-id"] });
     }
     if (request.method === "GET" && path === `${root}/importaciones/${admittedBatchId}`) {
       batchReads += 1;
@@ -151,7 +151,8 @@ test("Bulk API contra servidor HTTP aislado simula rutas, upload válido, errore
       refreshAccessToken: async () => null,
       invalidateAccessToken: () => undefined,
     });
-    await expect(repository.getExportFile(exportId)).rejects.toMatchObject({ status: 503 });
+    await expect(repository.getExportFile(exportId)).resolves.toBeNull();
+    expect(requests.filter((request) => request.url === `${root}/exportaciones/${exportId}/archivo`)).toHaveLength(0);
   }, "actual-backend");
 });
 

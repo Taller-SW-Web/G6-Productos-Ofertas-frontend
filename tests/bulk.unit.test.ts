@@ -59,7 +59,7 @@ describe("adaptador HTTP de Bulk", () => {
       const marker = JSON.parse(storage.getItem(`g6:bulk:import-pending:${encodeURIComponent(owner)}:${encodeURIComponent(correlationId)}`) ?? "null") as Record<string, unknown> | null;
       expect(marker).toMatchObject({ userId: owner, correlationId, contentHash, state: "IN_FLIGHT" });
       expect(marker).not.toHaveProperty("expectedBatchId");
-      return new Response(JSON.stringify({ batch_id: batchId, status: "QUEUED", template_version: 2 }), { status: 202, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ batch_id: batchId, status: "QUEUED", template_version: 2, correlation_id: correlationId }), { status: 202, headers: { "content-type": "application/json" } });
     });
     try {
       const repository = createHttpBulkRepository({ request }, session);
@@ -101,6 +101,57 @@ describe("adaptador HTTP de Bulk", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it.each([
+    ["ausente", undefined],
+    ["inválida", "no-es-uuid"],
+    ["contradictoria", "22222222-2222-4222-8222-222222222222"],
+  ] as const)("BUL-F03 conserva admisión incierta con correlation_id %s", async (_case, responseCorrelationId) => {
+    const storage = createMemoryStorage();
+    vi.stubGlobal("sessionStorage", storage);
+    const correlationId = "11111111-1111-4111-8111-111111111111";
+    const responseBody = {
+      batch_id: "99999999-9999-4999-8999-999999999999",
+      status: "QUEUED",
+      template_version: 2,
+      ...(responseCorrelationId ? { correlation_id: responseCorrelationId } : {}),
+    };
+    const request = vi.fn(async () => new Response(JSON.stringify(responseBody), { status: 202, headers: { "content-type": "application/json" } }));
+    const repository = createHttpBulkRepository({ request }, { ...testSession, snapshot: () => ({ user: { id: fakeOwnerA, nombreCompleto: "H4 A", correo: "a@example.invalid", roles: [] }, mfa: false, busy: false, notice: "", expiresAt: null }) });
+    const intent = { owner: fakeOwnerA, correlationId, contentHash: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" };
+    try {
+      await expect(repository.createImport(new File(["abc"], "a.csv"), intent)).rejects.toMatchObject({ category: "unknown" });
+      const marker = JSON.parse(storage.getItem(`g6:bulk:import-pending:${encodeURIComponent(fakeOwnerA)}:${encodeURIComponent(correlationId)}`) ?? "null") as Record<string, unknown>;
+      expect(marker.state).toBe("PENDING_RECONCILIATION");
+      await expect(repository.createImport(new File(["abc"], "a.csv"), intent)).rejects.toMatchObject({ category: "unknown" });
+      expect(request).toHaveBeenCalledOnce();
+      expect(storage.length).toBe(1);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it.each([
+    ["ausente", undefined],
+    ["inválida", "batch-invalido"],
+  ] as const)("BUL-F03 deja incierta la admisión con batch_id %s", async (_case, responseBatchId) => {
+    const storage = createMemoryStorage();
+    vi.stubGlobal("sessionStorage", storage);
+    const correlationId = "11111111-1111-4111-8111-111111111111";
+    const responseBody = {
+      ...(responseBatchId ? { batch_id: responseBatchId } : {}),
+      status: "QUEUED",
+      template_version: 2,
+      correlation_id: correlationId,
+    };
+    const request = vi.fn(async () => new Response(JSON.stringify(responseBody), { status: 202, headers: { "content-type": "application/json" } }));
+    const repository = createHttpBulkRepository({ request }, { ...testSession, snapshot: () => ({ user: { id: fakeOwnerA, nombreCompleto: "H4 A", correo: "a@example.invalid", roles: [] }, mfa: false, busy: false, notice: "", expiresAt: null }) });
+    const intent = { owner: fakeOwnerA, correlationId, contentHash: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" };
+    try {
+      await expect(repository.createImport(new File(["abc"], "a.csv"), intent)).rejects.toMatchObject({ category: "unknown" });
+      const marker = JSON.parse(storage.getItem(`g6:bulk:import-pending:${encodeURIComponent(fakeOwnerA)}:${encodeURIComponent(correlationId)}`) ?? "null") as Record<string, unknown>;
+      expect(marker.state).toBe("PENDING_RECONCILIATION");
+      expect(request).toHaveBeenCalledOnce();
+    } finally { vi.unstubAllGlobals(); }
   });
 
   it.each([401, 403])("R4-03 preserva sesión ante POST HTTP %i desconocido sin reintento", async status => {
@@ -169,10 +220,11 @@ describe("adaptador HTTP de Bulk", () => {
 
   it("BUL-09: HTTP 202 conserva el batch_id real del backend aunque no sea calculable localmente", async () => {
     const storage = createMemoryStorage(); vi.stubGlobal("sessionStorage", storage);
-    const request = vi.fn(async () => new Response(JSON.stringify({ batch_id: "22222222-2222-4222-8222-222222222222", status: "QUEUED", template_version: 2 }), { status: 202, headers: { "content-type": "application/json" } }));
+    const correlationId = "11111111-1111-4111-8111-111111111111";
+    const request = vi.fn(async () => new Response(JSON.stringify({ batch_id: "22222222-2222-4222-8222-222222222222", status: "QUEUED", template_version: 2, correlation_id: correlationId }), { status: 202, headers: { "content-type": "application/json" } }));
     try {
       const repository = createHttpBulkRepository({ request }, { ...testSession, snapshot: () => ({ user: { id: fakeOwnerA, nombreCompleto: "H4 A", correo: "a@example.invalid", roles: [] }, mfa: false, busy: false, notice: "", expiresAt: null }) });
-      const intent = { owner: fakeOwnerA, contentHash: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", correlationId: "11111111-1111-4111-8111-111111111111" };
+      const intent = { owner: fakeOwnerA, contentHash: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", correlationId };
       await expect(repository.createImport(new File(["abc"], "a.csv"), intent)).resolves.toMatchObject({ batch_id: "22222222-2222-4222-8222-222222222222", status: "QUEUED" });
       expect(request).toHaveBeenCalledOnce();
       expect(storage.length).toBe(0);
@@ -268,6 +320,44 @@ describe("adaptador HTTP de Bulk", () => {
     await expect(invalidMime.getExportFile("33333333-3333-4333-8333-333333333333")).rejects.toThrow("MIME");
   });
 
+  it("rechaza respuestas de lote o exportación con identidad distinta a la solicitada", async () => {
+    const mismatchedBatch = createHttpBulkRepository({ request: async () => Response.json({
+      batch_id: "99999999-9999-4999-8999-999999999999", status: "COMPLETED", total_rows: 0,
+      completed_rows: 0, failed_rows: 0, needs_reconciliation: false,
+    }) }, testSession);
+    await expect(mismatchedBatch.getImport("11111111-1111-4111-8111-111111111111")).rejects.toMatchObject({ category: "unknown" });
+
+    const mismatchedExport = createHttpBulkRepository({ request: async () => Response.json({
+      export_id: "99999999-9999-4999-8999-999999999999", status: "COMPLETED", formato: "CSV", created_at: "2026-11-21T00:00:00Z",
+    }) }, testSession);
+    await expect(mismatchedExport.getExport("11111111-1111-4111-8111-111111111111")).rejects.toMatchObject({ category: "unknown" });
+  });
+
+  it("el reporte solo acepta CSV real y no intenta descargar exports aún pendientes", async () => {
+    const reportId = "11111111-1111-4111-8111-111111111111";
+    const csvRepository = createHttpBulkRepository({ request: async () => new Response("row_id,code\n1,SKU_DUPLICADO\n", {
+      status: 200, headers: { "content-type": "text/csv", "content-disposition": 'attachment; filename="../errores.csv"' },
+    }) }, testSession);
+    const report = await csvRepository.getImportReport(reportId);
+    expect(report?.blob).toBeInstanceOf(Blob);
+    expect(await report?.blob.text()).toContain("SKU_DUPLICADO");
+    expect(report?.fileName).toBe("errores.csv");
+
+    const xlsxRepository = createHttpBulkRepository({ request: async () => new Response("xlsx", {
+      status: 200, headers: { "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+    }) }, testSession);
+    await expect(xlsxRepository.getImportReport(reportId)).rejects.toThrow("MIME");
+
+    const exportId = "22222222-2222-4222-8222-222222222222";
+    const pendingRequests: string[] = [];
+    const pendingExportRepository = createHttpBulkRepository({ request: async (path) => {
+      pendingRequests.push(path);
+      return Response.json({ export_id: exportId, status: "PROCESSING", formato: "CSV", created_at: "2026-11-21T00:00:00Z" });
+    } }, testSession);
+    await expect(pendingExportRepository.getExportFile(exportId)).resolves.toBeNull();
+    expect(pendingRequests).toEqual([`/api/v1/carga-masiva/productos/exportaciones/${exportId}`]);
+  });
+
   it("valida MIME, nombre saneado y contenido no vacío de plantillas solicitadas", async () => {
     const session = { ...testSession, snapshot: () => ({ user: { id: fakeOwnerA, nombreCompleto: "H4 A", correo: "a@example.invalid", roles: [] }, mfa: false, busy: false, notice: "", expiresAt: null }) };
     const xlsx = createHttpBulkRepository({ request: async () => new Response("xlsx", { status: 200, headers: { "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "content-disposition": "attachment; filename*=UTF-8''..%2Fplantilla%3A.xlsx" } }) }, session);
@@ -325,6 +415,9 @@ describe("seguimiento de lotes", () => {
     expect(getBulkPollDelay(0, () => 0)).toBe(1600);
     expect(getBulkPollDelay(0, () => 1)).toBe(2400);
     expect(getBulkPollDelay(20, () => 0.5)).toBe(30000);
+    expect(getBulkPollDelay(20, () => 1)).toBe(30000);
+    expect(getBulkPollDelay(Number.MAX_SAFE_INTEGER, () => 1)).toBe(30000);
+    expect(getBulkPollDelay(1_000, () => 1)).toBeLessThanOrEqual(30_000);
   });
 });
 

@@ -83,11 +83,17 @@ function mapBatch(value: unknown): BulkImportBatch {
   if (Array.isArray(item.rows)) batch.rows = item.rows.map(mapRow);
   return batch;
 }
-function mapAccepted(value: unknown): BulkImportBatch {
+function mapAccepted(value: unknown, expectedCorrelationId: string): BulkImportBatch {
   const accepted = record(value);
   if (oneOf(accepted.status, ["QUEUED"] as const) !== "QUEUED" || count(accepted.template_version) !== 2) return invalid();
+  const batchId = text(accepted.batch_id);
+  const correlationId = text(accepted.correlation_id);
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (!uuidPattern.test(batchId) || !uuidPattern.test(correlationId) || correlationId !== expectedCorrelationId) {
+    return invalid("La respuesta de admisión contiene una identidad incompleta, inválida o contradictoria; el resultado queda incierto.");
+  }
   return {
-    batch_id: text(accepted.batch_id), status: "QUEUED", total_rows: null,
+    batch_id: batchId, status: "QUEUED", total_rows: null,
     completed_rows: 0, failed_rows: 0, needs_reconciliation: false,
     created_at: "", updated_at: "",
   };
@@ -214,7 +220,7 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
       }
       const form = new FormData(); form.append("archivo", file); form.append("template_version", "2");
       try {
-        const accepted = mapAccepted(await json(await send(`${root}/importaciones`, "POST", signal, form, false, correlationId, userId), 202, signal));
+        const accepted = mapAccepted(await json(await send(`${root}/importaciones`, "POST", signal, form, false, correlationId, userId), 202, signal), correlationId);
         try { sessionStorage.removeItem(intentKey); } catch { /* accepted response retains the batch id in URL */ }
         return accepted;
       } catch (error) {
@@ -225,14 +231,19 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
     },
     async getImport(batchId, signal, expectedOwner) {
       if (expectedOwner && session.snapshot?.().user?.id !== expectedOwner) throw new BulkRepositoryError("La sesión no corresponde al propietario original del lote.", "configuration");
-      try { return mapBatch(await json(await send(`${root}/importaciones/${encodeURIComponent(batchId)}`, "GET", signal, undefined, false, crypto.randomUUID(), expectedOwner), 200, signal)); }
+      try {
+        const batch = mapBatch(await json(await send(`${root}/importaciones/${encodeURIComponent(batchId)}`, "GET", signal, undefined, false, crypto.randomUUID(), expectedOwner), 200, signal));
+        if (batch.batch_id !== batchId) invalid("El lote consultado no coincide con el identificador solicitado.");
+        return batch;
+      }
       catch (error) { if (error instanceof BulkRepositoryError && error.status === 404 && error.code === "LOTE_NO_ENCONTRADO") return null; throw error; }
     },
-    async getImportReport(batchId, signal) { return download(`${root}/importaciones/${encodeURIComponent(batchId)}/reporte`, `reporte-${batchId}.csv`, signal); },
+    async getImportReport(batchId, signal) { return download(`${root}/importaciones/${encodeURIComponent(batchId)}/reporte`, `reporte-${batchId}.csv`, signal, "text/csv"); },
     async resumeImport(batchId, signal) {
       const key = `g6:bulk:resume-blocked:${encodeURIComponent(session.snapshot?.().user?.id ?? "anonymous")}:${encodeURIComponent(batchId)}`;
       if (sessionStorage.getItem(key) === "1") throw new BulkRepositoryError("Backend no habilitó el protocolo de reanudación para este lote.", "rejected", 409, "RETRY_PROTOCOL_NOT_APPROVED");
-      try { return mapAccepted(await json(await send(`${root}/importaciones/${encodeURIComponent(batchId)}/reanudar`, "POST", signal), 202, signal)); }
+      const correlationId = crypto.randomUUID();
+      try { return mapAccepted(await json(await send(`${root}/importaciones/${encodeURIComponent(batchId)}/reanudar`, "POST", signal, undefined, false, correlationId), 202, signal), correlationId); }
       catch (error) {
         if (error instanceof BulkRepositoryError && error.code === "RETRY_PROTOCOL_NOT_APPROVED") { try { sessionStorage.setItem(key, "1"); } catch { /* backend rejection remains visible */ } }
         throw error;
@@ -260,12 +271,16 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
       }
     },
     async getExport(exportId, signal) {
-      try { return mapExport(await json(await send(`${root}/exportaciones/${encodeURIComponent(exportId)}`, "GET", signal), 200, signal)); }
+      try {
+        const job = mapExport(await json(await send(`${root}/exportaciones/${encodeURIComponent(exportId)}`, "GET", signal), 200, signal));
+        if (job.export_id !== exportId) invalid("La exportación consultada no coincide con el identificador solicitado.");
+        return job;
+      }
       catch (error) { if (error instanceof BulkRepositoryError && error.status === 404 && error.code === "LOTE_NO_ENCONTRADO") return null; throw error; }
     },
     async getExportFile(exportId, signal) {
       const job = await this.getExport(exportId, signal);
-      if (!job) return null;
+      if (!job || job.status !== "COMPLETED") return null;
       const expectedMime = job.format === "XLSX" ? xlsxMime : "text/csv";
       const extension = job.format.toLowerCase();
       const resource = await download(`${root}/exportaciones/${encodeURIComponent(exportId)}/archivo`, `exportacion-${exportId}.${extension}`, signal, expectedMime);
