@@ -17,6 +17,37 @@ const productDto = { product_id: pid, slug: "producto", name: "Servidor", sku_ba
 const variantDto = { variant_id: vid, sku: "000-case", status: "BORRADOR", catalog_version: 3, identifying_attributes: [], non_identifying_attributes: [], images: [], physical_profile: null };
 const variantPrep = { ...prep, tiene_variantes: true, inventario: null, variantes: [{ variant_id: vid, sku: "000-case", inventario: { status: "PENDING", manual_retry_allowed: false } }] };
 
+test("CAT-F07: canal sólo se envía en lecturas comerciales", async () => {
+  const admin = harness(() => json({ items: [], meta: { pagina: 1, tamanio: 20, total: 0, totalPaginas: 0 } }));
+  await admin.catalog.list({ page: 1, pageSize: 20, channel: "RETAIL" });
+  expect(admin.calls[0]?.path).toContain("/productos/administracion?");
+  expect(new URL("https://example.test" + admin.calls[0]!.path).searchParams.has("canal")).toBe(false);
+
+  const commercial = harness(() => json({ items: [], pagina: 1, tamanio: 20, total: 0 }), "commercial");
+  await commercial.catalog.list({ page: 1, pageSize: 20, channel: "RETAIL" });
+  expect(new URL("https://example.test" + commercial.calls[0]!.path).searchParams.get("canal")).toBe("RETAIL");
+});
+
+test("CAT-F01/F02: POST/PATCH aceptan campos opcionales omitidos por OpenAPI y rechazan requeridos inválidos", async () => {
+  const productPartial = { product_id: pid, slug: "partial", name: "Partial", status: "BORRADOR", categoria_id: "category", tipo_producto_id: "type", marca_id: "brand", tiene_variantes: false, variants: [] };
+  const variantPartial = { variant_id: vid, sku: "000-partial", status: "BORRADOR" };
+  const h = harness((path, init) => {
+    if (path.endsWith("/preparacion")) return json(prep);
+    if (path.endsWith("/variantes") || path.includes("/variantes/")) return json(variantPartial, init.method === "POST" ? 201 : 200);
+    return json(productPartial, init.method === "POST" && path === "/api/v1/productos" ? 201 : 200);
+  });
+  await expect(h.catalog.create({ ...payload, atributos: [] })).resolves.toMatchObject({ id: pid, catalogVersion: null, images: [], attributes: [], physicalProfile: undefined });
+  await expect(h.catalog.update(pid, { nombre: "Partial", descripcion: "", categoriaId: "category", marcaId: "brand", catalogVersion: 1 })).resolves.toMatchObject({ id: pid, catalogVersion: null });
+  const variantPrepPartial = { ...prep, tiene_variantes: true, inventario: null, variantes: [{ variant_id: vid, sku: "000-partial", inventario: { status: "PENDING", manual_retry_allowed: false } }] };
+  const variantHttp = harness(path => path.endsWith("/preparacion") ? json(variantPrepPartial) : json(variantPartial, 201));
+  await expect(variantHttp.catalog.createVariant(pid, { sku: "000-partial", identifyingAttributes: [] })).resolves.toMatchObject({ variantId: vid, catalogVersion: null });
+
+  const invalidProduct = harness((_path, init) => init.method === "POST" ? json({ ...productPartial, name: 7 }, 201) : json(prep));
+  await expect(invalidProduct.catalog.create(payload)).rejects.toMatchObject({ kind: "write_unknown", details: { responseReceived: "true", payloadValid: "false" } });
+  const invalidVariant = harness((_path, init) => init.method === "POST" ? json({ ...variantPartial, sku: null }, 201) : json(prep));
+  await expect(invalidVariant.catalog.createVariant(pid, { sku: "000-partial" })).rejects.toMatchObject({ kind: "write_unknown", details: { responseReceived: "true", payloadValid: "false" } });
+});
+
 test("Mapper producto: null y SKU opcional ausente conservan ausencia; no genera códigos", () => {
   for (const hasVariants of [false, true]) {
     const preparation = mapPreparation(hasVariants ? variantPrep : prep);

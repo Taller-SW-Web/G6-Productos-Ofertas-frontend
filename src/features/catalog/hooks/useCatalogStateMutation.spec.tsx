@@ -34,11 +34,11 @@ function mount(catalog: Partial<CatalogRepository>, currentUser = { id: "user-a"
 }
 
 function intent() {
-  const key = Object.keys(sessionStorage).find(value => value.startsWith("g6:catalog:state-intent:v2"));
-  return key ? JSON.parse(sessionStorage.getItem(key)!) as Record<string, unknown> : null;
+  const key = Object.keys(localStorage).find(value => value.startsWith("g6:catalog:state-intent:v2"));
+  return key ? JSON.parse(localStorage.getItem(key)!) as Record<string, unknown> : null;
 }
 
-afterEach(() => { cleanup(); sessionStorage.clear(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); });
 
 it("CAT-F05 producto: persiste acción/estado/version e impide reenvío ante resultado incierto", async () => {
   const getById = vi.fn().mockResolvedValue(product("BORRADOR", 7));
@@ -105,6 +105,29 @@ it("CAT-F05 doble submit: sólo una lectura precondición y una mutación quedan
   await act(async () => { await first; });
   expect(getById).toHaveBeenCalledOnce();
   expect(activate).toHaveBeenCalledOnce();
+});
+
+it("CAT-F05 dos pestañas: una intención incierta bloquea la mutación concurrente de la otra pestaña", async () => {
+  let releaseFirst!: (value: ProductDetailView) => void;
+  let releaseSecond!: (value: ProductDetailView) => void;
+  const firstRead = vi.fn(() => new Promise<ProductDetailView>(resolve => { releaseFirst = resolve; }));
+  const secondRead = vi.fn(() => new Promise<ProductDetailView>(resolve => { releaseSecond = resolve; }));
+  const firstWrite = vi.fn().mockRejectedValue(new CatalogError("write_unknown", "timeout", { correlationId: "tab-a" }));
+  const secondWrite = vi.fn().mockResolvedValue(product("ACTIVO", 2));
+  const tabA = mount({ getById: firstRead, activate: firstWrite });
+  const tabB = mount({ getById: secondRead, activate: secondWrite });
+  let first!: Promise<unknown>;
+  let second!: Promise<unknown>;
+  await act(async () => { first = tabA.result.current.product.activate(productId); second = tabB.result.current.product.activate(productId); });
+  releaseFirst(product("BORRADOR", 1));
+  await act(async () => { await first; });
+  releaseSecond(product("BORRADOR", 1));
+  await act(async () => { await second; });
+  expect(firstWrite).toHaveBeenCalledOnce();
+  expect(secondWrite).not.toHaveBeenCalled();
+  expect(localStorage.length).toBe(1);
+  tabA.unmount();
+  tabB.unmount();
 });
 
 it("CAT-F05 recarga/cambio de sesión: la nueva identidad no reenvía ni reconcilia la intención ajena", async () => {

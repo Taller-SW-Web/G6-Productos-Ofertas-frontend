@@ -69,13 +69,23 @@ export function useVariantPreparation(
     let timer: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
     const current = () => !controller.signal.aborted && activeSelection.current === selectionKey;
-    const poll = async () => {
+    let selected: { product: ProductDetailView | null; variant: VariantDetailView | null } | undefined;
+    const poll = async (loadSelection = false) => {
       try {
-        const [prod, v, authoritativePreparation] = await Promise.all([
-          catalogService.getById(productId, scenario, controller.signal),
-          catalogService.getVariantById(productId, variantId, scenario, controller.signal),
-          catalogService.getPreparation(productId, scenario, controller.signal),
-        ]);
+        let prod: ProductDetailView | null;
+        let v: VariantDetailView | null;
+        let authoritativePreparation: Awaited<ReturnType<typeof catalogService.getPreparation>>;
+        if (loadSelection || !selected) {
+          [prod, v, authoritativePreparation] = await Promise.all([
+            catalogService.getById(productId, scenario, controller.signal),
+            catalogService.getVariantById(productId, variantId, scenario, controller.signal),
+            catalogService.getPreparation(productId, scenario, controller.signal),
+          ]);
+          selected = { product: prod, variant: v };
+        } else {
+          ({ product: prod, variant: v } = selected);
+          authoritativePreparation = await catalogService.getPreparation(productId, scenario, controller.signal);
+        }
         if (current()) {
           if (!prod || !v) {
             setResponse({ repository: catalogService,
@@ -136,7 +146,7 @@ export function useVariantPreparation(
         }
       }
     };
-    void poll();
+    void poll(true);
 
     return () => {
       controller.abort();

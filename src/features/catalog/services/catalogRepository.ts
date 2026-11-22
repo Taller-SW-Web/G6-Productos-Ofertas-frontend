@@ -235,8 +235,8 @@ export interface VariantDetailView {
   nonIdentifyingAttributes: ProductAttributeValue[];
   images: string[];
   imageUrl: string;
-  physicalProfile: VariantPhysicalProfile | null;
-  catalogVersion: number;
+  physicalProfile: VariantPhysicalProfile | null | undefined;
+  catalogVersion: number | null;
   inventoryPreparationStatus: PreparationStatus;
   inventoryPreparationCode?: string | null;
   inventoryManualRetryAllowed: boolean;

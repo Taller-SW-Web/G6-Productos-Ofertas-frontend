@@ -3,6 +3,7 @@ import type { ProductDetailView, ProductStatus, StateMutationPayload } from "../
 import { CatalogError } from "../services/catalogRepository";
 import { useCatalogServices } from "./useCatalogServices";
 import { PromotionSessionContext } from "../../../app/config/PromotionSessionContext";
+import { DataModeContext } from "../../../app/config/DataModeContext";
 import { clearCatalogStateIntent, hasCatalogStateIntent, isProductStatus, nextCatalogStatus, readCatalogStateIntent, saveCatalogStateIntent, type CatalogStateAction, type CatalogStateIntent } from "../services/catalogStateIntent";
 
 type SessionIdentity = { userId: string; sessionExpiresAt: number | null; sessionVersion: number; sessionRoles: readonly string[] };
@@ -26,6 +27,8 @@ export interface UseProductStateMutationResult {
 export function useProductStateMutation(): UseProductStateMutationResult {
   const { catalog: catalogService } = useCatalogServices();
   const session = useContext(PromotionSessionContext);
+  const mode = useContext(DataModeContext);
+  const sessionBound = mode !== "mock";
   const identity = useCallback(() => {
     const view = session?.snapshot();
     const userId = view?.user?.id;
@@ -40,14 +43,14 @@ export function useProductStateMutation(): UseProductStateMutationResult {
   const clearError = useCallback(() => { setError(undefined); setIsUnknownError(false); }, []);
   const isUnknown = useCallback((id: string) => {
     const owner = identity();
-    return owner ? hasCatalogStateIntent("product", id) : false;
-  }, [identity]);
+    return sessionBound && owner ? hasCatalogStateIntent("product", id) : false;
+  }, [identity, sessionBound]);
 
   const execute = useCallback(async (id: string, action: CatalogStateAction, scenario?: string): Promise<ProductDetailView | null> => {
     const owner = identity();
-    if (!owner) { setError("Se requiere una sesión administrativa vigente para cambiar el estado."); return null; }
+    if (sessionBound && !owner) { setError("Se requiere una sesión administrativa vigente para cambiar el estado."); return null; }
     if (inFlight.current) return null;
-    const existing = hasCatalogStateIntent("product", id);
+    const existing = sessionBound && hasCatalogStateIntent("product", id);
     if (existing) { setIsUnknownError(true); setError("Hay una intención anterior pendiente. Consulte la lectura administrativa antes de volver a operar."); return null; }
     inFlight.current = true;
     setSubmitting(true); clearError();
@@ -55,20 +58,24 @@ export function useProductStateMutation(): UseProductStateMutationResult {
     try {
       // A fresh authorized administrative GET is the only authority for the write precondition.
       const current = await catalogService.getById(id, scenario);
-      if (!sameIdentity(identity(), owner)) throw new CatalogError("session", "La sesión o sus permisos cambiaron durante la lectura; no se envió la mutación.");
+      if (sessionBound && (!owner || !sameIdentity(identity(), owner))) throw new CatalogError("session", "La sesión o sus permisos cambiaron durante la lectura; no se envió la mutación.");
+      if (sessionBound && hasCatalogStateIntent("product", id)) throw new CatalogError("conflict", "Otra pestaña dejó una intención pendiente para este producto; no se envió la mutación.");
       if (!current || current.id !== id || !isProductStatus(current.status) || current.catalogVersion === null) throw new CatalogError("blocked_contract", "La lectura administrativa vigente no confirma identidad, estado y versión del producto.");
       const allowed = action === "activate" ? current.status === "BORRADOR" : action === "reactivate" ? current.status === "INACTIVO" : current.status === "ACTIVO";
       if (!allowed) throw new CatalogError("conflict", "El estado administrativo actual no permite esta acción.");
       const target = nextCatalogStatus(action);
-      intent = { schemaVersion: 2, entity: "product", ...owner, productId: id, action, priorStatus: current.status, expectedStatus: target, priorVersion: current.catalogVersion, phase: "dispatching", updatedAt: Date.now() };
-      if (!saveCatalogStateIntent(intent)) throw new CatalogError("write_unknown", "No se pudo conservar la intención en esta sesión; no se envió la mutación.");
-      if (!sameIdentity(identity(), owner)) throw new CatalogError("session", "La sesión o sus permisos cambiaron antes del envío; no se envió la mutación.");
+      if (sessionBound) {
+        if (!owner) throw new CatalogError("session", "Se requiere una sesión administrativa vigente para cambiar el estado.");
+        intent = { schemaVersion: 2, entity: "product", ...owner, productId: id, action, priorStatus: current.status, expectedStatus: target, priorVersion: current.catalogVersion, phase: "dispatching", updatedAt: Date.now() };
+        if (!saveCatalogStateIntent(intent)) throw new CatalogError("write_unknown", "No se pudo conservar la intención en esta sesión; no se envió la mutación.");
+        if (!sameIdentity(identity(), owner)) throw new CatalogError("session", "La sesión o sus permisos cambiaron antes del envío; no se envió la mutación.");
+      }
       const payload: StateMutationPayload = { catalogVersion: current.catalogVersion };
       const result = action === "activate" ? await catalogService.activate(id, payload, scenario)
         : action === "deactivate" ? await catalogService.deactivate(id, payload, scenario)
           : await catalogService.reactivate(id, payload, scenario);
-      if (!sameIdentity(identity(), owner)) return null;
-      clearCatalogStateIntent(intent);
+      if (sessionBound && (!owner || !sameIdentity(identity(), owner))) return null;
+      if (intent) clearCatalogStateIntent(intent);
       return result;
     } catch (err) {
       if (intent) {
@@ -77,24 +84,24 @@ export function useProductStateMutation(): UseProductStateMutationResult {
           saveCatalogStateIntent(intent);
         } else clearCatalogStateIntent(intent);
       }
-      if (sameIdentity(identity(), owner)) {
+      if (!sessionBound || (owner && sameIdentity(identity(), owner))) {
         setError(err instanceof Error ? err.message : "Error inesperado al cambiar el estado.");
         setIsUnknownError(intent !== null && (intent.phase === "uncertain" || intent.phase === "acknowledged"));
       }
       return null;
     } finally { inFlight.current = false; setSubmitting(false); }
-  }, [catalogService, clearError, identity]);
+  }, [catalogService, clearError, identity, sessionBound]);
 
   const reconcile = useCallback(async (id: string, expectedStatus: ProductStatus): Promise<ProductDetailView | null> => {
     const owner = identity();
-    if (!owner || reconciling) return null;
+    if (!sessionBound || !owner || reconciling) return null;
     const intent = readCatalogStateIntent(owner, "product", id);
     if (!intent || intent.expectedStatus !== expectedStatus) return null;
     setReconciling(true);
     try {
       const current = await catalogService.getById(id);
       if (!sameIdentity(identity(), owner)) return null;
-      if (!current || current.id !== intent.productId || current.status !== expectedStatus || current.catalogVersion === null || current.catalogVersion <= intent.priorVersion) {
+      if (!current || current.id !== intent.productId || current.status !== expectedStatus || current.catalogVersion === null || intent.priorVersion === null || current.catalogVersion <= intent.priorVersion) {
         setError(intent.phase === "acknowledged" ? "El servidor reconoció la escritura, pero la lectura administrativa vigente todavía no confirma el estado esperado." : "El estado observado es compatible o no concluyente y no atribuye la operación. La intención incierta se conserva; no se reenviará.");
         setIsUnknownError(true);
         return null;
@@ -112,7 +119,7 @@ export function useProductStateMutation(): UseProductStateMutationResult {
       setIsUnknownError(true);
       return null;
     } finally { setReconciling(false); }
-  }, [catalogService, identity, reconciling]);
+  }, [catalogService, identity, reconciling, sessionBound]);
 
   return {
     submitting, reconciling, error, isUnknownError,

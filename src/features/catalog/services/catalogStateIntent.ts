@@ -13,7 +13,7 @@ export interface CatalogStateIntent {
   action: CatalogStateAction;
   priorStatus: ProductStatus | VariantStatus;
   expectedStatus: ProductStatus | VariantStatus;
-  priorVersion: number;
+  priorVersion: number | null;
   operationId?: string;
   correlationId?: string;
   phase: "dispatching" | "uncertain" | "acknowledged";
@@ -32,7 +32,7 @@ export function readCatalogStateIntent(
 ): CatalogStateIntent | null {
   try {
     const storageKey = key({ ...identity, entity, productId, variantId });
-    const value: unknown = JSON.parse(sessionStorage.getItem(storageKey) ?? "null");
+    const value: unknown = JSON.parse(localStorage.getItem(storageKey) ?? "null");
     if (!value || typeof value !== "object") return null;
     const intent = value as CatalogStateIntent;
     return intent.schemaVersion === 2 && intent.userId === identity.userId &&
@@ -51,10 +51,10 @@ export function readCatalogStateIntent(
  */
 export function hasCatalogStateIntent(entity: CatalogStateIntent["entity"], productId: string, variantId?: string): boolean {
   try {
-    for (let index = 0; index < sessionStorage.length; index++) {
-      const storageKey = sessionStorage.key(index);
+    for (let index = 0; index < localStorage.length; index++) {
+      const storageKey = localStorage.key(index);
       if (!storageKey?.startsWith("g6:catalog:state-intent:v2:")) continue;
-      const value: unknown = JSON.parse(sessionStorage.getItem(storageKey) ?? "null");
+      const value: unknown = JSON.parse(localStorage.getItem(storageKey) ?? "null");
       if (!value || typeof value !== "object") continue;
       const intent = value as Partial<CatalogStateIntent>;
       if (intent.schemaVersion === 2 && intent.entity === entity && intent.productId === productId && intent.variantId === variantId &&
@@ -70,7 +70,7 @@ export function hasCatalogStateIntent(entity: CatalogStateIntent["entity"], prod
 
 export function saveCatalogStateIntent(intent: CatalogStateIntent): boolean {
   try {
-    sessionStorage.setItem(key(intent), JSON.stringify(intent));
+    localStorage.setItem(key(intent), JSON.stringify(intent));
     return true;
   } catch {
     return false;
@@ -78,7 +78,7 @@ export function saveCatalogStateIntent(intent: CatalogStateIntent): boolean {
 }
 
 export function clearCatalogStateIntent(intent: CatalogStateIntent): void {
-  try { sessionStorage.removeItem(key(intent)); } catch { /* fail closed: marker remains */ }
+  try { localStorage.removeItem(key(intent)); } catch { /* fail closed: marker remains */ }
 }
 
 export function nextCatalogStatus(action: CatalogStateAction): "ACTIVO" | "INACTIVO" {

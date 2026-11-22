@@ -96,8 +96,12 @@ export function createHttpCatalogRepository(
     );
   };
   const variantAttributes = (dto: Record<string, unknown>) => [
-    ...array(dto.identifying_attributes),
-    ...array(dto.non_identifying_attributes),
+    ...(dto.identifying_attributes === undefined
+      ? []
+      : array(dto.identifying_attributes)),
+    ...(dto.non_identifying_attributes === undefined
+      ? []
+      : array(dto.non_identifying_attributes)),
   ];
   const productSchemas = (
     dto: Record<string, unknown>,
@@ -244,19 +248,27 @@ export function createHttpCatalogRepository(
       );
     }
   };
+  const optional = (dto: Record<string, unknown>, key: string, validate: (value: unknown) => void) => {
+    if (dto[key] !== undefined) validate(dto[key]);
+  };
   const validateProductWrite = (value: unknown, expectedId?: string) => {
     const dto = object(value);
     const id = string(dto.product_id);
     if (expectedId && id !== expectedId) blockedCatalog("La respuesta pertenece a otro producto.");
+    optional(dto, "slug", item => { string(item); });
     string(dto.name);
-    if (dto.description !== null && typeof dto.description !== "string") blockedCatalog("Descripción contractual inválida.");
-    if (dto.sku_base !== null && typeof dto.sku_base !== "string") blockedCatalog("SKU base contractual inválido.");
     choice(dto.status, ["BORRADOR", "ACTIVO", "INACTIVO"] as const);
-    integer(dto.catalog_version);
     boolean(dto.tiene_variantes);
     string(dto.categoria_id); string(dto.marca_id); string(dto.tipo_producto_id);
-    array(dto.attributes); array(dto.images); array(dto.variants);
-    if (dto.perfil_fisico !== null && (typeof dto.perfil_fisico !== "object" || Array.isArray(dto.perfil_fisico))) blockedCatalog("Perfil físico contractual inválido.");
+    array(dto.variants);
+    optional(dto, "description", item => { if (item !== null && typeof item !== "string") blockedCatalog("Descripción contractual inválida."); });
+    optional(dto, "sku_base", item => { if (item !== null && typeof item !== "string") blockedCatalog("SKU base contractual inválido."); });
+    optional(dto, "catalog_version", item => { integer(item); });
+    optional(dto, "attributes", item => { array(item); });
+    optional(dto, "images", item => { array(item); });
+    optional(dto, "perfil_fisico", item => { if (item !== null && (typeof item !== "object" || Array.isArray(item))) blockedCatalog("Perfil físico contractual inválido."); });
+    optional(dto, "pricing_preparado", item => { boolean(item); });
+    optional(dto, "inventario_inicializado", item => { boolean(item); });
   };
   const validateVariantWrite = (value: unknown, expectedId?: string) => {
     const dto = object(value);
@@ -264,9 +276,11 @@ export function createHttpCatalogRepository(
     if (expectedId && id !== expectedId) blockedCatalog("La respuesta pertenece a otra variante.");
     string(dto.sku);
     choice(dto.status, ["BORRADOR", "ACTIVA", "INACTIVA"] as const);
-    integer(dto.catalog_version);
-    array(dto.identifying_attributes); array(dto.non_identifying_attributes); array(dto.images);
-    if (dto.physical_profile !== null && (typeof dto.physical_profile !== "object" || Array.isArray(dto.physical_profile))) blockedCatalog("Perfil físico contractual inválido.");
+    optional(dto, "catalog_version", item => { integer(item); });
+    optional(dto, "identifying_attributes", item => { array(item); });
+    optional(dto, "non_identifying_attributes", item => { array(item); });
+    optional(dto, "images", item => { array(item); });
+    optional(dto, "physical_profile", item => { if (item !== null && (typeof item !== "object" || Array.isArray(item))) blockedCatalog("Perfil físico contractual inválido."); });
   };
   const productBody = (p: ProductCreatePayload | ProductUpdatePayload) => ({
     ...p,
@@ -338,7 +352,7 @@ export function createHttpCatalogRepository(
       if (q.q) params.set("q", q.q);
       if (categoryId) params.set("categoriaId", categoryId);
       if (status) params.set("estado", status);
-      if (q.channel) params.set("canal", q.channel);
+      if (audience === "commercial" && q.channel) params.set("canal", q.channel);
       for (const id of typeIdsIncluded)
         params.append("tipoProductoIdsIncluidos", id);
       for (const id of typeIdsExcluded)

@@ -14,12 +14,14 @@ import { G7Session, type SessionView } from "../../src/features/promotions/adapt
 import { PricingProvider } from "../../src/features/pricing/components/PricingProvider";
 import { createPricingRuntime } from "../../src/features/pricing/services/pricingService";
 
-declare global { interface Window { __G6_CATALOG_E2E_JWT__?: string; __G6_CATALOG_E2E_CORRELATION__?: string } }
+declare global { interface Window { __G6_CATALOG_E2E_JWT__?: string; __G6_CATALOG_E2E_CORRELATION__?: string; __G6_CATALOG_E2E_API_ORIGIN__?: string } }
 if (!import.meta.env.DEV) throw new Error("Entrada exclusiva de E2E local.");
-const path = new URLSearchParams(location.search).get("path") ?? "/productos/nuevo";
-history.replaceState(null, "", path);
+const requestedPath = new URLSearchParams(location.search).get("path");
+const path = requestedPath ?? "/productos/nuevo";
 const token = window.__G6_CATALOG_E2E_JWT__;
+const apiOrigin = window.__G6_CATALOG_E2E_API_ORIGIN__;
 if (!token) throw new Error("Falta identidad JWT del Gateway local.");
+if (!apiOrigin) throw new Error("Falta el origen loopback de la API local.");
 const session = new G7Session(location.origin);
 const view: SessionView = {
   user: { id: "00000000-0000-4000-8000-000000000050", nombreCompleto: "Gestor E2E", correo: "catalog-e2e@example.invalid", roles: ["GESTOR_COMERCIAL"] },
@@ -29,7 +31,7 @@ session.snapshot = () => view;
 session.getAccessToken = async (signal: AbortSignal) => { signal.throwIfAborted(); return token; };
 session.refreshAccessToken = async () => null;
 session.invalidateAccessToken = () => undefined;
-const client = createAuthenticatedGatewayClient(location.origin, session);
+const client = createAuthenticatedGatewayClient(apiOrigin, session);
 const services = createCatalogHttpServices({
   request: (path, init) => client.request(path, { method: init.method, signal: init.signal, headers: init.headers, ...(init.body === undefined ? {} : { body: init.body }) }),
 });
@@ -39,7 +41,7 @@ createRoot(document.getElementById("root")!).render(
   <MantineProvider theme={theme} cssVariablesResolver={cssVariablesResolver} forceColorScheme="light">
     <AuthSessionContext.Provider value={session}>
       <DataModeContext.Provider value="api"><CatalogServicesContext.Provider value={services}>
-        <PricingProvider runtime={pricing}><App /></PricingProvider>
+        <PricingProvider runtime={pricing}><App initialEntry={path} /></PricingProvider>
       </CatalogServicesContext.Provider></DataModeContext.Provider>
     </AuthSessionContext.Provider>
   </MantineProvider>,
