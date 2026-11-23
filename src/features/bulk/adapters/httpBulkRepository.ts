@@ -1,6 +1,6 @@
 import type { G7Session } from "../../promotions/adapters/g7Session";
 import { isGatewayTokenInvalid } from "../../shared/isGatewayTokenInvalid";
-import { isVerifiedBulkHomologationManifest, type VerifiedBulkHomologationManifest } from "./bulkHomologationManifest";
+import { hasBulkCapabilityEvidence, isVerifiedBulkHomologationManifest, type VerifiedBulkHomologationManifest } from "./bulkHomologationManifest";
 import type { BulkRepository, DownloadResource } from "../services/bulkRepository";
 import { BulkRepositoryError } from "../services/bulkErrors";
 import type {
@@ -213,9 +213,9 @@ export function createBulkFetchTransport(origin: string, fetcher: typeof fetch =
 
 export function createHttpBulkRepository(transport: BulkHttpTransport, session: AuthSession, options: BulkHttpRepositoryOptions = {}): BulkRepository {
   const manifest = isVerifiedBulkHomologationManifest(options.homologationManifest) ? options.homologationManifest : undefined;
-  const reconciliationEnabled = options.reconciliationEnabled === true && manifest !== undefined;
-  const replaySupported = options.replayEnabled === true && reconciliationEnabled && manifest !== undefined;
-  const resumeSupported = options.resumeEnabled === true && manifest !== undefined;
+  const reconciliationEnabled = options.reconciliationEnabled === true && hasBulkCapabilityEvidence(manifest, "reconciliation");
+  const replaySupported = options.replayEnabled === true && reconciliationEnabled && hasBulkCapabilityEvidence(manifest, "replay");
+  const resumeSupported = options.resumeEnabled === true && hasBulkCapabilityEvidence(manifest, "catalogRetry");
   const exportIntentKey = async (format: BulkExportFormat, userId: string) => {
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${userId}\u0000${format}`)));
     return `g6:bulk:export-uncertain:${[...digest].map(byte => byte.toString(16).padStart(2, "0")).join("")}`;

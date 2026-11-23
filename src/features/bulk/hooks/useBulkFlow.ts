@@ -14,6 +14,7 @@ import { useBulkRepository, useBulkRepositorySelection } from "./useBulkReposito
 import {
   canDownloadExport,
   canResumeBatch,
+  confirmsBulkResumeProgress,
   isExportSnapshotStale,
   resumeBatchWhenAllowed,
   getBulkPollDelay,
@@ -24,7 +25,7 @@ import {
 } from "./bulkQueryState";
 import { useMockStateRevision } from "../../shared/useMockStateRevision";
 import { PromotionSessionContext } from "../../../app/config/PromotionSessionContext";
-import { clearBulkResumeRequest, getOrCreateBulkResumeRequest } from "../utils/bulkResumeIntent";
+import { clearBulkResumeRequest, getBulkResumeIntent, getOrCreateBulkResumeRequest, hasAcceptedBulkResumeForBatch, hasUncertainBulkResumeForBatch, markBulkResumeAccepted, markBulkResumeUncertain } from "../utils/bulkResumeIntent";
 
 export function useBulkBatch(batchId: string | undefined) {
   const repository = useBulkRepository();
@@ -43,7 +44,11 @@ export function useBulkBatch(batchId: string | undefined) {
   }>();
   const [resuming, setResuming] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
-  const [resumeRefreshStatus, setResumeRefreshStatus] = useState<"accepted_refreshing" | "accepted_refresh_failed" | null>(null);
+  const [resumeRefreshStatus, setResumeRefreshStatus] = useState<"accepted_refreshing" | "accepted_refresh_failed" | null>(() => {
+    if (!batchId) return null;
+    if (sessionIdentity && getBulkResumeIntent(sessionIdentity, batchId)?.status === "ACCEPTED_PENDING_REFRESH") return "accepted_refreshing";
+    return hasAcceptedBulkResumeForBatch(batchId) ? "accepted_refresh_failed" : null;
+  });
   const [downloadingReport, setDownloadingReport] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const resumeInFlight = useRef(false);
@@ -58,11 +63,16 @@ export function useBulkBatch(batchId: string | undefined) {
   }, [session]);
 
   const requestKey = JSON.stringify([batchId, revision + mockRevision, sessionIdentity]);
+  const acceptedByAnotherIdentity = Boolean(batchId && hasAcceptedBulkResumeForBatch(batchId) &&
+    getBulkResumeIntent(sessionIdentity ?? "", batchId)?.status !== "ACCEPTED_PENDING_REFRESH");
 
   useEffect(() => {
     if (!batchId) return;
     const controller = new AbortController();
     let attempt = 0;
+    const acceptedIntent = sessionIdentity ? getBulkResumeIntent(sessionIdentity, batchId) : undefined;
+    resumeAcceptedRef.current = acceptedIntent?.status === "ACCEPTED_PENDING_REFRESH";
+    if (acceptedByAnotherIdentity) return () => controller.abort();
     const wait = (delay: number) => new Promise<void>((resolve) => {
       const done = () => {
         clearTimeout(timer);
@@ -86,8 +96,24 @@ export function useBulkBatch(batchId: string | undefined) {
             }
             return;
           }
-          resumeAcceptedRef.current = false;
-          setResumeRefreshStatus(null);
+          if (result.batch_id !== batchId || (acceptedIntent?.originalCorrelationId && result.correlation_id !== acceptedIntent.originalCorrelationId)) {
+            setResponse({ key: requestKey, state: { status: "error", message: "La actualización devolvió una identidad distinta; se conserva el bloqueo de reanudación." } });
+            if (resumeAcceptedRef.current) setResumeRefreshStatus("accepted_refresh_failed");
+            return;
+          }
+          const advanced = acceptedIntent?.status === "ACCEPTED_PENDING_REFRESH" && confirmsBulkResumeProgress({
+            batch: result, batchId, originalCorrelationId: acceptedIntent.originalCorrelationId,
+          });
+          if (resumeAcceptedRef.current && !advanced) {
+            setResponse({ key: requestKey, state: { status: "error", message: "La consulta aún no demuestra el avance de la reanudación; se conserva el último estado como histórico." } });
+            setResumeRefreshStatus("accepted_refresh_failed");
+            return;
+          }
+          if (resumeAcceptedRef.current && acceptedIntent && sessionIdentity) {
+            clearBulkResumeRequest(sessionIdentity, batchId);
+            resumeAcceptedRef.current = false;
+            setResumeRefreshStatus(null);
+          }
           setLastSuccess({ batchId, batch: result, owner: sessionIdentity });
           setResponse({ key: requestKey, state: { status: "success", batch: result } });
           if (!shouldPollBatch(result)) return;
@@ -105,7 +131,7 @@ export function useBulkBatch(batchId: string | undefined) {
     };
     void poll();
     return () => controller.abort();
-  }, [batchId, requestKey, repository, session, sessionIdentity]);
+  }, [acceptedByAnotherIdentity, batchId, requestKey, repository, session, sessionIdentity]);
 
   const batchView = selectBatchQueryView({
     batchId,
@@ -114,6 +140,14 @@ export function useBulkBatch(batchId: string | undefined) {
     response,
     lastSuccess,
   });
+  const acceptedResumePending = Boolean(batchId && hasAcceptedBulkResumeForBatch(batchId));
+  const uncertainResumePending = Boolean(batchId && hasUncertainBulkResumeForBatch(batchId));
+  const visibleResumeRefreshStatus = acceptedByAnotherIdentity
+    ? "accepted_refresh_failed"
+    : acceptedResumePending ? resumeRefreshStatus ?? "accepted_refreshing" : null;
+  const batchError = acceptedByAnotherIdentity
+    ? "Este lote tiene una reanudación aceptada por otra identidad de usuario. Recupera la sesión original para continuar."
+    : batchView.error;
   const reportAvailable = Boolean(
     batchView.batch && canRequestImportReport(repository, batchView.batch),
   );
@@ -122,12 +156,12 @@ export function useBulkBatch(batchId: string | undefined) {
   const canResume = canResumeBatch({
     batch: batchView.batch,
     loading: batchView.loading,
-    error: batchView.error,
+    error: batchError,
     isStale: batchView.isStale,
     isNotFound: batchView.isNotFound,
     resuming,
   }) && repository.resumeSupported !== false;
-  const canResumeNow = canResume && resumeRefreshStatus === null;
+  const canResumeNow = canResume && !acceptedResumePending && !uncertainResumePending;
 
   const refreshBatch = useCallback(() => {
     setRevision((prev) => prev + 1);
@@ -139,24 +173,30 @@ export function useBulkBatch(batchId: string | undefined) {
       resumeInFlight.current = true;
       setResuming(true);
       setResumeError(null);
+      let requestCorrelationId: string | undefined;
       try {
         const owner = sessionIdentity ?? "mock";
         const request = getOrCreateBulkResumeRequest(owner, batchId, sessionStorage, batchView.batch?.correlation_id);
+        requestCorrelationId = request.correlationId;
         const accepted = await repository.resumeImport(batchId, undefined, request);
-        if (sessionIdentity && session?.snapshot().user?.id !== sessionIdentity) {
-          throw new Error("La sesión cambió durante la reanudación; se conserva la identidad original de la solicitud.");
-        }
         if (accepted.batch_id !== batchId || accepted.status !== "QUEUED" || accepted.template_version !== 2 ||
             (batchView.batch?.correlation_id !== undefined && accepted.correlation_id !== batchView.batch.correlation_id)) {
           throw new Error("La respuesta no confirmó el retry del lote solicitado; se conserva la correlación.");
         }
-        clearBulkResumeRequest(owner, batchId);
+        markBulkResumeAccepted(owner, batchId, request.correlationId, request.originalCorrelationId);
+        if (sessionIdentity && session?.snapshot().user?.id !== sessionIdentity) {
+          throw new Error("La sesión cambió después de aceptar la reanudación; se conserva la identidad original y se requiere recuperar esa sesión.");
+        }
         resumeAcceptedRef.current = true;
         setResumeRefreshStatus("accepted_refreshing");
         setResumeError(null);
         setRevision((prev) => prev + 1);
         return accepted;
       } catch (err: unknown) {
+        const owner = sessionIdentity ?? "mock";
+        if (requestCorrelationId && getBulkResumeIntent(owner, batchId)?.status !== "ACCEPTED_PENDING_REFRESH") {
+          markBulkResumeUncertain(owner, batchId);
+        }
         if (sessionIdentity && session?.snapshot().user?.id !== sessionIdentity) return undefined;
         const message =
           err instanceof Error
@@ -203,7 +243,7 @@ export function useBulkBatch(batchId: string | undefined) {
     isStale: batchView.isStale,
     resuming,
     resumeError,
-    resumeRefreshStatus,
+    resumeRefreshStatus: visibleResumeRefreshStatus,
     canResume: canResumeNow,
     downloadingReport,
     reportError,

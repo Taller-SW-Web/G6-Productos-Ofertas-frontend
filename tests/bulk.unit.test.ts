@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mockBulkRepository } from "../src/features/bulk/adapters/mockBulkRepository";
 import { createHttpBulkRepository, mapReconciliation, mapResumeAccepted, type BulkHttpTransport } from "../src/features/bulk/adapters/httpBulkRepository";
-import { verifyBulkHomologationManifest } from "../src/features/bulk/adapters/bulkHomologationManifest";
+import { hasBulkCapabilityEvidence, verifyBulkHomologationManifest } from "../src/features/bulk/adapters/bulkHomologationManifest";
 import { BulkRepositoryError, createBulkRepository } from "../src/features/bulk/services/bulkService";
 import { canRequestImportReport } from "../src/features/bulk/services/bulkRepository";
 import { canMockProvideImportReport } from "../src/features/bulk/services/reportAvailability";
@@ -10,6 +10,7 @@ import { getQueuedBatchDescription, getUnknownRowCountDescription } from "../src
 import {
   canDownloadExport,
   canResumeBatch,
+  confirmsBulkResumeProgress,
   getBulkPollDelay,
   hasReconcilableOperations,
   isExportSnapshotStale,
@@ -20,7 +21,7 @@ import {
 } from "../src/features/bulk/hooks/bulkQueryState";
 import { getDownloadFailureMessage, getUnavailableDownloadMessage } from "../src/features/bulk/services/downloadMessages";
 import { AdmissionCoordinator, LatestTaskCoordinator, runSingleFlight } from "../src/features/bulk/utils/asyncGuards";
-import { getOrCreateBulkResumeRequest } from "../src/features/bulk/utils/bulkResumeIntent";
+import { getBulkResumeIntent, getOrCreateBulkResumeRequest, hasAcceptedBulkResumeForBatch, markBulkResumeAccepted } from "../src/features/bulk/utils/bulkResumeIntent";
 import { reconcileBulkAdmission } from "../src/features/bulk/services/bulkAdmissionRecovery";
 import { checkLocalFile, parseCsvSafely } from "../src/features/bulk/utils/localFileCheck";
 import { getGenuineMinimalXlsxArrayBuffer } from "./fixtures/genuineXlsxFixture";
@@ -104,6 +105,59 @@ describe("adaptador HTTP de Bulk", () => {
       authorizedReleaseId: "release-a",
       authorizedManifestSha256: "a".repeat(64),
     })).resolves.toBeUndefined();
+  });
+
+  it("homologa capacidades por evidencia independiente y exige digest de release autorizado", async () => {
+    const manifest = {
+      schemaVersion: 2, approvalStatus: "APPROVED", releaseId: "release-rc3",
+      openApiVersion: "0.7.0-rc.3", asyncApiVersion: "0.7.0-rc.3",
+      docsSha: "a".repeat(40), backendSha: "b".repeat(40),
+      reconciliation: {
+        operation: "GET /api/v1/carga-masiva/productos/importaciones/por-correlacion/{correlationId}",
+        authenticatedIntegrationEvidenceSha256: "d".repeat(64),
+      },
+    };
+    const canonical = JSON.stringify(manifest);
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical)));
+    const sha256 = [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    const verified = await verifyBulkHomologationManifest({ manifestJson: JSON.stringify(manifest), authorizedReleaseId: "release-rc3", authorizedManifestSha256: sha256 });
+    expect(hasBulkCapabilityEvidence(verified, "reconciliation")).toBe(true);
+    expect(hasBulkCapabilityEvidence(verified, "replay")).toBe(false);
+    expect(hasBulkCapabilityEvidence(verified, "catalogRetry")).toBe(false);
+    const request = vi.fn(async () => Response.json({}));
+    const repository = createHttpBulkRepository({ request }, testSession, { reconciliationEnabled: true, replayEnabled: true, resumeEnabled: true, homologationManifest: verified });
+    expect(repository.reconciliationEnabled).toBe(true);
+    expect(repository.replaySupported).toBe(false);
+    expect(repository.resumeSupported).toBe(false);
+    const untrusted = createHttpBulkRepository({ request }, testSession, { reconciliationEnabled: true, replayEnabled: true, resumeEnabled: true });
+    expect(untrusted.reconciliationEnabled).toBe(false);
+    expect(untrusted.replaySupported).toBe(false);
+    expect(untrusted.resumeSupported).toBe(false);
+    expect(request).not.toHaveBeenCalled();
+
+    const withReplay = {
+      ...manifest,
+      replay: { concurrentIdempotency: true, evidenceSha256: "e".repeat(64) },
+    };
+    const replayDigestBytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(withReplay))));
+    const replayDigest = [...replayDigestBytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    const replayVerified = await verifyBulkHomologationManifest({ manifestJson: JSON.stringify(withReplay), authorizedReleaseId: "release-rc3", authorizedManifestSha256: replayDigest });
+    expect(hasBulkCapabilityEvidence(replayVerified, "reconciliation")).toBe(true);
+    expect(hasBulkCapabilityEvidence(replayVerified, "replay")).toBe(true);
+    expect(hasBulkCapabilityEvidence(replayVerified, "catalogRetry")).toBe(false);
+
+    const withCatalog = {
+      schemaVersion: 2, approvalStatus: "APPROVED", releaseId: "release-catalog",
+      openApiVersion: "0.7.0-rc.3", asyncApiVersion: "0.7.0-rc.3",
+      docsSha: "a".repeat(40), backendSha: "b".repeat(40),
+      catalogRetry: { catalogConsumerSha: "c".repeat(40), protocol: "BULK_RETRY_V1", domains: ["CATALOGO"], v4v2EvidenceSha256: "f".repeat(64) },
+    };
+    const catalogDigestBytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(withCatalog))));
+    const catalogDigest = [...catalogDigestBytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    const catalogVerified = await verifyBulkHomologationManifest({ manifestJson: JSON.stringify(withCatalog), authorizedReleaseId: "release-catalog", authorizedManifestSha256: catalogDigest });
+    expect(hasBulkCapabilityEvidence(catalogVerified, "reconciliation")).toBe(false);
+    expect(hasBulkCapabilityEvidence(catalogVerified, "replay")).toBe(false);
+    expect(hasBulkCapabilityEvidence(catalogVerified, "catalogRetry")).toBe(true);
   });
 
   it("valida un vector SHA-256 independiente y persiste la intención completa antes del POST", async () => {
@@ -1080,6 +1134,31 @@ describe("Bulk reconciliation gating and export download eligibility", () => {
     expect(first).toMatchObject({ motivo: null });
     expect(first.correlationId).toMatch(/^[0-9a-f-]{36}$/i);
     expect(() => getOrCreateBulkResumeRequest(owner, batchId, storage, "99999999-9999-4999-8999-999999999999")).toThrow();
+  });
+
+  it("persiste la aceptación del retry entre montajes y bloquea el lote para cualquier identidad", () => {
+    const storage = createMemoryStorage();
+    const owner = "g7-bulk-unit-owner";
+    const otherOwner = "g7-other-user";
+    const batchId = "11111111-1111-4111-8111-111111111111";
+    const original = "88888888-8888-4888-8888-888888888888";
+    const request = getOrCreateBulkResumeRequest(owner, batchId, storage, original);
+    markBulkResumeAccepted(owner, batchId, request.correlationId, original, storage);
+    expect(getBulkResumeIntent(owner, batchId, storage)).toMatchObject({ owner, batchId, correlationId: request.correlationId, originalCorrelationId: original, status: "ACCEPTED_PENDING_REFRESH" });
+    expect(getBulkResumeIntent(otherOwner, batchId, storage)).toBeUndefined();
+    expect(hasAcceptedBulkResumeForBatch(batchId, storage)).toBe(true);
+    expect(getOrCreateBulkResumeRequest(owner, batchId, storage, original).correlationId).toBe(request.correlationId);
+    expect(hasAcceptedBulkResumeForBatch(batchId, storage)).toBe(true);
+  });
+
+  it("solo cierra un retry aceptado ante progreso verificable del mismo lote", () => {
+    const batch = mockBatches["batch-partial"]!;
+    const pendingInput = { batch, batchId: batch.batch_id, originalCorrelationId: batch.correlation_id };
+    expect(confirmsBulkResumeProgress(pendingInput)).toBe(false); // snapshot anterior COMPLETED/elegible
+    expect(confirmsBulkResumeProgress({ ...pendingInput, batch: { ...batch, status: "PROCESSING" } })).toBe(true);
+    expect(confirmsBulkResumeProgress({ ...pendingInput, batch: { ...batch, reanudacion: undefined } })).toBe(true);
+    expect(confirmsBulkResumeProgress({ ...pendingInput, batch: { ...batch, batch_id: "22222222-2222-4222-8222-222222222222", status: "PROCESSING" } })).toBe(false);
+    expect(confirmsBulkResumeProgress({ ...pendingInput, batch: { ...batch, correlation_id: "22222222-2222-4222-8222-222222222222", status: "PROCESSING" } })).toBe(false);
   });
 
   it("concilia con GET, mantiene incierto un 404 y nunca envía POST", async () => {

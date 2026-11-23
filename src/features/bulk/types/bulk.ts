@@ -1,5 +1,5 @@
 // Domain & UI models for MK-001 (Bulk Upload and Export)
-// Base HTTP models aligned with the frontend's verified OpenAPI 0.7.0-rc.2 reference.
+// Base HTTP models aligned with approved OpenAPI/AsyncAPI 0.7.0-rc.3 (Docs merge 67fc87b71f60ebd0d97be69912dc669510934bc2).
 
 export type BulkImportStatus =
   | "QUEUED"

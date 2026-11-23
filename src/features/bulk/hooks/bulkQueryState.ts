@@ -99,6 +99,20 @@ export function hasReconcilableOperations(batch: BulkImportBatch): boolean {
   });
 }
 
+/** A retry 202 is only an admission receipt. This predicate accepts a later GET
+ * as confirmation only when it identifies the same batch and proves progress. */
+export function confirmsBulkResumeProgress(input: {
+  batch: BulkImportBatch;
+  batchId: string;
+  originalCorrelationId?: string;
+}): boolean {
+  const { batch } = input;
+  if (batch.batch_id !== input.batchId ||
+      (input.originalCorrelationId !== undefined && batch.correlation_id !== input.originalCorrelationId)) return false;
+  if (batch.status === "QUEUED" || batch.status === "PROCESSING") return true;
+  return (batch.status === "COMPLETED" || batch.status === "FAILED_GENERAL") && batch.reanudacion?.eligible !== true;
+}
+
 // Single source of truth for "resume is allowed". It refuses to operate on a
 // terminal-but-not-confirmed snapshot: no write may be issued while the visible
 // batch is stale, loading, errored or already resuming.
