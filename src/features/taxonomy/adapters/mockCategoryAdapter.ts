@@ -482,6 +482,8 @@ export const mockCategoryAdapter: CategoryRepository = {
       }
       return {
         operacionId,
+        entityId: operacion.categoriaId,
+        entityType: "CATEGORY",
         estado: "confirmada",
         mensaje:
           "Verificación concluida: la categoría quedó Inactiva sin eliminar el registro.",
@@ -491,6 +493,8 @@ export const mockCategoryAdapter: CategoryRepository = {
 
     return {
       operacionId,
+      entityId: operacion.categoriaId,
+      entityType: "CATEGORY",
       estado: "confirmada",
       mensaje: "La baja de la categoría ya estaba confirmada.",
       categoria: aDetalle(registro),

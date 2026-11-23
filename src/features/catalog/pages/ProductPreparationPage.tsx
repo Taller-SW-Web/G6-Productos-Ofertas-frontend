@@ -36,7 +36,6 @@ import {
   readCatalogScenario,
 } from "../services/catalogPresentation";
 import { ProductActivationDialog } from "../components/ProductActivationDialog";
-import type { ProductDetailView } from "../services/catalogRepository";
 
 export function ProductPreparationPage() {
   const { productId } = useParams<{ productId: string }>();
@@ -49,11 +48,7 @@ export function ProductPreparationPage() {
   const [activateOpened, setActivateOpened] = useState(false);
 
   const fetchedDetailState = useProductDetail(productId || "", scenario, revision);
-  const createdProduct = location.state?.createdProduct as ProductDetailView | undefined;
-  const transientCreated = createdProduct?.id === productId ? createdProduct : undefined;
-  const detailState = transientCreated && ["not_found", "error"].includes(fetchedDetailState.status)
-    ? { status: "success" as const, product: transientCreated }
-    : fetchedDetailState;
+  const detailState = fetchedDetailState;
   const prepState = useProductPreparation(productId || "", scenario, revision);
 
   if (detailState.status === "loading" || prepState.status === "loading") {
@@ -63,6 +58,23 @@ export function ProductPreparationPage() {
         <Text size="sm" c="dimmed">
           Consultando estado de preparación...
         </Text>
+      </Stack>
+    );
+  }
+
+  if (prepState.status === "error") {
+    return (
+      <Stack gap="md" p="lg">
+        <FeedbackAlert semantic="error" title="No se pudo consultar la preparación">
+          {prepState.error}
+        </FeedbackAlert>
+        <Button
+          variant="outline"
+          leftSection={<IconRefresh size={16} />}
+          onClick={() => prepState.reload()}
+        >
+          Consultar nuevamente
+        </Button>
       </Stack>
     );
   }
@@ -122,7 +134,19 @@ export function ProductPreparationPage() {
   }
 
   const p = detailState.product;
-  const prep = prepState.status === "success" && prepState.data?.productId === p.id ? prepState.data : p.preparation;
+  const prep = prepState.data;
+  if (!prep || prep.productId !== p.id) {
+    return (
+      <Stack gap="md" p="lg">
+        <FeedbackAlert semantic="error" title="Preparación no disponible">
+          Catálogo no devolvió un estado administrativo consistente para este producto.
+        </FeedbackAlert>
+        <Button variant="outline" onClick={() => prepState.reload()}>
+          Consultar nuevamente
+        </Button>
+      </Stack>
+    );
+  }
 
   const isPricingReady = prep.pricing.status === "COMPLETED";
   const isInventoryReady = p.hasVariants
@@ -162,6 +186,14 @@ export function ProductPreparationPage() {
                 Editar producto
               </Button>
             )}
+
+            <Button
+              variant="outline"
+              leftSection={<IconRefresh size={16} />}
+              onClick={() => setRevision((current) => current + 1)}
+            >
+              Consultar estado
+            </Button>
 
             {p.catalogVersion !== null && p.status === "BORRADOR" && (
               <Button

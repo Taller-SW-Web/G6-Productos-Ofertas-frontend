@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Button, Group, Loader, Stack, Text } from "@mantine/core";
 import {
@@ -10,6 +10,8 @@ import {
 } from "../../../components/shared";
 import { CampoDato } from "../components/CampoDato";
 import { ListaBloqueos } from "../components/ListaBloqueos";
+import { SeguimientoBaja } from "../components/SeguimientoBaja";
+import { useSeguimientoBaja } from "../hooks/useSeguimientoBaja";
 import { useCategoryDetail } from "../hooks/useCategoryDetail";
 import { useSolicitarBaja } from "../hooks/useSolicitarBaja";
 import { estadoSemantic } from "../services/estadoSemantic";
@@ -31,7 +33,9 @@ export function DeactivateCategoryPage() {
 
 function DeactivateCategoryLoader({ id }: { id: string }) {
   const navigate = useNavigate();
-  const { state } = useCategoryDetail(id);
+  const { state, reload } = useCategoryDetail(id);
+  const tracking = useSeguimientoBaja("categoria", id);
+  useEffect(() => { if (tracking.estado === "confirmada") reload(); }, [tracking.estado, reload]);
 
   const contenido =
     state.status === "loading" ? (
@@ -40,7 +44,7 @@ function DeactivateCategoryLoader({ id }: { id: string }) {
         <Text size="sm">Cargando categoría…</Text>
       </Group>
     ) : state.status === "error" ? (
-      <FeedbackAlert semantic="error" title="No se pudo cargar la categoría">
+      <FeedbackAlert semantic="error" title="No se pudo cargar la categoría" actions={tracking.estado === "confirmada" ? <Button onClick={reload}>Consultar detalle nuevamente</Button> : undefined}>
         {state.message}
       </FeedbackAlert>
     ) : state.status === "not-found" ? (
@@ -55,8 +59,10 @@ function DeactivateCategoryLoader({ id }: { id: string }) {
       >
         La categoría solicitada no existe o ya no está disponible.
       </FeedbackAlert>
+    ) : tracking.estado === "confirmada" && state.detalle.estado === "Activo" ? (
+      <FeedbackAlert semantic="warning" title="Detalle aún no actualizado">La baja está confirmada; consulta nuevamente el detalle antes de modificar la categoría.</FeedbackAlert>
     ) : (
-      <DeactivateCategoryContent detalle={state.detalle} />
+      <DeactivateCategoryContent detalle={state.detalle} tracking={tracking} />
     );
 
   return (
@@ -69,15 +75,15 @@ function DeactivateCategoryLoader({ id }: { id: string }) {
           { label: "Desactivar" },
         ]}
       />
-      <Stack gap="lg">{contenido}</Stack>
+      <Stack gap="lg"><SeguimientoBaja seguimiento={tracking} />{contenido}</Stack>
     </>
   );
 }
 
-function DeactivateCategoryContent({ detalle }: { detalle: CategoryDetail }) {
+function DeactivateCategoryContent({ detalle, tracking }: { detalle: CategoryDetail; tracking: ReturnType<typeof useSeguimientoBaja> }) {
   const navigate = useNavigate();
-  const { state, seguimiento, solicitar, consultarEstado, reiniciar } =
-    useSolicitarBaja(detalle.id);
+  const { state, solicitar, reiniciar } =
+    useSolicitarBaja(detalle.id, tracking.registrar);
   const [confirmar, setConfirmar] = useState(false);
 
   const cerrarDialogo = () => {
@@ -89,12 +95,14 @@ function DeactivateCategoryContent({ detalle }: { detalle: CategoryDetail }) {
 
   return (
     <>
-      {resultado === null ? (
+      {resultado === null || (resultado.resultado === "verificando" && tracking.estado === "rechazada") ? (
         <>
+          {tracking.estado !== "rechazada" && (
           <FeedbackAlert semantic="warning" title="Confirmación requerida">
             Antes de aplicar la baja, el sistema verifica que la categoría no
             tenga subcategorías ni productos activos.
           </FeedbackAlert>
+          )}
           <SectionCard
             title="Categoría a desactivar"
             description="Revisa los datos antes de solicitar la baja."
@@ -120,119 +128,14 @@ function DeactivateCategoryContent({ detalle }: { detalle: CategoryDetail }) {
             </Button>
             <Button
               variant="outline"
-              disabled={detalle.estado !== "Activo"}
-              onClick={() => setConfirmar(true)}
+              disabled={detalle.estado !== "Activo" || tracking.estado === "recuperando" || tracking.estado === "pendiente" || tracking.estado === "error" || tracking.estado === "confirmada"}
+              onClick={() => { reiniciar(); setConfirmar(true); }}
             >
               Solicitar desactivación
             </Button>
           </Group>
         </>
-      ) : resultado.resultado === "verificando" ? (
-        <Stack gap="lg">
-          <FeedbackAlert
-            semantic="warning"
-            title="Verificando baja"
-            actions={
-              <Group gap="sm">
-                {resultado.operacionId && (
-                  <Button
-                    loading={seguimiento.status === "consultando"}
-                    onClick={() =>
-                      consultarEstado(resultado.operacionId as string)
-                    }
-                  >
-                    Consultar estado
-                  </Button>
-                )}
-                <Button onClick={() => navigate(`/categorias/${detalle.id}`)}>
-                  Ver categoría
-                </Button>
-                <Button variant="outline" onClick={() => navigate("/categorias")}>
-                  Volver al árbol
-                </Button>
-              </Group>
-            }
-          >
-            <Stack gap="sm">
-              <Text size="sm">{resultado.mensaje}</Text>
-              <StatusBadge semantic={estadoSemantic[resultado.categoria.estado]}>
-                {resultado.categoria.estado}
-              </StatusBadge>
-            </Stack>
-          </FeedbackAlert>
-          {seguimiento.status === "success" &&
-            seguimiento.result.estado === "confirmada" && (
-              <FeedbackAlert semantic="success" title="Baja confirmada">
-                <Stack gap="sm">
-                  <Text size="sm">{seguimiento.result.mensaje}</Text>
-                  {seguimiento.result.categoria && (
-                    <StatusBadge
-                      semantic={estadoSemantic[seguimiento.result.categoria.estado]}
-                    >
-                      {seguimiento.result.categoria.estado}
-                    </StatusBadge>
-                  )}
-                </Stack>
-              </FeedbackAlert>
-            )}
-          {seguimiento.status === "success" &&
-            seguimiento.result.estado === "pendiente" && (
-              <FeedbackAlert semantic="warning" title="Baja aún en verificación">
-                <Stack gap="sm">
-                  <Text size="sm">{seguimiento.result.mensaje}</Text>
-                  {seguimiento.result.categoria && (
-                    <StatusBadge
-                      semantic={estadoSemantic[seguimiento.result.categoria.estado]}
-                    >
-                      {seguimiento.result.categoria.estado}
-                    </StatusBadge>
-                  )}
-                </Stack>
-              </FeedbackAlert>
-            )}
-          {seguimiento.status === "success" &&
-            seguimiento.result.estado === "rechazada" && (
-              <FeedbackAlert semantic="error" title="Baja rechazada">
-                <Stack gap="sm">
-                  <Text size="sm">{seguimiento.result.mensaje}</Text>
-                  {seguimiento.result.categoria && (
-                    <StatusBadge
-                      semantic={estadoSemantic[seguimiento.result.categoria.estado]}
-                    >
-                      {seguimiento.result.categoria.estado}
-                    </StatusBadge>
-                  )}
-                </Stack>
-              </FeedbackAlert>
-            )}
-          {seguimiento.status === "success" &&
-            seguimiento.result.estado === "no-concluyente" && (
-              <FeedbackAlert
-                semantic="warning"
-                title="Verificación no concluyente"
-              >
-                <Stack gap="sm">
-                  <Text size="sm">{seguimiento.result.mensaje}</Text>
-                  {seguimiento.result.categoria && (
-                    <StatusBadge
-                      semantic={estadoSemantic[seguimiento.result.categoria.estado]}
-                    >
-                      {seguimiento.result.categoria.estado}
-                    </StatusBadge>
-                  )}
-                </Stack>
-              </FeedbackAlert>
-            )}
-          {seguimiento.status === "error" && (
-            <FeedbackAlert
-              semantic="error"
-              title="No se pudo consultar el estado"
-            >
-              {seguimiento.message}
-            </FeedbackAlert>
-          )}
-        </Stack>
-      ) : (
+      ) : resultado.resultado === "verificando" ? null : (
         <FeedbackAlert
           semantic="error"
           title="Baja rechazada"

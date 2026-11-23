@@ -10,6 +10,8 @@ import {
   array,
   blockedCatalog,
   boolean,
+  CATALOG_RETRY_AFTER_MS,
+  CATALOG_RESPONSE_CORRELATION_ID,
   choice,
   createCatalogHttp,
   encoded,
@@ -40,12 +42,14 @@ export function createHttpCatalogRepository(
   const variantPath = (pid: string, vid?: string) =>
     `${productPath(pid)}/variantes${vid === undefined ? "" : "/" + encoded(vid)}`;
   const preparation = async (id: string, signal?: AbortSignal) => {
-    const result = mapPreparation(
-      await request(`${productPath(id)}/preparacion`, "GET", undefined, signal),
-    );
+    const raw = await request(`${productPath(id)}/preparacion`, "GET", undefined, signal);
+    const result = mapPreparation(raw);
     if (result.productId !== id)
       return blockedCatalog("La preparación pertenece a otro producto.");
-    return result;
+    const retryAfterMs = raw && typeof raw === "object"
+      ? (raw as Record<PropertyKey, unknown>)[CATALOG_RETRY_AFTER_MS]
+      : undefined;
+    return typeof retryAfterMs === "number" ? { ...result, retryAfterMs } : result;
   };
   // Type/unit come from the published characteristic GET. The response already
   // separates identifying/non-identifying values; no roles are inferred here.
@@ -92,8 +96,12 @@ export function createHttpCatalogRepository(
     );
   };
   const variantAttributes = (dto: Record<string, unknown>) => [
-    ...array(dto.identifying_attributes),
-    ...array(dto.non_identifying_attributes),
+    ...(dto.identifying_attributes === undefined
+      ? []
+      : array(dto.identifying_attributes)),
+    ...(dto.non_identifying_attributes === undefined
+      ? []
+      : array(dto.non_identifying_attributes)),
   ];
   const productSchemas = (
     dto: Record<string, unknown>,
@@ -200,16 +208,79 @@ export function createHttpCatalogRepository(
     signal: AbortSignal | undefined,
     map: (value: unknown) => Promise<T>,
     status = 200,
+    validate?: (value: unknown) => void,
   ): Promise<T> => {
     const result = await request(path, method, body, signal, status);
     try {
-      return await map(result);
-    } catch {
+      validate?.(result);
+    } catch (error) {
+      const response = result && typeof result === "object" && !Array.isArray(result)
+        ? result as Record<PropertyKey, unknown>
+        : {};
+      const operationId = response.operation_id;
+      const bodyCorrelationId = response.correlation_id;
+      const headerCorrelationId = response[CATALOG_RESPONSE_CORRELATION_ID];
       throw new CatalogError(
         "write_unknown",
-        "El servicio confirmó la escritura, pero no se pudo recuperar toda la vista administrativa. No repita el envío; consulte el registro y su preparación.",
+        "El servidor respondió con éxito, pero el payload no cumple el contrato. El resultado de negocio permanece incierto; consulte el estado antes de cualquier reenvío.",
+        { responseReceived: "true", payloadValid: "false", reason: error instanceof Error ? error.message : "invalid_payload", ...(typeof operationId === "string" ? { operationId } : {}), ...(typeof bodyCorrelationId === "string" ? { correlationId: bodyCorrelationId } : typeof headerCorrelationId === "string" ? { correlationId: headerCorrelationId } : {}) },
       );
     }
+    try {
+      return await map(result);
+    } catch {
+      const response = result && typeof result === "object" && !Array.isArray(result)
+        ? result as Record<PropertyKey, unknown>
+        : {};
+      const operationId = response.operation_id;
+      const bodyCorrelationId = response.correlation_id;
+      const headerCorrelationId = response[CATALOG_RESPONSE_CORRELATION_ID];
+      throw new CatalogError(
+        validate ? "write_acknowledged" : "write_unknown",
+        validate
+          ? "Catálogo reconoció la escritura con una respuesta contractual válida, pero falló una lectura administrativa de enriquecimiento. Consulte nuevamente el estado administrativo antes de otra mutación."
+          : "La respuesta fue exitosa, pero no hay evidencia contractual suficiente para confirmar el resultado. No repita el envío; consulte el estado administrativo.",
+        {
+          serverAcknowledged: String(Boolean(validate)),
+          ...(typeof operationId === "string" ? { operationId } : {}),
+          ...(typeof bodyCorrelationId === "string" ? { correlationId: bodyCorrelationId } : typeof headerCorrelationId === "string" ? { correlationId: headerCorrelationId } : {}),
+        },
+      );
+    }
+  };
+  const optional = (dto: Record<string, unknown>, key: string, validate: (value: unknown) => void) => {
+    if (dto[key] !== undefined) validate(dto[key]);
+  };
+  const validateProductWrite = (value: unknown, expectedId?: string) => {
+    const dto = object(value);
+    const id = string(dto.product_id);
+    if (expectedId && id !== expectedId) blockedCatalog("La respuesta pertenece a otro producto.");
+    string(dto.slug);
+    string(dto.name);
+    choice(dto.status, ["BORRADOR", "ACTIVO", "INACTIVO"] as const);
+    boolean(dto.tiene_variantes);
+    string(dto.categoria_id); string(dto.marca_id); string(dto.tipo_producto_id);
+    array(dto.variants);
+    optional(dto, "description", item => { if (item !== null && typeof item !== "string") blockedCatalog("Descripción contractual inválida."); });
+    optional(dto, "sku_base", item => { if (item !== null && typeof item !== "string") blockedCatalog("SKU base contractual inválido."); });
+    optional(dto, "catalog_version", item => { integer(item); });
+    optional(dto, "attributes", item => { array(item); });
+    optional(dto, "images", item => { array(item); });
+    optional(dto, "perfil_fisico", item => { if (item !== null && (typeof item !== "object" || Array.isArray(item))) blockedCatalog("Perfil físico contractual inválido."); });
+    optional(dto, "pricing_preparado", item => { boolean(item); });
+    optional(dto, "inventario_inicializado", item => { boolean(item); });
+  };
+  const validateVariantWrite = (value: unknown, expectedId?: string) => {
+    const dto = object(value);
+    const id = string(dto.variant_id);
+    if (expectedId && id !== expectedId) blockedCatalog("La respuesta pertenece a otra variante.");
+    string(dto.sku);
+    choice(dto.status, ["BORRADOR", "ACTIVA", "INACTIVA"] as const);
+    optional(dto, "catalog_version", item => { integer(item); });
+    optional(dto, "identifying_attributes", item => { array(item); });
+    optional(dto, "non_identifying_attributes", item => { array(item); });
+    optional(dto, "images", item => { array(item); });
+    optional(dto, "physical_profile", item => { if (item !== null && (typeof item !== "object" || Array.isArray(item))) blockedCatalog("Perfil físico contractual inválido."); });
   };
   const productBody = (p: ProductCreatePayload | ProductUpdatePayload) => ({
     ...p,
@@ -240,6 +311,8 @@ export function createHttpCatalogRepository(
       undefined,
       signal,
       (value) => variantResult(value, pid, signal, vid),
+      200,
+      value => validateVariantWrite(value, vid),
     ),
     // Variante does not publish the updated parent status. Do not derive it from a page.
   });
@@ -279,6 +352,7 @@ export function createHttpCatalogRepository(
       if (q.q) params.set("q", q.q);
       if (categoryId) params.set("categoriaId", categoryId);
       if (status) params.set("estado", status);
+      if (audience === "commercial" && q.channel) params.set("canal", q.channel);
       for (const id of typeIdsIncluded)
         params.append("tipoProductoIdsIncluidos", id);
       for (const id of typeIdsExcluded)
@@ -598,22 +672,31 @@ export function createHttpCatalogRepository(
         sig,
         (value) => productResult(value, sig),
         201,
+        value => validateProductWrite(value),
       ),
     update: (id, p, _sc, sig) =>
       write(productPath(id), "PATCH", productBody(p), sig, (value) =>
         productResult(value, sig, id),
+        200,
+        value => validateProductWrite(value, id),
       ),
     activate: (id, p, _sc, sig) =>
       write(`${productPath(id)}/activar`, "POST", p ?? {}, sig, (value) =>
         productResult(value, sig, id),
+        200,
+        value => validateProductWrite(value, id),
       ),
     deactivate: (id, p, _sc, sig) =>
       write(`${productPath(id)}/desactivar`, "POST", p ?? {}, sig, (value) =>
         productResult(value, sig, id),
+        200,
+        value => validateProductWrite(value, id),
       ),
     reactivate: (id, p, _sc, sig) =>
       write(`${productPath(id)}/reactivar`, "POST", p ?? {}, sig, (value) =>
         productResult(value, sig, id),
+        200,
+        value => validateProductWrite(value, id),
       ),
     getPreparation: (id, _sc, sig) => preparation(id, sig),
     retryPreparation: (id, p, _sc, sig) =>
@@ -707,6 +790,7 @@ export function createHttpCatalogRepository(
         sig,
         (value) => variantResult(value, pid, sig),
         201,
+        value => validateVariantWrite(value),
       );
     },
     updateVariant: (pid, vid, p, _sc, sig) =>
@@ -727,6 +811,8 @@ export function createHttpCatalogRepository(
         },
         sig,
         (value) => variantResult(value, pid, sig, vid),
+        200,
+        value => validateVariantWrite(value, vid),
       ),
     activateVariant: (pid, vid, _sc, sig) =>
       variantState(pid, vid, "activar", sig),
