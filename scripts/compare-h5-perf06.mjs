@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { assertSafeEvidenceText } from "../tests/h5/evidence-security.mjs";
-import { comparePerf06 } from "../tests/h5/perf06-policy.mjs";
+import { comparePerf06, validateExistingComparatorReport } from "../tests/h5/perf06-policy.mjs";
 
 const [baselinePathArg, candidatePathArg, outputPathArg, repositoryRootArg] = process.argv.slice(2);
 if (!baselinePathArg || !candidatePathArg || !outputPathArg || !repositoryRootArg) throw new Error("PERF06_COMPARE_ARGUMENTS_INVALID");
@@ -57,20 +57,25 @@ if (baseline.status !== "MEASURED" || candidate.status !== "MEASURED") {
     ], { cwd: resolve(repositoryRootArg), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     let numeric = null;
     let numericSha256 = null;
+    let comparatorValidation = { valid: false, reason: "EXISTING_COMPARATOR_FAILED" };
     if (comparator.status === 0) {
       try {
         const numericText = await readFile(numericPath, "utf8");
         assertSafeEvidenceText(numericText);
         numeric = JSON.parse(numericText);
         numericSha256 = createHash("sha256").update(numericText).digest("hex");
+        comparatorValidation = validateExistingComparatorReport(numeric);
       } catch {
         numeric = null;
+        comparatorValidation = { valid: false, reason: "EXISTING_COMPARATOR_REPORT_UNREADABLE" };
       }
     }
     try { await unlink(numericPath); } catch (error) { if (error?.code !== "ENOENT") throw error; }
-    const gate = comparePerf06({ baseline: { ...baseline, functionalChange }, candidate: { ...candidate, functionalChange } });
+    const gate = comparatorValidation.valid
+      ? comparePerf06({ baseline: { ...baseline, functionalChange }, candidate: { ...candidate, functionalChange } })
+      : { status: "INCONCLUSIVE", reason: comparator.status === 0 ? comparatorValidation.reason : "EXISTING_COMPARATOR_FAILED" };
     output.status = gate.status;
-    output.reason = gate.reason ?? (comparator.status === 0 ? undefined : "EXISTING_COMPARATOR_FAILED");
+    output.reason = gate.reason;
     output.functionalChange = functionalChange;
     output.changedProductionFileCount = changedFiles.filter(path => path.startsWith("src/") && !/\.(?:spec|test)\.[^.]+$/.test(path)).length;
     output.userExperience = {
@@ -89,6 +94,7 @@ if (baseline.status !== "MEASURED" || candidate.status !== "MEASURED") {
     };
     output.existingComparator = numeric;
     output.existingComparatorSha256 = numericSha256;
+    output.existingComparatorValidation = comparatorValidation;
   }
 }
 const serialized = `${JSON.stringify(output, null, 2)}\n`;

@@ -1,10 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test("CAT real HTTP: Chromium carga Catalog, edita por UI, lee variantes y conserva evidencia de errores/reintento", async ({ page }) => {
-  test.skip(
-    process.env.G6_H5_INT08_ISOLATED_HARNESS !== "1" || !process.env.CATALOG_REAL_JWT,
-    "Requiere activación explícita y JWT sintético del harness aislado.",
-  );
+  test.skip(!process.env.CATALOG_REAL_JWT, "Requiere que el runner E2E real inyecte el JWT local firmado.");
   const token = process.env.CATALOG_REAL_JWT;
   const forbiddenToken = process.env.CATALOG_REAL_FORBIDDEN_JWT;
   const browserOrigin = process.env.CATALOG_REAL_BROWSER_ORIGIN;

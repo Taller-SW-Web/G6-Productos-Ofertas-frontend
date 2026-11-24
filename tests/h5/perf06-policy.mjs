@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 export const PERF06_PROFILES = Object.freeze({
   "1": Object.freeze({ sessions: 1, durationSeconds: 60 }),
   "5": Object.freeze({ sessions: 5, durationSeconds: 180 }),
@@ -5,6 +7,16 @@ export const PERF06_PROFILES = Object.freeze({
 });
 
 export const PERF06_REPETITIONS = 3;
+
+const sortKeys = (value) => {
+  if (Array.isArray(value)) return value.map(sortKeys);
+  if (value && typeof value === "object") return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortKeys(value[key])]));
+  return value;
+};
+
+export function coldCacheProofDigest(proof) {
+  return createHash("sha256").update(`${JSON.stringify(sortKeys(proof))}\n`, "utf8").digest("hex");
+}
 
 export function parsePerf06Run(env) {
   const profile = PERF06_PROFILES[env.G6_H5_PERF06_PROFILE];
@@ -17,13 +29,30 @@ export function parsePerf06Run(env) {
   for (const [name, pattern] of [
     ['G6_H5_PERF06_SUBJECT_SHA', /^[0-9a-f]{40}$/i],
     ['G6_H5_PERF06_HARNESS_SHA', /^[0-9a-f]{40}$/i],
+    ['G6_H5_PERF06_SERVICE_SHA', /^[0-9a-f]{40}$/i],
     ['G6_H5_PERF06_DATASET_SHA', /^[0-9a-f]{64}$/i],
   ]) if (!pattern.test(env[name] ?? '')) throw new Error(`${name}_INVALID`);
   if (env.G6_H5_PERF06_ISOLATED_HARNESS !== '1') throw new Error('PERF06_ISOLATED_HARNESS_REQUIRED');
-  if (env.G6_H5_PERF06_CACHE_MODE === 'cold' && !['service-cache-reset-verified', 'service-cache-not-used'].includes(env.G6_H5_PERF06_COLD_ORACLE))
-    throw new Error('PERF06_COLD_ORACLE_UNVERIFIED');
   if (!/^[A-Z0-9_-]{1,40}$/.test(env.G6_H5_PERF06_NETWORK_PROFILE ?? '')) throw new Error('PERF06_NETWORK_PROFILE_INVALID');
   return { ...profile, repetition, cacheMode: env.G6_H5_PERF06_CACHE_MODE, subjectRole: env.G6_H5_PERF06_SUBJECT_ROLE };
+}
+
+export function validateColdCacheAttestation(attestation, { apiOriginSha256, subjectSha, serviceSha, now = Date.now() } = {}) {
+  if (!attestation || attestation.schemaVersion !== 1 || attestation.issuer !== 'POMA_H5_DISPOSABLE_SERVICE_HARNESS' || attestation.cacheState !== 'COLD')
+    return { valid: false, reason: 'COLD_CACHE_ATTESTATION_SHAPE_INVALID' };
+  const proof = attestation.proof;
+  if (!proof || typeof proof !== 'object' || Array.isArray(proof) || proof.schemaVersion !== 1 || proof.issuer !== attestation.issuer || proof.cacheState !== attestation.cacheState || proof.serviceCacheState !== attestation.serviceCacheState || proof.apiOriginSha256 !== attestation.apiOriginSha256 || proof.subjectSha !== attestation.subjectSha || proof.sourceSha !== attestation.sourceSha || proof.serviceInstanceAlias !== attestation.serviceInstanceAlias || proof.attestedAtUtc !== attestation.attestedAtUtc)
+    return { valid: false, reason: 'COLD_CACHE_PROOF_INVALID' };
+  if (!['RESET', 'DISABLED'].includes(attestation.serviceCacheState) || attestation.apiOriginSha256 !== apiOriginSha256 || attestation.subjectSha !== subjectSha || attestation.sourceSha !== serviceSha)
+    return { valid: false, reason: 'COLD_CACHE_ATTESTATION_SUBJECT_MISMATCH' };
+  if (!/^[A-Z0-9_-]{1,60}$/.test(attestation.serviceInstanceAlias ?? '') || !/^[0-9a-f]{40}$/i.test(attestation.sourceSha ?? '') || !/^[0-9a-f]{64}$/i.test(attestation.proofSha256 ?? ''))
+    return { valid: false, reason: 'COLD_CACHE_ATTESTATION_PROVENANCE_INVALID' };
+  if (coldCacheProofDigest(proof) !== attestation.proofSha256)
+    return { valid: false, reason: 'COLD_CACHE_PROOF_SHA_MISMATCH' };
+  const timestamp = Date.parse(attestation.attestedAtUtc ?? '');
+  if (!Number.isFinite(timestamp) || timestamp > now || now - timestamp > 15 * 60 * 1000)
+    return { valid: false, reason: 'COLD_CACHE_ATTESTATION_STALE' };
+  return { valid: true, reason: 'COLD_CACHE_ATTESTATION_VERIFIED' };
 }
 
 export function percentile(values, fraction) {
@@ -50,6 +79,13 @@ export function aggregatePerf06Runs(runs) {
   const repetitions = new Set(runs.map((run) => run.repetition));
   if (!sameSubject || !sameExecutionContext || repetitions.size !== PERF06_REPETITIONS || ![1, 2, 3].every((value) => repetitions.has(value)))
     return { status: 'INCONCLUSIVE', reason: 'REPETITION_PROVENANCE_MISMATCH' };
+  const completeMetrics = runs.every((run) => [
+    run.journeys?.p50Ms, run.journeys?.p95Ms, run.journeys?.p99Ms,
+    run.journeys?.throughputPerSecond, run.http?.requestsPerSecond,
+    run.http?.unexpectedErrorPercent, run.http?.requests,
+    run.http?.requestBodyBytes, run.http?.responseBodyBytes, run.http?.transferredBytes,
+  ].every(Number.isFinite) && run.journeys.p95Ms > 0 && run.journeys.throughputPerSecond > 0 && run.http.requests > 0 && run.http.requestsPerSecond > 0 && run.http.unexpectedErrorPercent >= 0);
+  if (!completeMetrics) return { status: 'INCONCLUSIVE', reason: 'RUN_METRICS_MISSING_OR_NONFINITE' };
   const medianField = (selector) => median(runs.map(selector).filter(Number.isFinite));
   return {
     schemaVersion: 1,
@@ -85,6 +121,7 @@ export function aggregatePerf06Runs(runs) {
       requestCount: medianField((run) => run.http.requests),
       requestBodyBytes: medianField((run) => run.http.requestBodyBytes),
       responseBodyBytes: medianField((run) => run.http.responseBodyBytes),
+      transferredBytes: medianField((run) => run.http.transferredBytes),
       journeysPerSecond: medianField((run) => run.journeys.throughputPerSecond),
       requestsPerJourney: medianField((run) => run.journeys.completed > 0 ? run.http.requests / run.journeys.completed : null),
     }],
@@ -135,20 +172,37 @@ export function comparePerf06({ baseline, candidate }) {
     return { status: 'INCONCLUSIVE', reason: 'RUN_CONFIGURATION_MISMATCH' };
   if (baseline.functionalChange !== true || candidate.functionalChange !== true)
     return { status: 'INCONCLUSIVE', reason: 'NO_FUNCTIONALLY_DISTINCT_COMPARABLE_CANDIDATE' };
-  if (![baseline.medianRequestsPerJourney, candidate.medianRequestsPerJourney, baseline.medianRequestsPerSecond, candidate.medianRequestsPerSecond].every(Number.isFinite) || baseline.medianRequestsPerJourney <= 0)
-    return { status: 'INCONCLUSIVE', reason: 'HTTP_REQUEST_METRICS_MISSING' };
+  const finiteMetrics = [baseline.medianP95Ms, candidate.medianP95Ms, baseline.medianJourneysPerSecond, candidate.medianJourneysPerSecond,
+    baseline.medianRequestsPerJourney, candidate.medianRequestsPerJourney, baseline.medianRequestsPerSecond, candidate.medianRequestsPerSecond,
+    baseline.unexpectedErrorPercent, candidate.unexpectedErrorPercent].every(Number.isFinite);
+  if (!finiteMetrics || baseline.medianP95Ms <= 0 || baseline.medianJourneysPerSecond <= 0 || baseline.medianRequestsPerJourney <= 0 || baseline.medianRequestsPerSecond <= 0)
+    return { status: 'INCONCLUSIVE', reason: 'COMPARISON_METRICS_MISSING_OR_INVALID' };
   const requestPatternDelta = Math.abs((candidate.medianRequestsPerJourney - baseline.medianRequestsPerJourney) / baseline.medianRequestsPerJourney);
-  if (requestPatternDelta > 0.05)
-    return { status: 'INCONCLUSIVE', reason: 'HTTP_REQUEST_PATTERN_DIFFERS_RPS_GATE_NOT_COMPARABLE', requestPatternDeltaPercent: Number((requestPatternDelta * 100).toFixed(2)) };
   const p95Pass = candidate.medianP95Ms <= baseline.medianP95Ms * 1.1;
+  const journeyThroughputDeltaPercent = Number((((candidate.medianJourneysPerSecond - baseline.medianJourneysPerSecond) / baseline.medianJourneysPerSecond) * 100).toFixed(2));
+  if (requestPatternDelta > 0.05) return {
+    status: 'INCONCLUSIVE', reason: 'HTTP_RPS_GATE_NOT_COMPARABLE_REQUEST_PATTERN_DIFFERS',
+    userExperience: { p95Pass, baselineMedianP95Ms: baseline.medianP95Ms, candidateMedianP95Ms: candidate.medianP95Ms, journeyThroughputDeltaPercent },
+    httpRpsGate: 'INCONCLUSIVE', requestPatternDeltaPercent: Number((requestPatternDelta * 100).toFixed(2)),
+  };
   const rpsPass = candidate.medianRequestsPerSecond >= baseline.medianRequestsPerSecond * 0.9;
-  const errorPass = candidate.unexpectedErrorPercent < 1;
+  const errorPass = baseline.unexpectedErrorPercent < 1 && candidate.unexpectedErrorPercent < 1;
   return {
     status: p95Pass && rpsPass && errorPass ? 'PASS' : 'FAIL',
     p95Pass,
     rpsPass,
     errorPass,
-    journeyThroughputDeltaPercent: Number((((candidate.medianJourneysPerSecond - baseline.medianJourneysPerSecond) / baseline.medianJourneysPerSecond) * 100).toFixed(2)),
+    journeyThroughputDeltaPercent,
     requestPatternDeltaPercent: Number((requestPatternDelta * 100).toFixed(2)),
   };
+}
+
+export function validateExistingComparatorReport(report) {
+  if (!report || report.schemaVersion !== 1 || !Array.isArray(report.familyComparison)) return { valid: false, reason: 'COMPARATOR_REPORT_MISSING_OR_INVALID' };
+  const catalog = report.familyComparison.find((sample) => sample.family === 'Catalog');
+  const metrics = [catalog?.baseline?.p95Ms, catalog?.optimized?.p95Ms, catalog?.baseline?.requests, catalog?.optimized?.requests,
+    catalog?.baseline?.requestBodyBytes, catalog?.optimized?.requestBodyBytes, catalog?.baseline?.responseBodyBytes, catalog?.optimized?.responseBodyBytes];
+  if (!catalog || !metrics.every(Number.isFinite) || catalog.baseline.p95Ms <= 0 || catalog.optimized.p95Ms <= 0 || catalog.baseline.requests <= 0 || catalog.optimized.requests <= 0)
+    return { valid: false, reason: 'COMPARATOR_METRIC_MISSING_OR_INVALID' };
+  return { valid: true };
 }

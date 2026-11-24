@@ -25,7 +25,7 @@ export default defineConfig({
     acceptDownloads: false,
   },
   webServer: {
-    command: `npm run dev -- --host 127.0.0.1 --port ${port} --strictPort`,
+    command: `npm run preview -- --host 127.0.0.1 --port ${port} --strictPort`,
     cwd: subjectRoot,
     url: `http://127.0.0.1:${port}/productos`,
     reuseExistingServer: false,

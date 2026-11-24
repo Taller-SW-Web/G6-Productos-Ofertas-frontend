@@ -16,7 +16,7 @@ for (const repetition of [1, 2, 3]) {
   try {
     const bytes = await readFile(path);
     assertSafeEvidenceText(bytes.toString("utf8"));
-    inputs.push({ repetition, run: JSON.parse(bytes.toString("utf8")), sha256: createHash("sha256").update(bytes).digest("hex") });
+    inputs.push({ repetition, run: JSON.parse(bytes.toString("utf8")), bytes, sha256: createHash("sha256").update(bytes).digest("hex") });
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
     missingRepetitions.push(repetition);
@@ -50,6 +50,9 @@ const output = aggregate.status === "MEASURED"
 const serializedAggregate = `${JSON.stringify(output, null, 2)}\n`;
 assertSafeEvidenceText(serializedAggregate);
 await mkdir(dirname(aggregatePath), { recursive: true });
+for (const input of inputs) {
+  await writeFile(resolve(outputRoot, `run-${input.repetition}.json`), input.bytes, { flag: "wx" });
+}
 await writeFile(aggregatePath, serializedAggregate, "utf8");
 const index = {
   schemaVersion: 1,

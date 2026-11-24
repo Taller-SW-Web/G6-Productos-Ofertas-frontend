@@ -1,17 +1,48 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { assertSafeEvidenceText } from "../tests/h5/evidence-security.mjs";
-import { parsePerf06Run } from "../tests/h5/perf06-policy.mjs";
+import { parsePerf06Run, validateColdCacheAttestation } from "../tests/h5/perf06-policy.mjs";
 
 let reportPath = resolve("test-results/h5/perf06-preflight.json");
-const block = async (reason, count = 1) => {
-  const summary = { schemaVersion: 1, suite: "PERF06", status: "BLOCKED_DEPENDENCY", reason, blockerCount: count, serviceCalls: 0 };
-  const serialized = `${JSON.stringify(summary, null, 2)}\n`;
+const validSha = (value, length) => new RegExp(`^[0-9a-f]{${length}}$`, "i").test(value ?? "") ? value : null;
+const writeIndexedReport = async (path, report) => {
+  const serialized = `${JSON.stringify(report, null, 2)}\n`;
   assertSafeEvidenceText(serialized);
-  await mkdir(dirname(reportPath), { recursive: true });
-  await writeFile(reportPath, serialized, "utf8");
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, serialized, "utf8");
+  const sha256 = createHash("sha256").update(Buffer.from(serialized, "utf8")).digest("hex");
+  const index = {
+    schemaVersion: 1,
+    artifact: path.replaceAll("\\", "/").split("/").at(-1),
+    sha256,
+    caseId: "PERF06",
+    h5Criterion: "POM-A05",
+    repository: "Taller-SW-Web/G6-Productos-Ofertas-frontend",
+    owner: "Poma",
+    sourceSha: validSha(process.env.G6_H5_PERF06_SUBJECT_SHA, 40),
+    harnessSha: validSha(process.env.G6_H5_PERF06_HARNESS_SHA, 40),
+    datasetSha: validSha(process.env.G6_H5_PERF06_DATASET_SHA, 64),
+    coldAttestationArtifact: report.evidence?.coldAttestation?.artifact ?? null,
+    coldAttestationSha256: report.evidence?.coldAttestation?.sha256 ?? null,
+    docsSha: "40524e96c6973f84d74160076781702fe2a3da19",
+    timestampUtc: new Date().toISOString(),
+    status: report.status,
+    evidenceLevel: "L1",
+  };
+  const indexText = `${JSON.stringify(index, null, 2)}\n`;
+  assertSafeEvidenceText(indexText);
+  await writeFile(`${path}.index.json`, indexText, "utf8");
+  return sha256;
+};
+const block = async (reason, count = 1) => {
+  const summary = {
+    schemaVersion: 1, suite: "PERF06", status: "BLOCKED_DEPENDENCY", reason,
+    blockerCount: count, serviceCalls: 0,
+    evidence: { caseId: "PERF06", h5Criterion: "POM-A05", docsSha: "40524e96c6973f84d74160076781702fe2a3da19", timestampUtc: new Date().toISOString(), evidenceLevel: "L1" },
+  };
+  await writeIndexedReport(reportPath, summary);
   process.stdout.write(`PERF06 BLOCKED_DEPENDENCY: ${reason}; blockers=${count}; service_calls=0.\n`);
   process.exit(2);
 };
@@ -27,12 +58,13 @@ const required = [
   "G6_H5_PERF06_STORAGE_STATE_DIR",
   "G6_H5_PERF06_IDENTITY_INDEX",
   "G6_H5_PERF06_API_ORIGIN",
+  "G6_H5_PERF06_EVIDENCE_ROOT",
+  "G6_H5_PERF06_SERVICE_SHA",
   "G6_H5_PERF06_READ_ONLY_ATTESTATION",
   "VITE_GATEWAY_ORIGIN",
   "VITE_DATA_MODE",
   "VITE_G6_ADMIN_API_ENABLED",
 ];
-if (run.cacheMode === "cold") required.push("G6_H5_PERF06_COLD_ORACLE");
 const missing = required.filter(name => !process.env[name]);
 if (process.env.G6_H5_PERF06_READ_ONLY_ATTESTATION !== "1") missing.push("READ_ONLY_NOT_ATTESTED");
 if (process.env.VITE_DATA_MODE !== "api" || process.env.VITE_G6_ADMIN_API_ENABLED !== "true") missing.push("REAL_API_MODE_NOT_SELECTED");
@@ -79,6 +111,43 @@ try {
 }
 if (missing.length) await block("ISOLATED_HARNESS_OR_IDENTITY_MISSING", new Set(missing).size);
 
+let coldAttestationSha256 = null;
+let coldAttestationEvidence = null;
+if (run.cacheMode === "cold") {
+  try {
+    const bytes = await readFile(resolve(process.env.G6_H5_PERF06_COLD_ORACLE_PATH));
+    const text = bytes.toString("utf8");
+    assertSafeEvidenceText(text);
+    const attestation = JSON.parse(text);
+    const apiOriginSha256 = createHash("sha256").update(apiOrigin.origin).digest("hex");
+    const verified = validateColdCacheAttestation(attestation, {
+      apiOriginSha256,
+      subjectSha: process.env.G6_H5_PERF06_SUBJECT_SHA,
+      serviceSha: process.env.G6_H5_PERF06_SERVICE_SHA,
+    });
+    if (!verified.valid) throw new Error(verified.reason);
+    coldAttestationSha256 = createHash("sha256").update(bytes).digest("hex");
+    const evidenceRoot = resolve(process.env.G6_H5_PERF06_EVIDENCE_ROOT);
+    const rootInfo = await lstat(evidenceRoot);
+    if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new Error("EVIDENCE_ROOT_INVALID");
+    const attestationDirectory = resolve(evidenceRoot, "cold-attestations");
+    await mkdir(attestationDirectory, { recursive: true });
+    const attestationDirectoryInfo = await lstat(attestationDirectory);
+    if (!attestationDirectoryInfo.isDirectory() || attestationDirectoryInfo.isSymbolicLink()) throw new Error("ATTESTATION_DIRECTORY_INVALID");
+    const attestationName = `${run.subjectRole}-${process.env.G6_H5_PERF06_SUBJECT_SHA}-${run.sessions}VU-${run.durationSeconds}s-r${run.repetition}.json`;
+    const attestationPath = resolve(attestationDirectory, attestationName);
+    if (!attestationPath.startsWith(`${attestationDirectory}${process.platform === "win32" ? "\\" : "/"}`)) throw new Error("ATTESTATION_PATH_INVALID");
+    await writeFile(attestationPath, bytes, { flag: "wx" });
+    coldAttestationEvidence = { artifact: `cold-attestations/${attestationName}`, sha256: coldAttestationSha256 };
+  } catch {
+    const summary = { schemaVersion: 1, suite: "PERF06", status: "INCONCLUSIVE", reason: "SERVICE_CACHE_COLD_STATE_NOT_VERIFIED", serviceCalls: 0 };
+    summary.evidence = { caseId: "PERF06", h5Criterion: "POM-A05", docsSha: "40524e96c6973f84d74160076781702fe2a3da19", timestampUtc: new Date().toISOString(), evidenceLevel: "L1" };
+    await writeIndexedReport(reportPath, summary);
+    process.stdout.write("PERF06 INCONCLUSIVE: service_cache_cold_state_not_verified; service_calls=0.\n");
+    process.exit(2);
+  }
+}
+
 reportPath = resolve(
   "test-results/h5/perf06",
   `${process.env.G6_H5_PERF06_SUBJECT_SHA}-${run.subjectRole}-${run.sessions}VU-${run.durationSeconds}s-r${run.repetition}-${run.cacheMode}.json`,
@@ -89,11 +158,13 @@ await Promise.all([reportPath, safeReporterPath].map(async path => {
 }));
 
 const child = spawn(process.execPath, [
-  "node_modules/playwright/cli.js",
-  "test",
-  "--config",
-  "playwright.h5-perf06.config.ts",
-], { stdio: ["ignore", "pipe", "pipe"], shell: false, env: { ...process.env, G6_H5_EVIDENCE_SUMMARY_PATH: safeReporterPath } });
+  "scripts/run-admin-performance.mjs",
+  "--h5-perf06",
+], { stdio: ["ignore", "pipe", "pipe"], shell: false, env: { ...process.env,
+  G6_H5_EVIDENCE_SUMMARY_PATH: safeReporterPath,
+  G6_H5_PERF06_COLD_ORACLE_VERIFIED: coldAttestationSha256 ? "1" : "0",
+  G6_H5_PERF06_COLD_ORACLE_PATH_SHA256: coldAttestationSha256 ?? "",
+} });
 let capturedBytes = 0;
 child.stdout.on("data", chunk => { capturedBytes += chunk.length; });
 child.stderr.on("data", chunk => { capturedBytes += chunk.length; });
@@ -115,17 +186,42 @@ try {
   assertSafeEvidenceText(text);
   reporterSummary = JSON.parse(text);
 } catch {
-  // Missing or unreadable reporter output becomes a safe summary failure below.
+  // Missing or unreadable reporter output cannot qualify as PASS.
 }
-if (!runReport || !reporterSummary || reporterSummary.suite !== "H5" || reporterSummary.total !== 1 || reporterSummary.passed !== 1 || reporterSummary.skipped !== 0 || runReport.schemaVersion !== 1) {
-  const summary = { schemaVersion: 1, suite: "PERF06", status: "FAIL", reason: "SAFE_METRICS_NOT_PRODUCED", capturedSubprocessBytes: capturedBytes, serviceCalls: "ATTEMPTED" };
-  const serialized = `${JSON.stringify(summary, null, 2)}\n`;
-  assertSafeEvidenceText(serialized);
-  await writeFile(reportPath, serialized, "utf8");
-  process.stdout.write(`PERF06 FAIL: safe_metrics_not_produced; captured_bytes=${capturedBytes}.\n`);
-  process.exit(1);
+const reportMetricsValid = runReport?.schemaVersion === 1 && [
+  runReport.journeys?.p50Ms, runReport.journeys?.p95Ms, runReport.journeys?.p99Ms,
+  runReport.journeys?.throughputPerSecond, runReport.http?.requests,
+  runReport.http?.requestsPerSecond, runReport.http?.responseBodyBytes,
+  runReport.http?.transferredBytes, runReport.http?.unexpectedErrorPercent,
+].every(Number.isFinite) && runReport.journeys.completed > 0 && runReport.http.requests > 0;
+const reporterShapeValid = reporterSummary?.suite === "H5" && reporterSummary.status === "passed" && reporterSummary.total === 1 && reporterSummary.skipped === 0;
+const status = reporterSummary?.failed > 0 || runReport?.status === "FAIL"
+  ? "FAIL"
+  : reporterShapeValid && reporterSummary.passed === 1 && reportMetricsValid && exitCode === 0
+    ? runReport.status
+    : "INCONCLUSIVE";
+if (coldAttestationEvidence && runReport?.evidence) runReport.evidence.coldAttestation = coldAttestationEvidence;
+if (status !== "MEASURED") {
+  if (runReport) {
+    runReport.status = status;
+    runReport.reason = status === "FAIL" ? "PERF06_ASSERTION_FAILED" : "SAFE_METRICS_OR_TEST_DISCOVERY_INCOMPLETE";
+    if (runReport.evidence) {
+      runReport.evidence.observed.status = status;
+      runReport.evidence.blockerOwner = status === "INCONCLUSIVE" ? "Vera or isolated-service owner" : null;
+    }
+    const serialized = `${JSON.stringify(runReport, null, 2)}\n`;
+    assertSafeEvidenceText(serialized);
+    await writeFile(reportPath, serialized, "utf8");
+  } else {
+    const summary = { schemaVersion: 1, suite: "PERF06", status, reason: status === "FAIL" ? "PERF06_ASSERTION_FAILED" : "SAFE_METRICS_OR_TEST_DISCOVERY_INCOMPLETE", capturedSubprocessBytes: capturedBytes, serviceCalls: "UNKNOWN" };
+    const serialized = `${JSON.stringify(summary, null, 2)}\n`;
+    assertSafeEvidenceText(serialized);
+    await writeFile(reportPath, serialized, "utf8");
+  }
 }
-const reportText = await readFile(reportPath, "utf8");
-assertSafeEvidenceText(reportText);
-process.stdout.write(`PERF06 ${runReport.status}: profile=${runReport.profile}; cache=${runReport.cacheMode}; requests=${runReport.http?.requests ?? 0}; journeys=${runReport.journeys?.completed ?? 0}; captured_bytes=${capturedBytes}.\n`);
-if (exitCode !== 0 || runReport.status !== "MEASURED") process.exit(1);
+const reportSha256 = await writeIndexedReport(reportPath, runReport ?? {
+  schemaVersion: 1, suite: "PERF06", status, reason: "SAFE_METRICS_OR_TEST_DISCOVERY_INCOMPLETE",
+  evidence: { caseId: "PERF06", h5Criterion: "POM-A05", docsSha: "40524e96c6973f84d74160076781702fe2a3da19", timestampUtc: new Date().toISOString(), evidenceLevel: "L1", coldAttestation: coldAttestationEvidence },
+});
+process.stdout.write(`PERF06 ${runReport?.status ?? status}: profile=${runReport?.profile ?? "UNKNOWN"}; cache=${runReport?.cacheMode ?? "UNKNOWN"}; requests=${runReport?.http?.requests ?? 0}; journeys=${runReport?.journeys?.completed ?? 0}; artifact_sha256=${reportSha256}; captured_bytes=${capturedBytes}.\n`);
+if (status !== "MEASURED") process.exit(status === "FAIL" ? 1 : 2);

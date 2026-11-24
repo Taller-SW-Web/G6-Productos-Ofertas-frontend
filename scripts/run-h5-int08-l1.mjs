@@ -32,7 +32,7 @@ await mkdir(dirname(innerReportPath), { recursive: true });
 try { await unlink(innerReportPath); } catch (error) { if (error?.code !== "ENOENT") throw error; }
 
 const child = spawn(process.execPath, [
-  "node_modules/playwright/cli.js", "test", "--config", "tests/catalog-http-real.config.ts", "tests/catalog-http-real.spec.ts",
+  "node_modules/playwright/cli.js", "test", "--config", "playwright.h5-int08-l1.config.ts", "tests/catalog-http-real.spec.ts",
 ], { stdio: ["ignore", "pipe", "pipe"], shell: false, env: { ...process.env, G6_H5_EVIDENCE_SUMMARY_PATH: innerReportPath } });
 let capturedBytes = 0;
 child.stdout.on("data", chunk => { capturedBytes += chunk.length; });

@@ -29,6 +29,8 @@ try {
   try {
     npm ci --no-audit --no-fund --loglevel=error *> $null
     if ($LASTEXITCODE -ne 0) { throw 'BASELINE_LOCKFILE_INSTALL_FAILED' }
+    npm run build *> $null
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $destination 'dist/index.html'))) { throw 'SUBJECT_PRODUCTION_BUILD_FAILED' }
   } finally {
     Pop-Location
   }

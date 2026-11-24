@@ -11,11 +11,8 @@ export default defineConfig({
   testDir: ".",
   workers: 1,
   retries: 0,
-  testMatch: "catalog-http-real.spec.ts",
-  outputDir: "test-results/h5-int08-real",
-  preserveOutput: "never",
-  reporter: [["../tests/h5/safe-reporter.mjs"]],
-  use: { browserName: "chromium", baseURL: browserOrigin, headless: true, trace: "off", screenshot: "off", video: "off", acceptDownloads: false, serviceWorkers: "block" },
+  reporter: "line",
+  use: { browserName: "chromium", baseURL: browserOrigin, headless: true, trace: "off", screenshot: "off", video: "off" },
   webServer: {
     command: `node node_modules/vite/bin/vite.js --config tests/harness/vite.catalog-real.config.ts --host 127.0.0.1 --port ${port} --strictPort`,
     cwd: "..",
