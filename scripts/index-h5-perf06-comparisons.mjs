@@ -15,6 +15,14 @@ for (const name of names) {
   if (!['PASS', 'FAIL', 'INCONCLUSIVE'].includes(report.status)) throw new Error('PERF06_COMPARISON_STATUS_INVALID');
   artifacts.push({ name, sha256: createHash('sha256').update(bytes).digest('hex'), status: report.status });
 }
+const schedulePath = resolve(dirname(directory), 'run-schedule.json');
+try {
+  const bytes = await readFile(schedulePath);
+  assertSafeEvidenceText(bytes.toString('utf8'));
+  artifacts.push({ name: 'run-schedule.json', sha256: createHash('sha256').update(bytes).digest('hex'), status: 'RECORDED' });
+} catch (error) {
+  if (error?.code !== 'ENOENT') throw error;
+}
 const index = { schemaVersion: 1, artifacts };
 const serialized = `${JSON.stringify(index, null, 2)}\n`;
 assertSafeEvidenceText(serialized);
