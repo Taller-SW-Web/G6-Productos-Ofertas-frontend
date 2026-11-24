@@ -10,6 +10,8 @@ import type {
   BulkExportJob,
   BulkImportBatch,
   BulkImportRow,
+  BulkResumeAccepted,
+  BulkResumeRequest,
 } from "../types/bulk";
 import type {
   BulkRepository,
@@ -1157,14 +1159,17 @@ export const mockBulkRepository: BulkRepository & {
   async resumeImport(
     batchId: string,
     signal?: AbortSignal,
-  ): Promise<BulkImportBatch> {
+    request?: BulkResumeRequest,
+  ): Promise<BulkResumeAccepted> {
     signal?.throwIfAborted();
+    if (!request || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(request.correlationId)) {
+      throw new Error("La reanudación mock requiere una correlación estable.");
+    }
 
     const existing = await this.getImport(batchId, signal);
     if (!existing) {
       throw new Error(`No se encontró el lote ${batchId} para reanudar.`);
     }
-
     // Validate eligibility for resume
     if (existing.status === "QUEUED" || existing.status === "PROCESSING") {
       throw new Error(
@@ -1177,6 +1182,7 @@ export const mockBulkRepository: BulkRepository & {
         `El lote ${batchId} no contiene operaciones pendientes ni requiere reconciliación.`,
       );
     }
+    if (!existing.correlation_id) throw new Error("El lote mock no conserva su correlación original.");
 
     if (resumingBatches.has(batchId)) {
       throw new Error(`El lote ${batchId} ya tiene una reanudación en curso.`);
@@ -1211,7 +1217,12 @@ export const mockBulkRepository: BulkRepository & {
     // until the next turn so a rapid duplicate cannot schedule a second run.
     queueMicrotask(() => resumingBatches.delete(batchId));
 
-    return deepCloneBatch(resumedBatch);
+    return {
+      batch_id: resumedBatch.batch_id,
+      correlation_id: existing.correlation_id,
+      status: "QUEUED",
+      template_version: 2,
+    };
   },
 
   async createExport(

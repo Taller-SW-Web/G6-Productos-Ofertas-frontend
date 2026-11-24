@@ -46,6 +46,7 @@ const channels: { value: DemoChannel; label: string }[] = [
   { value: "MARKETPLACE", label: "Marketplace" },
   { value: "CHATBOT", label: "Chatbot" },
   { value: "RETAIL", label: "Retail" },
+  { value: "VENTAS", label: "Ventas" },
 ];
 function readChannel(value: string | null): DemoChannel | null {
   return channels.some((channel) => channel.value === value)

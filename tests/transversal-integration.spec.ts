@@ -407,7 +407,7 @@ test.describe("P0 — Integración transversal completa de módulos con persiste
     await expect(page.getByText(catFailSku)).toHaveCount(0);
   });
 
-  test("Error en Inventory durante Bulk permite reanudación de dominios pendientes sin duplicar Catálogo ni stock", async ({
+  test("Error en Inventory durante Bulk permanece bloqueado porque INVENTARIO está excluido de BULK_RETRY_V1", async ({
     page,
   }) => {
     const invFailSku = `INV-FAIL-${Date.now().toString().slice(-4)}`;
@@ -465,28 +465,18 @@ test.describe("P0 — Integración transversal completa de módulos con persiste
     await page.goto("/inventario");
     await expect(page.getByText(invFailSku)).toHaveCount(0);
 
-    // Volver a la pantalla de resultado del lote y reanudar para completar la conciliación
+    // BULK_RETRY_V1 solo autoriza CATALOGO en esta etapa. El fallo de Inventory
+    // no debe exponer una acción de retry ni crear stock desde el navegador.
     await page.goto(`/carga-masiva/importaciones/${batchId}/resultado`);
-    const resumeButton = page.getByRole("button", { name: "Reanudar lote", exact: true });
-    await expect(resumeButton).toBeVisible({ timeout: 10000 });
-    await resumeButton.click();
-    const confirmDialog = page.getByRole("dialog");
-    await expect(confirmDialog).toBeVisible({ timeout: 5000 });
-    await confirmDialog.getByRole("button", { name: "Confirmar reanudación", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Reanudar lote", exact: true })).toHaveCount(0);
 
-    // Esperar a que el lote complete exitosamente
-    await expect(page.locator("section").getByText("Completado", { exact: true }).first()).toBeVisible({ timeout: 15000 });
-
-    // Verificar en Inventario que el stock ahora sí existe con exactamente 30 unidades
+    // El producto permanece en Catálogo, pero no se aplica stock por retry.
     await page.goto("/inventario");
     const invRow = page.getByRole("row").filter({ hasText: invFailSku });
-    await expect(invRow).toBeVisible();
-    await expect(invRow).toContainText("30");
-
-    // F5: exactamente 30 unidades sin duplicación
+    await expect(invRow).toHaveCount(0);
     await page.reload();
     const persistedRow = page.getByRole("row").filter({ hasText: invFailSku });
-    await expect(persistedRow).toContainText("30");
+    await expect(persistedRow).toHaveCount(0);
   });
 
   test("Idempotencia estricta en Inventory: múltiples ejecuciones con misma clave no duplican stock", async ({

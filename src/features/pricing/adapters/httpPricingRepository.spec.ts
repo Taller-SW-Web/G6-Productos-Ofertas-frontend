@@ -1,3 +1,4 @@
+import { createAuthenticatedGatewayClient } from "../../../app/config/authenticatedGatewayClient";
 import { withAdminPriceDefinition } from "../../../../tests/fixtures/adminPriceDefinition";
 import { createMemoryStorage } from "../../../../tests/fixtures/h4Controlled";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -524,6 +525,54 @@ describe("createHttpPricingRepository", () => {
       ),
     ).rejects.toMatchObject({ kind });
     expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("envía multipart autenticado y conserva la intención cuando Gateway rechaza la sesión", async () => {
+    vi.stubGlobal("localStorage", createMemoryStorage());
+    vi.stubGlobal("navigator", {
+      locks: { request: async (name: string, _options: LockOptions, handle: LockGrantedCallback<unknown>) =>
+        handle({ name, mode: "exclusive" }) },
+    });
+    const session = {
+      getAccessToken: vi.fn(async () => "expired-token"),
+      refreshAccessToken: vi.fn(async () => "refreshed-token"),
+      invalidateAccessToken: vi.fn(),
+    };
+    const fetcher = vi.fn<typeof fetch>()
+      .mockRejectedValueOnce(new DOMException("Solicitud expirada", "TimeoutError"))
+      .mockImplementation(async () => jsonResponse({ code: "TOKEN_INVALIDO" }, 401));
+    const repository = createHttpPricingRepository({
+      transport: createAuthenticatedGatewayClient("https://gateway.example", session, fetcher),
+      scopeId: () => "actor",
+      canManagePricing: () => true,
+      listCatalogTargets: async () => [],
+    });
+    const input = { file: new File(["sku\nSKU-A\n"], "precios.csv"), allowPartial: false };
+    const admission = repository.importAdmission!;
+    const signal = new AbortController().signal;
+    await expect(admission.submit(input, signal)).rejects.toMatchObject({ kind: "unknown" });
+    const pending = admission.recovery()?.pending;
+    if (!pending) throw new Error("Se esperaba una intención recuperable.");
+    expect(pending.key).toMatch(/^[0-9a-f-]{36}$/);
+    fetcher.mockClear();
+
+    await expect(admission.submit(input, signal, pending.key))
+      .rejects.toMatchObject({ kind: "unauthorized" });
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    const [url, init] = fetcher.mock.calls[0]!;
+    expect(url).toBe("https://gateway.example/api/v1/precios/importaciones");
+    expect(init?.method).toBe("POST");
+    const headers = new Headers(init?.headers);
+    expect(headers.get("Authorization")).toBe("Bearer expired-token");
+    expect(headers.get("Idempotency-Key")).toBe(pending.key);
+    expect(headers.has("Content-Type")).toBe(false);
+    expect(init?.body).toBeInstanceOf(FormData);
+    if (!(init?.body instanceof FormData)) throw new Error("Se esperaba multipart.");
+    expect([...init.body.entries()]).toEqual([["archivo", input.file], ["allow_partial", "false"]]);
+    expect(session.invalidateAccessToken).toHaveBeenCalledWith("expired-token");
+    expect(session.refreshAccessToken).not.toHaveBeenCalled();
+    expect(admission.recovery()?.pending).toEqual(pending);
   });
 
   it.each([

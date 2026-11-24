@@ -225,28 +225,30 @@ test("E2E-06: Bulk admite CSV, sigue el mismo batchId y descarga reporte simulad
   expect(state.posts()).toBe(1);
 });
 
-test("E2E-07: Bulk incierto recarga, conserva marcador tras 404 y recupera con GET 200 sin segundo POST", async ({ page }) => {
+test("E2E-07: Bulk incierto conserva la intención y bloquea conciliación no soportada sin reenvío", async ({ page }) => {
   const state = await attachBulkApi(page, "recover");
   await openBulkHarness(page); await selectCsv(page);
   await page.getByRole("button", { name: "Confirmar importación", exact: true }).first().click();
-  await expect(page.getByText(/GET 404: lote no localizado/)).toBeVisible();
+  await expect(page.getByText(/conciliación permanece deshabilitada hasta acreditar el endpoint compatible/i)).toBeVisible();
   const beforeReload = await page.evaluate(() => Object.entries(sessionStorage).find(([key]) => key.startsWith("g6:bulk:admission:v1:"))?.[1] ?? null);
   expect(beforeReload).not.toBeNull();
   expect(JSON.parse(beforeReload!)).toMatchObject({ owner: "g7-h4-owner-a", state: "uncertain" });
   await page.reload();
-  await page.getByRole("link", { name: "Ir a selección de archivo" }).click();
+  await openBulkHarness(page);
   await selectCsv(page);
-  await expect(page.getByText(/GET 404: lote no localizado/)).toBeVisible();
+  await expect(page.getByText(/conciliación permanece deshabilitada hasta acreditar el endpoint compatible/i)).toBeVisible();
   const after404 = await page.evaluate(() => Object.entries(sessionStorage).find(([key]) => key.startsWith("g6:bulk:admission:v1:"))?.[1] ?? null);
   expect(JSON.parse(after404!)).toMatchObject({ owner: "g7-h4-owner-a", state: "uncertain" });
-  await page.getByRole("button", { name: "Volver a consultar lote" }).click();
-  await expect(page).toHaveURL(new RegExp(`${state.batchId()}$`));
-  await expect(page.getByText("Producto H4")).toBeVisible();
+  expect(state.reads()).toBe(0);
   expect(state.posts()).toBe(1);
-  expect(state.reads()).toBeGreaterThanOrEqual(3);
   const afterRecovery = await page.evaluate(() => Object.entries(sessionStorage).find(([key]) => key.startsWith("g6:bulk:admission:v1:"))?.[1] ?? null);
-  expect(JSON.parse(afterRecovery!)).toMatchObject({ owner: "g7-h4-owner-a", state: "accepted" });
-  expect(await page.evaluate(() => Object.keys(sessionStorage).some(key => key.startsWith("g6:bulk:import-pending:")))).toBe(false);
+  expect(JSON.parse(afterRecovery!)).toMatchObject({ owner: "g7-h4-owner-a", state: "uncertain" });
+  expect(await page.evaluate(() => Object.keys(sessionStorage).some(key => key.startsWith("g6:bulk:import-pending:")))).toBe(true);
+  await openBulkHarness(page);
+  await page.locator('input[type="file"]').setInputFiles({ name: "otro.csv", mimeType: "text/csv", buffer: Buffer.from("sku,nombre\nSKU-OTHER,Otro producto\n") });
+  await page.getByRole("button", { name: "Continuar a revisión", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Confirmar importación", exact: true }).first()).toBeDisabled();
+  expect(state.posts()).toBe(1);
 });
 
 test("E2E-08: cambio A→B mientras el POST Bulk está pendiente conserva aislada la intención de A", async ({ page }) => {

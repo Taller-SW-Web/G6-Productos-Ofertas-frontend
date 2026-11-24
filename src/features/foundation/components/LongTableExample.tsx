@@ -10,10 +10,6 @@ type Row = typeof longTableRow;
 export function LongTableExample() {
   const [opened, setOpened] = useState(false);
   const descriptionTrigger = useRef<HTMLButtonElement>(null);
-  const closeDialog = () => {
-    setOpened(false);
-    requestAnimationFrame(() => descriptionTrigger.current?.focus());
-  };
   const columns: TableColumn<Row>[] = [
     {
       key: "sku",
@@ -82,7 +78,8 @@ export function LongTableExample() {
       />
       <Modal
         opened={opened}
-        onClose={closeDialog}
+        onClose={() => setOpened(false)}
+        onExitTransitionEnd={() => descriptionTrigger.current?.focus()}
         title="Detalle de tabla extensa"
       >
         <Stack gap="md">
