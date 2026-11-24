@@ -29,7 +29,7 @@ function parseCanonicalJson(bytes, category) {
 }
 
 function parseChecksum(text, bytes, category) {
-  const expected = /^([a-f0-9]{64})  manifest\.json\n$/.exec(text)?.[1];
+  const expected = /^([a-f0-9]{64})[\x20]{2}manifest\.json\n$/.exec(text)?.[1];
   if (!expected || expected !== digest(bytes)) throw new Error(`${category}_CHECKSUM_MISMATCH`);
   return expected;
 }
