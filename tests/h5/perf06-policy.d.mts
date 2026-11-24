@@ -13,6 +13,8 @@ export function percentile(values: number[], fraction: number): number | null;
 export function evaluatePerf06Run(run: {
   cacheMode: Perf06CacheMode;
   cacheHits: number;
+  firstNetworkReads: number;
+  firstCacheHits: number;
   serviceWorkerHits: number;
   coldOracleVerified: boolean;
   requestCount: number;

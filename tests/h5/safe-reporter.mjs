@@ -8,11 +8,15 @@ export default class H5SafeReporter {
   onBegin(_config, suite) {
     this.total = suite.allTests().length;
     this.counts = { passed: 0, failed: 0, skipped: 0, interrupted: 0, timedOut: 0 };
+    this.cases = [];
   }
 
-  onTestEnd(_test, result) {
+  onTestEnd(test, result) {
     const key = result.status === "timedOut" ? "timedOut" : result.status;
     if (Object.hasOwn(this.counts, key)) this.counts[key] += 1;
+    const stableName = test.title.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 64) || "ASSERTION";
+    const status = result.status === "passed" ? "PASS" : result.status === "failed" ? "FAIL" : result.status === "skipped" ? "SKIPPED" : result.status === "interrupted" ? "INTERRUPTED" : "TIMED_OUT";
+    this.cases.push({ scenario_id: `H5-${stableName}-${String(this.cases.length + 1).padStart(3, "0")}`, status, evidence_level: "L0_CONTRACT" });
   }
 
   async onEnd(result) {
@@ -22,6 +26,7 @@ export default class H5SafeReporter {
       status: result.status,
       total: this.total,
       ...this.counts,
+      cases: this.cases,
     };
     const serialized = `${JSON.stringify(summary, null, 2)}\n`;
     assertSafeEvidenceText(serialized);

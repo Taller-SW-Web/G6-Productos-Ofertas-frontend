@@ -11,6 +11,7 @@ export default defineConfig({
   preserveOutput: "never",
   workers: 1,
   retries: 0,
+  timeout: 20_000,
   reporter: [["./tests/h5/safe-reporter.mjs"]],
   use: {
     baseURL: `http://127.0.0.1:${port}`,
@@ -27,6 +28,6 @@ export default defineConfig({
     cwd: process.cwd(),
     url: `http://127.0.0.1:${port}/tests/harness/catalog-http.html`,
     reuseExistingServer: false,
-    timeout: 60_000,
+    timeout: Number(process.env.G6_H5_INT08_READINESS_TIMEOUT_MS ?? "15_000"),
   },
 });

@@ -13,12 +13,12 @@ type Manifest = {
   expected: { product_ids: string[] };
 };
 
-type BrowserObservation = { cacheHits: number; serviceWorkerHits: number; cacheHitRequestIds: Set<string> };
+type BrowserObservation = { cacheHits: number; serviceWorkerHits: number; firstNetworkReads: number; firstCacheHits: number; cacheHitRequestIds: Set<string>; firstRequestByUrl: Map<string, string>; classifiedFirstRequestIds: Set<string> };
 type Session = { id: string; context: BrowserContext; page: Page; observed: BrowserObservation; currentRoute: JourneyKey | null; firstNavigationRecorded: boolean };
 type JourneyKey = "admin-entry" | "catalog-navigation" | "catalog-list" | "catalog-filter" | "product-detail" | "edit-screen" | "preparation-status-read" | "return-list";
 type RouteHttpMetrics = { requests: number; requestBodyBytes: number; responseBodyBytes: number; transferredBytes: number; errors: number; cancelled: number };
 
-test("PERF06: sesiones activas concurrentes sobre recorrido Catalog administrativo", async ({ baseURL }) => {
+test("PERF06_READ_ONLY: sesiones activas concurrentes sobre recorrido Catalog administrativo de solo lectura", async ({ baseURL }) => {
   test.setTimeout(420_000);
   const sessions: Session[] = [];
   let isolatedBrowser: Browser | undefined;
@@ -64,6 +64,8 @@ test("PERF06: sesiones activas concurrentes sobre recorrido Catalog administrati
   const aliases = new Set<string>();
   const stateHashes = new Set<string>();
   const journeyDurations: number[] = [];
+  const stableRenderDurations: number[] = [];
+  const navigationDurations: number[] = [];
   const routeDurations: Record<JourneyKey, number[]> = {
     "admin-entry": [], "catalog-navigation": [], "catalog-list": [], "catalog-filter": [], "product-detail": [], "edit-screen": [], "preparation-status-read": [], "return-list": [],
   };
@@ -76,6 +78,8 @@ test("PERF06: sesiones activas concurrentes sobre recorrido Catalog administrati
   let unexpectedHttpResponses = 0;
   let failedRequests = 0;
   let pageErrors = 0;
+  let consoleWarnings = 0;
+  let consoleErrors = 0;
   let unexpectedOrigins = 0;
   let journeysStarted = 0;
   let journeysCompleted = 0;
@@ -123,13 +127,23 @@ test("PERF06: sesiones activas concurrentes sobre recorrido Catalog administrati
       locale: "es-PE",
     });
     const page = await context.newPage();
-    const observed: BrowserObservation = { cacheHits: 0, serviceWorkerHits: 0, cacheHitRequestIds: new Set() };
+    const observed: BrowserObservation = { cacheHits: 0, serviceWorkerHits: 0, firstNetworkReads: 0, firstCacheHits: 0, cacheHitRequestIds: new Set(), firstRequestByUrl: new Map(), classifiedFirstRequestIds: new Set() };
     const session: Session = { id: sessionId, context, page, observed, currentRoute: null, firstNavigationRecorded: false };
     const cdp = await context.newCDPSession(page);
     await cdp.send("Network.enable");
     const cdpRequestRoutes = new Map<string, JourneyKey | null>();
+    const cdpRequestUrls = new Map<string, string>();
+    const classifyFirstCacheState = (requestId: string, fromCache: boolean) => {
+      const url = cdpRequestUrls.get(requestId);
+      if (!url || observed.firstRequestByUrl.get(url) !== requestId || observed.classifiedFirstRequestIds.has(requestId)) return;
+      observed.classifiedFirstRequestIds.add(requestId);
+      if (fromCache) observed.firstCacheHits += 1;
+      else observed.firstNetworkReads += 1;
+    };
     cdp.on("Network.requestWillBeSent", (event: { requestId: string; request: { url: string } }) => {
       if (!measuring) return;
+      cdpRequestUrls.set(event.requestId, event.request.url);
+      if (!observed.firstRequestByUrl.has(event.request.url)) observed.firstRequestByUrl.set(event.request.url, event.requestId);
       let requestOrigin = "";
       try { requestOrigin = new URL(event.request.url).origin; } catch { unexpectedOrigins += 1; }
       if (requestOrigin && ![appOrigin, apiOrigin.origin].includes(requestOrigin)) unexpectedOrigins += 1;
@@ -145,16 +159,19 @@ test("PERF06: sesiones activas concurrentes sobre recorrido Catalog administrati
       transferredResources += 1;
       const route = cdpRequestRoutes.get(event.requestId);
       if (route) routeHttp[route].transferredBytes += event.encodedDataLength;
+      cdpRequestRoutes.delete(event.requestId);
+      cdpRequestUrls.delete(event.requestId);
     });
     cdp.on("Network.responseReceived", (event: { requestId: string; response: { fromDiskCache?: boolean; fromServiceWorker?: boolean } }) => {
       if (!measuring) return;
       if (event.response.fromDiskCache) observed.cacheHitRequestIds.add(event.requestId);
+      classifyFirstCacheState(event.requestId, Boolean(event.response.fromDiskCache || event.response.fromServiceWorker));
       if (event.response.fromServiceWorker) {
         observed.cacheHitRequestIds.add(event.requestId);
         observed.serviceWorkerHits += 1;
       }
     });
-    cdp.on("Network.requestServedFromCache", (event: { requestId: string }) => { if (measuring) observed.cacheHitRequestIds.add(event.requestId); });
+    cdp.on("Network.requestServedFromCache", (event: { requestId: string }) => { if (measuring) { observed.cacheHitRequestIds.add(event.requestId); classifyFirstCacheState(event.requestId, true); } });
     if (config.cacheMode === "cold") await cdp.send("Network.clearBrowserCache");
 
     page.on("request", request => {
@@ -211,6 +228,7 @@ test("PERF06: sesiones activas concurrentes sobre recorrido Catalog administrati
     });
     page.on("requestfinished", request => { activeRequests.delete(request); });
     page.on("pageerror", () => { if (measuring) pageErrors += 1; });
+    page.on("console", message => { if (!measuring) return; if (message.type() === "warning") consoleWarnings += 1; if (message.type() === "error") consoleErrors += 1; });
     sessions.push(session);
   }
 
@@ -219,7 +237,14 @@ test("PERF06: sesiones activas concurrentes sobre recorrido Catalog administrati
     session.currentRoute = key;
     try {
       await action();
-      if (measuring) routeDurations[key].push(performance.now() - startedAt);
+      if (measuring) {
+        const actionDuration = performance.now() - startedAt;
+        routeDurations[key].push(actionDuration);
+        if (["admin-entry", "catalog-navigation", "return-list"].includes(key)) navigationDurations.push(actionDuration);
+        const stableStart = performance.now();
+        await session.page.evaluate(() => new Promise<void>(resolveFrame => requestAnimationFrame(() => requestAnimationFrame(() => resolveFrame()))));
+        stableRenderDurations.push(performance.now() - stableStart);
+      }
     } finally {
       session.currentRoute = null;
     }
@@ -326,10 +351,12 @@ test("PERF06: sesiones activas concurrentes sobre recorrido Catalog administrati
   for (const session of sessions) session.observed.cacheHits = session.observed.cacheHitRequestIds.size;
   const cacheHits = sessions.reduce((total, session) => total + session.observed.cacheHits, 0);
   const serviceWorkerHits = sessions.reduce((total, session) => total + session.observed.serviceWorkerHits, 0);
+  const firstNetworkReads = sessions.reduce((total, session) => total + session.observed.firstNetworkReads, 0);
+  const firstCacheHits = sessions.reduce((total, session) => total + session.observed.firstCacheHits, 0);
   const proxyStats = egressProxy!.stats();
   unexpectedOrigins += proxyStats.deniedRequests;
   const coldOracle = config.cacheMode === "cold" ? process.env.G6_H5_PERF06_COLD_ORACLE_PATH_SHA256 ?? "SERVICE_CACHE_ATTESTATION_REQUIRED" : "NOT_APPLICABLE_WARM";
-  const coldOracleVerified = config.cacheMode === "cold" && process.env.G6_H5_PERF06_COLD_ORACLE_VERIFIED === "1" && cacheHits === 0 && serviceWorkerHits === 0;
+  const coldOracleVerified = config.cacheMode === "cold" && process.env.G6_H5_PERF06_COLD_ORACLE_VERIFIED === "1" && firstNetworkReads > 0 && firstCacheHits === 0 && serviceWorkerHits === 0;
   const unexpectedErrors = unexpectedHttpResponses + failedRequests + pageErrors + proxyStats.upstreamFailures;
   const startSkewMs = sessionStartedAt.length ? Number((Math.max(...sessionStartedAt) - Math.min(...sessionStartedAt)).toFixed(2)) : null;
   const minimumActiveSessionMs = sessionStartedAt.length
@@ -341,6 +368,8 @@ test("PERF06: sesiones activas concurrentes sobre recorrido Catalog administrati
   const evaluation = evaluatePerf06Run({
     cacheMode: config.cacheMode,
     cacheHits,
+    firstNetworkReads,
+    firstCacheHits,
     serviceWorkerHits,
     coldOracleVerified,
     requestCount: requests,
@@ -357,7 +386,7 @@ test("PERF06: sesiones activas concurrentes sobre recorrido Catalog administrati
   });
   const report = {
     schemaVersion: 1,
-    runLabel: `POMA-H5-PERF06-${config.subjectRole}-${config.sessions}VU-r${config.repetition}-${config.cacheMode}`,
+    runLabel: `POMA-H5-PERF06-READ_ONLY-${config.subjectRole}-${config.sessions}VU-r${config.repetition}-${config.cacheMode}`,
     family: "Catalog",
     subjectRole: config.subjectRole,
     subjectSha: process.env.G6_H5_PERF06_SUBJECT_SHA,
@@ -378,7 +407,7 @@ test("PERF06: sesiones activas concurrentes sobre recorrido Catalog administrati
     startSkewMs,
     repetition: config.repetition,
     cacheMode: config.cacheMode,
-    cacheEvidence: { hits: cacheHits, serviceWorkerHits, coldOracleSha256: coldOracle, status: evaluation.cacheValid ? "VERIFIED" : "INCONCLUSIVE", authenticationPremeasurement: "no_login_navigation_performed" },
+    cacheEvidence: { hits: cacheHits, firstRequestNetworkReads: firstNetworkReads, firstRequestCacheHits: firstCacheHits, serviceWorkerHits, coldOracleSha256: coldOracle, status: evaluation.cacheValid ? "VERIFIED" : "INCONCLUSIVE", authenticationPremeasurement: "no_login_navigation_performed", browserCacheClearedBeforeColdMeasurement: config.cacheMode === "cold" },
     durationSeconds: config.durationSeconds,
     elapsedSeconds: Number(elapsedSeconds.toFixed(2)),
     journeyDenominators: {
@@ -401,6 +430,8 @@ test("PERF06: sesiones activas concurrentes sobre recorrido Catalog administrati
       p99Ms: percentile(journeyDurations, 0.99),
     },
     routeHttp,
+    navigationMetrics: { count: navigationDurations.length, p50Ms: percentile(navigationDurations, 0.5), p95Ms: percentile(navigationDurations, 0.95), p99Ms: percentile(navigationDurations, 0.99) },
+    renderStability: { checks: stableRenderDurations.length, p50Ms: percentile(stableRenderDurations, 0.5), p95Ms: percentile(stableRenderDurations, 0.95), p99Ms: percentile(stableRenderDurations, 0.99), method: "two animation frames after each contract-visible route assertion" },
     mutationOperations: { editSaved: false, preparationRequested: false, explanation: "read-only benchmark visits the edit and preparation-status screens; it does not save an edit or issue a preparation operation" },
     routeDurationsMs: Object.fromEntries(Object.entries(routeDurations).map(([key, values]) => [key, { count: values.length, p50: percentile(values, 0.5), p95: percentile(values, 0.95), p99: percentile(values, 0.99) }])),
     http: {
@@ -423,6 +454,8 @@ test("PERF06: sesiones activas concurrentes sobre recorrido Catalog administrati
       blockedExternalOriginRequests: proxyStats.deniedRequests,
       proxyUpstreamFailures: proxyStats.upstreamFailures,
       pageErrors,
+      consoleWarnings,
+      consoleErrors,
     },
     environment: {
       browser: `Chromium ${isolatedBrowser!.version()}`,
@@ -440,7 +473,7 @@ test("PERF06: sesiones activas concurrentes sobre recorrido Catalog administrati
     },
     status: evaluation.status,
     evidence: {
-      caseId: "PERF06",
+      caseId: "PERF06_READ_ONLY",
       h5Criterion: "POM-A05",
       repository: "Taller-SW-Web/G6-Productos-Ofertas-frontend",
       owner: "Poma",

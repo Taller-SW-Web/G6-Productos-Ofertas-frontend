@@ -10,6 +10,7 @@ export default defineConfig({
   preserveOutput: "never",
   workers: 1,
   retries: 0,
+  timeout: 20_000,
   reporter: [["./tests/h5/safe-reporter.mjs"]],
   use: { baseURL: `http://127.0.0.1:${port}`, browserName: "chromium", headless: true, trace: "off", screenshot: "off", video: "off", serviceWorkers: "block" },
   webServer: {
@@ -17,6 +18,6 @@ export default defineConfig({
     cwd: process.cwd(),
     url: `http://127.0.0.1:${port}/`,
     reuseExistingServer: false,
-    timeout: 15_000,
+    timeout: Number(process.env.G6_H5_CACHE_READINESS_TIMEOUT_MS ?? "15_000"),
   },
 });

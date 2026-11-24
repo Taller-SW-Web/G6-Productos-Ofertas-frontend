@@ -132,7 +132,7 @@ export function aggregatePerf06Runs(runs) {
 export function evaluatePerf06Run(run) {
   const cacheValid = run.cacheMode === 'warm'
     ? run.cacheHits > 0
-    : run.coldOracleVerified && run.cacheHits === 0 && run.serviceWorkerHits === 0;
+    : run.coldOracleVerified && run.firstNetworkReads > 0 && run.firstCacheHits === 0 && run.serviceWorkerHits === 0;
   const denominator = run.requestCount;
   const errorRate = denominator === 0 ? 1 : run.unexpectedErrors / denominator;
   const startSynchronized = Number.isFinite(run.startSkewMs) && run.startSkewMs <= 500;

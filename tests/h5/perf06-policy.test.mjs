@@ -54,9 +54,9 @@ test("requires a verified observed cold/warm cache state and preserves error den
     sessionConcurrencyValid: true, journeyOutcomeValid: true, errorRate: 0,
   });
   assert.equal(evaluatePerf06Run({ ...sync, cacheMode: "warm", cacheHits: 3, serviceWorkerHits: 0, requestCount: 100, unexpectedErrors: 1, unexpectedOrigins: 0 }).status, "FAIL");
-  assert.equal(evaluatePerf06Run({ ...sync, cacheMode: "cold", coldOracleVerified: true, cacheHits: 1, serviceWorkerHits: 0, requestCount: 100, unexpectedErrors: 0, unexpectedOrigins: 0 }).status, "INCONCLUSIVE");
+  assert.equal(evaluatePerf06Run({ ...sync, cacheMode: "cold", coldOracleVerified: true, firstNetworkReads: 1, firstCacheHits: 1, cacheHits: 5, serviceWorkerHits: 0, requestCount: 100, unexpectedErrors: 0, unexpectedOrigins: 0 }).status, "INCONCLUSIVE");
   assert.equal(evaluatePerf06Run({ ...sync, cacheMode: "cold", coldOracleVerified: true, cacheHits: 0, serviceWorkerHits: 1, requestCount: 100, unexpectedErrors: 0, unexpectedOrigins: 0 }).status, "INCONCLUSIVE");
-  assert.equal(evaluatePerf06Run({ ...sync, cacheMode: "cold", coldOracleVerified: true, cacheHits: 0, serviceWorkerHits: 0, requestCount: 100, unexpectedErrors: 0, unexpectedOrigins: 0 }).status, "MEASURED");
+  assert.equal(evaluatePerf06Run({ ...sync, cacheMode: "cold", coldOracleVerified: true, firstNetworkReads: 1, firstCacheHits: 0, cacheHits: 5, serviceWorkerHits: 0, requestCount: 100, unexpectedErrors: 0, unexpectedOrigins: 0 }).status, "MEASURED");
   assert.equal(evaluatePerf06Run({ ...sync, maxSessionsActive: 0, cacheMode: "warm", cacheHits: 3, serviceWorkerHits: 0, requestCount: 100, unexpectedErrors: 0, unexpectedOrigins: 0 }).status, "INCONCLUSIVE");
   assert.equal(evaluatePerf06Run({ ...sync, failedJourneys: 1, completedJourneys: 0, cacheMode: "warm", cacheHits: 3, serviceWorkerHits: 0, requestCount: 100, unexpectedErrors: 0, unexpectedOrigins: 0 }).status, "FAIL");
   assert.equal(evaluatePerf06Run({ ...sync, completedJourneys: 0, cacheMode: "warm", cacheHits: 3, serviceWorkerHits: 0, requestCount: 100, unexpectedErrors: 0, unexpectedOrigins: 0 }).status, "FAIL");
