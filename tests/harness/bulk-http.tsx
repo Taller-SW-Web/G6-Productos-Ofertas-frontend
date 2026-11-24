@@ -41,7 +41,11 @@ const session = {
   snapshot: () => sessionView,
   subscribe: (notify: () => void) => { listeners.add(notify); return () => listeners.delete(notify); },
 } as unknown as G7Session;
-const repository = createHttpBulkRepository(createBulkFetchTransport(gateway), session);
+const repository = createHttpBulkRepository(createBulkFetchTransport(gateway), session, {
+  reconciliationEnabled: new URLSearchParams(location.search).get("reconciliation") === "fixture",
+  replayEnabled: new URLSearchParams(location.search).get("replay") === "fixture",
+  resumeEnabled: new URLSearchParams(location.search).get("resume") === "fixture",
+});
 createRoot(document.getElementById("root")!).render(
   <StrictMode><MantineProvider theme={theme} cssVariablesResolver={cssVariablesResolver} forceColorScheme="light">
     <DataModeContext.Provider value="api"><PromotionSessionContext.Provider value={session}><BulkRepositoryContext.Provider value={repository}><HashRouter>

@@ -180,7 +180,7 @@ test.describe("MK-001 — regresión de UI de Carga masiva", () => {
     await expectNoHorizontalOverflow(page);
   });
 
-  test("C25: un lote parcial habilita la reanudación y confirma la reconciliación", async ({ page }) => {
+  test("C25: el recibo de reanudación no fabrica el snapshot y el GET mantiene los resultados previos", async ({ page }) => {
     await page.goto("/carga-masiva/importaciones/batch-partial/resultado");
     await expect(page.getByText("Completado con observaciones", { exact: true })).toBeVisible();
     await expectNoHorizontalOverflow(page);
@@ -193,8 +193,9 @@ test.describe("MK-001 — regresión de UI de Carga masiva", () => {
     const dialog = page.getByRole("dialog");
     await expect(dialog).toContainText("Identificador del lote");
     await dialog.getByRole("button", { name: "Confirmar reanudación", exact: true }).click();
-    await expect(page).toHaveURL("/carga-masiva/importaciones/batch-partial");
-    await expect(page.getByText("En cola de procesamiento", { exact: true })).toBeVisible();
+    await expect(page).toHaveURL("/carga-masiva/importaciones/batch-partial/resultado");
+    await expect(page.getByText("Filas completadas exitosamente").locator("..")).toContainText(/[3-9]/);
+    await expect(page.getByRole("region", { name: "Tabla: Detalle de filas del lote batch-partial" })).toBeVisible();
   });
 
   test("C26: un lote terminal sin reconciliación no ofrece reanudación", async ({ page }) => {

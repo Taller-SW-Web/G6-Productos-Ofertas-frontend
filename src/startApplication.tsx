@@ -25,6 +25,7 @@ import { createApplicationCombosRuntime } from "./features/combos/services/combo
 import { CombosProvider } from "./features/combos/components/CombosProvider";
 import { BulkRepositoryContext } from "./features/bulk/services/BulkRepositoryContext";
 import { createBulkFetchTransport, createHttpBulkRepository } from "./features/bulk/adapters/httpBulkRepository";
+import { verifyBulkHomologationManifest } from "./features/bulk/adapters/bulkHomologationManifest";
 import { GatewayOriginContext } from "./app/config/GatewayOriginContext";
 import { AdminApiContext } from "./app/config/AdminApiContext";
 import { createAuthenticatedInventoryTransport } from "./features/inventory/adapters/authenticatedInventoryTransport";
@@ -203,8 +204,20 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
     adminApi,
     scopeId,
   });
+  const homologationManifest = mode === "api"
+    ? await verifyBulkHomologationManifest({
+      manifestJson: import.meta.env.VITE_BULK_HOMOLOGATION_MANIFEST_JSON,
+      authorizedReleaseId: import.meta.env.VITE_BULK_AUTHORIZED_RELEASE_ID,
+      authorizedManifestSha256: import.meta.env.VITE_BULK_AUTHORIZED_MANIFEST_SHA256,
+    })
+    : undefined;
   const bulkRepository = mode === "api" && gateway && session
-    ? createHttpBulkRepository(createBulkFetchTransport(gateway), session)
+    ? createHttpBulkRepository(createBulkFetchTransport(gateway), session, {
+      reconciliationEnabled: import.meta.env.VITE_BULK_RECONCILIATION_ENABLED === "true",
+      replayEnabled: import.meta.env.VITE_BULK_REPLAY_ENABLED === "true",
+      resumeEnabled: import.meta.env.VITE_BULK_RESUME_ENABLED === "true",
+      homologationManifest,
+    })
     : null;
   root.render(
     <StrictMode>
