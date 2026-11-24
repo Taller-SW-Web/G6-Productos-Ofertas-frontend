@@ -1,0 +1,132 @@
+{
+  "repo": "Taller-SW-Web/G6-Productos-Ofertas-frontend",
+  "base_sha": "e322808d868bb89e2c645a1b069eb12728296d9f",
+  "docs_sha": "c9e1e5c217616d28229fccf5315fb97a1ae061a9",
+  "backend_master_sha": "49bab9e2075819d922c63b06fcc6fc6ac16ce703",
+  "timestamp_utc": "2026-11-24T21:37:03.161081+00:00",
+  "pr_79": {
+    "state": "OPEN",
+    "head_sha": "d3641ae4d1a4226d223b142157479aa13996490c",
+    "merged": false
+  },
+  "codeql_setup": "BLOCKED_GH_ADMIN",
+  "capabilities": [
+    {
+      "repo": "frontend",
+      "base_sha": "e322808d868bb89e2c645a1b069eb12728296d9f",
+      "docs_sha": "c9e1e5c217616d28229fccf5315fb97a1ae061a9",
+      "capability_id": "TAX-HTTP-READ",
+      "method": "GET",
+      "path": "/api/v1/categorias",
+      "provider_present": true,
+      "contract_present": true,
+      "local_test_possible": true,
+      "external_gate": "NONE",
+      "owner": "Taxonomy"
+    },
+    {
+      "repo": "frontend",
+      "base_sha": "e322808d868bb89e2c645a1b069eb12728296d9f",
+      "docs_sha": "c9e1e5c217616d28229fccf5315fb97a1ae061a9",
+      "capability_id": "TAX-HTTP-BRAND",
+      "method": "GET",
+      "path": "/api/v1/marcas",
+      "provider_present": true,
+      "contract_present": true,
+      "local_test_possible": true,
+      "external_gate": "NONE",
+      "owner": "Taxonomy"
+    },
+    {
+      "repo": "frontend",
+      "base_sha": "e322808d868bb89e2c645a1b069eb12728296d9f",
+      "docs_sha": "c9e1e5c217616d28229fccf5315fb97a1ae061a9",
+      "capability_id": "TAX-HTTP-CATEGORY-DEACTIVATE",
+      "method": "POST",
+      "path": "/api/v1/categorias/{categoriaId}/desactivar",
+      "provider_present": true,
+      "contract_present": true,
+      "local_test_possible": true,
+      "external_gate": "NONE",
+      "owner": "Taxonomy"
+    },
+    {
+      "repo": "frontend",
+      "base_sha": "e322808d868bb89e2c645a1b069eb12728296d9f",
+      "docs_sha": "c9e1e5c217616d28229fccf5315fb97a1ae061a9",
+      "capability_id": "TAX-HTTP-BRAND-DEACTIVATE",
+      "method": "POST",
+      "path": "/api/v1/marcas/{marcaId}/desactivar",
+      "provider_present": true,
+      "contract_present": true,
+      "local_test_possible": true,
+      "external_gate": "NONE",
+      "owner": "Taxonomy"
+    },
+    {
+      "repo": "frontend",
+      "base_sha": "e322808d868bb89e2c645a1b069eb12728296d9f",
+      "docs_sha": "c9e1e5c217616d28229fccf5315fb97a1ae061a9",
+      "capability_id": "TAX-HTTP-OPERATION",
+      "method": "GET",
+      "path": "/api/v1/taxonomia/operaciones/{operationId}",
+      "provider_present": true,
+      "contract_present": true,
+      "local_test_possible": true,
+      "external_gate": "NONE",
+      "owner": "Taxonomy"
+    },
+    {
+      "repo": "frontend",
+      "base_sha": "e322808d868bb89e2c645a1b069eb12728296d9f",
+      "docs_sha": "c9e1e5c217616d28229fccf5315fb97a1ae061a9",
+      "capability_id": "TAX-CONTRACT-R09-R18",
+      "method": "EVENT",
+      "path": "catalog.master.deactivation.checked",
+      "provider_present": true,
+      "contract_present": true,
+      "local_test_possible": true,
+      "external_gate": "NONE",
+      "owner": "Axel/Taxonomy"
+    },
+    {
+      "repo": "frontend",
+      "base_sha": "e322808d868bb89e2c645a1b069eb12728296d9f",
+      "docs_sha": "c9e1e5c217616d28229fccf5315fb97a1ae061a9",
+      "capability_id": "TAX-DB-BARRIER",
+      "method": "DATABASE",
+      "path": "taxonomy / catalog",
+      "provider_present": true,
+      "contract_present": true,
+      "local_test_possible": true,
+      "external_gate": "DOCKER_POSTGRES",
+      "owner": "Taxonomy/Catalog"
+    },
+    {
+      "repo": "frontend",
+      "base_sha": "e322808d868bb89e2c645a1b069eb12728296d9f",
+      "docs_sha": "c9e1e5c217616d28229fccf5315fb97a1ae061a9",
+      "capability_id": "TAX-AZURE-R18",
+      "method": "EVENT",
+      "path": "g6.catalog.from.taxonomy",
+      "provider_present": true,
+      "contract_present": true,
+      "local_test_possible": false,
+      "external_gate": "SB_RBAC_AND_DEPLOY",
+      "owner": "Axel/Azure"
+    },
+    {
+      "repo": "frontend",
+      "base_sha": "e322808d868bb89e2c645a1b069eb12728296d9f",
+      "docs_sha": "c9e1e5c217616d28229fccf5315fb97a1ae061a9",
+      "capability_id": "GITHUB_CODEQL",
+      "method": "GET",
+      "path": "/code-scanning/default-setup",
+      "provider_present": false,
+      "contract_present": false,
+      "local_test_possible": false,
+      "external_gate": "GH_ADMIN_403",
+      "owner": "GitHub Admin"
+    }
+  ]
+}
