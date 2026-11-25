@@ -21,7 +21,11 @@ Para ejecutar además la suite HTTP/PostgreSQL completa desde el generador, esta
 
 ## Hallazgos históricos y cobertura de CI
 
-`gitleaks-historico.json` registra los siete hallazgos `generic-api-key`, por archivo, commit y línea. La revisión local encontró señales de fixtures o JWT con firma de prueba; la clasificación es **preliminar**, no acredita rotación y requiere revisión y resolución formal de Vera. Hasta entonces el historial conserva `FAIL`, el escáner mantiene su código de salida estricto y no se agrega ninguna allowlist.
+`gitleaks-historico.json` registra los siete hallazgos `generic-api-key`, por archivo, commit y línea. El 2026-11-25, **Coordinación G6 / Auditoría G6** emitió la siguiente resolución formal:
+
+> Dictamen de coordinación G6: las siete detecciones corresponden a falsos positivos por fixtures sintéticas. Los JWT contienen firmas ficticias, el JWE utiliza valores de relleno y los casos pertenecen a pruebas locales aisladas. No encontré credenciales reales en esos hallazgos.
+
+La clasificación formal no altera el resultado bruto: el escáner mantiene su salida estricta y el historial sigue en `FAIL` mientras detecte los hallazgos. No se agrega ninguna allowlist.
 
 En el [job E2E, parte 2](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/45508348798/job/138849573451), CI detectó seis archivos faltantes en los manifiestos y usó la distribución automática completa. El archivo `tests/h5/security-boundary.spec.ts` es uno de los specs recientes que deben incorporarse a la planificación; el ajuste definitivo de shards/manifiestos se coordinará después del merge del PR #79, sin modificar aquí el workflow compartido.
 
