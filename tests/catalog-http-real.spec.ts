@@ -24,25 +24,17 @@ test("CAT real HTTP: Chromium carga Catalog, edita por UI, lee variantes y conse
   expect(correlation).toMatch(/^[0-9a-f-]{36}$/i);
 
   const catalogRequests: string[] = [];
-  page.on("pageerror", error => console.log(`[catalog-http-real-pageerror] ${error.message}`));
-  page.on("console", message => {
-    if (message.type() === "error") console.log(`[catalog-http-real-console] ${message.text()}`);
-  });
-  page.on("response", response => {
-    const url = new URL(response.url());
-    if (url.pathname.startsWith("/api/v1/"))
-      console.log(`[catalog-http-real-browser] ${response.request().method()} ${url.pathname} -> ${response.status()}`);
-  });
+  let pageErrors = 0;
+  let failedRequests = 0;
+  page.on("pageerror", () => { pageErrors += 1; });
   page.on("request", request => {
     const url = new URL(request.url());
     if (url.pathname.startsWith("/api/v1/productos")) {
-      catalogRequests.push(`${request.method()} ${url.pathname}${url.search}`);
-      console.log(`[catalog-http-real-request] ${request.method()} ${url.href}`);
+      catalogRequests.push(`${request.method()} ${url.pathname}`);
     }
   });
   page.on("requestfailed", request => {
-    if (new URL(request.url()).pathname.startsWith("/api/v1/"))
-      console.log(`[catalog-http-real-request-failed] ${request.url()} ${request.failure()?.errorText ?? "unknown"}`);
+    if (new URL(request.url()).pathname.startsWith("/api/v1/")) failedRequests += 1;
   });
   const context = page.context();
   await context.addInitScript(({ jwt, forbiddenJwt, id, apiOrigin }: { jwt: string; forbiddenJwt: string; id: string; apiOrigin: string }) => {
@@ -216,7 +208,7 @@ test("CAT real HTTP: Chromium carga Catalog, edita por UI, lee variantes y conse
   for (const tab of [page, secondTab]) {
     tab.on("request", request => {
       if (request.method() === "POST" && new URL(request.url()).pathname === concurrentVariantPath)
-        variantStatePosts.push(request.url());
+        variantStatePosts.push(`${request.method()} ${new URL(request.url()).pathname}`);
     });
     tab.on("response", response => {
       if (response.request().method() === "POST" && new URL(response.url()).pathname === concurrentVariantPath)
@@ -247,4 +239,6 @@ test("CAT real HTTP: Chromium carga Catalog, edita por UI, lee variantes y conse
   expect(await concurrentReload.json()).toMatchObject({ variant_id: concurrentVariantId, status: "INACTIVA" });
 
   expect(catalogRequests.some(request => request.startsWith("PATCH /api/v1/productos/"))).toBe(true);
+  expect(pageErrors).toBe(0);
+  expect(failedRequests).toBe(0);
 });

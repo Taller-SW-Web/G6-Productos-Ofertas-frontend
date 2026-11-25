@@ -1,0 +1,8 @@
+{
+  "commit": "e8e1441b5679c2bfa61aef75282f34372ad1d208",
+  "path": "apps/catalog-svc/test/fixtures/h5/manifest.json",
+  "repository": "Taller-SW-Web/G6-Productos-Ofertas-backend",
+  "schema_version": 1,
+  "seed": 20261123,
+  "sha256": "daa35f39f2ab6a5d365c6a5ba21fc96a4d2178a0ddf2850602a1fed897feee83"
+}
