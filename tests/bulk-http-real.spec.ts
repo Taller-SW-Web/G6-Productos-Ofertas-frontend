@@ -120,7 +120,7 @@ test.describe("MK-001 Bulk E2E navegador real (Gateway + Bulk + Catalog + Postgr
     await page.getByRole("link", { name: /Ver resultado final/i }).first().click();
     expect((await terminal).status()).toBe(200);
     await expect(page.getByRole("heading", { name: /Resultado de importación/i })).toBeVisible();
-    await expect(page.locator("main")).toContainText(/CATALOGO|Catálogo/i);
+    await expect(page.locator("#root")).toContainText(/CATALOGO|Catálogo/i);
 
     // 5. Exportaciones reales CSV y XLSX
     await page.goto("/tests/harness/bulk-http-real.html#/carga-masiva/descargas");
@@ -216,7 +216,7 @@ test.describe("MK-001 Bulk E2E navegador real (Gateway + Bulk + Catalog + Postgr
     // Persistencia de intención de retry durante recarga + resultado V2 terminal
     await page.reload();
     await expect(page).toHaveURL(new RegExp(`/carga-masiva/importaciones/${batchId}/resultado`));
-    await expect(page.locator("main")).toContainText(/COMPLETED|Completado|sin errores/i, { timeout: 60_000 });
+    await expect(page.locator("#root")).toContainText(/COMPLETED|Completado|sin errores/i, { timeout: 60_000 });
     expect(postResumes).toHaveLength(1);
 
     // Descarga de reporte auténtico
