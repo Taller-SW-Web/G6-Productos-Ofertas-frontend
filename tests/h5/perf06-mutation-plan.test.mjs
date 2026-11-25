@@ -58,3 +58,14 @@ test('PERF06_MUTATION cleanup solo toca productos registrados y repetirla es ide
   assert.equal(deleted.size, 1);
   await assert.rejects(() => cleanupRegisteredMutationResources({ schemaVersion: 1, resources: [{ product_id: '22222222-2222-4222-8222-222222222222', disposable: true }] }, async () => {}), /MUTATION_RESOURCE_NOT_HARNESS_REGISTERED/);
 });
+
+test('PERF06_MUTATION separa evidencia funcional A05 de métricas UX A04', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const runner = await readFile(new URL('../../scripts/run-h5-perf06-mutation.mjs', import.meta.url), 'utf8');
+  const realSpec = await readFile(new URL('./perf06-mutation-real.pw.ts', import.meta.url), 'utf8');
+  const readme = await readFile(new URL('./README.md', import.meta.url), 'utf8');
+  assert.match(runner, /task_id:\s*isContract\s*\?\s*'POM-A05'\s*:\s*'POM-A04'/);
+  assert.match(realSpec, /case_id:\s*'PERF06_MUTATION',\s*task_id:\s*'POM-A04',\s*h5_criterion:\s*'H5-03'/);
+  assert.match(readme, /evidencia contractual A05 \(`POM-A05`, `H5-03`, `L0_CONTRACT`\)/);
+  assert.match(readme, /experiencia de usuario PERF-06 \(`POM-A04`, `H5-03`\)/);
+});

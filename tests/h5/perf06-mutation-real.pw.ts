@@ -216,7 +216,7 @@ test('PERF06_MUTATION L1: sesiones aisladas editan por UI, esperan preparación 
       return combined;
     }, {} as Record<string, number>);
     const report = {
-      schema_version: 1, case_id: 'PERF06_MUTATION', task_id: 'POM-A05', h5_criterion: 'H5-03',
+      schema_version: 1, case_id: 'PERF06_MUTATION', task_id: 'POM-A04', h5_criterion: 'H5-03',
       repository: 'Taller-SW-Web/G6-Productos-Ofertas-frontend', owner: 'Poma', source_sha: appSha,
       harness_sha: harnessSha, docs_sha: docsSha, timestamp_utc: new Date().toISOString(), started_at_utc: startedAt,
       config_version: 'h5-perf06-mutation-real-v1', evidence_level: 'L1', status: scenarioStatus,

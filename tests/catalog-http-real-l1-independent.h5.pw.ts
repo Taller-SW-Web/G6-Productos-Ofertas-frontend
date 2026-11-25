@@ -33,62 +33,62 @@ async function catalogStatus(
   );
 }
 
-test("INT08-L1-ANONYMOUS-ADMIN: identidad ausente recibe 401 o 403", async ({
-  page,
-}) => {
+test.describe("INT08-L1-ANONYMOUS-ADMIN", () => {
   test.skip(
     readiness.get("INT08-L1-ANONYMOUS-ADMIN")?.status !== "READY_B",
     "CASE_PREREQUISITES_MISSING",
   );
-  expect([401, 403]).toContain(
-    await catalogStatus(page, "/productos/administracion"),
-  );
+  test("INT08-L1-ANONYMOUS-ADMIN: identidad ausente recibe 401 o 403", async ({ page }) => {
+    expect([401, 403]).toContain(
+      await catalogStatus(page, "/productos/administracion"),
+    );
+  });
 });
 
-test("INT08-L1-DENIED-SCOPE: identidad sin permiso recibe 403", async ({
-  page,
-}) => {
+test.describe("INT08-L1-DENIED-SCOPE", () => {
   test.skip(
     readiness.get("INT08-L1-DENIED-SCOPE")?.status !== "READY_B",
     "CASE_PREREQUISITES_MISSING",
   );
-  expect(
-    await catalogStatus(
-      page,
-      "/productos/administracion",
-      process.env.CATALOG_REAL_FORBIDDEN_JWT,
-    ),
-  ).toBe(403);
+  test("INT08-L1-DENIED-SCOPE: identidad sin permiso recibe 403", async ({ page }) => {
+    expect(
+      await catalogStatus(
+        page,
+        "/productos/administracion",
+        process.env.CATALOG_REAL_FORBIDDEN_JWT,
+      ),
+    ).toBe(403);
+  });
 });
 
-test("INT08-L1-AUTHORIZED-ADMIN-READ: identidad autorizada lee Catalog", async ({
-  page,
-}) => {
+test.describe("INT08-L1-AUTHORIZED-ADMIN-READ", () => {
   test.skip(
     readiness.get("INT08-L1-AUTHORIZED-ADMIN-READ")?.status !== "READY_B",
     "CASE_PREREQUISITES_MISSING",
   );
-  expect(
-    await catalogStatus(
-      page,
-      "/productos/administracion",
-      process.env.CATALOG_REAL_JWT,
-    ),
-  ).toBe(200);
+  test("INT08-L1-AUTHORIZED-ADMIN-READ: identidad autorizada lee Catalog", async ({ page }) => {
+    expect(
+      await catalogStatus(
+        page,
+        "/productos/administracion",
+        process.env.CATALOG_REAL_JWT,
+      ),
+    ).toBe(200);
+  });
 });
 
-test("INT08-L1-ABSENT-PRODUCT-404: Catalog conserva el oráculo de recurso ausente", async ({
-  page,
-}) => {
+test.describe("INT08-L1-ABSENT-PRODUCT-404", () => {
   test.skip(
     readiness.get("INT08-L1-ABSENT-PRODUCT-404")?.status !== "READY_B",
     "CASE_PREREQUISITES_MISSING",
   );
-  expect(
-    await catalogStatus(
-      page,
-      "/productos/administracion/ffffffff-ffff-4fff-8fff-ffffffffffff",
-      process.env.CATALOG_REAL_JWT,
-    ),
-  ).toBe(404);
+  test("INT08-L1-ABSENT-PRODUCT-404: Catalog conserva el oráculo de recurso ausente", async ({ page }) => {
+    expect(
+      await catalogStatus(
+        page,
+        "/productos/administracion/ffffffff-ffff-4fff-8fff-ffffffffffff",
+        process.env.CATALOG_REAL_JWT,
+      ),
+    ).toBe(404);
+  });
 });

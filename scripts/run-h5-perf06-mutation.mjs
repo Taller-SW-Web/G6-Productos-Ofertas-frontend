@@ -62,7 +62,7 @@ const runChild = (args, env, timeoutMs = 150_000) => new Promise((resolvePromise
 const baseReport = {
   schema_version: 1,
   case_id: 'PERF06_MUTATION',
-  task_id: 'POM-A05',
+  task_id: isContract ? 'POM-A05' : 'POM-A04',
   h5_criterion: 'H5-03',
   repository: 'Taller-SW-Web/G6-Productos-Ofertas-frontend',
   owner: 'Poma',

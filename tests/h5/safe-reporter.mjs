@@ -20,7 +20,7 @@ export default class H5SafeReporter {
     this.cases.push({
       scenario_id: explicitScenario ?? `H5-${stableName}-${String(this.cases.length + 1).padStart(3, "0")}`,
       status,
-      evidence_level: explicitScenario || test.title.startsWith("CAT real HTTP:") ? "L1" : "L0_CONTRACT",
+      evidence_level: explicitScenario ? "L1_BROWSER_HTTP" : test.title.startsWith("CAT real HTTP:") ? "L1" : "L0_CONTRACT",
     });
   }
 
