@@ -247,7 +247,7 @@ test.describe("MK-001 Bulk E2E navegador real (Gateway + Bulk + Catalog + Postgr
     expect([401, 403]).toContain((await forbiddenResponse).status());
 
     await page.evaluate(() => window.__G6_BULK_E2E_SET_IDENTITY__?.("anonymous"));
-    await page.getByRole("button", { name: "Actualizar estado" }).click();
+    await page.getByRole("button", { name: /Reintentar consulta|Actualizar estado/i }).click();
     await expect(page.getByText(/Inicia sesión|no se pudo|401|autoriz/i).first()).toBeVisible();
   });
 });
