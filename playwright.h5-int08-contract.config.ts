@@ -28,6 +28,6 @@ export default defineConfig({
     cwd: process.cwd(),
     url: `http://127.0.0.1:${port}/tests/harness/catalog-http.html`,
     reuseExistingServer: false,
-    timeout: Number(process.env.G6_H5_INT08_READINESS_TIMEOUT_MS ?? "15_000"),
+    timeout: Number(process.env.G6_H5_INT08_READINESS_TIMEOUT_MS ?? "15000"),
   },
 });

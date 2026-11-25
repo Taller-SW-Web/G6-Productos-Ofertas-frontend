@@ -7,7 +7,7 @@ import { assertSafeEvidenceText } from '../tests/h5/evidence-security.mjs';
 const reportPath = 'test-results/h5/cache-cdp-summary.json';
 const discoveryPath = 'test-results/h5/cache-cdp-discovery.json';
 const observationPath = 'test-results/h5/cache-cdp-observation.json';
-const docsSha = '40524e96c6973f84d74160076781702fe2a3da19';
+const docsSha = 'c9e1e5c217616d28229fccf5315fb97a1ae061a9';
 const budgets = Object.freeze({ discoveryMs: 15_000, readinessMs: 15_000, executionMs: 25_000, overallMs: 45_000 });
 const startedAt = Date.now();
 

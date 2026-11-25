@@ -1,6 +1,6 @@
 # H5 Frontend: suites contractuales y performance
 
-Las pruebas H5 son opt-in. `int08.contract.pw.ts` y `perf06.pw.ts` usan el sufijo `.pw.ts`; la configuración ordinaria `playwright.config.ts` solo descubre `**/*.spec.ts`. La configuración INT-08 especial selecciona `catalog-http-ui.spec.ts` y `h5/int08.contract.pw.ts`. La última lista de Playwright descubrió 19 casos en esos archivos; el wrapper no fija un total, compara discovered/executed en cada corrida y exige cero fallos, skips, timeouts e interrupciones. Su reporter publica IDs por caso y estados allowlisted, sin mensajes, stacks, headers ni bodies. Playwright no conserva screenshots, HAR, video, trace ni attachments. Las capturas manuales del contrato UI se desactivan únicamente con `playwright.h5-int08-contract.config.ts`.
+Las pruebas H5 son opt-in. `int08.contract.pw.ts`, `int08.l2-release.pw.ts` y `perf06*.pw.ts` usan sufijos especiales; la configuración ordinaria `playwright.config.ts` solo descubre `**/*.spec.ts`. La configuración contractual INT-08 selecciona `catalog-http-ui.spec.ts` y `h5/int08.contract.pw.ts`; valida en cada corrida el descubrimiento frente a ejecución y exige cero fallos, skips, timeouts e interrupciones. La suite incluye 21 casos, incluidos precio ausente y saldo no observado. Su reporter publica IDs por caso y estados allowlisted, sin mensajes, stacks, headers ni bodies. Las suites H5 desactivan screenshots, HAR, video, trace, service workers y attachments sensibles. La configuración contractual especial es `playwright.h5-int08-contract.config.ts`.
 
 ## Fixtures independientes
 
@@ -21,7 +21,7 @@ node scripts/run-h5-int08-contract.mjs
 node scripts/run-h5-cache-cdp.mjs
 ```
 
-La suite contractual usa únicamente mocks de contrato y el harness local `catalog-http.html`, con `serviceCalls=0`. Cubre sesión ausente, JWT vencido/401 con limpieza/logout, rol incorrecto/403, DTO malformado, timeout HTTP, retry 503, carga parcial y refresh consistente; conserva los casos preexistentes de HTTP 202 no terminal, precio y disponibilidad. Escribe `test-results/h5/int08-contract-summary.json` y su índice externo luego de validar bytes. El wrapper captura stdout/stderr en memoria y publica estado/conteos por escenario, nunca la salida cruda. El probe Chromium comprueba dos lecturas del mismo recurso local vía CDP, con petición fría seguida de caché warm y evidencia 1/1, sin `page.route`.
+La suite contractual usa únicamente mocks de contrato y el harness local `catalog-http.html`, con `service_calls=0`. Cubre sesión ausente, JWT vencido/401 con limpieza/logout, rol incorrecto/403, DTO malformado, timeout HTTP, retry 503, carga parcial y refresh consistente; además, comprueba `PRICE_NOT_READY` y `UBICACION_NO_ENCONTRADA` sin presentar precio ni saldo como disponibles. Escribe `test-results/h5/int08-contract-summary.json` y un índice externo con su SHA-256, SHA de fuente, Docs SHA, dataset, versiones, configuración y resultados individuales seguros. El wrapper captura stdout/stderr en memoria y publica estado/conteos por escenario, nunca la salida cruda. El probe Chromium comprueba dos lecturas del mismo recurso local vía CDP, con petición fría seguida de caché warm y evidencia 1/1, sin `page.route`.
 
 La integración L1 se activa aparte:
 
@@ -31,7 +31,7 @@ node scripts/run-h5-int08-l1.mjs
 
 Requiere `G6_H5_INT08_ISOLATED_HARNESS=1`, JWT sintético emitido por el harness local, identidad negativa sintética, origen Browser en loopback y los IDs SKU/producto/variante descartables que consume `tests/catalog-http-real.spec.ts`. Si falta uno, genera `BLOCKED_DEPENDENCY`, termina con código 2 y no inicia Playwright ni servicios. Su configuración limita descubrimiento a `catalog-http-real.spec.ts`, desactiva screenshot/trace/video y usa el reporter allowlist. Los logs de página solo cuentan errores y métodos/rutas sin query; no imprimen URLs, headers ni textos de excepción.
 
-El escenario de release real se mantiene en una pista L2 independiente descrita en `tests/h5/int08-l2-release-plan.mjs`; no se descubre en CI ordinaria. Sus pasos son login G7 autorizado, lectura de Catalog mediante APIM y verificación de `202` como admisión no terminal hasta el GET normativo de estado. La evidencia L2 incluye alias/hash del hostname, SHA de release/Gateway/servicio, correlation ID, alias de identidad, HTTP status y categoría de autorización, nunca URL privada ni credenciales. El preflight devuelve `WAIT_C_G7_APIM` con cero llamadas; solo P7 podrá ejecutarlo con release e infraestructura autorizados.
+El escenario L2 ejecutable está aislado en `int08.l2-release.pw.ts`, `playwright.h5-int08-l2-release.config.ts` y `scripts/run-h5-int08-l2-release.mjs`; la configuración ordinaria nunca lo descubre. Los dos casos usan el login UI real con una identidad autorizada y otra autenticada sin permisos, validan el hostname APIM contra una allowlist con SHA fijado, lectura Catalog, correlación, HTTP 401/403/200/202, y esperan estado terminal por polling antes de considerar completa la preparación. El producto de retry debe estar registrado como descartable y autorizado. Sin credenciales de entorno, SHA/allowlist, release e identidad autorizada, el comando produce `WAIT_C_G7_APIM` o `BLOCKED_DEPENDENCY` sin solicitudes ni escrituras. La ejecución real sigue sin realizarse y requiere coordinación/autorización de P7. Nunca se incluyen credenciales, tokens, cookies ni URL privada en código o evidencia.
 
 ## PERF-06 — sesiones de navegador
 
@@ -63,6 +63,12 @@ La ejecución L1 requiere los valores anteriores más `G6_H5_PERF06_PROFILE=1|5|
 
 Si falta infraestructura, token sintético, identidad independiente, lockfile u origen loopback, el wrapper informa `BLOCKED_DEPENDENCY` sin iniciar servicios ni emitir llamadas. Si falta una atestación cold o no se valida el estado de caché, ese resultado es `INCONCLUSIVE`; warm puede ejecutarse y conservarse independientemente. Un perfil con medición inválida no se considera aprobado. No se ejecuta comparación ahora si candidato solo cambia pruebas; la referencia puede ejecutarse en una instalación local aislada cuando estén disponibles los owners y la autorización del harness.
 
+## PERF06_MUTATION — recorrido opt-in
+
+`tests/h5/perf06-mutation.pw.ts` ejecuta el recorrido de interfaz contra el fixture sintético: listado, detalle, edición real por UI, incremento de versión, solicitud de preparación, HTTP 202 no terminal, polling acotado, regreso al listado y confirmación del resultado. El cleanup del ID fixture está fuera de la ventana medida y se repite para comprobar idempotencia. Se valida con `node scripts/run-h5-perf06-mutation.mjs --contract` y no hace llamadas externas.
+
+El modo L1 usa `playwright.h5-perf06-mutation-real.config.ts` con contexts y storage states independientes y preparados por sesión. El harness autorizado de Catalog/Poma debe exportar `preflight`, `prepare`, `cleanup` y `exists`; `prepare` recibe `registerResourceBeforeCreate` y registra cada producto sintético antes de cualquier escritura. El runner persiste el índice incremental para limpiar registros parciales aunque falle el seeder o Playwright, cierra los contexts y exige cleanup repetido y ausencia de cada recurso. Solo permite API loopback, SHAs fijados y modo `VITE_DATA_MODE=api`. Falta del harness produce `BLOCKED_DEPENDENCY`, cero llamadas y cero escrituras. Este recorrido de integración no es un benchmark pareado ni una prueba de mejora de rendimiento.
+
 ## Comandos especiales de evidencia
 
 La suite ordinaria no activa estos escenarios. Cada ejecución opt-in produce su propio resumen; omisión en CI ordinaria nunca equivale a PASS.
@@ -79,14 +85,19 @@ node scripts/run-h5-cache-cdp.mjs
 # INT-08 L1 real aislado en loopback, solo con harnesses/identidades descartables autorizados.
 node scripts/run-h5-int08-l1.mjs
 
-# L2 G7/APIM: valida el bloqueo de certificación; no emite solicitudes.
-node --test tests/h5/int08-l2-release-plan.test.mjs
+# L2 G7/APIM: el preflight sin --execute registra WAIT_C_G7_APIM; no emite solicitudes.
+node --test tests/h5/int08-l2-policy.test.mjs
+node scripts/run-h5-int08-l2-release.mjs
+# Ejecutar solo con aprobación y allowlist/identidades/producto descartable listos.
+node scripts/run-h5-int08-l2-release.mjs --execute
 
 # PERF-06 de solo lectura, por sujeto/perfil/repetición/modo cache.
 node scripts/run-h5-perf06.mjs
 
-# PERF-06 con mutaciones: validación contractual del plan y preflight fail-closed sin llamadas.
+# PERF-06 con mutaciones: UI contractual, polling y cleanup con fixtures locales.
 node --test tests/h5/perf06-mutation-plan.test.mjs
+node scripts/run-h5-perf06-mutation.mjs --contract
+# L1 real opt-in; se bloquea hasta que el harness de loopback autorizado exista.
 node scripts/run-h5-perf06-mutation.mjs
 
 # Seguridad de artefactos y revisión de bundle productivo.

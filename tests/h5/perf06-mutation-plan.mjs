@@ -46,5 +46,40 @@ export function preflightPerf06Mutation(env = process.env) {
   const origin = env.G6_H5_PERF06_API_ORIGIN ?? '';
   if (!/^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):\d+$/.test(origin)) missing.push('API_ORIGIN_NOT_LOOPBACK');
   if (missing.length) return { status: 'BLOCKED_DEPENDENCY', reason: 'MUTATION_HARNESS_OR_DISPOSABLE_RESOURCES_MISSING', missing: [...new Set(missing)] };
-  return { status: 'BLOCKED_DEPENDENCY', reason: 'AUTHORIZED_MUTATION_EXECUTOR_NOT_IMPLEMENTED', missing: ['OWNER_APPROVED_MUTATION_EXECUTOR'] };
+  return { status: 'READY_B', reason: 'OWNER_AUTHORIZED_ISOLATED_HARNESS_PRESENT', missing: [] };
+}
+
+export async function pollPreparationUntilTerminal(readPreparation, {
+  attempts = 8,
+  intervalMs = 100,
+  sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
+} = {}) {
+  if (typeof readPreparation !== 'function' || !Number.isInteger(attempts) || attempts < 1 || attempts > 20 || !Number.isFinite(intervalMs) || intervalMs < 0 || intervalMs > 5_000)
+    throw new Error('PREPARATION_POLL_CONFIGURATION_INVALID');
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const observed = await readPreparation();
+    if (observed?.httpStatus !== 200) throw new Error('PREPARATION_POLL_HTTP_STATUS_INVALID');
+    if (observed?.status === 'COMPLETED' || observed?.status === 'REJECTED') return { status: observed.status, attempts: attempt, observed };
+    if (observed?.status !== 'PENDING') throw new Error('PREPARATION_POLL_DOMAIN_STATE_INVALID');
+    if (attempt < attempts) await sleep(intervalMs);
+  }
+  throw new Error('PREPARATION_POLL_TERMINAL_STATE_TIMEOUT');
+}
+
+export async function cleanupRegisteredMutationResources(resourceIndex, cleanupOne) {
+  if (!resourceIndex || resourceIndex.schemaVersion !== 1 || !Array.isArray(resourceIndex.resources) || typeof cleanupOne !== 'function')
+    throw new Error('MUTATION_RESOURCE_INDEX_INVALID');
+  const seen = new Set();
+  const cleaned = [];
+  for (const item of resourceIndex.resources) {
+    const id = item?.product_id;
+    if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id) || item.disposable !== true || !item.registered_by_harness)
+      throw new Error('MUTATION_RESOURCE_NOT_HARNESS_REGISTERED');
+    if (seen.has(id)) throw new Error('MUTATION_RESOURCE_DUPLICATE');
+    seen.add(id);
+    await cleanupOne(id);
+    await cleanupOne(id);
+    cleaned.push(id);
+  }
+  return { cleaned, idempotent: true };
 }

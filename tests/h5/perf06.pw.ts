@@ -478,7 +478,7 @@ test("PERF06_READ_ONLY: sesiones activas concurrentes sobre recorrido Catalog ad
       repository: "Taller-SW-Web/G6-Productos-Ofertas-frontend",
       owner: "Poma",
       sourceSha: process.env.G6_H5_PERF06_SUBJECT_SHA,
-      docsSha: "40524e96c6973f84d74160076781702fe2a3da19",
+      docsSha: "c9e1e5c217616d28229fccf5315fb97a1ae061a9",
       timestampUtc: new Date().toISOString(),
       configuration: {
         profile: `${config.sessions}VU-${config.durationSeconds}s`,

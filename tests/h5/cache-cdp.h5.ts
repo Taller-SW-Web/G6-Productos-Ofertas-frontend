@@ -47,7 +47,7 @@ test("CDP distingue la primera lectura HTTP fría de la segunda lectura warm sin
     case_id: "H5-CACHE-CDP",
     status: "PASS",
     evidence_level: "L0",
-    docs_sha: "40524e96c6973f84d74160076781702fe2a3da19",
+    docs_sha: "c9e1e5c217616d28229fccf5315fb97a1ae061a9",
     cold_network_reads: coldNetworkRequestIds.size,
     warm_cache_reads: cachedRequestIds.size,
     disposable_server_requests_after_cold: countAfterFirst.resourceRequests,
