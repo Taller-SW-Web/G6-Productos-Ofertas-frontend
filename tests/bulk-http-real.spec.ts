@@ -204,6 +204,31 @@ test.describe("MK-001 Bulk E2E navegador real (Gateway + Bulk + Catalog + Postgr
     await page.getByRole("link", { name: /Ver resultado final/i }).first().click();
     await expect(page.getByRole("heading", { name: /Resultado de importación/i })).toBeVisible();
 
+    // Descarga obligatoria de reporte auténtico en el estado con fallo antes del retry
+    const reportBtn = page.getByRole("button", { name: "Descargar reporte de errores" });
+    await expect(reportBtn).toBeVisible({ timeout: 20_000 });
+    await expect(reportBtn).toBeEnabled();
+    const reportResPromise = page.waitForResponse((res) =>
+      res.request().method() === "GET" && new URL(res.url()).pathname === `${root}/importaciones/${batchId}/reporte`);
+    const reportDlPromise = page.waitForEvent("download");
+    await reportBtn.click();
+    const [reportRes, reportDl] = await Promise.all([reportResPromise, reportDlPromise]);
+    expect(reportRes.status()).toBe(200);
+    expect(reportRes.headers()["content-type"]).toContain("text/csv");
+    expect(reportDl.suggestedFilename()).toContain(batchId);
+    const reportPath = await reportDl.path();
+    expect(reportPath).toBeTruthy();
+    const reportText = (await readFile(reportPath!)).toString("utf8");
+    expect(reportText.length).toBeGreaterThan(20);
+    expect(reportText).toMatch(/CATALOG_AUTH_TEMPORARY_UNAVAILABLE|CATALOGO|FAILED/i);
+
+    // Verificar que un propietario ajeno (owner-b) recibe 404 al solicitar el reporte
+    const foreignReportStatus = await page.evaluate(async ({ origin, path, token }) => {
+      const response = await fetch(`${origin}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+      return response.status;
+    }, { origin: browserOrigin!, path: `${root}/importaciones/${batchId}/reporte`, token: ownerBJwt! });
+    expect(foreignReportStatus).toBe(404);
+
     // Verificar elegibilidad calculada por Backend y reanudación exclusiva de Catalog
     const resumeBtn = page.getByRole("button", { name: "Reanudar operaciones pendientes" });
     await expect(resumeBtn).toBeVisible({ timeout: 20_000 });
@@ -218,19 +243,6 @@ test.describe("MK-001 Bulk E2E navegador real (Gateway + Bulk + Catalog + Postgr
     await expect(page).toHaveURL(new RegExp(`/carga-masiva/importaciones/${batchId}/resultado`));
     await expect(page.locator("#root")).toContainText(/COMPLETED|Completado|sin errores/i, { timeout: 60_000 });
     expect(postResumes).toHaveLength(1);
-
-    // Descarga de reporte auténtico
-    const reportBtn = page.getByRole("button", { name: "Descargar reporte de errores" });
-    if (await reportBtn.isVisible().catch(() => false) && await reportBtn.isEnabled().catch(() => false)) {
-      const reportResPromise = page.waitForResponse((res) =>
-        res.request().method() === "GET" && new URL(res.url()).pathname === `${root}/importaciones/${batchId}/reporte`);
-      const reportDlPromise = page.waitForEvent("download");
-      await reportBtn.click();
-      const [reportRes, reportDl] = await Promise.all([reportResPromise, reportDlPromise]);
-      expect(reportRes.status()).toBe(200);
-      const reportPath = await reportDl.path();
-      expect((await readFile(reportPath!)).length).toBeGreaterThan(10);
-    }
 
     // Aislamiento de propietario ajeno (owner-b -> 404) y errores 401/403
     await page.evaluate(() => window.__G6_BULK_E2E_SET_IDENTITY__?.("owner-b"));
