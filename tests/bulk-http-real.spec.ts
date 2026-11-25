@@ -72,7 +72,7 @@ test.describe("MK-001 Bulk E2E navegador real (Gateway + Bulk + Catalog + Postgr
       const [response, download] = await Promise.all([responsePromise, downloadPromise]);
       expect(response.status()).toBe(200);
       expect(response.headers()["content-type"]).toContain(format === "CSV" ? "text/csv" : "spreadsheetml.sheet");
-      expect(response.headers()["content-disposition"]).toMatch(/filename=/i);
+      expect(download.suggestedFilename().toLowerCase()).toContain(format.toLowerCase());
       const target = await download.path();
       expect(target).toBeTruthy();
       const bytes = await readFile(target!);
