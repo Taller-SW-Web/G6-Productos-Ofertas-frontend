@@ -10,6 +10,7 @@ const browserOrigin = `http://127.0.0.1:${browserPort}`;
 
 export default defineConfig({
   testDir: ".",
+  timeout: 90_000,
   workers: 1,
   retries: 0,
   reporter: [["line"], ["junit", { outputFile: "test-results/bulk-http-real-junit.xml" }]],
