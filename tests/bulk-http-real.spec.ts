@@ -111,13 +111,13 @@ test.describe("MK-001 Bulk E2E navegador real (Gateway + Bulk + Catalog + Postgr
     // 4. Recuperación tras refresh + polling automático + resultado terminal
     await page.reload();
     await expect(page).toHaveURL(new RegExp(`/carga-masiva/importaciones/${admission.batch_id}$`));
-    await expect(page.getByRole("link", { name: /Ver resultado final/i })).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByRole("link", { name: /Ver resultado final/i }).first()).toBeVisible({ timeout: 60_000 });
     const stateReads = requests.filter((request) => request === `GET ${root}/importaciones/${admission.batch_id}`);
     expect(stateReads.length).toBeGreaterThan(0);
 
     const terminal = page.waitForResponse((candidate) =>
       candidate.request().method() === "GET" && new URL(candidate.url()).pathname === `${root}/importaciones/${admission.batch_id}`);
-    await page.getByRole("link", { name: /Ver resultado final/i }).click();
+    await page.getByRole("link", { name: /Ver resultado final/i }).first().click();
     expect((await terminal).status()).toBe(200);
     await expect(page.getByRole("heading", { name: /Resultado de importación/i })).toBeVisible();
     await expect(page.locator("main")).toContainText(/CATALOGO|Catálogo/i);
@@ -200,8 +200,8 @@ test.describe("MK-001 Bulk E2E navegador real (Gateway + Bulk + Catalog + Postgr
     expect(postImports, "No debe enviarse un segundo POST tras admisión ambigua").toHaveLength(1);
 
     // Esperar a que termine el primer intento con fallo transitorio en Catalog
-    await expect(page.getByRole("link", { name: /Ver resultado final/i })).toBeVisible({ timeout: 60_000 });
-    await page.getByRole("link", { name: /Ver resultado final/i }).click();
+    await expect(page.getByRole("link", { name: /Ver resultado final/i }).first()).toBeVisible({ timeout: 60_000 });
+    await page.getByRole("link", { name: /Ver resultado final/i }).first().click();
     await expect(page.getByRole("heading", { name: /Resultado de importación/i })).toBeVisible();
 
     // Verificar elegibilidad calculada por Backend y reanudación exclusiva de Catalog
