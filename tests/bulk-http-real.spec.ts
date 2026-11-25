@@ -243,11 +243,11 @@ test.describe("MK-001 Bulk E2E navegador real (Gateway + Bulk + Catalog + Postgr
     await page.evaluate(() => window.__G6_BULK_E2E_SET_IDENTITY__?.("forbidden"));
     const forbiddenResponse = page.waitForResponse((res) =>
       res.request().method() === "GET" && new URL(res.url()).pathname === `${root}/importaciones/${batchId}`);
-    await page.reload();
+    await page.goto(`/tests/harness/bulk-http-real.html#/carga-masiva/importaciones/${batchId}`);
     expect([401, 403]).toContain((await forbiddenResponse).status());
 
     await page.evaluate(() => window.__G6_BULK_E2E_SET_IDENTITY__?.("anonymous"));
-    await page.reload();
-    await expect(page.getByText(/Inicia sesión|no se pudo|401|autoriz/i)).toBeVisible();
+    await page.getByRole("button", { name: "Actualizar estado" }).click();
+    await expect(page.getByText(/Inicia sesión|no se pudo|401|autoriz/i).first()).toBeVisible();
   });
 });
