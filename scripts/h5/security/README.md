@@ -18,3 +18,13 @@ La aplicación usa `VITE_DATA_MODE`, `VITE_G6_ADMIN_API_ENABLED`, `VITE_G6_READ_
 CodeQL default setup y políticas GitHub no pudieron consultarse: 403, owner GitHub Admin. Gitleaks es una dependencia externa de herramienta y no se instala como dependencia productiva. CSP y CORS servidos por el host real requieren prueba autorizada; la fixture local no demuestra esa configuración. JWT, scopes y client_id del proveedor sintético no acreditan grants G7. El PR #79 sigue abierto y el workflow compartido no se toca desde esta rama.
 
 Para ejecutar además la suite HTTP/PostgreSQL completa desde el generador, establecer `G6_RUN_TAXONOMY_HTTP=1`; si se omite, ese caso queda `NOT_RUN` en el snapshot sin invalidar evidencias previas independientes.
+
+## Hallazgos históricos y cobertura de CI
+
+`gitleaks-historico.json` registra los siete hallazgos `generic-api-key`, por archivo, commit y línea. La revisión local encontró señales de fixtures o JWT con firma de prueba; la clasificación es **preliminar**, no acredita rotación y requiere revisión y resolución formal de Vera. Hasta entonces el historial conserva `FAIL`, el escáner mantiene su código de salida estricto y no se agrega ninguna allowlist.
+
+En el [job E2E, parte 2](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/45508348798/job/138849573451), CI detectó seis archivos faltantes en los manifiestos y usó la distribución automática completa. El archivo `tests/h5/security-boundary.spec.ts` es uno de los specs recientes que deben incorporarse a la planificación; el ajuste definitivo de shards/manifiestos se coordinará después del merge del PR #79, sin modificar aquí el workflow compartido.
+
+La suite histórica amplia de Playwright tuvo ejecuciones de 59/62 y 61/62, y la suite de auth 37/38; los casos fallidos pasaron en repeticiones aisladas. Son resultados intermitentes pendientes de investigación, separados del resultado local 7/7 de `security-boundary.spec.ts`; la repetición aislada no convierte las ejecuciones amplias en PASS.
+
+Todas las pruebas de identidad, JWT, CORS y CSP locales son `L1_SYNTHETIC`: no validan grants G7 (`BLOCKED_G7`) ni las cabeceras reales de Vercel (`SERVER_HEADERS_NOT_VERIFIED`). Una cabecera observada en el proveedor sintético o Vite local no acredita el host desplegado.

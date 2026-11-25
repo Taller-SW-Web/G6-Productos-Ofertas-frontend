@@ -2,13 +2,13 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { scanBundle, runGitleaks, coverageCounts } from './security-controls.mjs';
+import { scanBundle, runGitleaks, coverageCounts, historyVerdict } from './security-controls.mjs';
 import { prerequisite } from './int06-runner.mjs';
 
 const sha=spawnSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).stdout.trim();
 const dirty=Boolean(spawnSync('git',['status','--porcelain'],{encoding:'utf8'}).stdout.trim());
 const preflight=JSON.parse(readFileSync('scripts/h5/security/preflight.json','utf8').replace(/^\uFEFF/,''));
-const inputs=['scripts/h5/security/generate-snapshot.mjs','scripts/h5/security/bundle-check.mjs','scripts/h5/security/security-controls.mjs','scripts/h5/security/security-controls.test.mjs','scripts/h5/security/gitleaks.fixture.test.mjs','scripts/h5/security/gitleaks-scan.mjs','scripts/h5/security/sca-audit.mjs','scripts/h5/security/sarif-check.mjs','scripts/h5/security/int06-runner.mjs','scripts/h5/security/int06-runner.test.mjs','scripts/h5/security/identity-contract.test.mjs','tests/h5/security-boundary.spec.ts','tests/h5/security-playwright.config.ts'];
+const inputs=['scripts/h5/security/README.md','scripts/h5/security/gitleaks-historico.json','scripts/h5/security/generate-snapshot.mjs','scripts/h5/security/bundle-check.mjs','scripts/h5/security/security-controls.mjs','scripts/h5/security/security-controls.test.mjs','scripts/h5/security/gitleaks.fixture.test.mjs','scripts/h5/security/gitleaks-scan.mjs','scripts/h5/security/sca-audit.mjs','scripts/h5/security/sarif-check.mjs','scripts/h5/security/int06-runner.mjs','scripts/h5/security/int06-runner.test.mjs','scripts/h5/security/identity-contract.test.mjs','tests/h5/security-boundary.spec.ts','tests/h5/security-playwright.config.ts'];
 const hash=createHash('sha256'); for (const name of inputs.sort()) hash.update(name+'\0').update(readFileSync(name));
 const runTests=(...paths)=>spawnSync(process.execPath,['--test',...paths],{encoding:'utf8',timeout:30000,windowsHide:true});
 const tests=runTests('scripts/h5/security/security-controls.test.mjs','scripts/h5/security/int06-runner.test.mjs');
@@ -19,6 +19,8 @@ const browser=spawnSync(process.execPath,['node_modules/@playwright/test/cli.js'
 const sca=spawnSync(process.execPath,['scripts/h5/security/sca-audit.mjs'],{env,encoding:'utf8',timeout:125000,windowsHide:true});
 let audit={execution_result:'INCONCLUSIVE',reason:'AUDIT_RUN_FAILED'}; try { audit=JSON.parse(sca.stdout.trim().split('\n').at(-1)); } catch { /* preserve explicit inconclusive */ }
 const gitleaks=runGitleaks(['git','--no-banner','--redact','--exit-code','42','.'],process.cwd());
+const historicalFindings=JSON.parse(readFileSync('scripts/h5/security/gitleaks-historico.json','utf8')).findings;
+const history=historyVerdict(gitleaks.status,historicalFindings);
 const diffScan=spawnSync(process.execPath,['scripts/h5/security/gitleaks-scan.mjs','diff',preflight.base_sha],{encoding:'utf8',timeout:120000,windowsHide:true});
 let diffResult={execution_result:'INCONCLUSIVE'}; try { diffResult=JSON.parse(diffScan.stdout.trim()); } catch { /* no PASS when scanner unavailable */ }
 
@@ -42,7 +44,7 @@ const cases=[
  {case_id:'LOP-A01-SARIF-NEGATIVES',implementation_state:'DONE_LOCAL',execution_result:tests.status===0?'PASS':'FAIL'},
  {case_id:'LOP-A01-CODEQL-ACTIVE',implementation_state:'READY_FOR_INTEGRATION',execution_result:'BLOCKED_GH_ADMIN',owner:'GitHub Admin'},
  {case_id:'LOP-A02-SCA',implementation_state:'DONE_LOCAL',execution_result:audit.execution_result,details:audit.counts},
- {case_id:'LOP-A02-GITLEAKS-HISTORY',implementation_state:'DONE_LOCAL',execution_result:gitleaks.status,owner:'Frontend/security'},
+ {case_id:'LOP-A02-GITLEAKS-HISTORY',implementation_state:'DONE_LOCAL',execution_result:history.status,reason:history.reason,scanner_result:gitleaks.status,owner:'Frontend/security'},
  {case_id:'LOP-A02-GITLEAKS-DIFF',implementation_state:'DONE_LOCAL',execution_result:diffResult.execution_result,owner:'Frontend/security'},
  {case_id:'LOP-A02-NEGATIVE-FIXTURES',implementation_state:'DONE_LOCAL',execution_result:fixture.status===0?(fixture.stdout.includes('BLOCKED_TOOL')?'BLOCKED_TOOL':'PASS'):'FAIL',limits:'Gitleaks integration fixture is skipped when tool unavailable'},
  {case_id:'LOP-A03-ANONYMOUS',implementation_state:'DONE_LOCAL',execution_result:browser.status===0?'PASS':'FAIL',limits:'Synthetic provider; no real JWT or grants'},
@@ -61,12 +63,14 @@ const cases=[
  {case_id:'LOP-A06-BUNDLE-API',implementation_state:'DONE_LOCAL',execution_result:api.status,artifact_sha256:api.sha256},
  {case_id:'LOP-A07-SERVICE-BUS',implementation_state:'READY_FOR_INTEGRATION',execution_result:'BLOCKED_SB',owner:'Axel/Azure'},
  {case_id:'LOP-A07-TAXONOMY-HTTP',implementation_state:'READY_FOR_INTEGRATION',execution_result:taxonomyHttp,reason:taxonomyHttpReason,owner:'Taxonomy',limits:'Backend branch under test, PostgreSQL disposable; not deployed'},
-];
-const snapshot={repo:preflight.repo,source_sha:sha,source_tree_dirty:dirty,source_fingerprint_sha256:hash.digest('hex'),docs_sha:preflight.docs_sha,timestamp_utc:new Date().toISOString(),node_version:process.version,lock_sha256:createHash('sha256').update(readFileSync('package-lock.json')).digest('hex'),scanner_status:{unit:tests.status===0&&fixture.status===0&&identity.status===0?'PASS':'FAIL',browser:browser.status===0?'PASS':'FAIL',audit:audit.execution_result,gitleaks:gitleaks.status,gitleaks_diff:diffResult.execution_result,codeql:'GITHUB_ADMIN_NOT_VERIFIED',server_headers:'SERVER_HEADERS_NOT_VERIFIED'},cases};
+].map(c => c.case_id.startsWith('LOP-A03-') ? { ...c, level:c.case_id.includes('-REAL-')?'L2_PENDING':'L1_SYNTHETIC', real_g7:'BLOCKED_G7', real_server_headers:'SERVER_HEADERS_NOT_VERIFIED' } : c);
+const e2e_sharding={mode:'AUTOMATIC_FALLBACK',missing_manifest_specs:6,example:'tests/h5/security-boundary.spec.ts',source:'https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/45508348798/job/138849573451',coordination:'Update shards/manifests after PR 79 merge'};
+const historical_playwright={classification:'INTERMITTENT_UNRESOLVED',wide_runs:['59/62','61/62','37/38'],isolated_retries:'PASS',security_boundary:'7/7 PASS L1_SYNTHETIC',limits:'Isolated retries do not turn historical failures into PASS'};
+const snapshot={e2e_sharding,historical_playwright,identity_headers_level:'L1_SYNTHETIC',real_g7:'BLOCKED_G7',real_server_headers:'SERVER_HEADERS_NOT_VERIFIED',repo:preflight.repo,source_sha:sha,source_tree_dirty:dirty,source_fingerprint_sha256:hash.digest('hex'),docs_sha:preflight.docs_sha,timestamp_utc:new Date().toISOString(),node_version:process.version,lock_sha256:createHash('sha256').update(readFileSync('package-lock.json')).digest('hex'),scanner_status:{unit:tests.status===0&&fixture.status===0&&identity.status===0?'PASS':'FAIL',browser:browser.status===0?'PASS':'FAIL',audit:audit.execution_result,gitleaks:history.status,gitleaks_scanner:gitleaks.status,gitleaks_diff:diffResult.execution_result,codeql:'GITHUB_ADMIN_NOT_VERIFIED',server_headers:'SERVER_HEADERS_NOT_VERIFIED'},cases};
 const output=resolve(process.argv[2] ?? 'scripts/h5/security/fe-security-snapshot.json');
 const manifest=resolve(process.argv[3] ?? 'scripts/h5/security/coverage-manifest.json');
 const serialized=JSON.stringify(snapshot,null,2)+'\n'; writeFileSync(output,serialized);
-const result={source_sha:sha,source_fingerprint_sha256:snapshot.source_fingerprint_sha256,snapshot_sha256:createHash('sha256').update(serialized).digest('hex'),...coverageCounts(cases),cases};
+const result={e2e_sharding,historical_playwright,identity_headers_level:'L1_SYNTHETIC',real_g7:'BLOCKED_G7',real_server_headers:'SERVER_HEADERS_NOT_VERIFIED',source_sha:sha,source_tree_dirty:dirty,docs_sha:preflight.docs_sha,source_fingerprint_sha256:snapshot.source_fingerprint_sha256,snapshot_sha256:createHash('sha256').update(serialized).digest('hex'),...coverageCounts(cases),cases};
 writeFileSync(manifest,JSON.stringify(result,null,2)+'\n');
 console.log(JSON.stringify({snapshot:output,manifest,counts:{total_cases:result.total_cases,executed_local_cases:result.executed_local_cases,passed_local_cases:result.passed_local_cases,blocked_external_cases:result.blocked_external_cases,failed_cases:result.failed_cases},source_sha:sha,dirty}));
-if(tests.status!==0||fixture.status!==0||identity.status!==0||browser.status!==0||audit.execution_result!=='PASS'||mock.status!=='PASS'||api.status!=='PASS'||gitleaks.status==='FAIL'||diffResult.execution_result==='FAIL') process.exitCode=1;
+if(tests.status!==0||fixture.status!==0||identity.status!==0||browser.status!==0||audit.execution_result!=='PASS'||mock.status!=='PASS'||api.status!=='PASS'||history.status==='FAIL'||diffResult.execution_result==='FAIL') process.exitCode=1;

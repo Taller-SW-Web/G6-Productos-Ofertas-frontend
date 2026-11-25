@@ -1,7 +1,30 @@
 {
-  "source_sha": "e322808d868bb89e2c645a1b069eb12728296d9f",
-  "source_fingerprint_sha256": "94c596ca418f6549f63c03985a48e8684e8a70a806839cfa281e305a64a6d327",
-  "snapshot_sha256": "45898245a30ebfabb36f5c57e36b653865a13f64d0ab1d546f42018837a39a46",
+  "e2e_sharding": {
+    "mode": "AUTOMATIC_FALLBACK",
+    "missing_manifest_specs": 6,
+    "example": "tests/h5/security-boundary.spec.ts",
+    "source": "https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/45508348798/job/138849573451",
+    "coordination": "Update shards/manifests after PR 79 merge"
+  },
+  "historical_playwright": {
+    "classification": "INTERMITTENT_UNRESOLVED",
+    "wide_runs": [
+      "59/62",
+      "61/62",
+      "37/38"
+    ],
+    "isolated_retries": "PASS",
+    "security_boundary": "7/7 PASS L1_SYNTHETIC",
+    "limits": "Isolated retries do not turn historical failures into PASS"
+  },
+  "identity_headers_level": "L1_SYNTHETIC",
+  "real_g7": "BLOCKED_G7",
+  "real_server_headers": "SERVER_HEADERS_NOT_VERIFIED",
+  "source_sha": "1a5b8dcfdc644c52100ccf2674f93f36043ccdda",
+  "source_tree_dirty": true,
+  "docs_sha": "c9e1e5c217616d28229fccf5315fb97a1ae061a9",
+  "source_fingerprint_sha256": "4764000120cb5a29c081b608497c74ef41e65b3e1dba9d090e4e8847ec4e4e47",
+  "snapshot_sha256": "be8795009fed30a147a7f16dd2c8e1803c2896e146c6ce8f921da62b0ddcf71e",
   "total_cases": 22,
   "implemented_cases": 15,
   "executed_local_cases": 16,
@@ -27,25 +50,25 @@
       "execution_result": "PASS",
       "details": {
         "production": {
-          "high": 0,
-          "critical": 0,
-          "moderate": 0,
+          "info": 0,
           "low": 0,
-          "info": 0
+          "moderate": 0,
+          "high": 0,
+          "critical": 0
         },
         "dev": {
-          "high": 0,
-          "critical": 0,
-          "moderate": 0,
+          "info": 0,
           "low": 0,
-          "info": 0
+          "moderate": 0,
+          "high": 0,
+          "critical": 0
         },
         "unknown": {
-          "high": 0,
-          "critical": 0,
-          "moderate": 0,
+          "info": 0,
           "low": 0,
-          "info": 0
+          "moderate": 0,
+          "high": 0,
+          "critical": 0
         }
       }
     },
@@ -53,6 +76,8 @@
       "case_id": "LOP-A02-GITLEAKS-HISTORY",
       "implementation_state": "DONE_LOCAL",
       "execution_result": "FAIL",
+      "reason": "HISTORY_REVIEW_PENDING",
+      "scanner_result": "FAIL",
       "owner": "Frontend/security"
     },
     {
@@ -71,62 +96,92 @@
       "case_id": "LOP-A03-ANONYMOUS",
       "implementation_state": "DONE_LOCAL",
       "execution_result": "PASS",
-      "limits": "Synthetic provider; no real JWT or grants"
+      "limits": "Synthetic provider; no real JWT or grants",
+      "level": "L1_SYNTHETIC",
+      "real_g7": "BLOCKED_G7",
+      "real_server_headers": "SERVER_HEADERS_NOT_VERIFIED"
     },
     {
       "case_id": "LOP-A03-SCOPE-M2M-FIXTURE",
       "implementation_state": "DONE_LOCAL",
       "execution_result": "PASS",
-      "limits": "Synthetic provider; no real JWT or grants"
+      "limits": "Synthetic provider; no real JWT or grants",
+      "level": "L1_SYNTHETIC",
+      "real_g7": "BLOCKED_G7",
+      "real_server_headers": "SERVER_HEADERS_NOT_VERIFIED"
     },
     {
       "case_id": "LOP-A03-CORS-PREFLIGHT",
       "implementation_state": "DONE_LOCAL",
       "execution_result": "PASS",
-      "limits": "Synthetic provider; no real JWT or grants"
+      "limits": "Synthetic provider; no real JWT or grants",
+      "level": "L1_SYNTHETIC",
+      "real_g7": "BLOCKED_G7",
+      "real_server_headers": "SERVER_HEADERS_NOT_VERIFIED"
     },
     {
       "case_id": "LOP-A03-CORS-DENIED",
       "implementation_state": "DONE_LOCAL",
       "execution_result": "PASS",
-      "limits": "Synthetic provider; no real JWT or grants"
+      "limits": "Synthetic provider; no real JWT or grants",
+      "level": "L1_SYNTHETIC",
+      "real_g7": "BLOCKED_G7",
+      "real_server_headers": "SERVER_HEADERS_NOT_VERIFIED"
     },
     {
       "case_id": "LOP-A03-CSP-ISOLATED",
       "implementation_state": "DONE_LOCAL",
       "execution_result": "PASS",
-      "limits": "Synthetic provider; no real JWT or grants"
+      "limits": "Synthetic provider; no real JWT or grants",
+      "level": "L1_SYNTHETIC",
+      "real_g7": "BLOCKED_G7",
+      "real_server_headers": "SERVER_HEADERS_NOT_VERIFIED"
     },
     {
       "case_id": "LOP-A03-XSS-UI",
       "implementation_state": "DONE_LOCAL",
       "execution_result": "PASS",
-      "limits": "Synthetic provider; no real JWT or grants"
+      "limits": "Synthetic provider; no real JWT or grants",
+      "level": "L1_SYNTHETIC",
+      "real_g7": "BLOCKED_G7",
+      "real_server_headers": "SERVER_HEADERS_NOT_VERIFIED"
     },
     {
       "case_id": "LOP-A03-REFRESH-MULTITAB-LOGOUT",
       "implementation_state": "DONE_LOCAL",
       "execution_result": "PASS",
       "owner": "Frontend",
-      "limits": "Synthetic provider, new tab and logout; active-tab revocation remains external"
+      "limits": "Synthetic provider, new tab and logout; active-tab revocation remains external",
+      "level": "L1_SYNTHETIC",
+      "real_g7": "BLOCKED_G7",
+      "real_server_headers": "SERVER_HEADERS_NOT_VERIFIED"
     },
     {
       "case_id": "LOP-A03-JWT-SYNTHETIC",
       "implementation_state": "DONE_LOCAL",
       "execution_result": "PASS",
-      "limits": "Synthetic provider, no G7 authority"
+      "limits": "Synthetic provider, no G7 authority",
+      "level": "L1_SYNTHETIC",
+      "real_g7": "BLOCKED_G7",
+      "real_server_headers": "SERVER_HEADERS_NOT_VERIFIED"
     },
     {
       "case_id": "LOP-A03-REAL-JWT-SCOPE",
       "implementation_state": "READY_FOR_INTEGRATION",
       "execution_result": "BLOCKED_G7",
-      "owner": "G7"
+      "owner": "G7",
+      "level": "L2_PENDING",
+      "real_g7": "BLOCKED_G7",
+      "real_server_headers": "SERVER_HEADERS_NOT_VERIFIED"
     },
     {
       "case_id": "LOP-A03-REAL-CSP-CORS",
       "implementation_state": "READY_FOR_INTEGRATION",
       "execution_result": "NOT_RUN",
-      "owner": "Frontend/Infra"
+      "owner": "Frontend/Infra",
+      "level": "L2_PENDING",
+      "real_g7": "BLOCKED_G7",
+      "real_server_headers": "SERVER_HEADERS_NOT_VERIFIED"
     },
     {
       "case_id": "LOP-A04-INT06",

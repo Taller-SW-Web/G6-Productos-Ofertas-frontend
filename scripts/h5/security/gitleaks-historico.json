@@ -1,0 +1,73 @@
+{
+  "scanner": "gitleaks 8.30.1",
+  "scope": "git history before PR 96",
+  "execution_result": "FAIL",
+  "resolution": "PENDING_REVIEW",
+  "owner": "Vera / seguridad",
+  "note": "Clasificación preliminar, sin valores ni excepciones; no prueba que exista rotación ni reemplaza aprobación formal.",
+  "findings": [
+    {
+      "file": "tests/admin-performance.spec.ts",
+      "rule": "generic-api-key",
+      "commit": "11fecc3b02f10c129229ae816e566e28acf3fc70",
+      "line": 99,
+      "preliminary_classification": "PRESUNTO_FALSO_POSITIVO_FIXTURE",
+      "basis": "JWT con firma literal de prueba",
+      "formal_review": "PENDING_VERA"
+    },
+    {
+      "file": "tests/admin-performance.spec.ts",
+      "rule": "generic-api-key",
+      "commit": "3ed04869659798e90d3c30275a8a3b075ca13a59",
+      "line": 109,
+      "preliminary_classification": "PRESUNTO_FALSO_POSITIVO_FIXTURE",
+      "basis": "JWT con firma literal de prueba",
+      "formal_review": "PENDING_VERA"
+    },
+    {
+      "file": "tests/auth-general.spec.ts",
+      "rule": "generic-api-key",
+      "commit": "1f301447485069bd1c0d2151e5a9aac42916bf0f",
+      "line": 44,
+      "preliminary_classification": "PRESUNTO_FALSO_POSITIVO_FIXTURE",
+      "basis": "Contexto de fixture aislada",
+      "formal_review": "PENDING_VERA"
+    },
+    {
+      "file": "scripts/testing/release-boundary.test.mjs",
+      "rule": "generic-api-key",
+      "commit": "d9ccf1c628edea08c5a3fc6e589d291f367d8680",
+      "line": 12,
+      "preliminary_classification": "PRESUNTO_FALSO_POSITIVO_FIXTURE",
+      "basis": "Proveedor sintético de prueba",
+      "formal_review": "PENDING_VERA"
+    },
+    {
+      "file": "tests/auth-general.spec.ts",
+      "rule": "generic-api-key",
+      "commit": "674091f47577693c50d95eb68e91d3f6e33c6cd3",
+      "line": 16,
+      "preliminary_classification": "PRESUNTO_FALSO_POSITIVO_FIXTURE",
+      "basis": "JWT con firma literal de prueba",
+      "formal_review": "PENDING_VERA"
+    },
+    {
+      "file": "tests/promotions-session-ui.spec.ts",
+      "rule": "generic-api-key",
+      "commit": "99ec67d4db5965d3e01afe64078700027d33b6e7",
+      "line": 3,
+      "preliminary_classification": "PRESUNTO_FALSO_POSITIVO_FIXTURE",
+      "basis": "JWT sintético con firma literal",
+      "formal_review": "PENDING_VERA"
+    },
+    {
+      "file": "tests/promotions-session-ui.spec.ts",
+      "rule": "generic-api-key",
+      "commit": "170542a3ad0a295a6f234c110f679d10f4ddf172",
+      "line": 3,
+      "preliminary_classification": "PRESUNTO_FALSO_POSITIVO_FIXTURE",
+      "basis": "JWT sintético con firma literal",
+      "formal_review": "PENDING_VERA"
+    }
+  ]
+}

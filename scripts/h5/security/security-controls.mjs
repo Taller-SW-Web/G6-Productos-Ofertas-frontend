@@ -4,27 +4,59 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 export function sarifVerdict(text, expectedSha, execution) {
-  if (execution !== 'success') return { status: 'INCONCLUSIVE', reason: 'SCANNER_NOT_SUCCESSFUL' };
-  let data; try { data = JSON.parse(text); } catch { return { status: 'INCONCLUSIVE', reason: 'INVALID_SARIF' }; }
-  if (data.version !== '2.1.0' || !Array.isArray(data.runs) || !data.runs.length) return { status: 'INCONCLUSIVE', reason: 'INVALID_SARIF' };
-  if (!data.runs.every(r => r?.versionControlProvenance?.some(p => p.revisionId === expectedSha) && Array.isArray(r.results))) return { status: 'INCONCLUSIVE', reason: 'HEAD_OR_RESULTS_MISSING' };
-  return { status: data.runs.some(r => r.results.some(x => x.level === 'error')) ? 'FAIL' : 'PASS', reason: 'SARIF_CHECKED' };
+  if (execution !== 'success') return { status:'INCONCLUSIVE', reason:'SCANNER_NOT_SUCCESSFUL' };
+  let data; try { data=JSON.parse(text); } catch { return { status:'INCONCLUSIVE', reason:'INVALID_SARIF' }; }
+  if (!data || data.version!=='2.1.0' || !Array.isArray(data.runs) || !data.runs.length || !/^[a-f0-9]{40}$/i.test(expectedSha ?? '')) return { status:'INCONCLUSIVE', reason:'INVALID_SARIF' };
+  let high=false, medium=false, invalid=false;
+  for (const run of data.runs) {
+    if (!run || !Array.isArray(run.results) || !Array.isArray(run.versionControlProvenance) || !run.versionControlProvenance.some(p=>p?.revisionId===expectedSha)) { invalid=true; continue; }
+    const rules=run.tool?.driver?.rules;
+    if (rules !== undefined && !Array.isArray(rules)) { invalid=true; continue; }
+    for (const result of run.results) {
+      if (!result || typeof result!=='object' || Array.isArray(result)) { invalid=true; continue; }
+      const rule=Array.isArray(rules) ? (typeof result.ruleId==='string' ? rules.find(r=>r?.id===result.ruleId) : Number.isInteger(result.ruleIndex) ? rules[result.ruleIndex] : undefined) : undefined;
+      const level=result.level ?? rule?.defaultConfiguration?.level ?? 'warning';
+      if (!['error','warning','note','none'].includes(level)) invalid=true;
+      else if (level==='error') high=true;
+      else if (level==='warning') medium=true;
+      for (const value of [result.properties?.['security-severity'],rule?.properties?.['security-severity']]) {
+        if (value===undefined) continue;
+        if ((typeof value!=='string' && typeof value!=='number') || String(value).trim()==='' || !/^(?:10(?:\.0+)?|[0-9](?:\.[0-9]+)?)$/.test(String(value).trim())) { invalid=true; continue; }
+        const score=Number(value);
+        if (score>=7) high=true; else if (score>=4) medium=true;
+      }
+    }
+  }
+  if (high) return {status:'FAIL',reason:'HIGH_OR_CRITICAL_FINDING'};
+  if (invalid) return {status:'INCONCLUSIVE',reason:'INVALID_SARIF_OR_HEAD'};
+  if (medium) return {status:'INCONCLUSIVE',reason:'MEDIUM_REQUIRES_PLAN'};
+  return {status:'PASS',reason:'SARIF_CHECKED'};
 }
 export function auditVerdict(text, exitCode, lockfile) {
-  let data; try { data = JSON.parse(text); } catch { return { status: 'INCONCLUSIVE', reason: 'AUDIT_INVALID_JSON' }; }
-  if (!data || typeof data !== 'object' || data.error || !data.vulnerabilities || !data.metadata?.vulnerabilities) return { status: 'INCONCLUSIVE', reason: 'AUDIT_UNAVAILABLE' };
-  if (![0, 1].includes(exitCode)) return { status: 'INCONCLUSIVE', reason: 'AUDIT_PROCESS_ERROR' };
-  const empty = () => ({ high: 0, critical: 0, moderate: 0, low: 0, info: 0 });
-  const counts = { production: empty(), dev: empty(), unknown: empty() };
-  for (const [name, item] of Object.entries(data.vulnerabilities)) {
-    if (!item || typeof item !== 'object' || !(item.severity in counts.unknown) || typeof item.isDirect !== 'boolean') return { status: 'INCONCLUSIVE', reason: 'AUDIT_SCHEMA_INVALID' };
-    const matches = Object.entries(lockfile?.packages ?? {}).filter(([key]) => key === `node_modules/${name}` || key.endsWith(`/node_modules/${name}`));
-    const scope = !matches.length ? 'unknown' : matches.some(([, value]) => value.dev !== true) ? 'production' : 'dev';
+  let data; try { data=JSON.parse(text); } catch { return {status:'INCONCLUSIVE',reason:'AUDIT_INVALID_JSON'}; }
+  const object = x => x && typeof x==='object' && !Array.isArray(x);
+  if (!object(data) || data.auditReportVersion!==2 || data.error || !object(data.vulnerabilities) || !object(data.metadata) || !object(data.metadata.vulnerabilities) || ![0,1].includes(exitCode)) return {status:'INCONCLUSIVE',reason:'AUDIT_UNAVAILABLE'};
+  if (lockfile !== undefined && (!object(lockfile) || !object(lockfile.packages))) return {status:'INCONCLUSIVE',reason:'LOCKFILE_SCHEMA_INVALID'};
+  const severities=['info','low','moderate','high','critical'];
+  const dependencies=data.metadata.dependencies;
+  if (!object(dependencies) || !['prod','dev','optional','peer','peerOptional','total'].every(k=>Number.isSafeInteger(dependencies[k]) && dependencies[k]>=0)) return {status:'INCONCLUSIVE',reason:'AUDIT_INVALID_DEPENDENCIES'};
+  const meta=data.metadata.vulnerabilities;
+  if (![...severities,'total'].every(k=>Number.isSafeInteger(meta[k]) && meta[k]>=0)) return {status:'INCONCLUSIVE',reason:'AUDIT_INVALID_METADATA'};
+  const counts=Object.fromEntries(['production','dev','unknown'].map(scope=>[scope,Object.fromEntries(severities.map(k=>[k,0]))]));
+  const actual=Object.fromEntries(severities.map(k=>[k,0]));
+  for (const [name,item] of Object.entries(data.vulnerabilities)) {
+    if (!object(item) || item.name!==name || !severities.includes(item.severity) || typeof item.isDirect!=='boolean' || !Array.isArray(item.via) || !item.via.length || typeof item.range!=='string' || !Array.isArray(item.nodes) || !Array.isArray(item.effects) || !('fixAvailable' in item)) return {status:'INCONCLUSIVE',reason:'AUDIT_SCHEMA_INVALID'};
+    if (!item.name || !item.range || item.via.some(v=>typeof v==='string' ? !v : !object(v) || typeof v.name!=='string' || !severities.includes(v.severity)) || item.nodes.some(v=>typeof v!=='string') || item.effects.some(v=>typeof v!=='string') || (typeof item.fixAvailable!=='boolean' && !object(item.fixAvailable))) return {status:'INCONCLUSIVE',reason:'AUDIT_SCHEMA_INVALID'};
+    actual[item.severity]++;
+    const matches=Object.entries(lockfile?.packages ?? {}).filter(([key])=>key===`node_modules/${name}` || key.endsWith(`/node_modules/${name}`));
+    const scope=!matches.length?'unknown':matches.some(([,value])=>value.dev!==true)?'production':'dev';
     counts[scope][item.severity]++;
   }
-  const blocking = ['production', 'unknown'].some(scope => counts[scope].high || counts[scope].critical);
-  const review = Object.values(counts).some(scope => scope.moderate);
-  return { status: blocking ? 'FAIL' : review ? 'INCONCLUSIVE' : 'PASS', counts, reason: review ? 'MEDIUM_REQUIRES_PLAN' : 'AUDIT_CHECKED' };
+  const total=severities.reduce((n,k)=>n+actual[k],0);
+  if ((total>0 && dependencies.total===0) || meta.total!==total || severities.some(k=>meta[k]!==actual[k]) || (exitCode===0 && (actual.high || actual.critical)) || (exitCode===1 && total===0)) return {status:'INCONCLUSIVE',reason:'AUDIT_INCONSISTENT'};
+  const blocking=['production','unknown'].some(scope=>counts[scope].high || counts[scope].critical);
+  const review=Object.values(counts).some(scope=>scope.moderate);
+  return {status:blocking?'FAIL':review?'INCONCLUSIVE':'PASS',counts,reason:review?'MEDIUM_REQUIRES_PLAN':'AUDIT_CHECKED'};
 }
 export function validateAllowlist(entries, now = new Date()) {
   return entries.every(e => typeof e.expires === 'string' && /^\d{4}-\d\d-\d\d$/.test(e.expires) && Number.isFinite(Date.parse(e.expires)) && Date.parse(e.expires+'T23:59:59Z') >= now.getTime());
@@ -56,4 +88,10 @@ export function coverageCounts(cases) {
     blocked_external_cases:cases.filter(c=>c.execution_result.startsWith('BLOCKED_')).length,
     failed_cases:cases.filter(c=>c.execution_result==='FAIL').length,
     unimplemented_cases:cases.filter(c=>['BLOCKED_DEPENDENCY','NEEDS_FIX'].includes(c.implementation_state)).length };
+}
+
+export function historyVerdict(scannerStatus, findings) {
+  if (!Array.isArray(findings) || !findings.length) return {status:'INCONCLUSIVE',reason:'HISTORY_REVIEW_INVALID'};
+  if (findings.some(f=>f?.formal_review!=='APPROVED_RESOLVED')) return {status:'FAIL',reason:'HISTORY_REVIEW_PENDING'};
+  return {status:scannerStatus,reason:'SCANNER_RESULT'};
 }
