@@ -13,11 +13,16 @@ const explicitExecute = process.argv.length === 3 && process.argv[2] === '--exec
 const validSha = value => /^[a-f0-9]{40}$/i.test(value ?? '');
 const safeEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => ['PATH', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE'].includes(key) || key.startsWith('G6_H5_INT08_L2_')));
 const writeReport = async report => {
-  const bytes = Buffer.from(`${JSON.stringify(report, null, 2)}\n`, 'utf8');
+  const completeReport = {
+    ...report,
+    execution_result: report.status,
+    observed: report.observed ?? { discovered: report.discovered ?? 0, executed: report.executed ?? 0, passed: report.passed ?? 0, failed: report.failed ?? 0, skipped: report.skipped ?? 0, service_calls: report.service_calls ?? 0, writes: report.writes ?? 0 },
+  };
+  const bytes = Buffer.from(`${JSON.stringify(completeReport, null, 2)}\n`, 'utf8');
   assertSafeEvidenceText(bytes.toString('utf8'));
   await mkdir(dirname(reportPath), { recursive: true });
   await writeFile(reportPath, bytes);
-  const index = { artifact: 'int08-l2-release-summary.json', sha256: createHash('sha256').update(bytes).digest('hex'), source_sha: sourceSha, docs_sha: docsSha, status: report.status, evidence_level: report.evidence_level };
+  const index = { schema_version: 1, artifact: completeReport.artifact_uri, sha256_artifact: createHash('sha256').update(bytes).digest('hex'), case_id: completeReport.case_id, task_id: completeReport.task_id, h5_criterion: completeReport.h5_criterion, repository: completeReport.repository, owner: completeReport.owner, source_sha: sourceSha, docs_sha: docsSha, timestamp_utc: completeReport.timestamp_utc, config_version: completeReport.config_version, dataset_seed: completeReport.dataset_seed, dataset_checksum: completeReport.dataset_checksum, tool_versions: completeReport.tool_versions, environment: completeReport.environment, test_command: completeReport.test_command, artifact_uri: completeReport.artifact_uri, status: completeReport.status, execution_result: completeReport.execution_result, evidence_level: completeReport.evidence_level };
   const indexBytes = Buffer.from(`${JSON.stringify(index, null, 2)}\n`, 'utf8');
   assertSafeEvidenceText(indexBytes.toString('utf8'));
   await writeFile(indexPath, indexBytes);
@@ -44,18 +49,24 @@ try { datasetSha = createHash('sha256').update(await readFile('tests/fixtures/h5
 const preflight = await preflightInt08L2(process.env);
 const base = {
   schema_version: 1, case_id: 'INT-08-L2', task_id: 'POM-A02', h5_criterion: 'H5-02',
-  repository: 'Taller-SW-Web/G6-Productos-Ofertas-frontend', owner: 'Poma', source_sha: validSha(sourceSha) ? sourceSha : null,
+  repository: 'Taller-SW-Web/G6-Productos-Ofertas-frontend', repo: 'Taller-SW-Web/G6-Productos-Ofertas-frontend', owner: 'Poma', source_sha: validSha(sourceSha) ? sourceSha : null,
   docs_sha: docsSha, timestamp_utc: new Date().toISOString(), config_version: 'h5-int08-l2-opt-in-v1',
   dataset_seed: 20261123, dataset_checksum: datasetSha,
   tool_versions: { node: process.version, playwright: JSON.parse(await readFile('node_modules/@playwright/test/package.json', 'utf8')).version },
-  environment: { platform: process.platform, network_scope: 'approved preview, G7 and APIM hosts only' },
+  environment: { platform: process.platform, architecture: process.arch, network_scope: 'approved preview, G7 and APIM hosts only', service_calls: 0 },
+  configuration: { config: 'playwright.h5-int08-l2-release.config.ts', workers: 1, retries: 0, screenshots: false, traces: false, video: false, service_workers: 'blocked', explicit_execute_required: true },
+  test_command: 'node scripts/run-h5-int08-l2-release.mjs', artifact_uri: 'test-results/h5/int08-l2-release-summary.json; digest index: test-results/h5/int08-l2-release-summary.json.index.json',
   approved_hosts_sha256: preflight.metadata.approvedHostsSha256,
   release_sha: preflight.metadata.releaseSha, gateway_sha: preflight.metadata.gatewaySha, service_sha: preflight.metadata.serviceSha,
-  evidence_level: 'L2', service_calls: 0, writes: 0,
+  implementation_state: 'DONE_A', execution_result: 'WAIT_C_G7_APIM', evidence_level: 'L2', service_calls: 0, writes: 0,
+  expected: { explicit_execute_required: true, approved_release_required: true, service_calls_without_authorized_execution: 0, authorized_and_denied_scenarios: 2 },
+  negative_tests: ['Default mode performs no Playwright execution or service request.', 'Unapproved environment, hosts, or hashes block the release journey before external calls.', 'The HTTP 202 preparation response is admission only and requires bounded terminal polling.'],
+  known_limits: ['No real G7/APIM release was executed in this validation.', 'The scenario does not certify a release, deployment, provider availability, or authorization grant.'],
+  blocker_owner: 'G7/APIM release and identity owners',
 };
 
 if (!explicitExecute) {
-  await writeReport({ ...base, status: 'WAIT_C_G7_APIM', reason: 'L2_REQUIRES_EXPLICIT_EXECUTE_AND_RELEASE_APPROVAL', missing: preflight.missing, discovered: 0, executed: 0, passed: 0, failed: 0, skipped: 0, artifact_status: 'NO_REAL_CALLS' });
+  await writeReport({ ...base, status: 'WAIT_C_G7_APIM', execution_result: 'WAIT_C_G7_APIM', reason: 'L2_REQUIRES_EXPLICIT_EXECUTE_AND_RELEASE_APPROVAL', missing: preflight.missing, discovered: 0, executed: 0, passed: 0, failed: 0, skipped: 0, observed: { discovered: 0, executed: 0, passed: 0, failed: 0, skipped: 0, service_calls: 0, writes: 0 }, artifact_status: 'NO_REAL_CALLS' });
   process.stdout.write('INT-08 L2 WAIT_C_G7_APIM: rerun only with --execute and an approved release harness; service_calls=0.\n');
   process.exitCode = 2;
 } else if (preflight.status !== 'READY_C') {

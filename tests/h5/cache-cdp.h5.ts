@@ -1,11 +1,10 @@
 import { expect, test } from "@playwright/test";
-import { writeFile } from "node:fs/promises";
-import { mkdir } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
 import { createHash } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { assertSafeEvidenceText } from "./evidence-security.mjs";
 
-test("CDP distingue la primera lectura HTTP fría de la segunda lectura warm sin route interception", async ({ page }) => {
+test("CDP distingue la primera lectura HTTP fría de la segunda lectura warm sin route interception", async ({ page, browser }) => {
   test.setTimeout(20_000);
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Network.enable");
@@ -29,6 +28,11 @@ test("CDP distingue la primera lectura HTTP fría de la segunda lectura warm sin
   const countAfterFirst = await page.evaluate(async () => (await fetch("/resource-count", { signal: AbortSignal.timeout(3_000) })).json()) as { resourceRequests: number };
   const secondBody = await page.evaluate(async () => (await fetch("/resource.js", { signal: AbortSignal.timeout(3_000) })).text());
   const countAfterSecond = await page.evaluate(async () => (await fetch("/resource-count", { signal: AbortSignal.timeout(3_000) })).json()) as { resourceRequests: number };
+  const manifestBytes = await readFile("tests/fixtures/h5/catalog/manifest.json");
+  const datasetSha = createHash("sha256").update(manifestBytes).digest("hex");
+  const sourceSha = process.env.G6_H5_SOURCE_SHA ?? "";
+  expect(sourceSha).toMatch(/^[a-f0-9]{40}$/i);
+  expect(datasetSha).toBe(process.env.G6_H5_DATASET_SHA);
 
   expect(firstBody).toBe(secondBody);
   expect(resourceRequestIds).toHaveLength(2);
@@ -45,9 +49,19 @@ test("CDP distingue la primera lectura HTTP fría de la segunda lectura warm sin
   const observation = {
     schema_version: 1,
     case_id: "H5-CACHE-CDP",
+    task_id: "POM-A02",
+    h5_criterion: "H5-02",
+    repository: "Taller-SW-Web/G6-Productos-Ofertas-frontend",
+    owner: "Poma",
+    source_sha: sourceSha,
     status: "PASS",
     evidence_level: "L0",
     docs_sha: "c9e1e5c217616d28229fccf5315fb97a1ae061a9",
+    dataset_seed: 20261123,
+    dataset_checksum: datasetSha,
+    browser_version: browser.version(),
+    timestamp_utc: new Date().toISOString(),
+    test_command: "node scripts/run-h5-cache-cdp.mjs",
     cold_network_reads: coldNetworkRequestIds.size,
     warm_cache_reads: cachedRequestIds.size,
     disposable_server_requests_after_cold: countAfterFirst.resourceRequests,
@@ -59,9 +73,17 @@ test("CDP distingue la primera lectura HTTP fría de la segunda lectura warm sin
   await writeFile(outputPath, bytes);
   const observationIndex = {
     schema_version: 1,
-    artifact: "cache-cdp-observation.json",
+    artifact: outputPath.replaceAll("\\", "/"),
     sha256: createHash("sha256").update(bytes).digest("hex"),
+    sha256_artifact: createHash("sha256").update(bytes).digest("hex"),
     case_id: observation.case_id,
+    task_id: observation.task_id,
+    h5_criterion: observation.h5_criterion,
+    source_sha: observation.source_sha,
+    docs_sha: observation.docs_sha,
+    dataset_seed: observation.dataset_seed,
+    dataset_checksum: observation.dataset_checksum,
+    timestamp_utc: observation.timestamp_utc,
     evidence_level: observation.evidence_level,
     status: observation.status,
   };

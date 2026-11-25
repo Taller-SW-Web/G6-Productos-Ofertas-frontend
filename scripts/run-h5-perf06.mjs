@@ -7,6 +7,13 @@ import { parsePerf06Run, validateColdCacheAttestation } from "../tests/h5/perf06
 
 let reportPath = resolve("test-results/h5/perf06-preflight.json");
 const validSha = (value, length) => new RegExp(`^[0-9a-f]{${length}}$`, "i").test(value ?? "") ? value : null;
+const docsSha = "c9e1e5c217616d28229fccf5315fb97a1ae061a9";
+const sourceRevision = spawnSync("git", ["rev-parse", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+const sourceSha = sourceRevision.status === 0 ? sourceRevision.stdout.trim() : null;
+const datasetBytes = await readFile("tests/fixtures/h5/catalog/manifest.json");
+const dataset = JSON.parse(datasetBytes.toString("utf8"));
+const datasetSha = createHash("sha256").update(datasetBytes).digest("hex");
+const toolVersions = { node: process.version, playwright: JSON.parse(await readFile("node_modules/@playwright/test/package.json", "utf8")).version };
 const writeIndexedReport = async (path, report) => {
   const serialized = `${JSON.stringify(report, null, 2)}\n`;
   assertSafeEvidenceText(serialized);
@@ -17,16 +24,25 @@ const writeIndexedReport = async (path, report) => {
     schemaVersion: 1,
     artifact: path.replaceAll("\\", "/").split("/").at(-1),
     sha256,
+    sha256_artifact: sha256,
+    case_id: "PERF-06",
+    task_id: "POM-A05",
+    h5_criterion: "H5-03",
+    source_sha: validSha(report.source_sha ?? process.env.G6_H5_PERF06_SUBJECT_SHA, 40) ?? sourceSha,
+    docs_sha: docsSha,
+    dataset_seed: dataset.seed,
+    dataset_checksum: datasetSha,
+    artifact_uri: path.replaceAll("\\", "/"),
     caseId: "PERF06",
     h5Criterion: "POM-A05",
     repository: "Taller-SW-Web/G6-Productos-Ofertas-frontend",
     owner: "Poma",
-    sourceSha: validSha(process.env.G6_H5_PERF06_SUBJECT_SHA, 40),
+    sourceSha: validSha(report.source_sha ?? process.env.G6_H5_PERF06_SUBJECT_SHA, 40) ?? sourceSha,
     harnessSha: validSha(process.env.G6_H5_PERF06_HARNESS_SHA, 40),
     datasetSha: validSha(process.env.G6_H5_PERF06_DATASET_SHA, 64),
     coldAttestationArtifact: report.evidence?.coldAttestation?.artifact ?? null,
     coldAttestationSha256: report.evidence?.coldAttestation?.sha256 ?? null,
-    docsSha: "c9e1e5c217616d28229fccf5315fb97a1ae061a9",
+    docsSha,
     timestampUtc: new Date().toISOString(),
     status: report.status,
     evidenceLevel: "L1",
@@ -38,9 +54,21 @@ const writeIndexedReport = async (path, report) => {
 };
 const block = async (reason, count = 1) => {
   const summary = {
-    schemaVersion: 1, suite: "PERF06", status: "BLOCKED_DEPENDENCY", reason,
-    blockerCount: count, serviceCalls: 0,
-    evidence: { caseId: "PERF06", h5Criterion: "POM-A05", docsSha: "c9e1e5c217616d28229fccf5315fb97a1ae061a9", timestampUtc: new Date().toISOString(), evidenceLevel: "L1" },
+    schema_version: 1, case_id: "PERF-06", task_id: "POM-A05", h5_criterion: "H5-03",
+    repository: "Taller-SW-Web/G6-Productos-Ofertas-frontend", repo: "Taller-SW-Web/G6-Productos-Ofertas-frontend", owner: "Poma",
+    source_sha: sourceSha, docs_sha: docsSha, timestamp_utc: new Date().toISOString(), config_version: "h5-perf06-read-only-v2",
+    dataset_seed: dataset.seed, dataset_checksum: datasetSha, tool_versions: toolVersions,
+    environment: { platform: process.platform, architecture: process.arch, network_scope: "no target contacted; preflight only", service_calls: 0 },
+    configuration: { profiles: [{ vus: 1, seconds: 60 }, { vus: 5, seconds: 180 }, { vus: 20, seconds: 300 }], repetitions_per_subject: 3, mode: "read-only", cold_requires_owner_attestation: true },
+    test_command: "node scripts/run-h5-perf06.mjs", artifact_uri: "test-results/h5/perf06-preflight.json; digest index: test-results/h5/perf06-preflight.json.index.json",
+    implementation_state: "DONE_A", execution_result: "BLOCKED_DEPENDENCY", evidence_level: "L1",
+    suite: "PERF06", status: "BLOCKED_DEPENDENCY", reason, blocker_count: count, blockerCount: count, service_calls: 0, serviceCalls: 0,
+    expected: { preflight_must_block_without_isolated_identities_and_harness: true, service_calls: 0 },
+    observed: { preflight_status: "BLOCKED_DEPENDENCY", blocker_count: count, service_calls: 0, comparison_status: "INCONCLUSIVE" },
+    negative_tests: ["Missing identity, isolated API, or service harness blocks before Playwright or network calls.", "A missing cache-state attestation cannot be reported as cold or measured."],
+    known_limits: ["No authorized isolated Gateway, identity set, service harness, or candidate/baseline pair was supplied.", "No PERF-06 user journey or benchmark was executed."],
+    blocker_owner: "Catalog/Gateway harness and identity owners",
+    evidence: { case_id: "PERF-06", h5_criterion: "H5-03", docs_sha: docsSha, timestamp_utc: new Date().toISOString(), evidence_level: "L1" },
   };
   await writeIndexedReport(reportPath, summary);
   process.stdout.write(`PERF06 BLOCKED_DEPENDENCY: ${reason}; blockers=${count}; service_calls=0.\n`);

@@ -42,10 +42,14 @@ const writeOutcome = async (status, reason, counts = {}) => {
   assertSafeEvidenceText(serialized);
   await writeFile(reportPath, serialized, 'utf8');
   const index = {
-    schema_version: 1, artifact: 'int08-contract-summary.json',
+    schema_version: 1, artifact: report.artifact_uri,
     sha256: createHash('sha256').update(Buffer.from(serialized, 'utf8')).digest('hex'),
-    source_sha: sourceSha, docs_sha: docsSha, dataset_checksum: datasetSha, case_id: report.case_id, task_id: report.task_id,
-    h5_criterion: report.h5_criterion, timestamp_utc: report.timestamp_utc, status, evidence_level: 'L0',
+    sha256_artifact: createHash('sha256').update(Buffer.from(serialized, 'utf8')).digest('hex'),
+    source_sha: sourceSha, docs_sha: docsSha, dataset_seed: 20261123, dataset_checksum: datasetSha,
+    case_id: report.case_id, task_id: report.task_id, h5_criterion: report.h5_criterion,
+    repository: report.repository, owner: report.owner, timestamp_utc: report.timestamp_utc,
+    config_version: report.config_version, tool_versions: report.tool_versions, environment: report.environment,
+    test_command: report.test_command, artifact_uri: report.artifact_uri, status, execution_result: status, evidence_level: 'L0',
   };
   const indexText = `${JSON.stringify(index, null, 2)}\n`;
   assertSafeEvidenceText(indexText);

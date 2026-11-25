@@ -13,13 +13,30 @@ const commandArgs = process.argv.slice(2).filter(argument => argument !== '--con
 const sourceSha = spawnSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).stdout.trim();
 const datasetBytes = await readFile('tests/fixtures/h5/catalog/manifest.json');
 const datasetSha = createHash('sha256').update(datasetBytes).digest('hex');
+const toolVersions = { node: process.version, playwright: JSON.parse(await readFile('node_modules/@playwright/test/package.json', 'utf8')).version };
 
 const writeIndexedReport = async report => {
-  const bytes = Buffer.from(`${JSON.stringify(report, null, 2)}\n`, 'utf8');
+  const completeReport = {
+    ...report,
+    implementation_state: 'DONE_A',
+    execution_result: report.status,
+    environment: { platform: process.platform, architecture: process.arch, network_scope: isContract ? 'synthetic browser route fixture only' : 'authorized disposable loopback only', external_service_calls: report.service_calls ?? 0 },
+    configuration: { config: isContract ? 'playwright.h5-perf06-mutation-contract.config.ts' : 'playwright.h5-perf06-mutation-real.config.ts', workers: 1, retries: 0, screenshots: false, traces: false, video: false, service_workers: 'blocked' },
+    expected: report.expected ?? (isContract
+      ? { discovered: 1, executed: 1, passed: 1, failed: 0, skipped: 0, external_service_calls: 0, http_202_is_nonterminal: true, cleanup_idempotent: true }
+      : { only_registered_disposable_resources_mutated: true, external_service_calls: 0, polling_terminal_required: true, cleanup_idempotent: true }),
+    observed: report.observed ?? { status: report.status, discovered: report.discovered ?? 0, executed: report.executed ?? 0, passed: report.passed ?? 0, failed: report.failed ?? 0, skipped: report.skipped ?? 0, service_calls: report.service_calls ?? 0, writes: report.writes ?? 0, cleanup: report.cleanup ?? 'NOT_STARTED' },
+    negative_tests: report.negative_tests ?? ['HTTP 202 is never terminal.', 'Polling timeout and nonterminal/malformed states are rejected.', 'Cleanup refuses unregistered resources and is idempotent.', 'Absent authorized harness blocks before external calls or writes.'],
+    known_limits: report.known_limits ?? (isContract
+      ? ['Synthetic route fixture proves the UI sequence and harness cleanup only; it is not service integration or a performance measurement.']
+      : ['Real execution requires an owner-authorized isolated loopback harness, independent identities, and disposable products.']),
+    artifact_uri: report.artifact_uri ?? 'test-results/h5/perf06-mutation-summary.json; digest index: test-results/h5/perf06-mutation-summary.json.index.json',
+  };
+  const bytes = Buffer.from(`${JSON.stringify(completeReport, null, 2)}\n`, 'utf8');
   assertSafeEvidenceText(bytes.toString('utf8'));
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, bytes);
-  const index = { artifact: 'perf06-mutation-summary.json', sha256: createHash('sha256').update(bytes).digest('hex'), source_sha: sourceSha, docs_sha: docsSha, status: report.status, evidence_level: report.evidence_level };
+  const index = { schema_version: 1, artifact: completeReport.artifact_uri, sha256_artifact: createHash('sha256').update(bytes).digest('hex'), case_id: completeReport.case_id, task_id: completeReport.task_id, h5_criterion: completeReport.h5_criterion, repository: completeReport.repository, owner: completeReport.owner, source_sha: sourceSha, docs_sha: docsSha, timestamp_utc: completeReport.timestamp_utc, config_version: completeReport.config_version, dataset_seed: completeReport.dataset_seed, dataset_checksum: completeReport.dataset_checksum, tool_versions: toolVersions, environment: completeReport.environment, test_command: completeReport.test_command, artifact_uri: completeReport.artifact_uri, status: completeReport.status, execution_result: completeReport.execution_result, evidence_level: completeReport.evidence_level };
   const indexBytes = Buffer.from(`${JSON.stringify(index, null, 2)}\n`, 'utf8');
   assertSafeEvidenceText(indexBytes.toString('utf8'));
   await writeFile(`${outputPath}.index.json`, indexBytes);
@@ -55,7 +72,7 @@ const baseReport = {
   config_version: 'h5-perf06-mutation-v2',
   dataset_seed: 20261123,
   dataset_checksum: datasetSha,
-  tool_versions: { node: process.version, playwright: JSON.parse(await readFile('node_modules/@playwright/test/package.json', 'utf8')).version },
+  tool_versions: toolVersions,
   test_command: isContract ? 'node scripts/run-h5-perf06-mutation.mjs --contract' : 'node scripts/run-h5-perf06-mutation.mjs',
 };
 
