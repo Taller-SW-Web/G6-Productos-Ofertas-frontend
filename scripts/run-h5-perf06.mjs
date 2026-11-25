@@ -26,7 +26,7 @@ const writeIndexedReport = async (path, report) => {
     sha256,
     sha256_artifact: sha256,
     case_id: "PERF-06",
-    task_id: "POM-A05",
+    task_id: "POM-A04",
     h5_criterion: "H5-03",
     source_sha: validSha(report.source_sha ?? process.env.G6_H5_PERF06_SUBJECT_SHA, 40) ?? sourceSha,
     docs_sha: docsSha,
@@ -34,7 +34,7 @@ const writeIndexedReport = async (path, report) => {
     dataset_checksum: datasetSha,
     artifact_uri: path.replaceAll("\\", "/"),
     caseId: "PERF06",
-    h5Criterion: "POM-A05",
+    h5Criterion: "H5-03",
     repository: "Taller-SW-Web/G6-Productos-Ofertas-frontend",
     owner: "Poma",
     sourceSha: validSha(report.source_sha ?? process.env.G6_H5_PERF06_SUBJECT_SHA, 40) ?? sourceSha,
@@ -54,7 +54,7 @@ const writeIndexedReport = async (path, report) => {
 };
 const block = async (reason, count = 1) => {
   const summary = {
-    schema_version: 1, case_id: "PERF-06", task_id: "POM-A05", h5_criterion: "H5-03",
+    schema_version: 1, case_id: "PERF-06", task_id: "POM-A04", h5_criterion: "H5-03",
     repository: "Taller-SW-Web/G6-Productos-Ofertas-frontend", repo: "Taller-SW-Web/G6-Productos-Ofertas-frontend", owner: "Poma",
     source_sha: sourceSha, docs_sha: docsSha, timestamp_utc: new Date().toISOString(), config_version: "h5-perf06-read-only-v2",
     dataset_seed: dataset.seed, dataset_checksum: datasetSha, tool_versions: toolVersions,
@@ -68,7 +68,7 @@ const block = async (reason, count = 1) => {
     negative_tests: ["Missing identity, isolated API, or service harness blocks before Playwright or network calls.", "A missing cache-state attestation cannot be reported as cold or measured."],
     known_limits: ["No authorized isolated Gateway, identity set, service harness, or candidate/baseline pair was supplied.", "No PERF-06 user journey or benchmark was executed."],
     blocker_owner: "Catalog/Gateway harness and identity owners",
-    evidence: { case_id: "PERF-06", h5_criterion: "H5-03", docs_sha: docsSha, timestamp_utc: new Date().toISOString(), evidence_level: "L1" },
+    evidence: { case_id: "PERF-06", task_id: "POM-A04", h5_criterion: "H5-03", docs_sha: docsSha, timestamp_utc: new Date().toISOString(), evidence_level: "L1" },
   };
   await writeIndexedReport(reportPath, summary);
   process.stdout.write(`PERF06 BLOCKED_DEPENDENCY: ${reason}; blockers=${count}; service_calls=0.\n`);
@@ -169,7 +169,7 @@ if (run.cacheMode === "cold") {
     coldAttestationEvidence = { artifact: `cold-attestations/${attestationName}`, sha256: coldAttestationSha256 };
   } catch {
     const summary = { schemaVersion: 1, suite: "PERF06", status: "INCONCLUSIVE", reason: "SERVICE_CACHE_COLD_STATE_NOT_VERIFIED", serviceCalls: 0 };
-    summary.evidence = { caseId: "PERF06", h5Criterion: "POM-A05", docsSha: "c9e1e5c217616d28229fccf5315fb97a1ae061a9", timestampUtc: new Date().toISOString(), evidenceLevel: "L1" };
+    summary.evidence = { caseId: "PERF06", taskId: "POM-A04", h5Criterion: "H5-03", docsSha: "c9e1e5c217616d28229fccf5315fb97a1ae061a9", timestampUtc: new Date().toISOString(), evidenceLevel: "L1" };
     await writeIndexedReport(reportPath, summary);
     process.stdout.write("PERF06 INCONCLUSIVE: service_cache_cold_state_not_verified; service_calls=0.\n");
     process.exit(2);
@@ -249,7 +249,7 @@ if (status !== "MEASURED") {
 }
 const reportSha256 = await writeIndexedReport(reportPath, runReport ?? {
   schemaVersion: 1, suite: "PERF06", status, reason: "SAFE_METRICS_OR_TEST_DISCOVERY_INCOMPLETE",
-  evidence: { caseId: "PERF06", h5Criterion: "POM-A05", docsSha: "c9e1e5c217616d28229fccf5315fb97a1ae061a9", timestampUtc: new Date().toISOString(), evidenceLevel: "L1", coldAttestation: coldAttestationEvidence },
+  evidence: { caseId: "PERF06", taskId: "POM-A04", h5Criterion: "H5-03", docsSha: "c9e1e5c217616d28229fccf5315fb97a1ae061a9", timestampUtc: new Date().toISOString(), evidenceLevel: "L1", coldAttestation: coldAttestationEvidence },
 });
 process.stdout.write(`PERF06 ${runReport?.status ?? status}: profile=${runReport?.profile ?? "UNKNOWN"}; cache=${runReport?.cacheMode ?? "UNKNOWN"}; requests=${runReport?.http?.requests ?? 0}; journeys=${runReport?.journeys?.completed ?? 0}; artifact_sha256=${reportSha256}; captured_bytes=${capturedBytes}.\n`);
 if (status !== "MEASURED") process.exit(status === "FAIL" ? 1 : 2);

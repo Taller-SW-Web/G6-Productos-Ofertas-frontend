@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { aggregatePerf06Runs, coldCacheProofDigest, comparePerf06, evaluatePerf06Run, parsePerf06Run, PERF06_PROFILES, PERF06_REPETITIONS, percentile, validateColdCacheAttestation, validateExistingComparatorReport } from "./perf06-policy.mjs";
 
 const validEnv = {
@@ -76,6 +77,17 @@ test("percentiles are stable and comparison stays inconclusive without a functio
   assert.equal(changedRequests.userExperience.p95Pass, true);
   assert.equal(comparePerf06({ baseline, candidate: { ...candidate, medianP95Ms: Number.NaN } }).reason, "COMPARISON_METRICS_MISSING_OR_INVALID");
   assert.equal(comparePerf06({ baseline, candidate: { ...candidate, unexpectedErrorPercent: 1 } }).status, "FAIL");
+});
+
+test("PERF-06 runner, browser evidence and indexes point to POM-A04 / H5-03", async () => {
+  const runner = await readFile(new URL("../../scripts/run-h5-perf06.mjs", import.meta.url), "utf8");
+  const browserSpec = await readFile(new URL("./perf06.pw.ts", import.meta.url), "utf8");
+  assert.match(runner, /task_id:\s*"POM-A04"/);
+  assert.match(runner, /h5_criterion:\s*"H5-03"/);
+  assert.match(runner, /taskId:\s*"POM-A04"/);
+  assert.match(runner, /h5Criterion:\s*"H5-03"/);
+  assert.match(browserSpec, /taskId:\s*"POM-A04"/);
+  assert.match(browserSpec, /h5Criterion:\s*"H5-03"/);
 });
 
 test("rejects failed or incomplete output from the existing administrative comparator", () => {

@@ -16,7 +16,12 @@ export default class H5SafeReporter {
     if (Object.hasOwn(this.counts, key)) this.counts[key] += 1;
     const stableName = test.title.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 64) || "ASSERTION";
     const status = result.status === "passed" ? "PASS" : result.status === "failed" ? "FAIL" : result.status === "skipped" ? "SKIPPED" : result.status === "interrupted" ? "INTERRUPTED" : "TIMED_OUT";
-    this.cases.push({ scenario_id: `H5-${stableName}-${String(this.cases.length + 1).padStart(3, "0")}`, status, evidence_level: "L0_CONTRACT" });
+    const explicitScenario = /^(INT08-L1-[A-Z0-9-]+):/.exec(test.title)?.[1];
+    this.cases.push({
+      scenario_id: explicitScenario ?? `H5-${stableName}-${String(this.cases.length + 1).padStart(3, "0")}`,
+      status,
+      evidence_level: explicitScenario || test.title.startsWith("CAT real HTTP:") ? "L1" : "L0_CONTRACT",
+    });
   }
 
   async onEnd(result) {

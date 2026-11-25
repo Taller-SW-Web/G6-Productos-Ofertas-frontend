@@ -474,7 +474,8 @@ test("PERF06_READ_ONLY: sesiones activas concurrentes sobre recorrido Catalog ad
     status: evaluation.status,
     evidence: {
       caseId: "PERF06_READ_ONLY",
-      h5Criterion: "POM-A05",
+      taskId: "POM-A04",
+      h5Criterion: "H5-03",
       repository: "Taller-SW-Web/G6-Productos-Ofertas-frontend",
       owner: "Poma",
       sourceSha: process.env.G6_H5_PERF06_SUBJECT_SHA,
