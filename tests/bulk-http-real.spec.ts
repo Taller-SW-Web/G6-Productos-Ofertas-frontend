@@ -245,18 +245,23 @@ test.describe("MK-001 Bulk E2E navegador real (Gateway + Bulk + Catalog + Postgr
     expect(postResumes).toHaveLength(1);
 
     // Aislamiento de propietario ajeno (owner-b -> 404) y errores 401/403
+    const otherOwnerResponsePromise = page.waitForResponse((res) =>
+      res.request().method() === "GET" &&
+      new URL(res.url()).pathname === `${root}/importaciones/${batchId}` &&
+      res.request().headers().authorization === `Bearer ${ownerBJwt}`);
     await page.evaluate(() => window.__G6_BULK_E2E_SET_IDENTITY__?.("owner-b"));
-    const otherOwnerResponse = page.waitForResponse((res) =>
-      res.request().method() === "GET" && new URL(res.url()).pathname === `${root}/importaciones/${batchId}`);
-    await page.goto(`/tests/harness/bulk-http-real.html#/carga-masiva/importaciones/${batchId}/resultado`);
-    expect((await otherOwnerResponse).status()).toBe(404);
+    const otherOwnerResponse = await otherOwnerResponsePromise;
+    expect(otherOwnerResponse.status()).toBe(404);
     await expect(page.getByText(/Lote no encontrado/i)).toBeVisible();
+    await expect(page.locator("#root")).not.toContainText(/COMPLETED|sin errores/i);
 
+    const forbiddenResponsePromise = page.waitForResponse((res) =>
+      res.request().method() === "GET" &&
+      new URL(res.url()).pathname === `${root}/importaciones/${batchId}` &&
+      res.request().headers().authorization === `Bearer ${forbiddenJwt}`);
     await page.evaluate(() => window.__G6_BULK_E2E_SET_IDENTITY__?.("forbidden"));
-    const forbiddenResponse = page.waitForResponse((res) =>
-      res.request().method() === "GET" && new URL(res.url()).pathname === `${root}/importaciones/${batchId}`);
-    await page.goto(`/tests/harness/bulk-http-real.html#/carga-masiva/importaciones/${batchId}`);
-    expect([401, 403]).toContain((await forbiddenResponse).status());
+    const forbiddenResponse = await forbiddenResponsePromise;
+    expect([401, 403]).toContain(forbiddenResponse.status());
 
     await page.evaluate(() => window.__G6_BULK_E2E_SET_IDENTITY__?.("anonymous"));
     await page.getByRole("button", { name: /Reintentar consulta|Actualizar estado/i }).click();
