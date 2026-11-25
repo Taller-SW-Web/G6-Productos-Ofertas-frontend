@@ -62,9 +62,11 @@ export function adjudicateInt08L1Run({
     }[row?.status];
     if (!countKey) add("SCENARIO_STATUS_INVALID");
     else observedCounts[countKey] += 1;
-    const expectedEvidence = expectedSet.has(row?.scenario_id)
-      ? "L1_BROWSER_HTTP"
-      : null;
+    const expectedEvidence = row?.scenario_id === "INT08-L1-INTEGRAL"
+      ? "L1_BROWSER_UI"
+      : expectedSet.has(row?.scenario_id)
+        ? "L1_BROWSER_HTTP"
+        : null;
     if (expectedEvidence && row?.evidence_level !== expectedEvidence)
       add("SCENARIO_EVIDENCE_LEVEL_INVALID");
     if (

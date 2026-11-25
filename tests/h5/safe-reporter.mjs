@@ -4,6 +4,12 @@ import { assertSafeEvidenceText } from "./evidence-security.mjs";
 
 const reportPath = resolve(process.env.G6_H5_EVIDENCE_SUMMARY_PATH ?? "test-results/h5/safe-summary.json");
 
+export function evidenceLevelForH5Test(testTitle) {
+  if (/^INT08-L1-[A-Z0-9-]+:/.test(testTitle)) return "L1_BROWSER_HTTP";
+  if (testTitle.startsWith("CAT real HTTP:")) return "L1_BROWSER_UI";
+  return "L0_CONTRACT";
+}
+
 export default class H5SafeReporter {
   onBegin(_config, suite) {
     this.total = suite.allTests().length;
@@ -20,7 +26,7 @@ export default class H5SafeReporter {
     this.cases.push({
       scenario_id: explicitScenario ?? `H5-${stableName}-${String(this.cases.length + 1).padStart(3, "0")}`,
       status,
-      evidence_level: explicitScenario ? "L1_BROWSER_HTTP" : test.title.startsWith("CAT real HTTP:") ? "L1" : "L0_CONTRACT",
+      evidence_level: evidenceLevelForH5Test(test.title),
     });
   }
 

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { adjudicateInt08L1Run } from "./int08-l1-runner-adjudication.mjs";
+import { evidenceLevelForH5Test } from "./safe-reporter.mjs";
 
 const expectedScenarioIds = ["INT08-L1-A", "INT08-L1-B"];
 const readiness = expectedScenarioIds.map((id) => ({
@@ -47,6 +48,48 @@ test("accepts complete successful browser HTTP cases only after process and repo
   );
 });
 
+test("accepts the integral real-UI scenario with its dedicated report evidence level", () => {
+  const integral = validRun();
+  integral.summary.total = 1;
+  integral.summary.passed = 1;
+  integral.summary.cases = [{
+    scenario_id: "INT08-L1-INTEGRAL",
+    status: "PASS",
+    evidence_level: evidenceLevelForH5Test("CAT real HTTP: UI journey"),
+  }];
+  const result = adjudicateInt08L1Run({
+    run: integral,
+    expectedScenarioIds: ["INT08-L1-INTEGRAL"],
+    readiness: [{ id: "INT08-L1-INTEGRAL", status: "READY_B", blockers: [] }],
+  });
+  assert.equal(result.valid, true);
+  assert.equal(result.status, "PASS");
+  assert.equal(result.cases[0].evidence_level, "L1_BROWSER_UI");
+});
+
+test("rejects integral UI evidence mislabeled as browser HTTP evidence", () => {
+  const integral = validRun();
+  integral.summary.total = 1;
+  integral.summary.passed = 1;
+  integral.summary.cases = [{
+    scenario_id: "INT08-L1-INTEGRAL",
+    status: "PASS",
+    evidence_level: "L1_BROWSER_HTTP",
+  }];
+  const result = adjudicateInt08L1Run({
+    run: integral,
+    expectedScenarioIds: ["INT08-L1-INTEGRAL"],
+    readiness: [{ id: "INT08-L1-INTEGRAL", status: "READY_B", blockers: [] }],
+  });
+  assert.equal(result.valid, false);
+  assert.equal(result.errors.includes("SCENARIO_EVIDENCE_LEVEL_INVALID"), true);
+});
+
+test("keeps the four independent HTTP checks at L1_BROWSER_HTTP", () => {
+  assert.equal(evidenceLevelForH5Test("INT08-L1-READ-AUTHORIZED: reads product"), "L1_BROWSER_HTTP");
+  assert.equal(evidenceLevelForH5Test("CAT real HTTP: UI journey"), "L1_BROWSER_UI");
+});
+
 test("INT-08 L1 summary and index use POM-A02 / H5-02 and browser HTTP evidence", async () => {
   const { readFile } = await import("node:fs/promises");
   const runner = await readFile(
@@ -61,7 +104,7 @@ test("INT-08 L1 summary and index use POM-A02 / H5-02 and browser HTTP evidence"
   assert.match(runner, /h5_criterion:\s*"H5-02"/);
   assert.match(runner, /task_id:\s*summary\.task_id/);
   assert.match(runner, /h5_criterion:\s*summary\.h5_criterion/);
-  assert.match(reporter, /explicitScenario\s*\?\s*"L1_BROWSER_HTTP"/);
+  assert.match(reporter, /evidenceLevelForH5Test\(test\.title\)/);
 });
 
 test("rejects failed, interrupted, timed out, or missing Playwright process output", () => {
