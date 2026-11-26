@@ -34,61 +34,94 @@ const MANIFEST_PATH = resolve(
 );
 
 /**
- * Inventario ordenado de scripts SQL aplicados por microservicio.
- * Ningún error de esquema o migración se oculta; cualquier fallo aborta el arranque.
+ * Inventario ordenado de scripts SQL oficiales por microservicio (base en ../docs/datos + migraciones en ../backend/apps).
+ * Cada servicio ejecuta sus scripts bajo su rol owner (SET LOCAL ROLE po_<svc>_owner).
  */
 export const SQL_INVENTORY_BY_SERVICE = {
-  taxonomy: [
-    "apps/api-gateway/test/fixtures/phase1-taxonomy-0001.sql",
-    "apps/taxonomy-svc/migrations/0002_deactivation_source_version.sql",
-    "apps/taxonomy-svc/migrations/0003_deactivation_timeout_setting.sql",
-    "apps/taxonomy-svc/migrations/0004_product_type_pending_version.sql",
-    "apps/taxonomy-svc/migrations/0005_configurable_list_values.sql",
-    "apps/taxonomy-svc/migrations-candidate/h5/0001_outbox_delivery.sql",
-  ],
-  catalog: [
-    "apps/catalog-svc/test/fixtures/0001_create_catalog.sql",
-    "apps/catalog-svc/migrations/0002_create_sku_barcodes.sql",
-    "apps/catalog-svc/migrations/0003_product_publication_history.sql",
-    "apps/catalog-svc/migrations/0004_historical_preparation_requests.sql",
-    "apps/catalog-svc/migrations/0005_catalog_function_search_path.sql",
-    "apps/catalog-svc/migrations-candidate/h5/0001_outbox_delivery.sql",
-    "apps/catalog-svc/migrations-candidate/h5/0002_taxonomy_reply_transport.sql",
-    "apps/catalog-svc/migrations-candidate/h5/0003_bulk_retry_receipts.sql",
-  ],
-  pricing: [
-    "apps/pricing-svc/test/fixtures/pricing.sql",
-    "apps/pricing-svc/migrations/0002_schedule_effective_events.sql",
-    "apps/pricing-svc/migrations/0003_initialization_operation_index.sql",
-    "apps/pricing-svc/migrations/0004_price_import_idempotency.sql",
-    "apps/pricing-svc/migrations-candidate/h5/0001_outbox_delivery.sql",
-    "apps/pricing-svc/migrations/0003_service_bus_h5_routes_r2.sql",
-  ],
-  price_audit: [
-    "apps/price-audit-svc/test/fixtures/price-audit.sql",
-    "apps/price-audit-svc/migrations/0002_typed_price_change.sql",
-  ],
-  promotions: [
-    "apps/promotions-svc/migrations-candidate/h5/0001_coupon_http_operations.sql",
-    "apps/promotions-svc/migrations-candidate/h5/0002_coupon_http_runtime_role.sql",
-  ],
-  combos: ["apps/combos-svc/migrations/0002_create_combo_creation_receipts.sql"],
-  inventory: [
-    "apps/catalog-svc/test/fixtures/inventory-initial.sql",
-    "apps/catalog-svc/test/fixtures/inventory-operations.sql",
-    "apps/inventory-svc/migrations/20261104_0001_lifecycle_offline_reconciliation.sql",
-    "apps/inventory-svc/migrations-candidate/h5/0001_outbox_delivery.sql",
-  ],
-  bulk: [
-    "apps/bulk-svc/test/fixtures/0001_create_bulk_persistence.sql",
-    "apps/bulk-svc/migrations/0002_export_source_snapshot.sql",
-    "apps/bulk-svc/migrations/0003_export_claim_lease.sql",
-    "apps/bulk-svc/migrations/0004_catalog_claim_check_content.sql",
-    "apps/bulk-svc/migrations/0005_actor_ownership.sql",
-    "apps/bulk-svc/migrations/0006_owner_correlation_identity.sql",
-    "apps/bulk-svc/migrations/0007_bulk_retry_v1.sql",
-    "apps/bulk-svc/migrations/0008_h5_outbox_delivery.sql",
-  ],
+  taxonomy: {
+    ownerRole: "po_taxonomy_owner",
+    files: [
+      { root: "docs", path: "datos/taxonomy/migrations/0001_create_taxonomy.sql" },
+      { root: "backend", path: "apps/taxonomy-svc/migrations/0002_deactivation_source_version.sql" },
+      { root: "backend", path: "apps/taxonomy-svc/migrations/0003_deactivation_timeout_setting.sql" },
+      { root: "backend", path: "apps/taxonomy-svc/migrations/0004_product_type_pending_version.sql" },
+      { root: "backend", path: "apps/taxonomy-svc/migrations/0005_configurable_list_values.sql" },
+      { root: "backend", path: "apps/taxonomy-svc/migrations-candidate/h5/0001_outbox_delivery.sql" },
+    ],
+  },
+  catalog: {
+    ownerRole: "po_catalog_owner",
+    files: [
+      { root: "docs", path: "datos/catalog-svc/migrations/0001_create_catalog.sql" },
+      { root: "backend", path: "apps/catalog-svc/migrations/0002_create_sku_barcodes.sql" },
+      { root: "backend", path: "apps/catalog-svc/migrations/0003_product_publication_history.sql" },
+      { root: "backend", path: "apps/catalog-svc/migrations/0004_historical_preparation_requests.sql" },
+      { root: "backend", path: "apps/catalog-svc/migrations/0005_catalog_function_search_path.sql" },
+      { root: "backend", path: "apps/catalog-svc/migrations-candidate/h5/0001_outbox_delivery.sql" },
+      { root: "backend", path: "apps/catalog-svc/migrations-candidate/h5/0002_taxonomy_reply_transport.sql" },
+      { root: "backend", path: "apps/catalog-svc/migrations-candidate/h5/0003_bulk_retry_receipts.sql" },
+    ],
+  },
+  pricing: {
+    ownerRole: "po_pricing_owner",
+    files: [
+      { root: "docs", path: "datos/pricing/migrations/0001_create_pricing.sql" },
+      { root: "backend", path: "apps/pricing-svc/migrations/0002_schedule_effective_events.sql" },
+      { root: "backend", path: "apps/pricing-svc/migrations/0003_initialization_operation_index.sql" },
+      { root: "backend", path: "apps/pricing-svc/migrations/0004_price_import_idempotency.sql" },
+      { root: "backend", path: "apps/pricing-svc/migrations-candidate/h5/0001_outbox_delivery.sql" },
+      { root: "backend", path: "apps/pricing-svc/migrations/0003_service_bus_h5_routes_r2.sql" },
+    ],
+  },
+  price_audit: {
+    ownerRole: "po_price_audit_owner",
+    files: [
+      { root: "docs", path: "datos/price_audit/migrations/0001_create_price_audit.sql" },
+      { root: "backend", path: "apps/price-audit-svc/migrations/0002_typed_price_change.sql" },
+    ],
+  },
+  promotions: {
+    ownerRole: "po_promotions_owner",
+    preSql:
+      "ALTER DEFAULT PRIVILEGES IN SCHEMA promotions GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO po_promotions_runtime; SELECT set_config('g6.promotions_h5_runtime_role', 'po_promotions_runtime', true);",
+    files: [
+      { root: "docs", path: "datos/promotions/migrations/0001_promotions_persistence.sql" },
+      { root: "docs", path: "datos/promotions/migrations/0002_promotions_global_price_projection.sql" },
+      { root: "docs", path: "datos/promotions/migrations/0003_promotions_timestamps_and_delete_rules.sql" },
+      { root: "docs", path: "datos/promotions/migrations/0004_coupon_idempotency_receipts.sql" },
+      { root: "backend", path: "apps/promotions-svc/migrations-candidate/h5/0001_coupon_http_operations.sql" },
+      { root: "backend", path: "apps/promotions-svc/migrations-candidate/h5/0002_coupon_http_runtime_role.sql" },
+    ],
+  },
+  combos: {
+    ownerRole: "po_combos_owner",
+    files: [
+      { root: "docs", path: "datos/combos/migrations/0001_create_combos_persistence.sql" },
+      { root: "backend", path: "apps/combos-svc/migrations/0002_create_combo_creation_receipts.sql" },
+    ],
+  },
+  inventory: {
+    ownerRole: "po_inventory_owner",
+    files: [
+      { root: "docs", path: "datos/inventory-svc/migrations/0001_inventory_initial.sql" },
+      { root: "docs", path: "datos/inventory-svc/migrations/0002_order_id_operaciones_disponibilidad.sql" },
+      { root: "backend", path: "apps/inventory-svc/migrations/20261104_0001_lifecycle_offline_reconciliation.sql" },
+      { root: "backend", path: "apps/inventory-svc/migrations-candidate/h5/0001_outbox_delivery.sql" },
+    ],
+  },
+  bulk: {
+    ownerRole: "po_bulk_owner",
+    files: [
+      { root: "docs", path: "datos/bulk/migrations/0001_create_bulk_persistence.sql" },
+      { root: "backend", path: "apps/bulk-svc/migrations/0002_export_source_snapshot.sql" },
+      { root: "backend", path: "apps/bulk-svc/migrations/0003_export_claim_lease.sql" },
+      { root: "backend", path: "apps/bulk-svc/migrations/0004_catalog_claim_check_content.sql" },
+      { root: "backend", path: "apps/bulk-svc/migrations/0005_actor_ownership.sql" },
+      { root: "backend", path: "apps/bulk-svc/migrations/0006_owner_correlation_identity.sql" },
+      { root: "backend", path: "apps/bulk-svc/migrations/0007_bulk_retry_v1.sql" },
+      { root: "backend", path: "apps/bulk-svc/migrations/0008_h5_outbox_delivery.sql" },
+    ],
+  },
 };
 
 function runPsql(containerName, database, sqlContent, label) {
@@ -171,12 +204,30 @@ async function waitForHttpReady(url, timeoutMs = 45_000) {
   throw new Error(`PREFLIGHT_BLOCKED: Servicio no respondió listo en ${url}`);
 }
 
-async function startDisposablePostgresWithTls(backendRoot) {
+async function startDisposablePostgresWithTls(backendRoot, docsRoot) {
   const containerName = `g6-e2e-stack-${randomUUID()}`;
   const password = randomUUID();
   const certDir = mkdtempSync(join(tmpdir(), "g6-e2e-pg-tls-"));
   const caCertPath = join(certDir, "server.crt");
 
+  // 1. Generar certificado TLS con SAN IP:127.0.0.1 antes de arrancar PostgreSQL
+  await exec(
+    "docker",
+    [
+      "run",
+      "--rm",
+      "--entrypoint",
+      "sh",
+      "-v",
+      `${certDir}:/out`,
+      POSTGRES_IMAGE,
+      "-c",
+      'apk add --no-cache openssl >/dev/null && openssl req -x509 -newkey rsa:2048 -nodes -keyout /out/server.key -out /out/server.crt -days 1 -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1,DNS:localhost" && chmod 644 /out/server.crt && chmod 600 /out/server.key && chown 70:70 /out/server.key /out/server.crt',
+    ],
+    { timeout: 60_000 },
+  );
+
+  // 2. Arrancar PostgreSQL directamente con TLS habilitado desde el inicio
   await exec(
     "docker",
     [
@@ -187,11 +238,19 @@ async function startDisposablePostgresWithTls(backendRoot) {
       containerName,
       "--publish",
       "127.0.0.1::5432",
+      "-v",
+      `${certDir}:/etc/pg-tls:ro`,
       "--env",
       `POSTGRES_PASSWORD=${password}`,
       "--env",
       "POSTGRES_DB=g6_e2e_test",
       POSTGRES_IMAGE,
+      "-c",
+      "ssl=on",
+      "-c",
+      "ssl_cert_file=/etc/pg-tls/server.crt",
+      "-c",
+      "ssl_key_file=/etc/pg-tls/server.key",
     ],
     { timeout: 60_000 },
   );
@@ -223,83 +282,112 @@ async function startDisposablePostgresWithTls(backendRoot) {
       }
     }
 
-    // Generar certificado TLS autofirmado con SAN IP:127.0.0.1 para verify-full real
-    await exec("docker", [
-      "exec",
-      containerName,
-      "sh",
-      "-c",
-      'apk add --no-cache openssl >/dev/null && openssl req -x509 -newkey rsa:2048 -nodes -keyout /var/lib/postgresql/server.key -out /var/lib/postgresql/server.crt -days 1 -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1,DNS:localhost" && chown postgres:postgres /var/lib/postgresql/server.key /var/lib/postgresql/server.crt && chmod 600 /var/lib/postgresql/server.key',
-    ]);
-    await exec("docker", [
-      "cp",
-      `${containerName}:/var/lib/postgresql/server.crt`,
-      caCertPath,
-    ]);
-    await runPsql(
+    const sslStatus = await runPsql(
       containerName,
       "g6_e2e_test",
-      "ALTER SYSTEM SET ssl = 'on'; ALTER SYSTEM SET ssl_cert_file = '/var/lib/postgresql/server.crt'; ALTER SYSTEM SET ssl_key_file = '/var/lib/postgresql/server.key'; SELECT pg_reload_conf();",
-      "enable-postgres-tls",
+      "SHOW ssl;",
+      "verify-ssl-on",
     );
+    if (!/\bon\b/i.test(sslStatus)) {
+      throw new Error(`POSTGRES_TLS_NOT_ENABLED: SHOW ssl devolvió ${sslStatus}`);
+    }
 
+    // 3. Provisionar roles owner (NOLOGIN) y roles runtime separados (sin membresía owner)
     const roleAndSchemaSql = `
-      DO $$ BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'catalog_app') THEN
-          CREATE ROLE catalog_app LOGIN PASSWORD '${password}';
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'po_pricing_owner') THEN
-          CREATE ROLE po_pricing_owner NOLOGIN;
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'pricing_app') THEN
-          CREATE ROLE pricing_app LOGIN PASSWORD '${password}';
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'combos_app') THEN
-          CREATE ROLE combos_app LOGIN PASSWORD '${password}';
-        END IF;
-      END $$;
-      CREATE SCHEMA IF NOT EXISTS extensions;
-      CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA extensions;
-      CREATE SCHEMA IF NOT EXISTS catalog AUTHORIZATION catalog_app;
-      CREATE SCHEMA IF NOT EXISTS taxonomy;
-      CREATE SCHEMA IF NOT EXISTS pricing AUTHORIZATION po_pricing_owner;
-      CREATE SCHEMA IF NOT EXISTS price_audit;
-      CREATE SCHEMA IF NOT EXISTS promotions;
-      CREATE SCHEMA IF NOT EXISTS combos AUTHORIZATION combos_app;
-      CREATE SCHEMA IF NOT EXISTS inventory;
-      CREATE SCHEMA IF NOT EXISTS bulk;
-      GRANT USAGE ON SCHEMA extensions TO po_pricing_owner, catalog_app, combos_app;
+      CREATE ROLE po_taxonomy_owner NOLOGIN;
+      CREATE ROLE po_catalog_owner NOLOGIN;
+      CREATE ROLE po_pricing_owner NOLOGIN;
+      CREATE ROLE po_price_audit_owner NOLOGIN;
+      CREATE ROLE po_promotions_owner NOLOGIN;
+      CREATE ROLE po_promotions_runtime NOLOGIN;
+      CREATE ROLE po_combos_owner NOLOGIN;
+      CREATE ROLE po_inventory_owner NOLOGIN;
+      CREATE ROLE po_bulk_owner NOLOGIN;
+
+      CREATE ROLE taxonomy_app LOGIN PASSWORD '${password}';
+      CREATE ROLE catalog_app LOGIN PASSWORD '${password}';
+      CREATE ROLE pricing_app LOGIN PASSWORD '${password}';
+      CREATE ROLE price_audit_app LOGIN PASSWORD '${password}';
+      CREATE ROLE price_audit_archiver LOGIN PASSWORD '${password}';
+      CREATE ROLE promotions_app LOGIN PASSWORD '${password}';
+      GRANT po_promotions_runtime TO promotions_app;
+      CREATE ROLE combos_app LOGIN PASSWORD '${password}';
+      CREATE ROLE inventory_app LOGIN PASSWORD '${password}';
+      CREATE ROLE bulk_app LOGIN PASSWORD '${password}';
+
+      CREATE SCHEMA extensions;
+      CREATE EXTENSION btree_gist WITH SCHEMA extensions;
+      GRANT USAGE ON SCHEMA extensions TO po_taxonomy_owner, po_catalog_owner, po_pricing_owner, po_price_audit_owner, po_promotions_owner, po_combos_owner, po_inventory_owner, po_bulk_owner, taxonomy_app, catalog_app, pricing_app, price_audit_app, promotions_app, combos_app, inventory_app, bulk_app;
+
+      CREATE SCHEMA taxonomy AUTHORIZATION po_taxonomy_owner;
+      CREATE SCHEMA catalog AUTHORIZATION po_catalog_owner;
+      CREATE SCHEMA pricing AUTHORIZATION po_pricing_owner;
+      CREATE SCHEMA price_audit AUTHORIZATION po_price_audit_owner;
+      CREATE SCHEMA promotions AUTHORIZATION po_promotions_owner;
+      CREATE SCHEMA combos AUTHORIZATION po_combos_owner;
+      CREATE SCHEMA inventory AUTHORIZATION po_inventory_owner;
+      CREATE SCHEMA bulk AUTHORIZATION po_bulk_owner;
+
+      GRANT USAGE ON SCHEMA promotions TO po_promotions_runtime, promotions_app;
+      GRANT USAGE ON SCHEMA combos TO combos_app;
+      GRANT USAGE ON SCHEMA inventory TO inventory_app;
+      GRANT USAGE ON SCHEMA bulk TO bulk_app;
     `;
     await runPsql(containerName, "g6_e2e_test", roleAndSchemaSql, "roles-and-schemas");
 
-    for (const [service, files] of Object.entries(SQL_INVENTORY_BY_SERVICE)) {
-      for (const rel of files) {
-        const fullPath = resolve(backendRoot, rel);
+    // 4. Ejecutar SQL oficial de cada servicio bajo su rol owner
+    for (const [service, spec] of Object.entries(SQL_INVENTORY_BY_SERVICE)) {
+      const statements = [
+        "BEGIN;",
+        `SET LOCAL ROLE ${spec.ownerRole};`,
+        ...(spec.preSql ? [spec.preSql] : []),
+      ];
+      for (const entry of spec.files) {
+        const base = entry.root === "docs" ? docsRoot : backendRoot;
+        const fullPath = resolve(base, entry.path);
         if (!existsSync(fullPath)) {
           throw new Error(`SQL_MISSING (${service}): ${fullPath}`);
         }
-        const sql = readFileSync(fullPath, "utf8");
-        const wrapped =
-          service === "pricing"
-            ? `BEGIN; SET LOCAL ROLE po_pricing_owner;\n${sql}\nCOMMIT;`
-            : sql;
-        await runPsql(containerName, "g6_e2e_test", wrapped, `${service}:${rel}`);
+        statements.push(readFileSync(fullPath, "utf8"));
       }
+      statements.push("COMMIT;");
+      await runPsql(
+        containerName,
+        "g6_e2e_test",
+        statements.join("\n"),
+        `migrate:${service}`,
+      );
     }
+
+    // 5. Privilegios mínimos runtime sobre tablas y secuencias para los esquemas que lo requieran
+    const runtimeGrantsSql = `
+      GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA combos TO combos_app;
+      GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA combos TO combos_app;
+      GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA inventory TO inventory_app;
+      GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA inventory TO inventory_app;
+      GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA bulk TO bulk_app;
+      GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA bulk TO bulk_app;
+      GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA promotions TO promotions_app;
+      GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA promotions TO promotions_app;
+    `;
+    await runPsql(containerName, "g6_e2e_test", runtimeGrantsSql, "runtime-grants");
 
     await runPsql(
       containerName,
       "g6_e2e_test",
-      "SELECT 1 FROM information_schema.tables WHERE table_schema IN ('catalog','taxonomy','pricing','price_audit','promotions','combos','inventory','bulk') LIMIT 1;",
+      "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema IN ('catalog','taxonomy','pricing','price_audit','promotions','combos','inventory','bulk');",
       "verify-schemas-non-empty",
     );
+
+    const urlFor = (role) =>
+      `postgresql://${role}:${password}@127.0.0.1:${port}/g6_e2e_test?sslmode=verify-full&sslrootcert=${encodeURIComponent(caCertPath)}`;
 
     return {
       containerName,
       port: Number(port),
       password,
       caCertPath,
-      databaseUrl: `postgresql://postgres:${password}@127.0.0.1:${port}/g6_e2e_test`,
+      urlFor,
       stop: async () => {
         rmSync(certDir, { recursive: true, force: true });
         await exec("docker", ["rm", "--force", "--volumes", containerName], {
@@ -504,6 +592,9 @@ async function main() {
   const backendRoot = resolve(
     process.env.G6_BACKEND_ROOT ?? resolve(process.cwd(), "../backend"),
   );
+  const docsRoot = resolve(
+    process.env.G6_DOCS_ROOT ?? resolve(process.cwd(), "../docs"),
+  );
 
   let pg;
   let g7;
@@ -518,7 +609,7 @@ async function main() {
   };
 
   try {
-    pg = await startDisposablePostgresWithTls(backendRoot);
+    pg = await startDisposablePostgresWithTls(backendRoot, docsRoot);
     g7 = await startSingleLocalG7Server();
 
     const controlledBaseEnv = {
@@ -540,7 +631,6 @@ async function main() {
       PGPASSWORD: pg.password,
       PGSSLMODE: "verify-full",
       PGSSLROOTCERT: pg.caCertPath,
-      DATABASE_URL: pg.databaseUrl,
     };
 
     const serviceUrls = {};
@@ -563,10 +653,14 @@ async function main() {
       "taxonomy-svc": {
         ...controlledBaseEnv,
         PORT: String(servicePorts["taxonomy-svc"]),
+        PGUSER: "taxonomy_app",
+        DATABASE_URL: pg.urlFor("taxonomy_app"),
       },
       "pricing-svc": {
         ...controlledBaseEnv,
         PORT: String(servicePorts["pricing-svc"]),
+        PGUSER: "pricing_app",
+        DATABASE_URL: pg.urlFor("pricing_app"),
         PRICING_SERVICE_TOKEN_URL: g7.tokenUrl,
         PRICING_SERVICE_CLIENT_SECRET: "e2e-pricing-secret",
         PRICING_CATALOG_URL: serviceUrls["catalog-svc"],
@@ -574,10 +668,14 @@ async function main() {
       "price-audit-svc": {
         ...controlledBaseEnv,
         PORT: String(servicePorts["price-audit-svc"]),
+        PGUSER: "price_audit_app",
+        DATABASE_URL: pg.urlFor("price_audit_app"),
       },
       "promotions-svc": {
         ...controlledBaseEnv,
         PORT: String(servicePorts["promotions-svc"]),
+        PGUSER: "promotions_app",
+        DATABASE_URL: pg.urlFor("promotions_app"),
       },
       "combos-svc": {
         ...controlledBaseEnv,
@@ -592,10 +690,14 @@ async function main() {
       "inventory-svc": {
         ...controlledBaseEnv,
         PORT: String(servicePorts["inventory-svc"]),
+        PGUSER: "inventory_app",
+        DATABASE_URL: pg.urlFor("inventory_app"),
       },
       "bulk-svc": {
         ...controlledBaseEnv,
         PORT: String(servicePorts["bulk-svc"]),
+        PGUSER: "bulk_app",
+        DATABASE_URL: pg.urlFor("bulk_app"),
       },
     };
 
@@ -644,7 +746,6 @@ async function main() {
     }
     await waitForHttpReady(`${gatewayUrl}/health/ready`);
 
-    // Nunca escribir contraseña de PostgreSQL en el manifiesto
     writeFileSync(
       MANIFEST_PATH,
       JSON.stringify(

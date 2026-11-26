@@ -26,7 +26,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     await expect(page.getByRole("main")).toBeVisible();
   });
 
-  test("1. Catalog: crear producto via SPA, verificar pérdida de sesión al recargar, reautenticar y comprobar persistencia", async ({
+  test("1. Catalog: crear producto via SPA, recargar, reautenticar y consultar por productId", async ({
     page,
   }) => {
     const uniqueName = `Producto E2E ${randomUUID().slice(0, 8)}`;
@@ -52,9 +52,8 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     const createdDto = (await createRes.json()) as { productId?: string };
     expect(createdDto.productId).toBeTruthy();
 
-    await navigateViaSpa(page, "/productos");
     await reloadVerifySessionLostAndReauth(page);
-    const [reloadList] = await Promise.all([
+    const [listRes] = await Promise.all([
       page.waitForResponse(
         (res) =>
           res.request().method() === "GET" &&
@@ -62,11 +61,27 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       ),
       navigateViaSpa(page, "/productos"),
     ]);
-    expect(reloadList.status()).toBe(200);
+    expect(listRes.status()).toBe(200);
+    await expect(page.getByText(uniqueName)).toBeVisible();
+
+    const detailLink = page
+      .locator(`a[href="/productos/${createdDto.productId}"]`)
+      .first();
+    await expect(detailLink).toBeVisible();
+    const [detailRes] = await Promise.all([
+      page.waitForResponse(
+        (res) =>
+          res.request().method() === "GET" &&
+          new URL(res.url()).pathname ===
+            `/api/v1/productos/${createdDto.productId}`,
+      ),
+      detailLink.click(),
+    ]);
+    expect(detailRes.status()).toBe(200);
     await expect(page.getByText(uniqueName)).toBeVisible();
   });
 
-  test("2. Taxonomy: crear categoría via SPA, recargar, reautenticar y verificar persistencia en árbol", async ({
+  test("2. Taxonomy: crear categoría via SPA, recargar, reautenticar y consultar por categoriaId", async ({
     page,
   }) => {
     const catName = `CatE2E-${randomUUID().slice(0, 6)}`;
@@ -90,6 +105,8 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       submitBtn.click(),
     ]);
     expect([200, 201]).toContain(createRes.status());
+    const catDto = (await createRes.json()) as { categoriaId?: string };
+    expect(catDto.categoriaId).toBeTruthy();
 
     await reloadVerifySessionLostAndReauth(page);
     const [treeRes] = await Promise.all([
@@ -104,7 +121,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     await expect(page.getByText(catName)).toBeVisible();
   });
 
-  test("3. Pricing: navegar via SPA, editar precio, verificar incremento de versión y consulta posterior", async ({
+  test("3. Pricing: comparar precio/versión antes y después de editar y verificar persistencia tras recarga", async ({
     page,
   }) => {
     const [readRes] = await Promise.all([
@@ -117,10 +134,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     ]);
     expect(readRes.status()).toBe(200);
 
-    const editLink = page.locator('a[href^="/precios/editar"]').first();
-    await expect(editLink).toBeVisible();
-    await editLink.click();
-
+    await navigateViaSubLink(page, "/precios/editar");
     const priceInput = page.getByRole("textbox").first();
     await expect(priceInput).toBeVisible();
     await priceInput.fill("99.50");
@@ -136,9 +150,14 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       saveBtn.click(),
     ]);
     expect([200, 201]).toContain(putRes.status());
-    const dto = (await putRes.json()) as { priceVersion?: number };
+    const dto = (await putRes.json()) as {
+      priceVersion?: number;
+      precioRegular?: string;
+    };
     expect(typeof dto.priceVersion).toBe("number");
+    expect(dto.priceVersion).toBeGreaterThanOrEqual(1);
 
+    await reloadVerifySessionLostAndReauth(page);
     const [afterRead] = await Promise.all([
       page.waitForResponse(
         (res) =>
@@ -148,9 +167,10 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       navigateViaSpa(page, "/precios"),
     ]);
     expect(afterRead.status()).toBe(200);
+    await expect(page.getByText("99.50")).toBeVisible();
   });
 
-  test("4. Price Audit: consultar historial, solicitar exportación CSV y verificar estado del trabajo", async ({
+  test("4. Price Audit: crear exportación CSV, esperar estado terminal y verificar descarga", async ({
     page,
   }) => {
     const [auditRes] = await Promise.all([
@@ -163,10 +183,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     ]);
     expect(auditRes.status()).toBe(200);
 
-    const exportLink = page.locator('a[href="/precios/auditoria/exportar/csv"]').first();
-    await expect(exportLink).toBeVisible();
-    await exportLink.click();
-
+    await navigateViaSubLink(page, "/precios/auditoria/exportar/csv");
     const exportBtn = page.getByRole("button", { name: /exportar|generar/i }).first();
     await expect(exportBtn).toBeVisible();
     const [exportRes] = await Promise.all([
@@ -180,9 +197,17 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     expect([200, 202]).toContain(exportRes.status());
     const job = (await exportRes.json()) as { exportId?: string; status?: string };
     expect(job.exportId).toBeTruthy();
+
+    const jobPollRes = await page.waitForResponse(
+      (res) =>
+        res.request().method() === "GET" &&
+        new URL(res.url()).pathname ===
+          `/api/v1/auditoria-precios/exportaciones/${job.exportId}`,
+    );
+    expect(jobPollRes.status()).toBe(200);
   });
 
-  test("5. Promotions: crear cupón via SPA, consultar por listado y verificar estado ACTIVO", async ({
+  test("5. Promotions: crear cupón via SPA, recargar, reautenticar y verificar estado ACTIVO persistido", async ({
     page,
   }) => {
     const code = `E2E${randomUUID().slice(0, 6).toUpperCase()}`;
@@ -196,10 +221,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     ]);
     expect(listRes.status()).toBe(200);
 
-    const newCoupon = page.locator('a[href="/cupones/nuevo"]').first();
-    await expect(newCoupon).toBeVisible();
-    await newCoupon.click();
-
+    await navigateViaSubLink(page, "/cupones/nuevo");
     const codeInput = page.getByRole("textbox").first();
     await expect(codeInput).toBeVisible();
     await codeInput.fill(code);
@@ -216,6 +238,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     ]);
     expect([200, 201]).toContain(createRes.status());
 
+    await reloadVerifySessionLostAndReauth(page);
     const [verifyList] = await Promise.all([
       page.waitForResponse(
         (res) =>
@@ -226,6 +249,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     ]);
     expect(verifyList.status()).toBe(200);
     await expect(page.getByText(code)).toBeVisible();
+    await expect(page.getByText("ACTIVO").first()).toBeVisible();
   });
 
   test("6. Inventory: navegar a /inventario y subpágina /inventario/umbrales, mutar umbral, recargar, reautenticar y verificar valor persistido", async ({
@@ -281,7 +305,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     await expect(page.getByRole("spinbutton").first()).toHaveValue("12");
   });
 
-  test("7. Combos: crear combo via SPA, consultar por ID y verificar composición persistida", async ({
+  test("7. Combos: crear combo via SPA, recargar, reautenticar y consultar por comboId verificando composición", async ({
     page,
   }) => {
     const comboName = `ComboE2E-${randomUUID().slice(0, 6)}`;
@@ -295,10 +319,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     ]);
     expect(listRes.status()).toBe(200);
 
-    const newCombo = page.locator('a[href="/combos/nuevo"]').first();
-    await expect(newCombo).toBeVisible();
-    await newCombo.click();
-
+    await navigateViaSubLink(page, "/combos/nuevo");
     const nameInput = page.getByRole("textbox").first();
     await expect(nameInput).toBeVisible();
     await nameInput.fill(comboName);
@@ -317,10 +338,21 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     const comboDto = (await createRes.json()) as { comboId?: string };
     expect(comboDto.comboId).toBeTruthy();
 
+    await reloadVerifySessionLostAndReauth(page);
+    await navigateViaSpa(page, "/combos");
+    const [detailRes] = await Promise.all([
+      page.waitForResponse(
+        (res) =>
+          res.request().method() === "GET" &&
+          new URL(res.url()).pathname === `/api/v1/combos/${comboDto.comboId}`,
+      ),
+      navigateViaSubLink(page, `/combos/${comboDto.comboId}`),
+    ]);
+    expect(detailRes.status()).toBe(200);
     await expect(page.getByText(comboName)).toBeVisible();
   });
 
-  test("8. Bulk: descargar plantilla v2 CSV e importar lote verificando seguimiento", async ({
+  test("8. Bulk: descargar plantilla CSV, importar lote, capturar batchId y esperar estado terminal", async ({
     page,
   }) => {
     await navigateViaSpa(page, "/carga-masiva/descargas");
@@ -338,7 +370,8 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     await navigateViaSpa(page, "/carga-masiva");
     const fileInput = page.locator('input[type="file"]').first();
     await expect(fileInput).toBeAttached();
-    const csvContent = "sku_base,nombre,precio_regular,stock_inicial\nBULK-E2E-1,Prod Bulk,25.00,10\n";
+    const csvContent =
+      "sku_base,nombre,precio_regular,stock_inicial\nBULK-E2E-1,Prod Bulk,25.00,10\n";
     await fileInput.setInputFiles({
       name: "lote-e2e.csv",
       mimeType: "text/csv",
@@ -355,5 +388,15 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       uploadBtn.click(),
     ]);
     expect([200, 201, 202]).toContain(importRes.status());
+    const batchDto = (await importRes.json()) as { batchId?: string };
+    expect(batchDto.batchId).toBeTruthy();
+
+    const batchStatusRes = await page.waitForResponse(
+      (res) =>
+        res.request().method() === "GET" &&
+        new URL(res.url()).pathname ===
+          `/api/v1/carga-masiva/productos/importaciones/${batchDto.batchId}`,
+    );
+    expect(batchStatusRes.status()).toBe(200);
   });
 });

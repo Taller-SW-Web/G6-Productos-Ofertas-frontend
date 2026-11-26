@@ -143,7 +143,7 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
       "Content-Type": "application/json",
     };
 
-    // 4a. Consumo N01
+    // 4a. Consumo N01 + polling hasta estado terminal
     const consumeRes = await request.post(
       `${env.gatewayUrl}/api/v1/cupones/consumos`,
       { headers: consumeHeaders, data: consumeBody },
@@ -152,21 +152,33 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     const consumeOp = (await consumeRes.json()) as { operation_id?: string };
     expect(consumeOp.operation_id).toBeTruthy();
 
-    // 4b. Duplicación idempotente (mismo Idempotency-Key + payload)
+    // 4b. Duplicación idempotente (mismo Idempotency-Key + payload debe conservar operation_id)
     const dupConsumeRes = await request.post(
       `${env.gatewayUrl}/api/v1/cupones/consumos`,
       { headers: consumeHeaders, data: consumeBody },
     );
     expect([200, 202]).toContain(dupConsumeRes.status());
+    const dupOp = (await dupConsumeRes.json()) as { operation_id?: string };
+    expect(dupOp.operation_id).toBe(consumeOp.operation_id);
 
-    // 4c. Consulta estado terminal de operación N01
-    const opStatusRes = await request.get(
-      `${env.gatewayUrl}/api/v1/cupones/operaciones/${encodeURIComponent(consumeOp.operation_id!)}`,
-      { headers: { Authorization: `Bearer ${g5Token}` } },
-    );
-    expect(opStatusRes.status()).toBe(200);
+    // 4c. Polling hasta estado terminal de operación N01
+    let terminalStatus = "";
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const opStatusRes = await request.get(
+        `${env.gatewayUrl}/api/v1/cupones/operaciones/${encodeURIComponent(consumeOp.operation_id!)}`,
+        { headers: { Authorization: `Bearer ${g5Token}` } },
+      );
+      expect(opStatusRes.status()).toBe(200);
+      const opBody = (await opStatusRes.json()) as { status?: string };
+      terminalStatus = opBody.status ?? "";
+      if (["COMPLETED", "APPLIED", "REJECTED", "FAILED"].includes(terminalStatus)) {
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    expect(["COMPLETED", "APPLIED"]).toContain(terminalStatus);
 
-    // 4d. Restauración N01
+    // 4d. Restauración N01 + polling hasta estado terminal
     const restoreRes = await request.post(
       `${env.gatewayUrl}/api/v1/cupones/restauraciones`,
       {
@@ -180,6 +192,24 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
       },
     );
     expect([200, 202]).toContain(restoreRes.status());
+    const restoreOp = (await restoreRes.json()) as { operation_id?: string };
+    expect(restoreOp.operation_id).toBeTruthy();
+
+    let restoreTerminal = "";
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const restorePoll = await request.get(
+        `${env.gatewayUrl}/api/v1/cupones/operaciones/${encodeURIComponent(restoreOp.operation_id!)}`,
+        { headers: { Authorization: `Bearer ${g5Token}` } },
+      );
+      expect(restorePoll.status()).toBe(200);
+      const body = (await restorePoll.json()) as { status?: string };
+      restoreTerminal = body.status ?? "";
+      if (["COMPLETED", "APPLIED", "RESTORED", "REJECTED", "FAILED"].includes(restoreTerminal)) {
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    expect(["COMPLETED", "APPLIED", "RESTORED"]).toContain(restoreTerminal);
 
     // 4e. Rechazo contractual ante cupón inexistente
     const rejectRes = await request.post(
