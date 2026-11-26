@@ -11,7 +11,7 @@ export type ReadResult = { kind: "data"; value: unknown } | { kind: "file"; blob
 export class ReadFailure extends Error {}
 
 /** @deprecated Compatibilidad inerte; bajo G7 obligatorio `canal` es opcional según OpenAPI. */
-export const requiresPublicReadChannel = (_id: string) => false;
+export const requiresPublicReadChannel = (_id: string) => { void _id; return false; };
 
 const DATE_TIME_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(Z|([+-])(\d{2}):(\d{2}))$/;
@@ -110,6 +110,7 @@ export function createReadOnlyClient(
   fetcher: typeof fetch = fetch,
   _options: { /** @deprecated Compatibilidad inerte; sin efecto bajo G7. */ publicReadOnly?: boolean } = {},
 ) {
+  void _options;
   const base = secureBase(origin, true);
   return {
     async read(id: string, values: Readonly<Record<string, string>>, cancellation: AbortSignal): Promise<ReadResult> {

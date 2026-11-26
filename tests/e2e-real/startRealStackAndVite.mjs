@@ -1315,6 +1315,12 @@ async function startLocalG5EvidenceServer({
 
 async function startLocalIsolatedServiceBusBroker() {
   const queues = new Map();
+  const evidence = [];
+  const recordBroker = (stage, queue, msg, extra = {}) => evidence.push({
+    stage, queue, at: new Date().toISOString(), messageId: msg.messageId,
+    correlationId: msg.correlationId, subject: msg.subject, contentType: msg.contentType,
+    ...extra,
+  });
   const dlq = new Map();
   const inflight = new Map();
   const storageObjects = new Map();
@@ -1328,6 +1334,15 @@ async function startLocalIsolatedServiceBusBroker() {
   };
   const server = createServer(async (req, res) => {
     const url = req.url ?? "/";
+    if (req.method === "GET" && url === "/__test/broker-evidence") {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ transport: "HTTP_IN_MEMORY_NOT_AZURE", evidence,
+        active: Object.fromEntries([...queues].map(([name, q]) => [name, q.length])),
+        inflight: inflight.size,
+        deadletters: Object.fromEntries([...dlq].map(([name, q]) => [name, q.length])),
+      }));
+      return;
+    }
     if (url.startsWith("/storage/v1/")) {
       if (req.method === "GET" && url.startsWith("/storage/v1/bucket/")) {
         res.statusCode = 200;
@@ -1379,6 +1394,9 @@ async function startLocalIsolatedServiceBusBroker() {
     if (req.method === "POST" && action === "messages") {
       const msg = await readJsonBody(req);
       getQueue(queue).push({ ...msg, deliveryCount: 0 });
+      let envelope = null;
+      try { envelope = JSON.parse(msg.body); } catch { /* Broker accepts opaque invalid bodies for consumer tests. */ }
+      recordBroker("PUBLISHED", queue, msg, { envelope, applicationProperties: msg.applicationProperties });
       res.statusCode = 201;
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify({ ok: true }));
@@ -1395,6 +1413,7 @@ async function startLocalIsolatedServiceBusBroker() {
       next.deliveryCount = (next.deliveryCount ?? 0) + 1;
       const id = randomUUID();
       inflight.set(id, { queue, msg: next });
+      recordBroker("RECEIVED", queue, next, { deliveryId: id, deliveryCount: next.deliveryCount });
       res.statusCode = 200;
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify({ deliveryId: id, ...next }));
@@ -1413,6 +1432,8 @@ async function startLocalIsolatedServiceBusBroker() {
       return;
     }
     if (req.method === "POST" && action === "complete" && deliveryId) {
+      const entry = inflight.get(deliveryId);
+      if (entry) recordBroker("COMPLETED", queue, entry.msg, { deliveryId });
       inflight.delete(deliveryId);
       res.statusCode = 200;
       res.end();
@@ -1422,6 +1443,7 @@ async function startLocalIsolatedServiceBusBroker() {
       const entry = inflight.get(deliveryId);
       inflight.delete(deliveryId);
       if (entry) getQueue(entry.queue).push(entry.msg);
+      if (entry) recordBroker("ABANDONED", queue, entry.msg, { deliveryId });
       res.statusCode = 200;
       res.end();
       return;
@@ -1431,6 +1453,7 @@ async function startLocalIsolatedServiceBusBroker() {
       inflight.delete(deliveryId);
       const reasonBody = await readJsonBody(req);
       if (entry) {
+        recordBroker("DEADLETTERED", queue, entry.msg, { deliveryId, reason: reasonBody.deadLetterReason });
         getDlq(entry.queue).push({
           ...entry.msg,
           deadLetterReason: reasonBody.deadLetterReason ?? "DEAD_LETTERED",
@@ -1783,6 +1806,7 @@ async function main() {
         CATALOG_PREPARATION_TIMEOUT_MS: "100",
         CATALOG_DEFAULT_LOCATION_ID: "00000000-0000-4000-8000-000000000101",
         CATALOG_BULK_RESULT_V2_ENABLED: "true",
+        CATALOG_BULK_RETRY_V1_ENABLED: "true",
         CATALOG_SERVICE_TOKEN_URL: g7.tokenUrl,
         CATALOG_SERVICE_CLIENT_SECRET: "e2e-catalog-secret",
         MESSAGING_PROVIDER: "AZURE_SERVICE_BUS",
@@ -1840,6 +1864,8 @@ async function main() {
         PROMOTIONS_DEPENDENCY_PROBES_ENABLED: "true",
         PROMOTIONS_H5_COUPON_COMMANDS_ENABLED: "true",
         PROMOTIONS_H5_ISOLATED_BUS: "1",
+        PROMOTIONS_SERVICE_BUS_EVENTS_ENABLED: "true",
+        G6_ISOLATED_SERVICE_BUS_URL: isolatedBus.baseUrl,
         GATEWAY_CATALOG_SVC_URL: serviceUrls["catalog-svc"],
         GATEWAY_PRICING_SVC_URL: serviceUrls["pricing-svc"],
         GATEWAY_TAXONOMY_SVC_URL: serviceUrls["taxonomy-svc"],
@@ -1859,6 +1885,10 @@ async function main() {
         COMBOS_PRICING_URL: serviceUrls["pricing-svc"],
         COMBOS_G7_TOKEN_URL: g7.tokenUrl,
         COMBOS_G7_CLIENT_SECRET: "e2e-combos-secret",
+        MESSAGING_PROVIDER: "AZURE_SERVICE_BUS",
+        COMBOS_SERVICE_BUS_EVENTS_ENABLED: "true",
+        SERVICE_BUS_NAMESPACE_FQDN: "g6-combos-local.servicebus.windows.net",
+        G6_ISOLATED_SERVICE_BUS_URL: isolatedBus.baseUrl,
         COMBOS_CATALOG_CONTEXT_AUTHORIZED: "true",
         COMBOS_ALLOWED_ROLES_LISTAR_COMBOS_ADMIN: "GESTOR_COMERCIAL",
         COMBOS_ALLOWED_ROLES_OBTENER_COMBO: "GESTOR_COMERCIAL",
@@ -1875,6 +1905,7 @@ async function main() {
         PGUSER: "inventory_app",
         G7_JWT_ISSUER: g7.issuer,
         G7_JWT_JWKS_URL: g7.jwksUrl,
+        INVENTORY_CATALOG_SKU_DEACTIVATION_ENABLED: "true",
         INVENTORY_G7_TRANSFER_GRANTS: JSON.stringify({
           [g7.gestorId]: ["INVENTARIO_TRASLADOS_LEER", "INVENTARIO_TRASLADOS_RECIBIR"],
         }),
@@ -1982,7 +2013,7 @@ async function main() {
         await waitForHttpReady(`${serviceUrls[svc]}${readinessPath}`);
       } catch (err) {
         const logs = serviceLogs.get(svc)?.() ?? "";
-        throw new Error(`SERVICE_NOT_READY(${svc}): ${(err).message}\n--- LOGS(${svc}) ---\n${logs}`);
+        throw new Error(`SERVICE_NOT_READY(${svc}): ${(err).message}\n--- LOGS(${svc}) ---\n${logs}`, { cause: err });
       }
     }
     await waitForHttpReady(`${gatewayUrl}/health`);
@@ -2010,6 +2041,13 @@ async function main() {
     );
 
     if (process.argv.includes("--no-vite")) {
+      // Windows terminates kill(SIGTERM) without delivering a signal to Node.
+      // An IPC request lets the owner release its own services and container.
+      process.on("message", (message) => {
+        if (message?.type === "G6_STACK_STOP") {
+          void cleanup().then(() => process.exit(0));
+        }
+      });
       console.log("G6_STACK_READY");
       process.on("SIGINT", () => void cleanup().then(() => process.exit(0)));
       process.on("SIGTERM", () => void cleanup().then(() => process.exit(0)));

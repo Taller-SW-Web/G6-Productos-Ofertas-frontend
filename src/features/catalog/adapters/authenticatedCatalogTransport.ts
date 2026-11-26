@@ -8,12 +8,18 @@ export function createAuthenticatedCatalogTransport(
   session: G7Session,
   _options: { /** @deprecated Compatibilidad inerte; sin efecto bajo G7. */ publicReads?: boolean } = {},
 ): CatalogHttpTransport {
+  void _options; // Retained for source compatibility; G7 is always required.
   const transport = createCatalogFetchTransport(origin);
   return {
     async request(path, init) {
       const token = await session.getAccessToken(init.signal);
       if (!token) throw new Error("Inicia sesión para continuar.");
-      const send = (accessToken: string) => transport.request(path, { ...init, headers: { ...init.headers, Authorization: `Bearer ${accessToken}` } });
+      const send = (accessToken: string) => {
+        const headers = Object.fromEntries(Object.entries(init.headers)
+          .filter(([name]) => name.toLowerCase() !== "authorization"));
+        headers.Authorization = `Bearer ${accessToken}`;
+        return transport.request(path, { ...init, headers });
+      };
       const response = await send(token);
       if (!(await isGatewayTokenInvalid(response))) return response;
       if (init.method === "GET") {

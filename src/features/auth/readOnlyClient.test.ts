@@ -62,28 +62,28 @@ describe("consultas contractuales de lectura", () => {
     await expect(client.read("listarProductos", {}, signal())).rejects.toThrow("Inicia sesión");
     expect(fetcher).not.toHaveBeenCalled();
   });
-  it("en el modo público existente mantiene la sesión de UI y no adjunta bearer al GET", async () => {
+  it("publicReadOnly heredado conserva el Bearer obligatorio de G7", async () => {
     const { session, fetcher } = setup();
     const client = createReadOnlyClient(origin, session, fetcher, { publicReadOnly: true });
     await client.read("listarProductos", { canal: "MARKETPLACE" }, signal());
     expect(session.getAccessToken).toHaveBeenCalledTimes(1);
-    expect(fetcher.mock.calls[0]?.[1]?.headers).not.toHaveProperty("Authorization");
+    expect(new Headers(fetcher.mock.calls[0]?.[1]?.headers).get("Authorization")).toBe("Bearer test-access");
   });
-  it("en modo público exige elegir el canal comercial antes de consultar productos", async () => {
+  it("la opción pública inerte conserva los filtros admitidos por el contrato autenticado", async () => {
     const { session, fetcher } = setup();
     const client = createReadOnlyClient(origin, session, fetcher, { publicReadOnly: true });
-    await expect(client.read("listarProductos", {}, signal())).rejects.toThrow("Selecciona el canal");
-    expect(fetcher).not.toHaveBeenCalled();
+    await client.read("listarProductos", {}, signal());
+    expect(fetcher).toHaveBeenCalledWith(origin + "/api/v1/productos", expect.objectContaining({ method: "GET", headers: expect.objectContaining({ Authorization: "Bearer test-access" }) }));
     await client.read("listarProductos", { canal: "MARKETPLACE" }, signal());
     expect(fetcher).toHaveBeenCalledWith(origin + "/api/v1/productos?canal=MARKETPLACE", expect.objectContaining({ method: "GET" }));
   });
-  it("una lectura pública denegada no intenta JWT ni cambia la sesión", async () => {
-    const { session, fetcher } = setup([Response.json({ code: "TOKEN_INVALIDO" }, { status: 401 })]);
+  it("la opción pública no evita renovar ni invalidar una sesión rechazada por G7", async () => {
+    const { session, fetcher } = setup([Response.json({ code: "TOKEN_INVALIDO" }, { status: 401 }), Response.json({ code: "TOKEN_INVALIDO" }, { status: 401 })]);
     const client = createReadOnlyClient(origin, session, fetcher, { publicReadOnly: true });
-    await expect(client.read("listarProductos", { canal: "MARKETPLACE" }, signal())).rejects.toThrow("no está habilitada");
-    expect(session.refreshAccessToken).not.toHaveBeenCalled();
-    expect(session.invalidateAccessToken).not.toHaveBeenCalled();
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    await expect(client.read("listarProductos", { canal: "MARKETPLACE" }, signal())).rejects.toThrow("Inicia sesión");
+    expect(session.refreshAccessToken).toHaveBeenCalledTimes(1);
+    expect(session.invalidateAccessToken).toHaveBeenCalledWith("test-renewed");
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
   it("renueva una sola vez un GET rechazado con TOKEN_INVALIDO", async () => {
     const { session, fetcher, client } = setup([Response.json({ code: "TOKEN_INVALIDO" }, { status: 401 }), Response.json({ total: 1 })]);

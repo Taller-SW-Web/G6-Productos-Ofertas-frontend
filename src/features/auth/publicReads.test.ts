@@ -21,7 +21,7 @@ function setup() {
 }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-describe("login conservado y lecturas públicas sin JWT", () => {
+describe("lecturas con G7 y opciones públicas heredadas inertes", () => {
   it("las 10 pantallas con limitación de contrato administrativo exponen aviso explícito y enlace a /consultas", () => {
     expect(Object.keys(consultaEntries)).toHaveLength(10);
     for (const [path, entry] of Object.entries(consultaEntries)) {
@@ -33,7 +33,7 @@ describe("login conservado y lecturas públicas sin JWT", () => {
     }
     expect(publicReadEntries["/productos"]).toBe("listarProductos");
   });
-  it.each(["Catálogo", "Taxonomía", "Promociones", "Bulk"])("%s no envía bearer ni renueva/invalida la sesión ante un GET público denegado", async feature => {
+  it.each(["Catálogo", "Taxonomía", "Promociones", "Bulk"])("%s exige Bearer, renueva una vez e invalida tras otro 401 aunque publicReads sea true", async feature => {
     const { session, fetcher } = setup();
     if (feature === "Catálogo") {
       const response = await createAuthenticatedCatalogTransport(origin, session, { publicReads: true })
@@ -51,11 +51,12 @@ describe("login conservado y lecturas públicas sin JWT", () => {
       await expect(createHttpBulkRepository(transport, session, { publicReads: true }).getTemplate("CSV", signal()))
         .rejects.toMatchObject({ status: 401 });
     }
-    expect(fetcher).toHaveBeenCalledTimes(1);
-    expect(new Headers(fetcher.mock.calls[0]?.[1]?.headers).has("Authorization")).toBe(false);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(new Headers(fetcher.mock.calls[0]?.[1]?.headers).get("Authorization")).toBe("Bearer test-access");
+    expect(new Headers(fetcher.mock.calls[1]?.[1]?.headers).get("Authorization")).toBe("Bearer test-renewed");
     expect(fetcher.mock.calls[0]?.[1]?.method).toBe("GET");
-    expect(session.refreshAccessToken).not.toHaveBeenCalled();
-    expect(session.invalidateAccessToken).not.toHaveBeenCalled();
+    expect(session.refreshAccessToken).toHaveBeenCalledTimes(1);
+    expect(session.invalidateAccessToken).toHaveBeenCalledWith("test-renewed");
   });
 
   it("Catálogo conserva el JWT de escritura y no repite un POST", async () => {
@@ -81,7 +82,7 @@ describe("login conservado y lecturas públicas sin JWT", () => {
     expect(session.refreshAccessToken).not.toHaveBeenCalled();
   });
 
-  it("sin sesión de entrada Catálogo no envía el GET público", async () => {
+  it("sin sesión de entrada Catálogo no envía el GET aunque publicReads sea true", async () => {
     const { session, fetcher } = setup();
     vi.mocked(session.getAccessToken).mockResolvedValue(null);
     await expect(createAuthenticatedCatalogTransport(origin, session, { publicReads: true })

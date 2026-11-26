@@ -22,6 +22,7 @@ export function createPromotionSessionRuntime(
   session = new G7Session(securityApiBase),
   _options: { /** @deprecated Compatibilidad inerte; sin efecto bajo G7. */ publicReads?: boolean } = {},
 ) {
+  void _options;
   const gateway = secureBase(gatewayOrigin, true);
   return {
     session,
