@@ -28,7 +28,7 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   webServer: {
-    command: "npx tsx tests/e2e-real/startRealStackAndVite.ts",
+    command: "node tests/e2e-real/startRealStackAndVite.mjs",
     url: `http://127.0.0.1:${port}`,
     reuseExistingServer: false,
     timeout: 120_000,

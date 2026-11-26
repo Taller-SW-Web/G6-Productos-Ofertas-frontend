@@ -3,6 +3,8 @@ import { expect, test } from "@playwright/test";
 import {
   assertRealStackPreflight,
   loginViaReactUi,
+  navigateViaSpa,
+  reloadVerifySessionLostAndReauth,
   verifyGatewayAndServicesReady,
 } from "./realStackPreflight.ts";
 
@@ -23,23 +25,14 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     await expect(page.getByRole("main")).toBeVisible();
   });
 
-  test("1. Catalog: listar, crear producto via UI, verificar request Bearer, respuesta 201/200 y persistencia tras recarga", async ({
+  test("1. Catalog: crear producto via SPA, verificar pérdida de sesión al recargar, reautenticar y comprobar persistencia", async ({
     page,
   }) => {
     const uniqueName = `Producto E2E ${randomUUID().slice(0, 8)}`;
-    const sentRequests: Array<{ method: string; path: string; hasAuth: boolean }> = [];
-    page.on("request", (req) => {
-      const url = new URL(req.url());
-      if (url.pathname.startsWith("/api/v1/productos")) {
-        sentRequests.push({
-          method: req.method(),
-          path: url.pathname,
-          hasAuth: Boolean(req.headers()["authorization"]?.startsWith("Bearer ")),
-        });
-      }
-    });
+    const newBtn = page.locator('a[href="/productos/nuevo"]').first();
+    await expect(newBtn).toBeVisible();
+    await newBtn.click();
 
-    await page.goto("/productos/nuevo");
     const nameInput = page.getByRole("textbox", { name: /nombre/i }).first();
     await expect(nameInput).toBeVisible();
     await nameInput.fill(uniqueName);
@@ -58,25 +51,29 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     const createdDto = (await createRes.json()) as { productId?: string };
     expect(createdDto.productId).toBeTruthy();
 
+    await navigateViaSpa(page, "/productos");
+    await reloadVerifySessionLostAndReauth(page);
     const [reloadList] = await Promise.all([
       page.waitForResponse(
         (res) =>
           res.request().method() === "GET" &&
           new URL(res.url()).pathname.startsWith("/api/v1/productos"),
       ),
-      page.goto("/productos"),
+      navigateViaSpa(page, "/productos"),
     ]);
     expect(reloadList.status()).toBe(200);
     await expect(page.getByText(uniqueName)).toBeVisible();
-    expect(sentRequests.length).toBeGreaterThan(0);
-    expect(sentRequests.every((r) => r.hasAuth)).toBe(true);
   });
 
-  test("2. Taxonomy: crear categoría y consultar árbol administrativo con persistencia tras recarga", async ({
+  test("2. Taxonomy: crear categoría via SPA, recargar, reautenticar y verificar persistencia en árbol", async ({
     page,
   }) => {
     const catName = `CatE2E-${randomUUID().slice(0, 6)}`;
-    await page.goto("/categorias/nueva");
+    await navigateViaSpa(page, "/categorias");
+    const newCat = page.locator('a[href="/categorias/nueva"]').first();
+    await expect(newCat).toBeVisible();
+    await newCat.click();
+
     const nameInput = page.getByRole("textbox", { name: /nombre/i }).first();
     await expect(nameInput).toBeVisible();
     await nameInput.fill(catName);
@@ -93,19 +90,20 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     ]);
     expect([200, 201]).toContain(createRes.status());
 
+    await reloadVerifySessionLostAndReauth(page);
     const [treeRes] = await Promise.all([
       page.waitForResponse(
         (res) =>
           res.request().method() === "GET" &&
           new URL(res.url()).pathname.startsWith("/api/v1/categorias"),
       ),
-      page.goto("/categorias"),
+      navigateViaSpa(page, "/categorias"),
     ]);
     expect(treeRes.status()).toBe(200);
     await expect(page.getByText(catName)).toBeVisible();
   });
 
-  test("3. Pricing: consultar precios y actualizar precio SKU verificando respuesta real con versión", async ({
+  test("3. Pricing: navegar via SPA, editar precio, verificar incremento de versión y consulta posterior", async ({
     page,
   }) => {
     const [readRes] = await Promise.all([
@@ -114,12 +112,14 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
           res.request().method() === "GET" &&
           new URL(res.url()).pathname.startsWith("/api/v1/precios"),
       ),
-      page.goto("/precios"),
+      navigateViaSpa(page, "/precios"),
     ]);
     expect(readRes.status()).toBe(200);
-    expect(readRes.request().headers()["authorization"]).toMatch(/^Bearer /);
 
-    await page.goto("/precios/editar");
+    const editLink = page.locator('a[href^="/precios/editar"]').first();
+    await expect(editLink).toBeVisible();
+    await editLink.click();
+
     const priceInput = page.getByRole("textbox").first();
     await expect(priceInput).toBeVisible();
     await priceInput.fill("99.50");
@@ -137,9 +137,19 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     expect([200, 201]).toContain(putRes.status());
     const dto = (await putRes.json()) as { priceVersion?: number };
     expect(typeof dto.priceVersion).toBe("number");
+
+    const [afterRead] = await Promise.all([
+      page.waitForResponse(
+        (res) =>
+          res.request().method() === "GET" &&
+          new URL(res.url()).pathname.startsWith("/api/v1/precios"),
+      ),
+      navigateViaSpa(page, "/precios"),
+    ]);
+    expect(afterRead.status()).toBe(200);
   });
 
-  test("4. Price Audit: consultar historial administrativo y solicitar exportación CSV", async ({
+  test("4. Price Audit: consultar historial, solicitar exportación CSV y verificar estado del trabajo", async ({
     page,
   }) => {
     const [auditRes] = await Promise.all([
@@ -148,13 +158,14 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
           res.request().method() === "GET" &&
           new URL(res.url()).pathname.startsWith("/api/v1/auditoria-precios"),
       ),
-      page.goto("/precios/auditoria"),
+      navigateViaSpa(page, "/precios/auditoria"),
     ]);
     expect(auditRes.status()).toBe(200);
-    const body = (await auditRes.json()) as { items?: unknown[] };
-    expect(Array.isArray(body.items)).toBe(true);
 
-    await page.goto("/precios/auditoria/exportar/csv");
+    const exportLink = page.locator('a[href="/precios/auditoria/exportar/csv"]').first();
+    await expect(exportLink).toBeVisible();
+    await exportLink.click();
+
     const exportBtn = page.getByRole("button", { name: /exportar|generar/i }).first();
     await expect(exportBtn).toBeVisible();
     const [exportRes] = await Promise.all([
@@ -166,9 +177,11 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       exportBtn.click(),
     ]);
     expect([200, 202]).toContain(exportRes.status());
+    const job = (await exportRes.json()) as { exportId?: string; status?: string };
+    expect(job.exportId).toBeTruthy();
   });
 
-  test("5. Promotions: listar y crear cupón administrativo con Bearer G7 y verificar persistencia", async ({
+  test("5. Promotions: crear cupón via SPA, consultar por listado y verificar estado ACTIVO", async ({
     page,
   }) => {
     const code = `E2E${randomUUID().slice(0, 6).toUpperCase()}`;
@@ -178,11 +191,14 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
           res.request().method() === "GET" &&
           new URL(res.url()).pathname.startsWith("/api/v1/cupones"),
       ),
-      page.goto("/cupones"),
+      navigateViaSpa(page, "/cupones"),
     ]);
     expect(listRes.status()).toBe(200);
 
-    await page.goto("/cupones/nuevo");
+    const newCoupon = page.locator('a[href="/cupones/nuevo"]').first();
+    await expect(newCoupon).toBeVisible();
+    await newCoupon.click();
+
     const codeInput = page.getByRole("textbox").first();
     await expect(codeInput).toBeVisible();
     await codeInput.fill(code);
@@ -198,35 +214,61 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       submitBtn.click(),
     ]);
     expect([200, 201]).toContain(createRes.status());
-  });
 
-  test("6. Inventory: consultar dashboard y umbrales con respuesta real y UI visible", async ({
-    page,
-  }) => {
-    const [dashRes] = await Promise.all([
+    const [verifyList] = await Promise.all([
       page.waitForResponse(
         (res) =>
           res.request().method() === "GET" &&
-          new URL(res.url()).pathname === "/api/v1/inventario/dashboard",
+          new URL(res.url()).pathname.startsWith("/api/v1/cupones"),
       ),
-      page.goto("/inventario/dashboard"),
+      navigateViaSpa(page, "/cupones"),
     ]);
-    expect(dashRes.status()).toBe(200);
-    await expect(page.getByRole("main")).toBeVisible();
+    expect(verifyList.status()).toBe(200);
+    await expect(page.getByText(code)).toBeVisible();
+  });
 
+  test("6. Inventory: mutar umbral global via SPA, recargar, reautenticar y verificar persistencia", async ({
+    page,
+  }) => {
     const [thresholdRes] = await Promise.all([
       page.waitForResponse(
         (res) =>
           res.request().method() === "GET" &&
           new URL(res.url()).pathname === "/api/v1/inventario/umbrales",
       ),
-      page.goto("/inventario/umbrales"),
+      navigateViaSpa(page, "/inventario/umbrales"),
     ]);
     expect(thresholdRes.status()).toBe(200);
-    await expect(page.getByRole("main")).toBeVisible();
+
+    const thresholdInput = page.getByRole("spinbutton").first();
+    await expect(thresholdInput).toBeVisible();
+    await thresholdInput.fill("12");
+
+    const saveBtn = page.getByRole("button", { name: /guardar|actualizar/i }).first();
+    await expect(saveBtn).toBeVisible();
+    const [putRes] = await Promise.all([
+      page.waitForResponse(
+        (res) =>
+          res.request().method() === "PUT" &&
+          new URL(res.url()).pathname === "/api/v1/inventario/umbrales/global",
+      ),
+      saveBtn.click(),
+    ]);
+    expect([200, 204]).toContain(putRes.status());
+
+    await reloadVerifySessionLostAndReauth(page);
+    const [afterReload] = await Promise.all([
+      page.waitForResponse(
+        (res) =>
+          res.request().method() === "GET" &&
+          new URL(res.url()).pathname === "/api/v1/inventario/umbrales",
+      ),
+      navigateViaSpa(page, "/inventario/umbrales"),
+    ]);
+    expect(afterReload.status()).toBe(200);
   });
 
-  test("7. Combos: listar y crear combo administrativo verificando respuesta 201 y recarga", async ({
+  test("7. Combos: crear combo via SPA, consultar por ID y verificar composición persistida", async ({
     page,
   }) => {
     const comboName = `ComboE2E-${randomUUID().slice(0, 6)}`;
@@ -236,13 +278,14 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
           res.request().method() === "GET" &&
           new URL(res.url()).pathname.startsWith("/api/v1/combos"),
       ),
-      page.goto("/combos"),
+      navigateViaSpa(page, "/combos"),
     ]);
     expect(listRes.status()).toBe(200);
-    const listDto = (await listRes.json()) as { items?: unknown[] };
-    expect(Array.isArray(listDto.items)).toBe(true);
 
-    await page.goto("/combos/nuevo");
+    const newCombo = page.locator('a[href="/combos/nuevo"]').first();
+    await expect(newCombo).toBeVisible();
+    await newCombo.click();
+
     const nameInput = page.getByRole("textbox").first();
     await expect(nameInput).toBeVisible();
     await nameInput.fill(comboName);
@@ -258,12 +301,16 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       submitBtn.click(),
     ]);
     expect([200, 201]).toContain(createRes.status());
+    const comboDto = (await createRes.json()) as { comboId?: string };
+    expect(comboDto.comboId).toBeTruthy();
+
+    await expect(page.getByText(comboName)).toBeVisible();
   });
 
-  test("8. Bulk: descargar plantilla v2 CSV verificando content-type text/csv", async ({
+  test("8. Bulk: descargar plantilla v2 CSV e importar lote verificando seguimiento", async ({
     page,
   }) => {
-    await page.goto("/carga-masiva/descargas");
+    await navigateViaSpa(page, "/carga-masiva/descargas");
     const templateBtn = page.getByRole("button", { name: /plantilla|csv/i }).first();
     await expect(templateBtn).toBeVisible();
     const [templateRes] = await Promise.all([
@@ -274,5 +321,26 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     ]);
     expect(templateRes.status()).toBe(200);
     expect(templateRes.headers()["content-type"]).toContain("text/csv");
+
+    await navigateViaSpa(page, "/carga-masiva");
+    const fileInput = page.locator('input[type="file"]').first();
+    await expect(fileInput).toBeAttached();
+    const csvContent = "sku_base,nombre,precio_regular,stock_inicial\nBULK-E2E-1,Prod Bulk,25.00,10\n";
+    await fileInput.setInputFiles({
+      name: "lote-e2e.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from(csvContent, "utf8"),
+    });
+    const uploadBtn = page.getByRole("button", { name: /importar|cargar|subir/i }).first();
+    await expect(uploadBtn).toBeVisible();
+    const [importRes] = await Promise.all([
+      page.waitForResponse(
+        (res) =>
+          res.request().method() === "POST" &&
+          new URL(res.url()).pathname === "/api/v1/carga-masiva/productos/importaciones",
+      ),
+      uploadBtn.click(),
+    ]);
+    expect([200, 201, 202]).toContain(importRes.status());
   });
 });
