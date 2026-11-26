@@ -42,7 +42,7 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
       Accept: "application/json",
     };
 
-    // 1. Taxonomy -> Catalog
+    // 1. Taxonomy (categoría, marca, tipo de producto) -> Catalog (producto simple con skuBase)
     const catSlug = `cat-trans-${randomUUID().slice(0, 6)}`;
     const createCat = await request.post(`${env.gatewayUrl}/api/v1/categorias`, {
       headers: humanHeaders,
@@ -56,16 +56,76 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     const catDto = (await createCat.json()) as { categoriaId: string };
     expect(catDto.categoriaId).toBeTruthy();
 
+    const brandRes = await request.post(`${env.gatewayUrl}/api/v1/marcas`, {
+      headers: {
+        Authorization: capturedBearer,
+        "X-Correlation-Id": randomUUID(),
+      },
+      multipart: {
+        nombre: `Marca Trans ${randomUUID().slice(0, 6)}`,
+        logoUrl: "https://example.test/logo-e2e.png",
+      },
+    });
+    expect([200, 201]).toContain(brandRes.status());
+    const brandDto = (await brandRes.json()) as { marcaId: string };
+    expect(brandDto.marcaId).toBeTruthy();
+
+    const typeRes = await request.post(`${env.gatewayUrl}/api/v1/tipos-producto`, {
+      headers: humanHeaders,
+      data: {
+        nombre: `Tipo Trans ${randomUUID().slice(0, 6)}`,
+      },
+    });
+    expect([200, 201]).toContain(typeRes.status());
+    const typeDto = (await typeRes.json()) as { tipoProductoId: string };
+    expect(typeDto.tipoProductoId).toBeTruthy();
+
+    const skuBase = `SKU-N01-${randomUUID().slice(0, 8).toUpperCase()}`;
     const createProd = await request.post(`${env.gatewayUrl}/api/v1/productos`, {
       headers: { ...humanHeaders, "Idempotency-Key": randomUUID() },
       data: {
         nombre: `Prod Transversal ${randomUUID().slice(0, 6)}`,
+        descripcion: "Producto transversal E2E para pruebas reales H5",
         categoriaId: catDto.categoriaId,
+        marcaId: brandDto.marcaId,
+        tipoProductoId: typeDto.tipoProductoId,
+        skuBase,
+        tieneVariantes: false,
+        precioBaseInicial: 120,
       },
     });
     expect([200, 201]).toContain(createProd.status());
     const prodDto = (await createProd.json()) as { productId: string };
     expect(prodDto.productId).toBeTruthy();
+
+    const readProdRes = await request.get(
+      `${env.gatewayUrl}/api/v1/productos/${encodeURIComponent(prodDto.productId)}`,
+      { headers: humanHeaders },
+    );
+    expect(readProdRes.status()).toBe(200);
+    const readProdDto = (await readProdRes.json()) as {
+      productId?: string;
+      skuBase?: string;
+    };
+    expect(readProdDto.productId).toBe(prodDto.productId);
+    expect(readProdDto.skuBase).toBe(skuBase);
+
+    const catalogServiceToken = await issueTechnicalServiceToken(
+      env.g7ApiBase,
+      "modulo-productos",
+      "catalogo:leer",
+    );
+    const skuCtxRes = await request.get(
+      `${env.gatewayUrl}/api/v1/productos/skus/${encodeURIComponent(skuBase)}/contexto`,
+      { headers: { Authorization: `Bearer ${catalogServiceToken}` } },
+    );
+    expect(skuCtxRes.status()).toBe(200);
+    const skuCtx = (await skuCtxRes.json()) as {
+      productId?: string;
+      sku?: string;
+    };
+    expect(skuCtx.productId).toBe(prodDto.productId);
+    expect(skuCtx.sku).toBe(skuBase);
 
     // 2. Catalog -> Pricing -> Price Audit
     const putPrice = await request.put(
@@ -114,24 +174,65 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     );
     expect(getCombo.status()).toBe(200);
 
-    // 4. Promotions -> Coupons (admin humano) + N01 consumo/restauración (cliente técnico modulo-ventas separado)
+    // 4. Promotions -> Promoción CUPON vigente + Cupón elegible + N01 consumo/restauración (cliente técnico modulo-ventas)
+    const nowMs = Date.now();
+    const createPromo = await request.post(`${env.gatewayUrl}/api/v1/promociones`, {
+      headers: { ...humanHeaders, "Idempotency-Key": randomUUID() },
+      data: {
+        nombre: `Promo Cupón E2E ${randomUUID().slice(0, 6)}`,
+        tipoDescuento: "PORCENTAJE",
+        valor: 10,
+        modalidad: "CUPON",
+        estado: "ACTIVO",
+        validFrom: new Date(nowMs - 60_000).toISOString(),
+        validUntil: new Date(nowMs + 24 * 60 * 60 * 1000).toISOString(),
+        alcance: {
+          productIds: [prodDto.productId],
+          skus: [skuBase],
+        },
+        prioridad: 10,
+        canalesHabilitados: ["MARKETPLACE"],
+        politicaCombinacion: {
+          ofertaPricing: true,
+          promocionAutomatica: false,
+          cupon: true,
+        },
+      },
+    });
+    expect([200, 201]).toContain(createPromo.status());
+    const promoDto = (await createPromo.json()) as { promotionId: string };
+    expect(promoDto.promotionId).toBeTruthy();
+
+    const getPromo = await request.get(
+      `${env.gatewayUrl}/api/v1/promociones/${encodeURIComponent(promoDto.promotionId)}`,
+      { headers: humanHeaders },
+    );
+    expect(getPromo.status()).toBe(200);
+
     const couponCode = `TRN${randomUUID().slice(0, 6).toUpperCase()}`;
     const createCoupon = await request.post(`${env.gatewayUrl}/api/v1/cupones`, {
       headers: { ...humanHeaders, "Idempotency-Key": randomUUID() },
       data: {
         codigo: couponCode,
-        tipoDescuento: "PORCENTAJE",
-        valor: 10,
+        promocionId: promoDto.promotionId,
+        estado: "ACTIVO",
+        politicaCancelacion: "RESTAURAR_EN_CANCELACION",
       },
     });
     expect([200, 201]).toContain(createCoupon.status());
-    const couponDto = (await createCoupon.json()) as { cuponId: string };
-    expect(couponDto.cuponId).toBeTruthy();
+    const couponDto = (await createCoupon.json()) as { cuponId?: string; codigo?: string };
+    expect(couponDto.cuponId ?? couponDto.codigo).toBeTruthy();
+
+    const getCoupon = await request.get(
+      `${env.gatewayUrl}/api/v1/cupones?codigo=${encodeURIComponent(couponCode)}`,
+      { headers: humanHeaders },
+    );
+    expect(getCoupon.status()).toBe(200);
 
     const g5Token = await issueTechnicalServiceToken(
       env.g7ApiBase,
       "modulo-ventas",
-      "cupones:consumir cupones:restaurar cupones:operaciones:leer stock:reservar inventario:reservas:estado:leer",
+      "cupones:consumir cupones:restaurar cupones:operaciones:leer inventario:reservar inventario:operaciones:leer inventario:reservas:estado:leer",
     );
     const consumeOpId = randomUUID();
     const reserveOpId = randomUUID();
@@ -145,7 +246,7 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     expect(env.g5EvidenceOrigin.startsWith("https://127.0.0.1:")).toBe(true);
     expect(env.g5SeedOrigin.startsWith("http://127.0.0.1:")).toBe(true);
 
-    const skuForCoupon = `SKU-N01-${randomUUID().slice(0, 6).toUpperCase()}`;
+    const skuForCoupon = skuBase;
     const stockSeedRes = await request.post(`${env.g5SeedOrigin}/__test/inventory-stock`, {
       data: { sku: skuForCoupon, on_hand: 25 },
     });
@@ -380,9 +481,64 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     );
     expect(badContractRes.status()).toBe(400);
 
-    // 4f. Rechazo asíncrono de negocio (cupón inexistente: 202 admisión -> REJECTED por worker)
+    // 4f. Rechazo asíncrono de negocio (cupón inexistente con reserva y snapshot G5 válidos -> REJECTED COUPON_NOT_ELIGIBLE)
     const missingCouponOpId = randomUUID();
-    const missingOrderId = `PED-MISS-${randomUUID().slice(0, 8)}`;
+    const missingReserveOpId = randomUUID();
+    const missingOrderId = randomUUID();
+    const missingEffectiveAt = new Date().toISOString();
+    const missingReserveReq = await request.post(`${env.gatewayUrl}/api/v1/inventario/reservas`, {
+      headers: {
+        Authorization: `Bearer ${g5Token}`,
+        "X-Correlation-Id": randomUUID(),
+        "Idempotency-Key": missingReserveOpId,
+        "Content-Type": "application/json",
+      },
+      data: {
+        operation_id: missingReserveOpId,
+        order_id: missingOrderId,
+        channel_id: "MARKETPLACE",
+        lines: [{ sku: skuForCoupon, quantity: 1 }],
+      },
+    });
+    expect([200, 202]).toContain(missingReserveReq.status());
+    let missingReserveOp: { status?: string; reservation_id?: string | null } = {};
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      const poll = await request.get(
+        `${env.gatewayUrl}/api/v1/inventario/operaciones/${encodeURIComponent(missingReserveOpId)}`,
+        { headers: { Authorization: `Bearer ${g5Token}` } },
+      );
+      expect(poll.status()).toBe(200);
+      missingReserveOp = (await poll.json()) as typeof missingReserveOp;
+      if (missingReserveOp.status === "COMPLETED" || missingReserveOp.status === "REJECTED") break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    expect(missingReserveOp.status).toBe("COMPLETED");
+    const missingCouponResId = missingReserveOp.reservation_id ?? "";
+    expect(missingCouponResId).toMatch(/^[0-9a-f-]{36}$/i);
+
+    const missingSnap = await request.post(`${env.g5SeedOrigin}/__test/g5-snapshots`, {
+      data: {
+        order_id: missingOrderId,
+        reservation_id: missingCouponResId,
+        commercial_snapshot_ref: missingOrderId,
+        channel_id: "MARKETPLACE",
+        coupon_code: "NO-EXISTE-9999",
+        effective_at: missingEffectiveAt,
+        customer_ref: null,
+        lines: [
+          {
+            sku: skuForCoupon,
+            product_id: prodDto.productId,
+            quantity: 1,
+            regular_price: "120.00",
+            offer_price: null,
+            currency: "PEN",
+          },
+        ],
+      },
+    });
+    expect(missingSnap.status()).toBe(201);
+
     const missingRes = await request.post(
       `${env.gatewayUrl}/api/v1/cupones/consumos`,
       {
@@ -397,8 +553,8 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
           order_id: missingOrderId,
           coupon_code: "NO-EXISTE-9999",
           channel_id: "MARKETPLACE",
-          effective_at: new Date().toISOString(),
-          reservation_id: randomUUID(),
+          effective_at: missingEffectiveAt,
+          reservation_id: missingCouponResId,
           commercial_snapshot_ref: missingOrderId,
         },
       },
@@ -418,9 +574,9 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
       await new Promise((r) => setTimeout(r, 250));
     }
     expect(missingSnapshot.status).toBe("REJECTED");
-    expect(missingSnapshot.result?.result_code).toBeTruthy();
+    expect(missingSnapshot.result?.result_code).toBe("COUPON_NOT_ELIGIBLE");
 
-    // 4g. Rechazo asíncrono por reserva inexistente en Inventory (202 admisión -> REJECTED)
+    // 4g. Rechazo asíncrono por reserva inexistente en Inventory (202 admisión -> REJECTED COUPON_NOT_ELIGIBLE)
     const noResOpId = randomUUID();
     const noResOrderId = randomUUID();
     const missingReservationId = randomUUID();
@@ -476,6 +632,6 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
       await new Promise((r) => setTimeout(r, 250));
     }
     expect(noResSnap.status).toBe("REJECTED");
-    expect(noResSnap.result?.result_code).toBeTruthy();
+    expect(noResSnap.result?.result_code).toBe("COUPON_NOT_ELIGIBLE");
   });
 });

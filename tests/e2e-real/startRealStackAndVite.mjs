@@ -598,7 +598,8 @@ async function startSingleLocalG7Server() {
               "cupones:consumir",
               "cupones:restaurar",
               "cupones:operaciones:leer",
-              "stock:reservar",
+              "inventario:reservar",
+              "inventario:operaciones:leer",
               "inventario:reservas:estado:leer",
               "catalogo:leer",
               "inventario:leer",
@@ -990,6 +991,8 @@ async function main() {
         PORT: String(servicePorts["inventory-svc"]),
         PGUSER: "inventory_app",
         DATABASE_URL: pg.urlFor("inventory_app"),
+        G7_JWT_ISSUER: g7.issuer,
+        G7_JWT_JWKS_URL: g7.jwksUrl,
       },
       "bulk-svc": {
         ...controlledBaseEnv,
