@@ -413,7 +413,7 @@ async function readJsonBody(req) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
-async function startSingleLocalG7Server(issuer = "https://g7-local.test/auth") {
+async function startSingleLocalG7Server() {
   const { privateKey, publicKey } = generateKeyPairSync("rsa", {
     modulusLength: 2048,
   });
@@ -427,6 +427,9 @@ async function startSingleLocalG7Server(issuer = "https://g7-local.test/auth") {
   const noRoleId = randomUUID();
   const gestorScopes =
     "catalogo:leer catalogo:escribir taxonomia:leer taxonomia:escribir precios:leer precios:escribir auditoria-precios:leer auditoria-precios:exportar promociones:leer promociones:escribir cupones:leer cupones:escribir combos:leer combos:escribir inventario:leer inventario:escribir carga-masiva:leer carga-masiva:escribir";
+
+  let issuer = "";
+  let baseUrl = "";
 
   function issueAccessToken(claims = {}) {
     const header = Buffer.from(
@@ -455,7 +458,6 @@ async function startSingleLocalG7Server(issuer = "https://g7-local.test/auth") {
     return `${header}.${payload}.${sig}`;
   }
 
-  let baseUrl = "";
   const server = createServer(async (req, res) => {
     const url = req.url ?? "/";
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -517,7 +519,7 @@ async function startSingleLocalG7Server(issuer = "https://g7-local.test/auth") {
       );
       return;
     }
-    if (req.method === "POST" && url === "/auth/service-token") {
+    if (req.method === "POST" && (url === "/auth/service-token" || url === "/api/v1/auth/token")) {
       const body = await readJsonBody(req);
       const clientId =
         typeof body.client_id === "string" ? body.client_id : "modulo-ventas";
@@ -576,12 +578,59 @@ async function startSingleLocalG7Server(issuer = "https://g7-local.test/auth") {
     throw new Error("No se pudo iniciar servidor local G7/JWKS.");
   }
   baseUrl = `http://127.0.0.1:${addr.port}`;
+  issuer = baseUrl;
   return {
     issuer,
     baseUrl,
     jwksUrl: `${baseUrl}/jwks`,
     discoveryUrl: `${baseUrl}/.well-known/openid-configuration`,
-    tokenUrl: `${baseUrl}/auth/service-token`,
+    tokenUrl: `${baseUrl}/api/v1/auth/token`,
+    close: () => new Promise((r) => server.close(() => r())),
+  };
+}
+
+async function startLocalG5EvidenceServer() {
+  const snapshots = new Map();
+  const server = createServer(async (req, res) => {
+    const url = req.url ?? "/";
+    if (req.method === "POST" && url === "/__test/g5-snapshots") {
+      const body = await readJsonBody(req);
+      if (typeof body.order_id !== "string" || !body.order_id) {
+        res.statusCode = 400;
+        res.end();
+        return;
+      }
+      snapshots.set(body.order_id, body);
+      res.statusCode = 201;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+    const match = /^\/integraciones\/productos\/pedidos\/([^/]+)\/evidencia-cupon$/.exec(url);
+    if (req.method === "GET" && match) {
+      const orderId = decodeURIComponent(match[1]);
+      const snap = snapshots.get(orderId);
+      if (!snap) {
+        res.statusCode = 404;
+        res.end();
+        return;
+      }
+      res.statusCode = 200;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify(snap));
+      return;
+    }
+    res.statusCode = 404;
+    res.end();
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const addr = server.address();
+  if (!addr || typeof addr === "string") {
+    throw new Error("No se pudo iniciar servidor local de evidencia G5.");
+  }
+  return {
+    baseUrl: `http://127.0.0.1:${addr.port}`,
     close: () => new Promise((r) => server.close(() => r())),
   };
 }
@@ -598,11 +647,13 @@ async function main() {
 
   let pg;
   let g7;
+  let g5Evidence;
   const children = [];
 
   const cleanup = async (vite) => {
     vite?.kill("SIGTERM");
     for (const child of children) child.kill("SIGTERM");
+    await g5Evidence?.close();
     await g7?.close();
     await pg?.stop();
     rmSync(MANIFEST_PATH, { force: true });
@@ -611,6 +662,7 @@ async function main() {
   try {
     pg = await startDisposablePostgresWithTls(backendRoot, docsRoot);
     g7 = await startSingleLocalG7Server();
+    g5Evidence = await startLocalG5EvidenceServer();
 
     const controlledBaseEnv = {
       PATH: process.env.PATH ?? "",
@@ -677,11 +729,15 @@ async function main() {
         PGUSER: "promotions_app",
         G6_DATABASE_SCHEMA: "promotions",
         G6_CONNECTION_MODE: "session",
-        RABBITMQ_URL: "",
         MESSAGING_PROVIDER: "AZURE_SERVICE_BUS",
-        SERVICE_BUS_NAMESPACE_FQDN: "isolated-test.servicebus.windows.net",
         PROMOTIONS_H5_COUPON_COMMANDS_ENABLED: "true",
         PROMOTIONS_H5_ISOLATED_BUS: "1",
+        GATEWAY_CATALOG_SVC_URL: serviceUrls["catalog-svc"],
+        GATEWAY_INVENTORY_SVC_URL: serviceUrls["inventory-svc"],
+        PROMOTIONS_G5_COUPON_EVIDENCE_ORIGIN: g5Evidence.baseUrl,
+        PROMOTIONS_SERVICE_TOKEN_URL: g7.tokenUrl,
+        PROMOTIONS_SERVICE_CLIENT_SECRET: "e2e-promotions-secret",
+        PROMOTIONS_H5_SERVICE_CLIENT_SECRET: "e2e-promotions-h5-secret",
         DATABASE_URL: pg.urlFor("promotions_app"),
       },
       "combos-svc": {
@@ -761,6 +817,7 @@ async function main() {
           g7ApiBase: g7.baseUrl,
           g7Issuer: g7.issuer,
           g7JwksUrl: g7.jwksUrl,
+          g5EvidenceOrigin: g5Evidence.baseUrl,
           viteOrigin,
           dataMode: "api",
           adminApiEnabled: true,

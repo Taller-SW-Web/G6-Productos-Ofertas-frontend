@@ -222,6 +222,9 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     );
     expect(downloadRes.status()).toBe(200);
     expect(downloadRes.headers()["content-type"]).toContain("text/csv");
+    const csvText = await downloadRes.text();
+    expect(csvText.length).toBeGreaterThan(0);
+    expect(csvText).toMatch(/sku|precio|fecha/i);
   });
 
   test("5. Promotions: crear cupón via SPA, recargar, reautenticar y verificar estado ACTIVO persistido", async ({
@@ -411,7 +414,16 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     expect(batchDto.batchId).toBeTruthy();
 
     const token = await issueTokenFromTrustedG7(env.g7ApiBase, "gestor@example.test");
-    let batchSnapshot: { status?: string; rows?: unknown[] } = {};
+    const TERMINAL_BULK_STATES = new Set([
+      "COMPLETADO",
+      "COMPLETADO_CON_ERRORES",
+      "FALLIDO",
+      "RECHAZADO",
+      "COMPLETED",
+      "COMPLETED_WITH_ERRORS",
+      "FAILED",
+    ]);
+    let batchSnapshot: { batchId?: string; status?: string; rows?: unknown[] } = {};
     for (let attempt = 0; attempt < 25; attempt += 1) {
       const pollRes = await request.get(
         `${env.gatewayUrl}/api/v1/carga-masiva/productos/importaciones/${encodeURIComponent(batchDto.batchId!)}`,
@@ -419,16 +431,14 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       );
       expect(pollRes.status()).toBe(200);
       batchSnapshot = (await pollRes.json()) as typeof batchSnapshot;
-      if (
-        ["COMPLETED", "COMPLETED_WITH_ERRORS", "FAILED", "PARTIAL"].includes(
-          batchSnapshot.status ?? "",
-        )
-      ) {
+      if (TERMINAL_BULK_STATES.has(batchSnapshot.status ?? "")) {
         break;
       }
       await new Promise((r) => setTimeout(r, 250));
     }
-    expect(batchSnapshot.status).toBeTruthy();
+    expect(batchSnapshot.batchId).toBe(batchDto.batchId);
+    expect(TERMINAL_BULK_STATES.has(batchSnapshot.status ?? "")).toBe(true);
     expect(Array.isArray(batchSnapshot.rows)).toBe(true);
+    expect((batchSnapshot.rows ?? []).length).toBeGreaterThanOrEqual(1);
   });
 });

@@ -11,6 +11,7 @@ export interface RealStackEnvironment {
   g7ApiBase: string;
   g7Issuer: string;
   g7JwksUrl: string;
+  g5EvidenceOrigin: string;
   viteOrigin: string;
   dataMode: "api";
   adminApiEnabled: true;
@@ -75,6 +76,8 @@ export function assertRealStackPreflight(): RealStackEnvironment {
   const g7ApiBaseRaw = process.env.VITE_G7_API_BASE ?? manifest.g7ApiBase;
   const g7Issuer = process.env.G6_REAL_G7_ISSUER ?? manifest.g7Issuer;
   const g7JwksUrl = process.env.G6_REAL_G7_JWKS_URL ?? manifest.g7JwksUrl;
+  const g5EvidenceOrigin =
+    process.env.G6_REAL_G5_EVIDENCE_ORIGIN ?? manifest.g5EvidenceOrigin ?? "";
   const viteOrigin = manifest.viteOrigin ?? "http://127.0.0.1:4173";
 
   if (!gatewayRaw || !g7ApiBaseRaw || !g7Issuer || !g7JwksUrl) {
@@ -86,12 +89,16 @@ export function assertRealStackPreflight(): RealStackEnvironment {
   assertSafeLocalUrl(gatewayRaw, "G6_REAL_GATEWAY_URL");
   assertSafeLocalUrl(g7ApiBaseRaw, "VITE_G7_API_BASE");
   assertSafeLocalUrl(g7JwksUrl, "G6_REAL_G7_JWKS_URL");
+  if (g5EvidenceOrigin) {
+    assertSafeLocalUrl(g5EvidenceOrigin, "G6_REAL_G5_EVIDENCE_ORIGIN");
+  }
 
   return {
     gatewayUrl: gatewayRaw.replace(/\/$/, ""),
     g7ApiBase: g7ApiBaseRaw.replace(/\/$/, ""),
     g7Issuer,
     g7JwksUrl,
+    g5EvidenceOrigin,
     viteOrigin,
     dataMode: "api",
     adminApiEnabled: true,

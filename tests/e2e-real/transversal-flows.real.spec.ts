@@ -131,17 +131,62 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     const g5Token = await issueTechnicalServiceToken(
       env.g7ApiBase,
       "modulo-ventas",
-      "cupones:consumir cupones:restaurar cupones:operaciones:leer",
+      "cupones:consumir cupones:restaurar cupones:operaciones:leer stock:reservar",
     );
     const consumeOpId = randomUUID();
     const orderId = `PED-E2E-${randomUUID().slice(0, 8)}`;
+    const effectiveAt = new Date().toISOString();
     const reservationId = randomUUID();
+
+    // 4.0 Registrar reserva real en Inventory + evidencia G5 coherente para escenario positivo N01
+    if (!env.g5EvidenceOrigin) {
+      throw new Error("PREFLIGHT_BLOCKED: g5EvidenceOrigin requerido para N01.");
+    }
+    const skuForCoupon = `SKU-N01-${randomUUID().slice(0, 6)}`;
+    await request.post(`${env.gatewayUrl}/api/v1/inventario/reservas`, {
+      headers: {
+        Authorization: `Bearer ${g5Token}`,
+        "X-Correlation-Id": randomUUID(),
+        "Idempotency-Key": randomUUID(),
+        "Content-Type": "application/json",
+      },
+      data: {
+        reservation_id: reservationId,
+        order_id: orderId,
+        items: [{ sku: skuForCoupon, quantity: 1 }],
+      },
+    });
+    const snapRes = await request.post(
+      `${env.g5EvidenceOrigin}/__test/g5-snapshots`,
+      {
+        data: {
+          order_id: orderId,
+          reservation_id: reservationId,
+          commercial_snapshot_ref: orderId,
+          channel_id: "MARKETPLACE",
+          coupon_code: couponCode,
+          effective_at: effectiveAt,
+          customer_ref: null,
+          lines: [
+            {
+              sku: skuForCoupon,
+              quantity: 1,
+              regular_price: "120.00",
+              offer_price: null,
+              currency: "PEN",
+            },
+          ],
+        },
+      },
+    );
+    expect(snapRes.status()).toBe(201);
+
     const consumeBody = {
       operation_id: consumeOpId,
       order_id: orderId,
       coupon_code: couponCode,
       channel_id: "MARKETPLACE",
-      effective_at: new Date().toISOString(),
+      effective_at: effectiveAt,
       reservation_id: reservationId,
       commercial_snapshot_ref: orderId,
     };
@@ -321,5 +366,53 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     }
     expect(missingSnapshot.status).toBe("REJECTED");
     expect(missingSnapshot.result?.result_code).toBeTruthy();
+
+    // 4g. Rechazo asíncrono por reserva inexistente en Inventory (202 admisión -> REJECTED)
+    const noResOpId = randomUUID();
+    const noResOrderId = `PED-NORES-${randomUUID().slice(0, 8)}`;
+    const noResTime = new Date().toISOString();
+    await request.post(`${env.g5EvidenceOrigin}/__test/g5-snapshots`, {
+      data: {
+        order_id: noResOrderId,
+        reservation_id: randomUUID(),
+        commercial_snapshot_ref: noResOrderId,
+        channel_id: "MARKETPLACE",
+        coupon_code: couponCode,
+        effective_at: noResTime,
+        customer_ref: null,
+        lines: [{ sku: skuForCoupon, quantity: 1, regular_price: "120.00", offer_price: null, currency: "PEN" }],
+      },
+    });
+    const noResAdm = await request.post(`${env.gatewayUrl}/api/v1/cupones/consumos`, {
+      headers: {
+        Authorization: `Bearer ${g5Token}`,
+        "X-Correlation-Id": randomUUID(),
+        "Idempotency-Key": noResOpId,
+        "Content-Type": "application/json",
+      },
+      data: {
+        operation_id: noResOpId,
+        order_id: noResOrderId,
+        coupon_code: couponCode,
+        channel_id: "MARKETPLACE",
+        effective_at: noResTime,
+        reservation_id: randomUUID(),
+        commercial_snapshot_ref: noResOrderId,
+      },
+    });
+    expect([200, 202]).toContain(noResAdm.status());
+    let noResSnap: { status?: string; result?: { result_code?: string } | null } = {};
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      const poll = await request.get(
+        `${env.gatewayUrl}/api/v1/cupones/operaciones/${encodeURIComponent(noResOpId)}?order_id=${encodeURIComponent(noResOrderId)}`,
+        { headers: { Authorization: `Bearer ${g5Token}` } },
+      );
+      expect(poll.status()).toBe(200);
+      noResSnap = (await poll.json()) as typeof noResSnap;
+      if (noResSnap.status === "REJECTED" || noResSnap.status === "COMPLETED") break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    expect(noResSnap.status).toBe("REJECTED");
+    expect(noResSnap.result?.result_code).toBeTruthy();
   });
 });
