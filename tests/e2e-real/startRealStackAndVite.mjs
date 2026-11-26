@@ -1323,6 +1323,7 @@ async function startLocalIsolatedServiceBusBroker() {
   });
   const dlq = new Map();
   const inflight = new Map();
+  const receiveUnavailableUntil = new Map();
   const storageObjects = new Map();
   const getQueue = (name) => {
     if (!queues.has(name)) queues.set(name, []);
@@ -1334,6 +1335,14 @@ async function startLocalIsolatedServiceBusBroker() {
   };
   const server = createServer(async (req, res) => {
     const url = req.url ?? "/";
+    if (req.method === 'POST' && url === '/__test/broker-receive-unavailable') {
+      const fault = await readJsonBody(req);
+      if (typeof fault.queue !== 'string' || !Number.isInteger(fault.durationMs) || fault.durationMs < 1 || fault.durationMs > 5000) {
+        res.statusCode = 400; res.end(); return;
+      }
+      receiveUnavailableUntil.set(fault.queue, Date.now() + fault.durationMs);
+      res.statusCode = 201; res.end(); return;
+    }
     if (req.method === "GET" && url === "/__test/broker-evidence") {
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify({ transport: "HTTP_IN_MEMORY_NOT_AZURE", evidence,
@@ -1403,6 +1412,9 @@ async function startLocalIsolatedServiceBusBroker() {
       return;
     }
     if (req.method === "POST" && action === "receive") {
+      if (Date.now() < (receiveUnavailableUntil.get(queue) ?? 0)) {
+        res.statusCode = 503; res.end(); return;
+      }
       const q = getQueue(queue);
       if (q.length === 0) {
         res.statusCode = 204;
