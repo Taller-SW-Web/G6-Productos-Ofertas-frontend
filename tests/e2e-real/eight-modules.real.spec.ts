@@ -372,7 +372,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     await expect(page.getByText(comboName)).toBeVisible();
   });
 
-  test("8. Bulk: descargar plantilla CSV, importar lote, capturar batch_id y hacer polling hasta estado terminal", async ({
+  test("8a. Bulk (admisión HTTP): descargar plantilla CSV, subir lote válido y verificar 202 QUEUED y persistencia inicial", async ({
     page,
     request,
   }) => {
@@ -395,7 +395,60 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     const csvContent =
       "sku_base,nombre,precio_regular,stock_inicial\nBULK-E2E-1,Prod Bulk,25.00,10\n";
     await fileInput.setInputFiles({
-      name: "lote-e2e.csv",
+      name: "lote-admision-e2e.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from(csvContent, "utf8"),
+    });
+    const uploadBtn = page.getByRole("button", { name: /importar|cargar|subir/i }).first();
+    await expect(uploadBtn).toBeVisible();
+    const [importRes] = await Promise.all([
+      page.waitForResponse(
+        (res) =>
+          res.request().method() === "POST" &&
+          new URL(res.url()).pathname === "/api/v1/carga-masiva/productos/importaciones",
+      ),
+      uploadBtn.click(),
+    ]);
+    expect(importRes.status()).toBe(202);
+    const batchDto = (await importRes.json()) as { batch_id?: string; status?: string };
+    expect(batchDto.batch_id).toBeTruthy();
+    expect(batchDto.status).toBe("QUEUED");
+
+    const token = await issueTokenFromTrustedG7(env.g7ApiBase, "gestor@example.test");
+    const initialRes = await request.get(
+      `${env.gatewayUrl}/api/v1/carga-masiva/productos/importaciones/${encodeURIComponent(batchDto.batch_id!)}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    expect(initialRes.status()).toBe(200);
+    const initialSnap = (await initialRes.json()) as {
+      batch_id?: string;
+      status?: string;
+      total_rows?: number;
+      rows?: Array<{ row_id?: string; status?: string }>;
+    };
+    expect(initialSnap.batch_id).toBe(batchDto.batch_id);
+    expect(["QUEUED", "PROCESSING", "COMPLETED"]).toContain(initialSnap.status);
+    expect(initialSnap.total_rows).toBeGreaterThanOrEqual(1);
+    expect(Array.isArray(initialSnap.rows)).toBe(true);
+    expect((initialSnap.rows ?? []).length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("8b. Bulk (procesamiento integral con mensajería): exige COMPLETED, conteo íntegro de filas, cero errores y sin conciliación pendiente", async ({
+    page,
+    request,
+  }) => {
+    test.skip(
+      process.env.G6_BULK_INTEGRAL_BUS_ENABLED !== "1",
+      "Requiere laboratorio con transporte aislado operativo para Bulk<->Catalog (no Azure Chile ni RabbitMQ productivo).",
+    );
+    const env = assertRealStackPreflight();
+    await navigateViaSpa(page, "/carga-masiva");
+    const fileInput = page.locator('input[type="file"]').first();
+    await expect(fileInput).toBeAttached();
+    const csvContent =
+      "sku_base,nombre,precio_regular,stock_inicial\nBULK-E2E-INT-1,Prod Bulk Integral,25.00,10\n";
+    await fileInput.setInputFiles({
+      name: "lote-integral-e2e.csv",
       mimeType: "text/csv",
       buffer: Buffer.from(csvContent, "utf8"),
     });
@@ -447,7 +500,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     expect(batchSnapshot.rows?.[0]?.status).toBe("COMPLETED");
   });
 
-  test("8b. Bulk: archivo inválido falla de forma explícita (400 o FAILED_GENERAL separado del caso positivo)", async ({
+  test("8c. Bulk (CSV inválido): falla de forma explícita (400/422 o FAILED_GENERAL separado del caso positivo)", async ({
     page,
     request,
   }) => {
