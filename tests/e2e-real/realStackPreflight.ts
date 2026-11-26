@@ -1,6 +1,13 @@
 import { generateKeyPairSync, randomUUID, sign } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { once } from "node:events";
+import { resolve } from "node:path";
+
+export const REAL_STACK_MANIFEST_PATH = resolve(
+  process.cwd(),
+  "tests/e2e-real/.runtime-stack.json",
+);
 
 export interface RealStackEnvironment {
   gatewayUrl: string;
@@ -9,6 +16,7 @@ export interface RealStackEnvironment {
   g7Issuer: string;
   g7JwksUrl: string;
   dataMode: "api";
+  adminApiEnabled: true;
 }
 
 const FORBIDDEN_HOST_PATTERNS = [
@@ -42,18 +50,31 @@ export function assertSafeLocalUrl(raw: string, label: string): URL {
 }
 
 export function assertRealStackPreflight(): RealStackEnvironment {
+  const manifest = existsSync(REAL_STACK_MANIFEST_PATH)
+    ? (JSON.parse(readFileSync(REAL_STACK_MANIFEST_PATH, "utf8")) as Partial<RealStackEnvironment>)
+    : {};
+
   const dataMode = process.env.VITE_DATA_MODE ?? "api";
   if (dataMode !== "api") {
     throw new Error(
       `PREFLIGHT_BLOCKED: VITE_DATA_MODE debe ser 'api' (recibido: ${dataMode}).`,
     );
   }
+  const adminEnabled = process.env.VITE_G6_ADMIN_API_ENABLED ?? (manifest.adminApiEnabled ? "true" : "");
+  if (adminEnabled !== "true") {
+    throw new Error(
+      "PREFLIGHT_BLOCKED: VITE_G6_ADMIN_API_ENABLED debe ser 'true' en la suite E2E real.",
+    );
+  }
 
-  const gatewayRaw = process.env.G6_REAL_GATEWAY_URL ?? process.env.VITE_GATEWAY_ORIGIN;
-  const g7ApiBaseRaw = process.env.VITE_G7_API_BASE;
-  const dbRaw = process.env.G6_REAL_PG_URL;
-  const g7Issuer = process.env.G6_REAL_G7_ISSUER;
-  const g7JwksUrl = process.env.G6_REAL_G7_JWKS_URL;
+  const gatewayRaw =
+    process.env.G6_REAL_GATEWAY_URL ??
+    process.env.VITE_GATEWAY_ORIGIN ??
+    manifest.gatewayUrl;
+  const g7ApiBaseRaw = process.env.VITE_G7_API_BASE ?? manifest.g7ApiBase;
+  const dbRaw = process.env.G6_REAL_PG_URL ?? manifest.databaseUrl;
+  const g7Issuer = process.env.G6_REAL_G7_ISSUER ?? manifest.g7Issuer;
+  const g7JwksUrl = process.env.G6_REAL_G7_JWKS_URL ?? manifest.g7JwksUrl;
 
   if (!gatewayRaw || !g7ApiBaseRaw || !dbRaw || !g7Issuer || !g7JwksUrl) {
     throw new Error(
@@ -73,6 +94,7 @@ export function assertRealStackPreflight(): RealStackEnvironment {
     g7Issuer,
     g7JwksUrl,
     dataMode: "api",
+    adminApiEnabled: true,
   };
 }
 

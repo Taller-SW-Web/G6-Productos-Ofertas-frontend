@@ -141,6 +141,14 @@ export async function startIsolatedRealStack(): Promise<OrchestratedStack> {
           GATEWAY_COMBOS_SVC_URL: serviceUrls["combos-svc"],
           GATEWAY_INVENTORY_SVC_URL: serviceUrls["inventory-svc"],
           GATEWAY_BULK_SVC_URL: serviceUrls["bulk-svc"],
+          GATEWAY_CATALOG_SVC_READINESS_PATH: "/health/ready",
+          GATEWAY_TAXONOMY_SVC_READINESS_PATH: "/health/ready",
+          GATEWAY_PRICING_SVC_READINESS_PATH: "/health/ready",
+          GATEWAY_PRICE_AUDIT_SVC_READINESS_PATH: "/health/ready",
+          GATEWAY_PROMOTIONS_SVC_READINESS_PATH: "/health/ready",
+          GATEWAY_COMBOS_SVC_READINESS_PATH: "/health/ready",
+          GATEWAY_INVENTORY_SVC_READINESS_PATH: "/health/ready",
+          GATEWAY_BULK_SVC_READINESS_PATH: "/health/ready",
         },
         stdio: "pipe",
       },
@@ -153,6 +161,7 @@ export async function startIsolatedRealStack(): Promise<OrchestratedStack> {
     await waitForHttpReady(`${gatewayUrl}/health/ready`);
 
     process.env.VITE_DATA_MODE = "api";
+    process.env.VITE_G6_ADMIN_API_ENABLED = "true";
     process.env.VITE_GATEWAY_ORIGIN = gatewayUrl;
     process.env.G6_REAL_GATEWAY_URL = gatewayUrl;
     process.env.VITE_G7_API_BASE = g7Server.baseUrl;

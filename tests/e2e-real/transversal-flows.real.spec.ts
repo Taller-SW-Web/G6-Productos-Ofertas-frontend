@@ -7,14 +7,13 @@ import {
 } from "./realStackPreflight.ts";
 
 test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Microservicios (ESCRITA_NO_EJECUTADA)", () => {
-  test("secuencias reales entre módulos sin aceptar 404 en recursos creados y verificando identidades compartidas", async ({
+  test("causalidad real: Taxonomy -> Catalog -> Pricing/Inventory -> Audit/Promotions -> Combos -> Coupons", async ({
     page,
     request,
   }) => {
     const env = assertRealStackPreflight();
     await verifyGatewayAndServicesReady(env.gatewayUrl);
 
-    // 1. Login real en React y captura del Bearer emitido por G7 local
     let capturedBearer = "";
     page.on("request", (req) => {
       const auth = req.headers()["authorization"];
@@ -22,11 +21,17 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
         capturedBearer = auth;
       }
     });
+
     await page.goto("/productos");
-    await loginViaReactUi(page, "gestor@example.test", "isolated-g7-password");
-    await page.waitForResponse((res) =>
-      new URL(res.url()).pathname.startsWith("/api/v1/productos"),
-    );
+    const [loginRes] = await Promise.all([
+      page.waitForResponse(
+        (res) =>
+          res.request().method() === "GET" &&
+          new URL(res.url()).pathname.startsWith("/api/v1/productos"),
+      ),
+      loginViaReactUi(page, "gestor@example.test", "isolated-g7-password"),
+    ]);
+    expect(loginRes.status()).toBe(200);
     expect(capturedBearer).toMatch(/^Bearer eyJ/);
 
     const headers = {
@@ -36,7 +41,7 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
       Accept: "application/json",
     };
 
-    // 2. Taxonomy -> Catalog: crear categoría y verificar lectura inmediata (200 obligatorio)
+    // 1. Taxonomy -> Catalog: crear categoría y producto enlazado a categoriaId
     const catSlug = `cat-trans-${randomUUID().slice(0, 6)}`;
     const createCat = await request.post(`${env.gatewayUrl}/api/v1/categorias`, {
       headers,
@@ -56,49 +61,85 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     );
     expect(getCat.status()).toBe(200);
 
-    // 3. Catalog -> Pricing & Inventory: crear producto, consultar detalle (200), consultar precio/disponibilidad
-    const prodRes = await request.post(`${env.gatewayUrl}/api/v1/productos`, {
+    const createProd = await request.post(`${env.gatewayUrl}/api/v1/productos`, {
       headers: { ...headers, "Idempotency-Key": randomUUID() },
       data: {
         nombre: `Prod Transversal ${randomUUID().slice(0, 6)}`,
         categoriaId: catDto.categoriaId,
       },
     });
-    expect([200, 201]).toContain(prodRes.status());
-    const prodDto = (await prodRes.json()) as { productId: string };
+    expect([200, 201]).toContain(createProd.status());
+    const prodDto = (await createProd.json()) as { productId: string };
     expect(prodDto.productId).toBeTruthy();
 
-    const getProd = await request.get(
-      `${env.gatewayUrl}/api/v1/productos/${encodeURIComponent(prodDto.productId)}`,
+    // 2. Catalog -> Pricing & Inventory: actualizar precio base del producto y verificar lectura
+    const putPrice = await request.put(
+      `${env.gatewayUrl}/api/v1/precios/productos/${encodeURIComponent(prodDto.productId)}`,
+      {
+        headers: { ...headers, "Idempotency-Key": randomUUID() },
+        data: {
+          precioRegular: "120.00",
+          currency: "PEN",
+          motivoCambio: "E2E_TRANSVERSAL",
+        },
+      },
+    );
+    expect([200, 201]).toContain(putPrice.status());
+
+    const getPrice = await request.get(
+      `${env.gatewayUrl}/api/v1/precios/productos/${encodeURIComponent(prodDto.productId)}`,
       { headers },
     );
-    expect(getProd.status()).toBe(200);
+    expect(getPrice.status()).toBe(200);
 
-    // 4. Pricing -> Price Audit & Promotions: consultar auditoría y promociones administrativas (200 obligatorio)
+    // 3. Pricing -> Price Audit: verificar registro auditable del cambio
     const auditRes = await request.get(
-      `${env.gatewayUrl}/api/v1/auditoria-precios/administracion?pagina=1&tamanio=5`,
+      `${env.gatewayUrl}/api/v1/auditoria-precios/administracion?pagina=1&tamanio=10`,
       { headers },
     );
     expect(auditRes.status()).toBe(200);
+    const auditDto = (await auditRes.json()) as { items: unknown[] };
+    expect(Array.isArray(auditDto.items)).toBe(true);
 
-    const promoRes = await request.get(
-      `${env.gatewayUrl}/api/v1/promociones/administracion?pagina=1&tamanio=5`,
+    // 4. Combos: crear combo administrativo y consultar detalle + disponibilidad (200 obligatorio)
+    const createCombo = await request.post(
+      `${env.gatewayUrl}/api/v1/combos/administracion`,
+      {
+        headers: { ...headers, "Idempotency-Key": randomUUID() },
+        data: {
+          nombre: `Combo Trans ${randomUUID().slice(0, 6)}`,
+          productoId: prodDto.productId,
+        },
+      },
+    );
+    expect([200, 201]).toContain(createCombo.status());
+    const comboDto = (await createCombo.json()) as { comboId: string };
+    expect(comboDto.comboId).toBeTruthy();
+
+    const getCombo = await request.get(
+      `${env.gatewayUrl}/api/v1/combos/${encodeURIComponent(comboDto.comboId)}`,
       { headers },
     );
-    expect(promoRes.status()).toBe(200);
+    expect(getCombo.status()).toBe(200);
 
-    // 5. Combos -> listado y disponibilidad sin aceptar 404
-    const combosRes = await request.get(
-      `${env.gatewayUrl}/api/v1/combos?pagina=1&tamanio=5`,
+    // 5. Promotions -> Coupons: crear cupón y verificar lectura por ID (200 obligatorio)
+    const couponCode = `TRN${randomUUID().slice(0, 6).toUpperCase()}`;
+    const createCoupon = await request.post(`${env.gatewayUrl}/api/v1/cupones`, {
+      headers: { ...headers, "Idempotency-Key": randomUUID() },
+      data: {
+        codigo: couponCode,
+        tipoDescuento: "PORCENTAJE",
+        valor: 10,
+      },
+    });
+    expect([200, 201]).toContain(createCoupon.status());
+    const couponDto = (await createCoupon.json()) as { cuponId: string };
+    expect(couponDto.cuponId).toBeTruthy();
+
+    const getCoupon = await request.get(
+      `${env.gatewayUrl}/api/v1/cupones/${encodeURIComponent(couponDto.cuponId)}`,
       { headers },
     );
-    expect(combosRes.status()).toBe(200);
-
-    // 6. Bulk -> plantilla v2 CSV sin aceptar 404
-    const tplRes = await request.get(
-      `${env.gatewayUrl}/api/v1/carga-masiva/productos/plantilla?formato=CSV`,
-      { headers },
-    );
-    expect(tplRes.status()).toBe(200);
+    expect(getCoupon.status()).toBe(200);
   });
 });

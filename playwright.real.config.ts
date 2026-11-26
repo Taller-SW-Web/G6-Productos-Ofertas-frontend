@@ -11,17 +11,13 @@ if (process.env.VITE_DATA_MODE && process.env.VITE_DATA_MODE !== "api") {
   );
 }
 
-const gatewayOrigin =
-  process.env.VITE_GATEWAY_ORIGIN ?? process.env.G6_REAL_GATEWAY_URL ?? "";
-const g7ApiBase = process.env.VITE_G7_API_BASE ?? "";
-
 export default defineConfig({
   testDir: "./tests/e2e-real",
   testMatch: "**/*.real.spec.ts",
   fullyParallel: false,
   workers: 1,
   retries: 0,
-  timeout: 60_000,
+  timeout: 90_000,
   use: {
     baseURL: `http://127.0.0.1:${port}`,
     browserName: "chromium",
@@ -32,14 +28,15 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   webServer: {
-    command: `npm run dev -- --port ${port} --strictPort`,
+    command: "npx tsx tests/e2e-real/startRealStackAndVite.ts",
     url: `http://127.0.0.1:${port}`,
     reuseExistingServer: false,
+    timeout: 120_000,
     env: {
       ...process.env,
+      PLAYWRIGHT_REAL_PORT: String(port),
       VITE_DATA_MODE: "api",
-      ...(gatewayOrigin ? { VITE_GATEWAY_ORIGIN: gatewayOrigin } : {}),
-      ...(g7ApiBase ? { VITE_G7_API_BASE: g7ApiBase } : {}),
+      VITE_G6_ADMIN_API_ENABLED: "true",
     },
   },
 });

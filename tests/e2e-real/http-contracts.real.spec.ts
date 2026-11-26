@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import {
   assertRealStackPreflight,
   loginViaReactUi,
+  startLocalG7Server,
   verifyGatewayAndServicesReady,
 } from "./realStackPreflight.ts";
 
@@ -41,13 +42,14 @@ test.describe("Contratos HTTP, seguridad G7 y resiliencia React -> Gateway -> Ba
     });
 
     await page.goto("/productos");
-    await loginViaReactUi(page, "gestor@example.test", "isolated-g7-password");
-
-    const listRes = await page.waitForResponse(
-      (res) =>
-        res.request().method() === "GET" &&
-        new URL(res.url()).pathname.startsWith("/api/v1/productos"),
-    );
+    const [listRes] = await Promise.all([
+      page.waitForResponse(
+        (res) =>
+          res.request().method() === "GET" &&
+          new URL(res.url()).pathname.startsWith("/api/v1/productos"),
+      ),
+      loginViaReactUi(page, "gestor@example.test", "isolated-g7-password"),
+    ]);
     expect(listRes.status()).toBe(200);
     expect(authHeaders.some((h) => h.startsWith("Bearer eyJ"))).toBe(true);
     expect(correlationHeaders.length).toBeGreaterThan(0);
@@ -63,23 +65,37 @@ test.describe("Contratos HTTP, seguridad G7 y resiliencia React -> Gateway -> Ba
     expect(persistedStorage).not.toMatch(/eyJ|refresh-|isolated-g7-password/);
   });
 
-  test("verifica 401/403/404/409/422/429/503 en Gateway y ausencia de reintento automático en mutaciones ambiguas", async ({
+  test("usuario sin GESTOR_COMERCIAL ve AccessDenied en React sin emitir peticiones administrativas, y Gateway devuelve 403 ante JWT RS256 sin permisos", async ({
     page,
     request,
   }) => {
     const env = assertRealStackPreflight();
     await verifyGatewayAndServicesReady(env.gatewayUrl);
 
-    const correlationId = randomUUID();
+    // 1. UI: usuario sin GESTOR_COMERCIAL recibe AccessDenied y 0 requests administrativos
+    const adminRequests: string[] = [];
+    page.on("request", (req) => {
+      const url = new URL(req.url());
+      if (url.pathname.startsWith("/api/v1/")) {
+        adminRequests.push(`${req.method()} ${url.pathname}`);
+      }
+    });
 
-    // 401 sin JWT
+    await page.goto("/productos");
+    await loginViaReactUi(page, "sinrol@example.test", "isolated-g7-password");
+    await expect(
+      page.getByText(/acceso denegado|no tienes permisos/i).first(),
+    ).toBeVisible();
+    expect(adminRequests).toEqual([]);
+
+    // 2. Gateway: 401 sin JWT y 401 JWT inválido
+    const correlationId = randomUUID();
     const unauth = await request.get(`${env.gatewayUrl}/api/v1/productos`, {
       headers: { "X-Correlation-Id": correlationId },
     });
     expect(unauth.status()).toBe(401);
     expect(unauth.headers()["content-type"]).toContain("application/problem+json");
 
-    // 401 JWT inválido
     const badJwt = await request.get(`${env.gatewayUrl}/api/v1/productos`, {
       headers: {
         Authorization: "Bearer header.invalid.sig",
@@ -88,18 +104,46 @@ test.describe("Contratos HTTP, seguridad G7 y resiliencia React -> Gateway -> Ba
     });
     expect(badJwt.status()).toBe(401);
 
-    // 403 usuario autenticado sin rol via UI
-    await page.goto("/productos");
-    await loginViaReactUi(page, "sinrol@example.test", "isolated-g7-password");
-    const forbiddenRes = await page.waitForResponse(
-      (res) =>
-        new URL(res.url()).pathname.startsWith("/api/v1/productos") &&
-        res.status() === 403,
-    );
-    expect(forbiddenRes.status()).toBe(403);
-    expect(forbiddenRes.headers()["content-type"]).toContain("application/problem+json");
+    // 3. Gateway: JWT RS256 estructuralmente válido (tipo:'acceso', sub UUID) pero sin roles/scopes -> 403
+    const g7 = await startLocalG7Server(env.g7Issuer);
+    try {
+      const noPermJwt = g7.issueAccessToken({
+        sub: randomUUID(),
+        tipo: "acceso",
+        roles: [],
+        scope: "",
+      });
+      const forbidden = await request.get(`${env.gatewayUrl}/api/v1/productos`, {
+        headers: {
+          Authorization: `Bearer ${noPermJwt}`,
+          "X-Correlation-Id": correlationId,
+        },
+      });
+      expect(forbidden.status()).toBe(403);
+      expect(forbidden.headers()["content-type"]).toContain("application/problem+json");
+    } finally {
+      await g7.close();
+    }
+  });
 
-    // Mutación ambigua: al fallar con 503/timeout, React NO debe reenviar automáticamente el POST
+  test("verifica 429 con Retry-After y ausencia de reintento automático en mutaciones ambiguas 503", async ({
+    page,
+  }) => {
+    const env = assertRealStackPreflight();
+    await verifyGatewayAndServicesReady(env.gatewayUrl);
+
+    await page.goto("/productos");
+    const [loginRes] = await Promise.all([
+      page.waitForResponse(
+        (res) =>
+          res.request().method() === "GET" &&
+          new URL(res.url()).pathname.startsWith("/api/v1/productos"),
+      ),
+      loginViaReactUi(page, "gestor@example.test", "isolated-g7-password"),
+    ]);
+    expect(loginRes.status()).toBe(200);
+
+    // Mutación ambigua 503 -> máximo 1 intento POST
     let postAttempts = 0;
     await page.route("**/api/v1/combos/administracion", async (route) => {
       postAttempts += 1;
@@ -117,18 +161,24 @@ test.describe("Contratos HTTP, seguridad G7 y resiliencia React -> Gateway -> Ba
 
     await page.goto("/combos/nuevo");
     const nameInput = page.getByRole("textbox").first();
-    if (await nameInput.isVisible().catch(() => false)) {
-      await nameInput.fill(`Combo-503-${randomUUID().slice(0, 6)}`);
-      const submitBtn = page.getByRole("button", { name: /guardar|crear/i }).first();
-      if (await submitBtn.isVisible().catch(() => false)) {
-        await submitBtn.click();
-        await page.waitForTimeout(500);
-        expect(postAttempts).toBeLessThanOrEqual(1);
-      }
-    }
+    await expect(nameInput).toBeVisible();
+    await nameInput.fill(`Combo-503-${randomUUID().slice(0, 6)}`);
+    const submitBtn = page.getByRole("button", { name: /guardar|crear/i }).first();
+    await expect(submitBtn).toBeVisible();
+    const [err503] = await Promise.all([
+      page.waitForResponse(
+        (res) =>
+          res.request().method() === "POST" &&
+          new URL(res.url()).pathname === "/api/v1/combos/administracion",
+      ),
+      submitBtn.click(),
+    ]);
+    expect(err503.status()).toBe(503);
+    await page.waitForTimeout(300);
+    expect(postAttempts).toBe(1);
     await page.unroute("**/api/v1/combos/administracion");
 
-    // 429 con Retry-After en lectura debe exponerse sin ocultar el error
+    // 429 con Retry-After
     await page.route("**/api/v1/inventario/dashboard*", async (route) => {
       await route.fulfill({
         status: 429,
@@ -142,10 +192,12 @@ test.describe("Contratos HTTP, seguridad G7 y resiliencia React -> Gateway -> Ba
         }),
       });
     });
-    await page.goto("/inventario/dashboard");
-    const rateRes = await page.waitForResponse((res) =>
-      new URL(res.url()).pathname.startsWith("/api/v1/inventario/dashboard"),
-    );
+    const [rateRes] = await Promise.all([
+      page.waitForResponse((res) =>
+        new URL(res.url()).pathname.startsWith("/api/v1/inventario/dashboard"),
+      ),
+      page.goto("/inventario/dashboard"),
+    ]);
     expect(rateRes.status()).toBe(429);
     expect(rateRes.headers()["retry-after"]).toBe("2");
     await page.unroute("**/api/v1/inventario/dashboard*");
