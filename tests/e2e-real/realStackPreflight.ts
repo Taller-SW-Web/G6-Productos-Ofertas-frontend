@@ -8,6 +8,7 @@ export const REAL_STACK_MANIFEST_PATH = resolve(
 
 export interface RealStackEnvironment {
   gatewayUrl: string;
+  catalogServiceUrl: string;
   g7ApiBase: string;
   g7Issuer: string;
   g7JwksUrl: string;
@@ -74,6 +75,8 @@ export function assertRealStackPreflight(): RealStackEnvironment {
     process.env.G6_REAL_GATEWAY_URL ??
     process.env.VITE_GATEWAY_ORIGIN ??
     manifest.gatewayUrl;
+  const catalogServiceUrlRaw =
+    process.env.G6_REAL_CATALOG_URL ?? manifest.catalogServiceUrl ?? "";
   const g7ApiBaseRaw = process.env.VITE_G7_API_BASE ?? manifest.g7ApiBase;
   const g7Issuer = process.env.G6_REAL_G7_ISSUER ?? manifest.g7Issuer;
   const g7JwksUrl = process.env.G6_REAL_G7_JWKS_URL ?? manifest.g7JwksUrl;
@@ -90,6 +93,9 @@ export function assertRealStackPreflight(): RealStackEnvironment {
   }
 
   assertSafeLocalUrl(gatewayRaw, "G6_REAL_GATEWAY_URL");
+  if (catalogServiceUrlRaw) {
+    assertSafeLocalUrl(catalogServiceUrlRaw, "G6_REAL_CATALOG_URL");
+  }
   assertSafeLocalUrl(g7ApiBaseRaw, "VITE_G7_API_BASE");
   assertSafeLocalUrl(g7JwksUrl, "G6_REAL_G7_JWKS_URL");
   if (g5SeedOrigin) {
@@ -98,6 +104,7 @@ export function assertRealStackPreflight(): RealStackEnvironment {
 
   return {
     gatewayUrl: gatewayRaw.replace(/\/$/, ""),
+    catalogServiceUrl: catalogServiceUrlRaw.replace(/\/$/, ""),
     g7ApiBase: g7ApiBaseRaw.replace(/\/$/, ""),
     g7Issuer,
     g7JwksUrl,
@@ -140,26 +147,44 @@ export async function issueTokenFromTrustedG7(
   return dto.accessToken;
 }
 
+const LAB_CLIENT_SECRETS: Record<string, string> = {
+  "modulo-ventas": "e2e-ventas-secret",
+  "modulo-productos": "e2e-catalog-secret",
+  "modulo-marketplace": "e2e-marketplace-secret",
+  "modulo-chatbot": "e2e-chatbot-secret",
+  "promotions-svc": "e2e-promotions-secret",
+};
+
 export async function issueTechnicalServiceToken(
   g7ApiBase: string,
   clientId: string,
   scope: string,
+  clientSecret?: string,
 ): Promise<string> {
-  const res = await fetch(`${g7ApiBase}/auth/service-token`, {
+  const secret = clientSecret ?? LAB_CLIENT_SECRETS[clientId];
+  if (!secret) {
+    throw new Error(`Cliente técnico de laboratorio no registrado: ${clientId}`);
+  }
+  const res = await fetch(`${g7ApiBase}/api/v1/auth/token`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ client_id: clientId, scope }),
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "client_credentials",
+      client_id: clientId,
+      client_secret: secret,
+      scope,
+    }),
   });
   if (!res.ok) {
     throw new Error(
       `No se pudo emitir token técnico G7 para ${clientId} (HTTP ${res.status}).`,
     );
   }
-  const dto = (await res.json()) as { access_token?: string };
-  if (!dto.access_token) {
-    throw new Error("El emisor G7 local no devolvió access_token.");
+  const dto = (await res.json()) as { accessToken?: string };
+  if (!dto.accessToken) {
+    throw new Error("El emisor G7 local no devolvió accessToken.");
   }
-  return dto.access_token;
+  return dto.accessToken;
 }
 
 export interface SpaPageLike {

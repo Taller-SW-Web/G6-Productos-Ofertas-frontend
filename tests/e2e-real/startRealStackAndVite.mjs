@@ -435,8 +435,65 @@ async function startSingleLocalG7Server() {
   };
   const gestorId = randomUUID();
   const noRoleId = randomUUID();
+  const inactiveUserId = randomUUID();
+  const blockedUserId = randomUUID();
   const gestorScopes =
     "catalogo:leer catalogo:escribir taxonomia:leer taxonomia:escribir precios:leer precios:escribir auditoria-precios:leer auditoria-precios:exportar promociones:leer promociones:escribir cupones:leer cupones:escribir combos:leer combos:escribir inventario:leer inventario:escribir carga-masiva:leer carga-masiva:escribir";
+
+  const labUsers = new Map([
+    [
+      "gestor@example.test",
+      {
+        id: gestorId,
+        password: "isolated-g7-password",
+        nombreCompleto: "Gestor Comercial E2E",
+        roles: ["GESTOR_COMERCIAL"],
+        permisos: gestorScopes.split(" "),
+        scope: gestorScopes,
+        status: "ACTIVO",
+      },
+    ],
+    [
+      "sinrol@example.test",
+      {
+        id: noRoleId,
+        password: "isolated-sinrol-password",
+        nombreCompleto: "Usuario Sin Rol",
+        roles: [],
+        permisos: [],
+        scope: "",
+        status: "ACTIVO",
+      },
+    ],
+    [
+      "inactivo@example.test",
+      {
+        id: inactiveUserId,
+        password: "isolated-inactivo-password",
+        nombreCompleto: "Usuario Inactivo",
+        roles: ["GESTOR_COMERCIAL"],
+        permisos: gestorScopes.split(" "),
+        scope: gestorScopes,
+        status: "INACTIVO",
+      },
+    ],
+    [
+      "bloqueado@example.test",
+      {
+        id: blockedUserId,
+        password: "isolated-bloqueado-password",
+        nombreCompleto: "Usuario Bloqueado",
+        roles: ["GESTOR_COMERCIAL"],
+        permisos: gestorScopes.split(" "),
+        scope: gestorScopes,
+        status: "BLOQUEADO",
+      },
+    ],
+  ]);
+
+  const issuedTokens = new Map();
+  const revokedJtis = new Set();
+  const refreshTokens = new Map();
 
   let issuer = "";
   let baseUrl = "";
@@ -446,26 +503,28 @@ async function startSingleLocalG7Server() {
       JSON.stringify({ alg: "RS256", kid: jwk.kid, typ: "JWT" }),
     ).toString("base64url");
     const now = Math.floor(Date.now() / 1000);
-    const payload = Buffer.from(
-      JSON.stringify({
-        iss: issuer,
-        sub: gestorId,
-        tipo: "acceso",
-        aud: ["api-productos"],
-        roles: ["GESTOR_COMERCIAL"],
-        scope: gestorScopes,
-        iat: now,
-        exp: now + 600,
-        jti: randomUUID(),
-        ...claims,
-      }),
-    ).toString("base64url");
+    const jti = randomUUID();
+    const payloadObj = {
+      iss: issuer,
+      sub: gestorId,
+      tipo: "acceso",
+      aud: ["api-productos"],
+      roles: ["GESTOR_COMERCIAL"],
+      scope: gestorScopes,
+      iat: now,
+      exp: now + 600,
+      jti,
+      ...claims,
+    };
+    const payload = Buffer.from(JSON.stringify(payloadObj)).toString("base64url");
     const sig = sign(
       "RSA-SHA256",
       Buffer.from(`${header}.${payload}`),
       privateKey,
     ).toString("base64url");
-    return `${header}.${payload}.${sig}`;
+    const token = `${header}.${payload}.${sig}`;
+    issuedTokens.set(token, payloadObj);
+    return token;
   }
 
   const server = createServer(async (req, res) => {
@@ -484,7 +543,7 @@ async function startSingleLocalG7Server() {
         JSON.stringify({
           issuer,
           jwks_uri: `${baseUrl}/jwks`,
-          token_endpoint: `${baseUrl}/auth/service-token`,
+          token_endpoint: `${baseUrl}/api/v1/auth/token`,
         }),
       );
       return;
@@ -496,59 +555,54 @@ async function startSingleLocalG7Server() {
     }
     if (req.method === "POST" && url === "/auth/login") {
       const body = await readJsonBody(req);
-      const correo = typeof body.correo === "string" ? body.correo : "";
+      const correo = typeof body.correo === "string" ? body.correo.trim().toLowerCase() : "";
       const contrasena =
         typeof body.contrasena === "string" ? body.contrasena : "";
-      if (!correo || !contrasena || body.formatoAcceso !== "JWS") {
+      const user = labUsers.get(correo);
+      if (
+        !user ||
+        user.password !== contrasena ||
+        body.formatoAcceso !== "JWS" ||
+        user.status !== "ACTIVO"
+      ) {
         res.statusCode = 401;
         res.setHeader("content-type", "application/problem+json");
-        res.end(JSON.stringify({ code: "CREDENCIALES_INVALIDAS" }));
+        res.end(
+          JSON.stringify({
+            code:
+              user?.status === "INACTIVO"
+                ? "USUARIO_INACTIVO"
+                : user?.status === "BLOQUEADO"
+                  ? "USUARIO_BLOQUEADO"
+                  : "CREDENCIALES_INVALIDAS",
+          }),
+        );
         return;
       }
-      const isNoRole = correo.startsWith("sinrol");
-      const userId = isNoRole ? noRoleId : gestorId;
-      const roles = isNoRole ? [] : ["GESTOR_COMERCIAL"];
-      const scope = isNoRole ? "" : gestorScopes;
+      const refreshToken = `refresh-${randomUUID()}`;
+      refreshTokens.set(refreshToken, {
+        correo,
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+      });
       res.statusCode = 200;
       res.setHeader("content-type", "application/json");
       res.end(
         JSON.stringify({
           tokenType: "Bearer",
-          accessToken: issueAccessToken({ sub: userId, roles, scope }),
-          refreshToken: `refresh-${randomUUID()}`,
+          accessToken: issueAccessToken({
+            sub: user.id,
+            roles: user.roles,
+            scope: user.scope,
+            email: correo,
+          }),
+          refreshToken,
           expiresIn: 600,
           usuario: {
-            id: userId,
-            nombreCompleto: isNoRole
-              ? "Usuario Sin Rol"
-              : "Gestor Comercial E2E",
+            id: user.id,
+            nombreCompleto: user.nombreCompleto,
             correo,
-            roles,
+            roles: user.roles,
           },
-        }),
-      );
-      return;
-    }
-    if (req.method === "POST" && url === "/auth/service-token") {
-      const body = await readJsonBody(req);
-      const clientId =
-        typeof body.client_id === "string" ? body.client_id : "modulo-ventas";
-      const scope =
-        typeof body.scope === "string"
-          ? body.scope
-          : "cupones:consumir cupones:restaurar cupones:operaciones:leer stock:reservar";
-      res.statusCode = 200;
-      res.setHeader("content-type", "application/json");
-      res.end(
-        JSON.stringify({
-          token_type: "Bearer",
-          access_token: issueAccessToken({
-            sub: clientId,
-            tipo: "servicio",
-            roles: [],
-            scope,
-          }),
-          expires_in: 600,
         }),
       );
       return;
@@ -588,8 +642,28 @@ async function startSingleLocalG7Server() {
               "e2e-catalog-secret",
               "e2e-pricing-secret",
               "e2e-combos-secret",
+              "e2e-gateway-secret",
             ]),
-            scopes: new Set(["catalogo:leer", "precios:leer", "inventario:leer"]),
+            scopes: new Set([
+              "catalogo:leer",
+              "precios:leer",
+              "inventario:leer",
+              "tokens:introspeccion",
+            ]),
+          },
+        ],
+        [
+          "modulo-marketplace",
+          {
+            secrets: new Set(["e2e-marketplace-secret"]),
+            scopes: new Set(["catalogo:leer", "precios:leer", "promociones:evaluar"]),
+          },
+        ],
+        [
+          "modulo-chatbot",
+          {
+            secrets: new Set(["e2e-chatbot-secret"]),
+            scopes: new Set(["catalogo:leer", "precios:leer", "promociones:evaluar"]),
           },
         ],
         [
@@ -616,14 +690,21 @@ async function startSingleLocalG7Server() {
         requestedScopes.length > 0 &&
         requestedScopes.every((s) => clientPolicy?.scopes.has(s) ?? false);
       const wantsVentas = requestedScopes.includes("ventas:pedidos:evidencia-cupon:leer");
-      const mixedAudience = wantsVentas && requestedScopes.length > 1;
+      const wantsSeguridad = requestedScopes.includes("tokens:introspeccion");
+      const mixedAudience =
+        (wantsVentas && requestedScopes.length > 1) ||
+        (wantsSeguridad && requestedScopes.length > 1);
       if (grantType !== "client_credentials" || !validSecret || !validScopes || mixedAudience) {
         res.statusCode = 401;
         res.setHeader("content-type", "application/problem+json");
         res.end(JSON.stringify({ code: "CLIENT_AUTH_INVALID" }));
         return;
       }
-      const audience = wantsVentas ? "api-ventas" : "api-productos";
+      const audience = wantsVentas
+        ? "api-ventas"
+        : wantsSeguridad
+          ? "api-seguridad"
+          : "api-productos";
       res.statusCode = 200;
       res.setHeader("content-type", "application/json");
       res.end(
@@ -642,26 +723,166 @@ async function startSingleLocalG7Server() {
       );
       return;
     }
+    if (req.method === "POST" && url === "/api/v1/auth/introspeccion") {
+      const authResult = verifyTechnicalG7Bearer(
+        req.headers["authorization"],
+        publicKey,
+        "api-seguridad",
+        "tokens:introspeccion",
+        "modulo-productos",
+      );
+      if (!authResult.ok) {
+        res.statusCode = authResult.status;
+        res.setHeader("content-type", "application/problem+json");
+        res.end(JSON.stringify({ code: authResult.code }));
+        return;
+      }
+      const body = await readJsonBody(req);
+      const tokenToInspect = typeof body.token === "string" ? body.token : "";
+      const parts = tokenToInspect.split(".");
+      if (parts.length !== 3) {
+        res.statusCode = 200;
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ activo: false, motivo: "FIRMA_INVALIDA" }));
+        return;
+      }
+      try {
+        const verifier = createVerify("RSA-SHA256");
+        verifier.update(`${parts[0]}.${parts[1]}`);
+        verifier.end();
+        if (!verifier.verify(publicKey, Buffer.from(parts[2], "base64url"))) {
+          res.statusCode = 200;
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ activo: false, motivo: "FIRMA_INVALIDA" }));
+          return;
+        }
+        const payload = JSON.parse(
+          Buffer.from(parts[1], "base64url").toString("utf8"),
+        );
+        const now = Math.floor(Date.now() / 1000);
+        if (typeof payload.exp !== "number" || payload.exp <= now) {
+          res.statusCode = 200;
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ activo: false, motivo: "TOKEN_VENCIDO" }));
+          return;
+        }
+        if (typeof payload.jti === "string" && revokedJtis.has(payload.jti)) {
+          res.statusCode = 200;
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ activo: false, motivo: "TOKEN_REVOCADO" }));
+          return;
+        }
+        const userEntry = Array.from(labUsers.values()).find(
+          (u) => u.id === payload.sub,
+        );
+        if (userEntry?.status === "INACTIVO") {
+          res.statusCode = 200;
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ activo: false, motivo: "USUARIO_INACTIVO" }));
+          return;
+        }
+        if (userEntry?.status === "BLOQUEADO") {
+          res.statusCode = 200;
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ activo: false, motivo: "USUARIO_BLOQUEADO" }));
+          return;
+        }
+        res.statusCode = 200;
+        res.setHeader("content-type", "application/json");
+        res.end(
+          JSON.stringify({
+            activo: true,
+            sub: payload.sub,
+            tipo: payload.tipo,
+            roles: Array.isArray(payload.roles) ? payload.roles : [],
+            permisos: userEntry ? userEntry.permisos : [],
+            exp: payload.exp,
+            ...(typeof payload.email === "string"
+              ? { email: payload.email }
+              : {}),
+          }),
+        );
+        return;
+      } catch {
+        res.statusCode = 200;
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ activo: false, motivo: "FIRMA_INVALIDA" }));
+        return;
+      }
+    }
     if (req.method === "POST" && url === "/auth/refresh") {
+      const body = await readJsonBody(req);
+      const token =
+        typeof body.refreshToken === "string" ? body.refreshToken : "";
+      const record = refreshTokens.get(token);
+      const now = Math.floor(Date.now() / 1000);
+      if (!record || record.expiresAt <= now) {
+        refreshTokens.delete(token);
+        res.statusCode = 401;
+        res.setHeader("content-type", "application/problem+json");
+        res.end(JSON.stringify({ code: "TOKEN_INVALIDO" }));
+        return;
+      }
+      const user = labUsers.get(record.correo);
+      if (!user || user.status !== "ACTIVO") {
+        refreshTokens.delete(token);
+        res.statusCode = 401;
+        res.setHeader("content-type", "application/problem+json");
+        res.end(JSON.stringify({ code: "TOKEN_INVALIDO" }));
+        return;
+      }
+      // Rotar refresh token
+      refreshTokens.delete(token);
+      const nextRefreshToken = `refresh-${randomUUID()}`;
+      refreshTokens.set(nextRefreshToken, {
+        correo: record.correo,
+        expiresAt: now + 3600,
+      });
       res.statusCode = 200;
       res.setHeader("content-type", "application/json");
       res.end(
         JSON.stringify({
           tokenType: "Bearer",
-          accessToken: issueAccessToken(),
-          refreshToken: `refresh-${randomUUID()}`,
+          accessToken: issueAccessToken({
+            sub: user.id,
+            roles: user.roles,
+            scope: user.scope,
+            email: record.correo,
+          }),
+          refreshToken: nextRefreshToken,
           expiresIn: 600,
           usuario: {
-            id: gestorId,
-            nombreCompleto: "Gestor Comercial E2E",
-            correo: "gestor@example.test",
-            roles: ["GESTOR_COMERCIAL"],
+            id: user.id,
+            nombreCompleto: user.nombreCompleto,
+            correo: record.correo,
+            roles: user.roles,
           },
         }),
       );
       return;
     }
     if (req.method === "POST" && url === "/auth/logout") {
+      const body = await readJsonBody(req);
+      if (typeof body.refreshToken === "string") {
+        refreshTokens.delete(body.refreshToken);
+      }
+      const authHeader = String(req.headers["authorization"] ?? "");
+      if (authHeader.startsWith("Bearer ")) {
+        const raw = authHeader.slice("Bearer ".length).trim();
+        const parts = raw.split(".");
+        if (parts.length === 3) {
+          try {
+            const payload = JSON.parse(
+              Buffer.from(parts[1], "base64url").toString("utf8"),
+            );
+            if (typeof payload.jti === "string") {
+              revokedJtis.add(payload.jti);
+            }
+          } catch {
+            // ignore malformed token on logout
+          }
+        }
+      }
       res.statusCode = 204;
       res.end();
       return;
@@ -689,7 +910,13 @@ async function startSingleLocalG7Server() {
   };
 }
 
-function verifyTechnicalG7Bearer(authHeader, publicKey, requiredAudience, requiredScope) {
+function verifyTechnicalG7Bearer(
+  authHeader,
+  publicKey,
+  requiredAudience,
+  requiredScope,
+  expectedSub = "promotions-svc",
+) {
   if (typeof authHeader !== "string" || !authHeader.startsWith("Bearer ")) {
     return { ok: false, status: 401, code: "TOKEN_INVALIDO" };
   }
@@ -719,7 +946,7 @@ function verifyTechnicalG7Bearer(authHeader, publicKey, requiredAudience, requir
     if (!audList.includes(requiredAudience)) {
       return { ok: false, status: 403, code: "AUDIENCIA_INVALIDA" };
     }
-    if (payload.tipo !== "servicio" || payload.sub !== "promotions-svc") {
+    if (payload.tipo !== "servicio" || payload.sub !== expectedSub) {
       return { ok: false, status: 403, code: "CLIENTE_NO_AUTORIZADO" };
     }
     const scopes = String(payload.scope ?? "")
@@ -898,6 +1125,86 @@ async function startLocalG5EvidenceServer({
   };
 }
 
+async function startLocalIsolatedServiceBusBroker() {
+  const queues = new Map();
+  const inflight = new Map();
+  const getQueue = (name) => {
+    if (!queues.has(name)) queues.set(name, []);
+    return queues.get(name);
+  };
+  const server = createServer(async (req, res) => {
+    const url = req.url ?? "/";
+    const match = /^\/queues\/([^/]+)\/(messages|receive|peek|complete|abandon)(?:\/([^/]+))?$/.exec(
+      url,
+    );
+    if (!match) {
+      res.statusCode = 404;
+      res.end();
+      return;
+    }
+    const queue = decodeURIComponent(match[1]);
+    const action = match[2];
+    const deliveryId = match[3] ? decodeURIComponent(match[3]) : undefined;
+
+    if (req.method === "POST" && action === "messages") {
+      const msg = await readJsonBody(req);
+      getQueue(queue).push({ ...msg, deliveryCount: 0 });
+      res.statusCode = 201;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+    if (req.method === "POST" && action === "receive") {
+      const q = getQueue(queue);
+      if (q.length === 0) {
+        res.statusCode = 204;
+        res.end();
+        return;
+      }
+      const next = q.shift();
+      next.deliveryCount = (next.deliveryCount ?? 0) + 1;
+      const id = randomUUID();
+      inflight.set(id, { queue, msg: next });
+      res.statusCode = 200;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ deliveryId: id, ...next }));
+      return;
+    }
+    if (req.method === "GET" && action === "peek") {
+      res.statusCode = 200;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify(getQueue(queue).slice(0, 10)));
+      return;
+    }
+    if (req.method === "POST" && action === "complete" && deliveryId) {
+      inflight.delete(deliveryId);
+      res.statusCode = 200;
+      res.end();
+      return;
+    }
+    if (req.method === "POST" && action === "abandon" && deliveryId) {
+      const entry = inflight.get(deliveryId);
+      inflight.delete(deliveryId);
+      if (entry) getQueue(entry.queue).push(entry.msg);
+      res.statusCode = 200;
+      res.end();
+      return;
+    }
+    res.statusCode = 404;
+    res.end();
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const addr = server.address();
+  if (!addr || typeof addr === "string") {
+    throw new Error("No se pudo iniciar broker Service Bus aislado local.");
+  }
+  return {
+    baseUrl: `http://127.0.0.1:${addr.port}`,
+    close: () => new Promise((r) => server.close(() => r())),
+  };
+}
+
 async function main() {
   const port = Number(process.env.PLAYWRIGHT_REAL_PORT ?? 4173);
   const viteOrigin = `http://127.0.0.1:${port}`;
@@ -911,11 +1218,13 @@ async function main() {
   let pg;
   let g7;
   let g5Evidence;
+  let isolatedBus;
   const children = [];
 
   const cleanup = async (vite) => {
     vite?.kill("SIGTERM");
     for (const child of children) child.kill("SIGTERM");
+    await isolatedBus?.close();
     await g5Evidence?.close();
     await g7?.close();
     await pg?.stop();
@@ -925,6 +1234,7 @@ async function main() {
   try {
     pg = await startDisposablePostgresWithTls(backendRoot, docsRoot);
     g7 = await startSingleLocalG7Server();
+    isolatedBus = await startLocalIsolatedServiceBusBroker();
     g5Evidence = await startLocalG5EvidenceServer({
       g7PublicKey: g7.publicKey,
       seedInventoryStock: async (sku, onHand) => {
@@ -1043,6 +1353,9 @@ async function main() {
         CATALOG_TAXONOMY_URL: serviceUrls["taxonomy-svc"],
         CATALOG_SERVICE_TOKEN_URL: g7.tokenUrl,
         CATALOG_SERVICE_CLIENT_SECRET: "e2e-catalog-secret",
+        MESSAGING_PROVIDER: "AZURE_SERVICE_BUS",
+        CATALOG_H5_DESTINATIONS: "g6.bulk.from.catalog",
+        G6_ISOLATED_SERVICE_BUS_URL: isolatedBus.baseUrl,
       },
       "taxonomy-svc": {
         ...controlledBaseEnv,
@@ -1092,6 +1405,12 @@ async function main() {
         COMBOS_PRICING_URL: serviceUrls["pricing-svc"],
         COMBOS_G7_TOKEN_URL: g7.tokenUrl,
         COMBOS_G7_CLIENT_SECRET: "e2e-combos-secret",
+        COMBOS_ALLOWED_ROLES_LISTAR_COMBOS_ADMIN: "GESTOR_COMERCIAL",
+        COMBOS_ALLOWED_ROLES_CREAR_COMBO: "GESTOR_COMERCIAL",
+        COMBOS_ALLOWED_ROLES_ACTUALIZAR_COMBO: "GESTOR_COMERCIAL",
+        COMBOS_ALLOWED_ROLES_DESACTIVAR_COMBO: "GESTOR_COMERCIAL",
+        COMBOS_ALLOWED_CLIENTS_COMBOS_READ:
+          "modulo-productos,modulo-marketplace,modulo-chatbot,modulo-ventas",
       },
       "inventory-svc": {
         ...controlledBaseEnv,
@@ -1106,6 +1425,10 @@ async function main() {
         PORT: String(servicePorts["bulk-svc"]),
         PGUSER: "bulk_app",
         DATABASE_URL: pg.urlFor("bulk_app"),
+        G7_JWT_ISSUER: g7.issuer,
+        G7_JWT_JWKS_URL: g7.jwksUrl,
+        MESSAGING_PROVIDER: "AZURE_SERVICE_BUS",
+        G6_ISOLATED_SERVICE_BUS_URL: isolatedBus.baseUrl,
       },
     };
 
@@ -1128,6 +1451,8 @@ async function main() {
           ...controlledBaseEnv,
           PORT: String(gatewayPort),
           GATEWAY_CORS_ALLOWED_ORIGINS: viteOrigin,
+          GATEWAY_SERVICE_TOKEN_URL: g7.tokenUrl,
+          GATEWAY_SERVICE_CLIENT_SECRET: "e2e-gateway-secret",
           GATEWAY_CATALOG_SVC_URL: serviceUrls["catalog-svc"],
           GATEWAY_TAXONOMY_SVC_URL: serviceUrls["taxonomy-svc"],
           GATEWAY_PRICING_SVC_URL: serviceUrls["pricing-svc"],
@@ -1159,6 +1484,7 @@ async function main() {
       JSON.stringify(
         {
           gatewayUrl,
+          catalogServiceUrl: serviceUrls["catalog-svc"],
           g7ApiBase: g7.baseUrl,
           g7Issuer: g7.issuer,
           g7JwksUrl: g7.jwksUrl,
