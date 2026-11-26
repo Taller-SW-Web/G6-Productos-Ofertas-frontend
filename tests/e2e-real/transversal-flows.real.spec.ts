@@ -83,8 +83,8 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     expect(catDto.categoriaId).toBeTruthy();
 
     const logoPath = resolve(
-      process.cwd(),
-      "../backend/apps/taxonomy-svc/test/fixtures/logo.png",
+      process.env.G6_BACKEND_ROOT ?? resolve(process.cwd(), "../backend"),
+      "apps/taxonomy-svc/test/fixtures/logo.png",
     );
     const logoBuffer = readFileSync(logoPath);
     const brandRes = await request.post(`${env.gatewayUrl}/api/v1/marcas`, {
@@ -195,13 +195,16 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     expect(readProdDto.product_id).toBe(prodDto.productId);
     expect(readProdDto.sku_base).toBe(skuBase);
 
+    if (!env.catalogServiceUrl) {
+      throw new Error("PREFLIGHT_BLOCKED: catalogServiceUrl requerido para lectura privada de contexto SKU.");
+    }
     const catalogServiceToken = await issueTechnicalServiceToken(
       env.g7ApiBase,
       "modulo-productos",
       "catalogo:leer",
     );
     const skuCtxRes = await request.get(
-      `${env.gatewayUrl}/api/v1/productos/skus/${encodeURIComponent(skuBase)}/contexto`,
+      `${env.catalogServiceUrl}/api/v1/productos/skus/${encodeURIComponent(skuBase)}/contexto`,
       { headers: { Authorization: `Bearer ${catalogServiceToken}` } },
     );
     expect(skuCtxRes.status()).toBe(200);
@@ -228,7 +231,7 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     );
     expect(seedCatalogRes2.status()).toBe(201);
     const skuCtxRes2 = await request.get(
-      `${env.gatewayUrl}/api/v1/productos/skus/${encodeURIComponent(skuBase2)}/contexto`,
+      `${env.catalogServiceUrl}/api/v1/productos/skus/${encodeURIComponent(skuBase2)}/contexto`,
       { headers: { Authorization: `Bearer ${catalogServiceToken}` } },
     );
     expect(skuCtxRes2.status()).toBe(200);
