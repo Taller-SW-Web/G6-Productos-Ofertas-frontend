@@ -1253,19 +1253,27 @@ async function startLocalG5EvidenceServer({
       return;
     }
     if (req.method === "POST" && url === "/__test/pg-query") {
-      const body = await readJsonBody(req);
-      const querySql = typeof body.sql === "string" ? body.sql.trim() : "";
-      if (!/^SELECT\s+/i.test(querySql) || querySql.includes(";")) {
-        res.statusCode = 400;
-        res.end(JSON.stringify({ error: "ONLY_SINGLE_SELECT_ALLOWED" }));
-        return;
+      try {
+        const body = await readJsonBody(req);
+        const querySql = typeof body.sql === "string" ? body.sql.trim() : "";
+        if (!/^SELECT\s+/i.test(querySql) || querySql.includes(";")) {
+          res.statusCode = 400;
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ error: "ONLY_SINGLE_SELECT_ALLOWED" }));
+          return;
+        }
+        const wrapped = `\\t\n\\a\nSELECT coalesce(json_agg(t), '[]'::json)::text FROM (${querySql}) t;\n`;
+        const out = await pgQuery(wrapped);
+        const jsonLine = out.trim().split(/\r?\n/).filter(Boolean).pop() ?? "[]";
+        res.statusCode = 200;
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ rows: JSON.parse(jsonLine) }));
+      } catch (err) {
+        console.error("[pg-query] error:", err instanceof Error ? err.message : String(err));
+        res.statusCode = 500;
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ error: "PG_QUERY_ERROR", detail: err instanceof Error ? err.message : String(err) }));
       }
-      const wrapped = `\\t\n\\a\nSELECT coalesce(json_agg(t), '[]'::json)::text FROM (${querySql}) t;\n`;
-      const out = await pgQuery(wrapped);
-      const jsonLine = out.trim().split(/\r?\n/).filter(Boolean).pop() ?? "[]";
-      res.statusCode = 200;
-      res.setHeader("content-type", "application/json");
-      res.end(JSON.stringify({ rows: JSON.parse(jsonLine) }));
       return;
     }
     res.statusCode = 404;
