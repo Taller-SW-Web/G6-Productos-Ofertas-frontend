@@ -8,6 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
 import { createServer as createNetServer } from "node:net";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
@@ -404,13 +405,18 @@ async function startDisposablePostgresWithTls(backendRoot, docsRoot) {
   }
 }
 
-async function readJsonBody(req) {
+async function readRawBody(req) {
   const chunks = [];
   for await (const chunk of req) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
-  if (chunks.length === 0) return {};
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+async function readJsonBody(req) {
+  const raw = await readRawBody(req);
+  if (!raw) return {};
+  return JSON.parse(raw);
 }
 
 async function startSingleLocalG7Server() {
@@ -519,7 +525,7 @@ async function startSingleLocalG7Server() {
       );
       return;
     }
-    if (req.method === "POST" && (url === "/auth/service-token" || url === "/api/v1/auth/token")) {
+    if (req.method === "POST" && url === "/auth/service-token") {
       const body = await readJsonBody(req);
       const clientId =
         typeof body.client_id === "string" ? body.client_id : "modulo-ventas";
@@ -539,6 +545,61 @@ async function startSingleLocalG7Server() {
             scope,
           }),
           expires_in: 600,
+        }),
+      );
+      return;
+    }
+    if (req.method === "POST" && url === "/api/v1/auth/token") {
+      const contentType = String(req.headers["content-type"] ?? "");
+      if (!contentType.includes("application/x-www-form-urlencoded")) {
+        res.statusCode = 415;
+        res.setHeader("content-type", "application/problem+json");
+        res.end(JSON.stringify({ code: "UNSUPPORTED_MEDIA_TYPE" }));
+        return;
+      }
+      const params = new URLSearchParams(await readRawBody(req));
+      const grantType = params.get("grant_type");
+      const clientId = params.get("client_id") ?? "";
+      const clientSecret = params.get("client_secret") ?? "";
+      const scope = (params.get("scope") ?? "").trim();
+      const allowedClients = new Map([
+        ["promotions-svc", new Set(["e2e-promotions-secret", "e2e-promotions-h5-secret"])],
+        ["modulo-productos", new Set(["e2e-promotions-secret", "e2e-promotions-h5-secret", "e2e-catalog-secret"])],
+        ["modulo-ventas", new Set(["e2e-ventas-secret"])],
+      ]);
+      const allowedScopes = new Set([
+        "ventas:pedidos:evidencia-cupon:leer",
+        "catalogo:leer",
+        "inventario:leer",
+      ]);
+      const requestedScopes = scope.split(/\s+/).filter(Boolean);
+      const validSecret = allowedClients.get(clientId)?.has(clientSecret) ?? false;
+      const validScopes =
+        requestedScopes.length > 0 &&
+        requestedScopes.every((s) => allowedScopes.has(s));
+      if (grantType !== "client_credentials" || !validSecret || !validScopes) {
+        res.statusCode = 401;
+        res.setHeader("content-type", "application/problem+json");
+        res.end(JSON.stringify({ code: "CLIENT_AUTH_INVALID" }));
+        return;
+      }
+      const audience = requestedScopes.includes("ventas:pedidos:evidencia-cupon:leer")
+        ? "api-ventas"
+        : "api-productos";
+      res.statusCode = 200;
+      res.setHeader("content-type", "application/json");
+      res.end(
+        JSON.stringify({
+          accessToken: issueAccessToken({
+            sub: clientId,
+            tipo: "servicio",
+            aud: [audience],
+            roles: [],
+            scope,
+          }),
+          tokenType: "Bearer",
+          expiresIn: 600,
+          scopes: requestedScopes,
         }),
       );
       return;
@@ -590,8 +651,63 @@ async function startSingleLocalG7Server() {
 }
 
 async function startLocalG5EvidenceServer() {
+  const g5CertDir = mkdtempSync(join(tmpdir(), "g6-e2e-g5-tls-"));
+  const g5KeyPath = join(g5CertDir, "server.key");
+  const g5CertPath = join(g5CertDir, "server.crt");
+
+  await exec(
+    "docker",
+    [
+      "run",
+      "--rm",
+      "--entrypoint",
+      "sh",
+      "-v",
+      `${g5CertDir}:/out`,
+      POSTGRES_IMAGE,
+      "-c",
+      'apk add --no-cache openssl >/dev/null && openssl req -x509 -newkey rsa:2048 -nodes -keyout /out/server.key -out /out/server.crt -days 1 -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1,DNS:localhost" && chmod 644 /out/server.crt && chmod 600 /out/server.key',
+    ],
+    { timeout: 60_000 },
+  );
+
   const snapshots = new Map();
-  const server = createServer(async (req, res) => {
+  const httpsServer = createHttpsServer(
+    {
+      cert: readFileSync(g5CertPath),
+      key: readFileSync(g5KeyPath),
+    },
+    (req, res) => {
+      const url = req.url ?? "/";
+      const match = /^\/api\/v1\/integraciones\/productos\/pedidos\/([^/]+)\/evidencia-cupon$/.exec(
+        url,
+      );
+      if (req.method === "GET" && match) {
+        const auth = String(req.headers["authorization"] ?? "");
+        if (!auth.startsWith("Bearer ")) {
+          res.statusCode = 401;
+          res.setHeader("content-type", "application/problem+json");
+          res.end(JSON.stringify({ code: "TOKEN_INVALIDO" }));
+          return;
+        }
+        const orderId = decodeURIComponent(match[1]);
+        const snap = snapshots.get(orderId);
+        if (!snap) {
+          res.statusCode = 404;
+          res.end();
+          return;
+        }
+        res.statusCode = 200;
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify(snap));
+        return;
+      }
+      res.statusCode = 404;
+      res.end();
+    },
+  );
+
+  const seedServer = createServer(async (req, res) => {
     const url = req.url ?? "/";
     if (req.method === "POST" && url === "/__test/g5-snapshots") {
       const body = await readJsonBody(req);
@@ -606,32 +722,38 @@ async function startLocalG5EvidenceServer() {
       res.end(JSON.stringify({ ok: true }));
       return;
     }
-    const match = /^\/integraciones\/productos\/pedidos\/([^/]+)\/evidencia-cupon$/.exec(url);
-    if (req.method === "GET" && match) {
-      const orderId = decodeURIComponent(match[1]);
-      const snap = snapshots.get(orderId);
-      if (!snap) {
-        res.statusCode = 404;
-        res.end();
-        return;
-      }
-      res.statusCode = 200;
-      res.setHeader("content-type", "application/json");
-      res.end(JSON.stringify(snap));
-      return;
-    }
     res.statusCode = 404;
     res.end();
   });
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const addr = server.address();
-  if (!addr || typeof addr === "string") {
-    throw new Error("No se pudo iniciar servidor local de evidencia G5.");
+
+  httpsServer.listen(0, "127.0.0.1");
+  await once(httpsServer, "listening");
+  const httpsAddr = httpsServer.address();
+  if (!httpsAddr || typeof httpsAddr === "string") {
+    rmSync(g5CertDir, { recursive: true, force: true });
+    throw new Error("No se pudo iniciar servidor HTTPS local de evidencia G5.");
   }
+
+  seedServer.listen(0, "127.0.0.1");
+  await once(seedServer, "listening");
+  const seedAddr = seedServer.address();
+  if (!seedAddr || typeof seedAddr === "string") {
+    httpsServer.close();
+    rmSync(g5CertDir, { recursive: true, force: true });
+    throw new Error("No se pudo iniciar servidor seed HTTP local de evidencia G5.");
+  }
+
   return {
-    baseUrl: `http://127.0.0.1:${addr.port}`,
-    close: () => new Promise((r) => server.close(() => r())),
+    baseUrl: `https://127.0.0.1:${httpsAddr.port}`,
+    seedOrigin: `http://127.0.0.1:${seedAddr.port}`,
+    caCertPath: g5CertPath,
+    close: async () => {
+      await Promise.all([
+        new Promise((r) => httpsServer.close(() => r())),
+        new Promise((r) => seedServer.close(() => r())),
+      ]);
+      rmSync(g5CertDir, { recursive: true, force: true });
+    },
   };
 }
 
@@ -726,6 +848,7 @@ async function main() {
       "promotions-svc": {
         ...controlledBaseEnv,
         PORT: String(servicePorts["promotions-svc"]),
+        NODE_EXTRA_CA_CERTS: g5Evidence.caCertPath,
         PGUSER: "promotions_app",
         G6_DATABASE_SCHEMA: "promotions",
         G6_CONNECTION_MODE: "session",
@@ -818,6 +941,7 @@ async function main() {
           g7Issuer: g7.issuer,
           g7JwksUrl: g7.jwksUrl,
           g5EvidenceOrigin: g5Evidence.baseUrl,
+          g5SeedOrigin: g5Evidence.seedOrigin,
           viteOrigin,
           dataMode: "api",
           adminApiEnabled: true,

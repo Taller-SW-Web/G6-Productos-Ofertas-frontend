@@ -138,10 +138,12 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     const effectiveAt = new Date().toISOString();
     const reservationId = randomUUID();
 
-    // 4.0 Registrar reserva real en Inventory + evidencia G5 coherente para escenario positivo N01
-    if (!env.g5EvidenceOrigin) {
-      throw new Error("PREFLIGHT_BLOCKED: g5EvidenceOrigin requerido para N01.");
+    // 4.0 Registrar reserva real en Inventory + evidencia G5 coherente en g5SeedOrigin
+    if (!env.g5SeedOrigin || !env.g5EvidenceOrigin) {
+      throw new Error("PREFLIGHT_BLOCKED: g5SeedOrigin y g5EvidenceOrigin requeridos para N01.");
     }
+    expect(env.g5EvidenceOrigin.startsWith("https://127.0.0.1:")).toBe(true);
+    expect(env.g5SeedOrigin.startsWith("http://127.0.0.1:")).toBe(true);
     const skuForCoupon = `SKU-N01-${randomUUID().slice(0, 6)}`;
     await request.post(`${env.gatewayUrl}/api/v1/inventario/reservas`, {
       headers: {
@@ -157,7 +159,7 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
       },
     });
     const snapRes = await request.post(
-      `${env.g5EvidenceOrigin}/__test/g5-snapshots`,
+      `${env.g5SeedOrigin}/__test/g5-snapshots`,
       {
         data: {
           order_id: orderId,
@@ -371,7 +373,7 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     const noResOpId = randomUUID();
     const noResOrderId = `PED-NORES-${randomUUID().slice(0, 8)}`;
     const noResTime = new Date().toISOString();
-    await request.post(`${env.g5EvidenceOrigin}/__test/g5-snapshots`, {
+    await request.post(`${env.g5SeedOrigin}/__test/g5-snapshots`, {
       data: {
         order_id: noResOrderId,
         reservation_id: randomUUID(),

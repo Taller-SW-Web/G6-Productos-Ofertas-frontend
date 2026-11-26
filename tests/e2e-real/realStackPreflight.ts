@@ -12,6 +12,7 @@ export interface RealStackEnvironment {
   g7Issuer: string;
   g7JwksUrl: string;
   g5EvidenceOrigin: string;
+  g5SeedOrigin: string;
   viteOrigin: string;
   dataMode: "api";
   adminApiEnabled: true;
@@ -78,6 +79,8 @@ export function assertRealStackPreflight(): RealStackEnvironment {
   const g7JwksUrl = process.env.G6_REAL_G7_JWKS_URL ?? manifest.g7JwksUrl;
   const g5EvidenceOrigin =
     process.env.G6_REAL_G5_EVIDENCE_ORIGIN ?? manifest.g5EvidenceOrigin ?? "";
+  const g5SeedOrigin =
+    process.env.G6_REAL_G5_SEED_ORIGIN ?? manifest.g5SeedOrigin ?? "";
   const viteOrigin = manifest.viteOrigin ?? "http://127.0.0.1:4173";
 
   if (!gatewayRaw || !g7ApiBaseRaw || !g7Issuer || !g7JwksUrl) {
@@ -89,8 +92,8 @@ export function assertRealStackPreflight(): RealStackEnvironment {
   assertSafeLocalUrl(gatewayRaw, "G6_REAL_GATEWAY_URL");
   assertSafeLocalUrl(g7ApiBaseRaw, "VITE_G7_API_BASE");
   assertSafeLocalUrl(g7JwksUrl, "G6_REAL_G7_JWKS_URL");
-  if (g5EvidenceOrigin) {
-    assertSafeLocalUrl(g5EvidenceOrigin, "G6_REAL_G5_EVIDENCE_ORIGIN");
+  if (g5SeedOrigin) {
+    assertSafeLocalUrl(g5SeedOrigin, "G6_REAL_G5_SEED_ORIGIN");
   }
 
   return {
@@ -99,6 +102,7 @@ export function assertRealStackPreflight(): RealStackEnvironment {
     g7Issuer,
     g7JwksUrl,
     g5EvidenceOrigin,
+    g5SeedOrigin,
     viteOrigin,
     dataMode: "api",
     adminApiEnabled: true,
