@@ -9,6 +9,8 @@ export const REAL_STACK_MANIFEST_PATH = resolve(
 export interface RealStackEnvironment {
   gatewayUrl: string;
   catalogServiceUrl: string;
+  serviceUrls: Record<string, string>;
+  isolatedBusUrl: string;
   g7ApiBase: string;
   g7Issuer: string;
   g7JwksUrl: string;
@@ -105,6 +107,8 @@ export function assertRealStackPreflight(): RealStackEnvironment {
   return {
     gatewayUrl: gatewayRaw.replace(/\/$/, ""),
     catalogServiceUrl: catalogServiceUrlRaw.replace(/\/$/, ""),
+    serviceUrls: manifest.serviceUrls ?? {},
+    isolatedBusUrl: manifest.isolatedBusUrl ?? "",
     g7ApiBase: g7ApiBaseRaw.replace(/\/$/, ""),
     g7Issuer,
     g7JwksUrl,

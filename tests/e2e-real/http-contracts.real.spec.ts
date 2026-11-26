@@ -288,4 +288,108 @@ test.describe("Contratos HTTP, seguridad G7 y resiliencia React -> Gateway -> Ba
     expect(rateRes.headers()["retry-after"]).toBe("2");
     await page.unroute("**/api/v1/inventario/dashboard*");
   });
+
+  test("P0-AUTH-09: matriz positiva y negativa independiente contra Gateway y los 8 proveedores reales", async ({
+    request,
+  }) => {
+    const env = assertRealStackPreflight();
+    await verifyGatewayAndServicesReady(env.gatewayUrl);
+
+    const gestorJwt = await issueTokenFromTrustedG7(
+      env.g7ApiBase,
+      "gestor@example.test",
+      "isolated-g7-password",
+    );
+    const sinRolJwt = await issueTokenFromTrustedG7(
+      env.g7ApiBase,
+      "sinrol@example.test",
+      "isolated-sinrol-password",
+    );
+    const { issueTechnicalServiceToken } = await import("./realStackPreflight.ts");
+    const m2mReadJwt = await issueTechnicalServiceToken(
+      env.g7ApiBase,
+      "modulo-marketplace",
+      "catalogo:leer",
+    );
+
+    const providers: Array<{
+      service: string;
+      humanReadPath: string;
+      humanWritePath?: string;
+    }> = [
+      { service: "catalog-svc", humanReadPath: "/api/v1/productos/administracion?pagina=1&tamanio=5", humanWritePath: "/api/v1/productos" },
+      { service: "taxonomy-svc", humanReadPath: "/api/v1/categorias/administracion?pagina=1&tamanio=5", humanWritePath: "/api/v1/categorias" },
+      { service: "pricing-svc", humanReadPath: "/api/v1/precios?skus=SKU-NO-EXISTE" },
+      { service: "price-audit-svc", humanReadPath: "/api/v1/auditoria-precios/administracion?pagina=1&tamanio=5" },
+      { service: "promotions-svc", humanReadPath: "/api/v1/promociones" },
+      { service: "combos-svc", humanReadPath: "/api/v1/combos" },
+      { service: "inventory-svc", humanReadPath: "/api/v1/inventario/umbrales" },
+      { service: "bulk-svc", humanReadPath: "/api/v1/carga-masiva/productos/plantilla?formato=CSV" },
+    ];
+
+    for (const p of providers) {
+      const providerBase = env.serviceUrls[p.service];
+      expect(providerBase).toBeTruthy();
+      const corrId = randomUUID();
+
+      // 1. Gateway autorizado (200) + 2. Proveedor directo autorizado (200)
+      const gwOk = await request.get(`${env.gatewayUrl}${p.humanReadPath}`, {
+        headers: { Authorization: `Bearer ${gestorJwt}`, "X-Correlation-Id": corrId },
+      });
+      expect(gwOk.status()).toBe(200);
+
+      const directOk = await request.get(`${providerBase}${p.humanReadPath}`, {
+        headers: { Authorization: `Bearer ${gestorJwt}`, "X-Correlation-Id": corrId },
+      });
+      expect(directOk.status()).toBe(200);
+
+      // 3. Directo sin JWT -> 401
+      const directNoAuth = await request.get(`${providerBase}${p.humanReadPath}`, {
+        headers: { "X-Correlation-Id": corrId },
+      });
+      expect(directNoAuth.status()).toBe(401);
+
+      // 4. Directo firma inválida -> 401
+      const directBadSig = await request.get(`${providerBase}${p.humanReadPath}`, {
+        headers: { Authorization: "Bearer eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.bad", "X-Correlation-Id": corrId },
+      });
+      expect(directBadSig.status()).toBe(401);
+
+      // 5. Directo usuario válido sin rol -> 403
+      const directForbidden = await request.get(`${providerBase}${p.humanReadPath}`, {
+        headers: { Authorization: `Bearer ${sinRolJwt}`, "X-Correlation-Id": corrId },
+      });
+      expect(directForbidden.status()).toBe(403);
+
+      // 6. Identidad de servicio sobre ruta exclusivamente humana -> 403 sin mutación
+      if (p.humanWritePath) {
+        const svcOnHuman = await request.post(`${providerBase}${p.humanWritePath}`, {
+          headers: { Authorization: `Bearer ${m2mReadJwt}`, "X-Correlation-Id": corrId },
+          data: {},
+        });
+        expect(svcOnHuman.status()).toBe(403);
+      }
+    }
+
+    // 7. Rechazo M2M por secreto o scope inválido en /api/v1/auth/token
+    const badSecretRes = await request.post(`${env.g7ApiBase}/api/v1/auth/token`, {
+      form: {
+        grant_type: "client_credentials",
+        client_id: "modulo-ventas",
+        client_secret: "wrong-secret",
+        scope: "cupones:consumir",
+      },
+    });
+    expect(badSecretRes.status()).toBe(401);
+
+    const badScopeRes = await request.post(`${env.g7ApiBase}/api/v1/auth/token`, {
+      form: {
+        grant_type: "client_credentials",
+        client_id: "modulo-chatbot",
+        client_secret: "e2e-chatbot-secret",
+        scope: "cupones:consumir",
+      },
+    });
+    expect(badScopeRes.status()).toBe(401);
+  });
 });

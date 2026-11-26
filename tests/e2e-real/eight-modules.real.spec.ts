@@ -42,9 +42,10 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     };
 
     const catSlug = `cat-ui-${randomUUID().slice(0, 6)}`;
+    const catName = `Cat UI ${catSlug}`;
     const catRes = await request.post(`${env.gatewayUrl}/api/v1/categorias`, {
       headers,
-      data: { nombre: `Cat UI ${catSlug}`, slugConfirmado: catSlug, categoriaPadreId: null },
+      data: { nombre: catName, slugConfirmado: catSlug, categoriaPadreId: null },
     });
     expect([200, 201]).toContain(catRes.status());
     const catDto = (await catRes.json()) as { categoriaId: string };
@@ -54,20 +55,26 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       process.env.G6_BACKEND_ROOT ?? resolve(process.cwd(), "../backend"),
       "apps/taxonomy-svc/test/fixtures/logo.png",
     );
+    const brandName = `Marca UI ${randomUUID().slice(0, 6)}`;
     const brandRes = await request.post(`${env.gatewayUrl}/api/v1/marcas`, {
       headers: { Authorization: `Bearer ${token}`, "X-Correlation-Id": randomUUID() },
       multipart: {
-        nombre: `Marca UI ${randomUUID().slice(0, 6)}`,
+        nombre: brandName,
         logo: { name: "logo.png", mimeType: "image/png", buffer: readFileSync(logoPath) },
       },
     });
     expect([200, 201]).toContain(brandRes.status());
+    const brandDto = (await brandRes.json()) as { marcaId: string };
+    expect(brandDto.marcaId).toBeTruthy();
 
+    const typeName = `Tipo UI ${randomUUID().slice(0, 6)}`;
     const typeRes = await request.post(`${env.gatewayUrl}/api/v1/tipos-producto`, {
       headers,
-      data: { nombre: `Tipo UI ${randomUUID().slice(0, 6)}` },
+      data: { nombre: typeName },
     });
     expect([200, 201]).toContain(typeRes.status());
+    const typeDto = (await typeRes.json()) as { tipoProductoId: string };
+    expect(typeDto.tipoProductoId).toBeTruthy();
 
     const uniqueName = `Producto E2E ${randomUUID().slice(0, 8)}`;
     const skuBase = `SKU-UI-${randomUUID().slice(0, 6).toUpperCase()}`;
@@ -75,28 +82,33 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     await expect(newBtn).toBeVisible();
     await newBtn.click();
 
-    await page.getByRole("textbox", { name: /nombre/i }).first().fill(uniqueName);
+    const nameField = page.getByRole("textbox", { name: /nombre/i }).first();
+    await expect(nameField).toBeVisible();
+    await nameField.fill(uniqueName);
+
     const descInput = page.getByRole("textbox", { name: /descripci/i }).first();
-    if (await descInput.isVisible().catch(() => false)) {
-      await descInput.fill("Descripción completa de producto creada desde React E2E");
-    }
+    await expect(descInput).toBeVisible();
+    await descInput.fill("Descripción completa de producto creada desde React E2E");
+
     const skuInput = page.getByRole("textbox", { name: /sku/i }).first();
-    if (await skuInput.isVisible().catch(() => false)) {
-      await skuInput.fill(skuBase);
-    }
+    await expect(skuInput).toBeVisible();
+    await skuInput.fill(skuBase);
+
     const priceInput = page.getByRole("spinbutton", { name: /precio/i }).first();
-    if (await priceInput.isVisible().catch(() => false)) {
-      await priceInput.fill("120");
-    }
-    for (const selectLabel of [/categor/i, /marca/i, /tipo/i]) {
+    await expect(priceInput).toBeVisible();
+    await priceInput.fill("120");
+
+    for (const [selectLabel, optionLabel] of [
+      [/categor/i, catName],
+      [/marca/i, brandName],
+      [/tipo/i, typeName],
+    ] as const) {
       const sel = page.getByRole("combobox", { name: selectLabel }).first();
-      if (await sel.isVisible().catch(() => false)) {
-        await sel.click();
-        const opt = page.getByRole("option").first();
-        if (await opt.isVisible().catch(() => false)) {
-          await opt.click();
-        }
-      }
+      await expect(sel).toBeVisible();
+      await sel.click();
+      const opt = page.getByRole("option", { name: optionLabel, exact: true }).first();
+      await expect(opt).toBeVisible();
+      await opt.click();
     }
 
     const submitBtn = page.getByRole("button", { name: /guardar|crear/i }).first();
@@ -194,68 +206,122 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     await expect(page.getByText(catName)).toBeVisible();
   });
 
-  test("3. Pricing: preprovisionar objetivo editable, verificar precio/versión anterior y posterior vía formulario real y persistencia tras recarga", async ({
+  test("3. Pricing: preprovisionar producto ACTIVO y definición vigente, editar vía PriceEditForm + ConfirmDialog (PATCH) y verificar persistencia tras recarga", async ({
     page,
     request,
   }) => {
     const env = assertRealStackPreflight();
     const token = await issueTokenFromTrustedG7(env.g7ApiBase, "gestor@example.test");
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      "X-Correlation-Id": randomUUID(),
+      "Content-Type": "application/json",
+    };
+
+    const catSlug = `cat-prc-${randomUUID().slice(0, 6)}`;
+    const catRes = await request.post(`${env.gatewayUrl}/api/v1/categorias`, {
+      headers,
+      data: { nombre: `Cat Prc ${catSlug}`, slugConfirmado: catSlug, categoriaPadreId: null },
+    });
+    expect([200, 201]).toContain(catRes.status());
+    const catDto = (await catRes.json()) as { categoriaId: string };
+    const logoPath = resolve(
+      process.env.G6_BACKEND_ROOT ?? resolve(process.cwd(), "../backend"),
+      "apps/taxonomy-svc/test/fixtures/logo.png",
+    );
+    const brandRes = await request.post(`${env.gatewayUrl}/api/v1/marcas`, {
+      headers: { Authorization: `Bearer ${token}`, "X-Correlation-Id": randomUUID() },
+      multipart: {
+        nombre: `Marca Prc ${randomUUID().slice(0, 6)}`,
+        logo: { name: "logo.png", mimeType: "image/png", buffer: readFileSync(logoPath) },
+      },
+    });
+    expect([200, 201]).toContain(brandRes.status());
+    const brandDto = (await brandRes.json()) as { marcaId: string };
+    const typeRes = await request.post(`${env.gatewayUrl}/api/v1/tipos-producto`, {
+      headers,
+      data: { nombre: `Tipo Prc ${randomUUID().slice(0, 6)}` },
+    });
+    expect([200, 201]).toContain(typeRes.status());
+    const typeDto = (await typeRes.json()) as { tipoProductoId: string };
+
     const targetProductId = randomUUID();
-    const seedPriceRes = await request.put(
+    const targetSku = `SKU-PRC-${randomUUID().slice(0, 6).toUpperCase()}`;
+    const seedProd = await request.post(`${env.g5SeedOrigin}/__test/catalog-active-product`, {
+      data: {
+        productId: targetProductId,
+        skuBase: targetSku,
+        categoriaId: catDto.categoriaId,
+        marcaId: brandDto.marcaId,
+        tipoProductoId: typeDto.tipoProductoId,
+      },
+    });
+    expect(seedProd.status()).toBe(201);
+
+    const seedPriceRes = await request.patch(
       `${env.gatewayUrl}/api/v1/precios/productos/${encodeURIComponent(targetProductId)}`,
       {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "X-Correlation-Id": randomUUID(),
-          "Idempotency-Key": randomUUID(),
-          "Content-Type": "application/json",
+        headers: { ...headers, "Idempotency-Key": randomUUID() },
+        data: {
+          accionPrecioOferta: "CONSERVAR",
+          priceVersion: 0,
+          precioRegular: 80,
+          moneda: "PEN",
+          motivoCambio: "SEED_E2E_PRICING",
         },
-        data: { precioRegular: "80.00", currency: "PEN", motivoCambio: "SEED_E2E_PRICING" },
       },
     );
-    expect([200, 201]).toContain(seedPriceRes.status());
+    expect(seedPriceRes.status()).toBe(200);
     const initialPriceDto = (await seedPriceRes.json()) as {
-      priceVersion: number;
-      precioRegular: string;
+      product_id: string;
+      price_version: number;
+      precio_regular: string;
+      channel_id: string | null;
     };
+    expect(initialPriceDto.product_id).toBe(targetProductId);
+    expect(initialPriceDto.precio_regular).toBe("80.00");
 
-    const [readRes] = await Promise.all([
+    await navigateViaSpa(page, "/precios");
+    await navigateViaSubLink(
+      page,
+      `/precios/editar?targetId=${encodeURIComponent(targetProductId)}&channel=global&scope=product`,
+    );
+
+    const regularInput = page.getByLabel(/nuevo precio regular/i).first();
+    await expect(regularInput).toBeVisible();
+    await regularInput.fill("99.50");
+
+    const reasonInput = page.getByLabel(/motivo del cambio/i).first();
+    await expect(reasonInput).toBeVisible();
+    await reasonInput.fill("Ajuste E2E Pricing");
+
+    const saveBtn = page.getByRole("button", { name: "Guardar cambios", exact: true }).first();
+    await expect(saveBtn).toBeEnabled();
+    await saveBtn.click();
+
+    const confirmBtn = page
+      .getByRole("dialog", { name: /confirmar cambio de precio/i })
+      .getByRole("button", { name: "Confirmar cambio de precio", exact: true });
+    await expect(confirmBtn).toBeVisible();
+
+    const [patchRes] = await Promise.all([
       page.waitForResponse(
         (res) =>
-          res.request().method() === "GET" &&
-          new URL(res.url()).pathname.startsWith("/api/v1/precios"),
+          res.request().method() === "PATCH" &&
+          new URL(res.url()).pathname === `/api/v1/precios/productos/${targetProductId}`,
       ),
-      navigateViaSpa(page, "/precios"),
+      confirmBtn.click(),
     ]);
-    expect(readRes.status()).toBe(200);
-
-    await navigateViaSubLink(page, "/precios/editar");
-    const prodInput = page.getByRole("textbox", { name: /producto|sku/i }).first();
-    if (await prodInput.isVisible().catch(() => false)) {
-      await prodInput.fill(targetProductId);
-    }
-    const priceInput = page.getByRole("textbox").last();
-    await expect(priceInput).toBeVisible();
-    await priceInput.fill("99.50");
-
-    const saveBtn = page.getByRole("button", { name: /guardar|actualizar/i }).first();
-    await expect(saveBtn).toBeVisible();
-    const [putRes] = await Promise.all([
-      page.waitForResponse(
-        (res) =>
-          res.request().method() === "PUT" &&
-          new URL(res.url()).pathname.startsWith("/api/v1/precios"),
-      ),
-      saveBtn.click(),
-    ]);
-    expect([200, 201]).toContain(putRes.status());
-    const dto = (await putRes.json()) as {
-      priceVersion?: number;
-      precioRegular?: string;
+    expect(patchRes.status()).toBe(200);
+    const dto = (await patchRes.json()) as {
+      product_id: string;
+      price_version: number;
+      precio_regular: string;
+      channel_id: string | null;
     };
-    expect(typeof dto.priceVersion).toBe("number");
-    expect(dto.priceVersion).toBeGreaterThan(initialPriceDto.priceVersion);
-    expect(dto.precioRegular).toBe("99.50");
+    expect(dto.product_id).toBe(targetProductId);
+    expect(dto.price_version).toBeGreaterThan(initialPriceDto.price_version);
+    expect(dto.precio_regular).toBe("99.50");
 
     await reloadVerifySessionLostAndReauth(page);
     const persistedRes = await request.get(
@@ -265,32 +331,104 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     expect(persistedRes.status()).toBe(200);
     const persistedDto = (await persistedRes.json()) as {
       precioRegular?: string;
+      precio_regular?: string;
       priceVersion?: number;
+      price_version?: number;
     };
-    expect(persistedDto.precioRegular).toBe("99.50");
-    expect(persistedDto.priceVersion).toBe(dto.priceVersion);
+    expect(persistedDto.precio_regular ?? persistedDto.precioRegular).toBe("99.50");
+    expect(persistedDto.price_version ?? persistedDto.priceVersion).toBe(dto.price_version);
   });
 
-  test("4. Price Audit: generar cambio causal de precio, comprobar registro en auditoría, exportar CSV hasta COMPLETED y verificar contenido", async ({
+  test("4. Price Audit: cambio causal en Pricing -> Service Bus aislado -> Price Audit, exportar CSV hasta COMPLETED y verificar contenido", async ({
     page,
     request,
   }) => {
     const env = assertRealStackPreflight();
     const token = await issueTokenFromTrustedG7(env.g7ApiBase, "gestor@example.test");
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      "X-Correlation-Id": randomUUID(),
+      "Content-Type": "application/json",
+    };
+
+    const catSlug = `cat-aud-${randomUUID().slice(0, 6)}`;
+    const catRes = await request.post(`${env.gatewayUrl}/api/v1/categorias`, {
+      headers,
+      data: { nombre: `Cat Aud ${catSlug}`, slugConfirmado: catSlug, categoriaPadreId: null },
+    });
+    expect([200, 201]).toContain(catRes.status());
+    const catDto = (await catRes.json()) as { categoriaId: string };
+    const logoPath = resolve(
+      process.env.G6_BACKEND_ROOT ?? resolve(process.cwd(), "../backend"),
+      "apps/taxonomy-svc/test/fixtures/logo.png",
+    );
+    const brandRes = await request.post(`${env.gatewayUrl}/api/v1/marcas`, {
+      headers: { Authorization: `Bearer ${token}`, "X-Correlation-Id": randomUUID() },
+      multipart: {
+        nombre: `Marca Aud ${randomUUID().slice(0, 6)}`,
+        logo: { name: "logo.png", mimeType: "image/png", buffer: readFileSync(logoPath) },
+      },
+    });
+    expect([200, 201]).toContain(brandRes.status());
+    const brandDto = (await brandRes.json()) as { marcaId: string };
+    const typeRes = await request.post(`${env.gatewayUrl}/api/v1/tipos-producto`, {
+      headers,
+      data: { nombre: `Tipo Aud ${randomUUID().slice(0, 6)}` },
+    });
+    expect([200, 201]).toContain(typeRes.status());
+    const typeDto = (await typeRes.json()) as { tipoProductoId: string };
+
     const causalProductId = randomUUID();
-    const putPriceRes = await request.put(
+    const causalSku = `SKU-AUD-${randomUUID().slice(0, 6).toUpperCase()}`;
+    const seedProd = await request.post(`${env.g5SeedOrigin}/__test/catalog-active-product`, {
+      data: {
+        productId: causalProductId,
+        skuBase: causalSku,
+        categoriaId: catDto.categoriaId,
+        marcaId: brandDto.marcaId,
+        tipoProductoId: typeDto.tipoProductoId,
+      },
+    });
+    expect(seedProd.status()).toBe(201);
+
+    const patchPriceRes = await request.patch(
       `${env.gatewayUrl}/api/v1/precios/productos/${encodeURIComponent(causalProductId)}`,
       {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "X-Correlation-Id": randomUUID(),
-          "Idempotency-Key": randomUUID(),
-          "Content-Type": "application/json",
+        headers: { ...headers, "Idempotency-Key": randomUUID() },
+        data: {
+          accionPrecioOferta: "CONSERVAR",
+          priceVersion: 0,
+          precioRegular: 145,
+          moneda: "PEN",
+          motivoCambio: "CAUSAL_AUDIT_E2E",
         },
-        data: { precioRegular: "145.00", currency: "PEN", motivoCambio: "CAUSAL_AUDIT_E2E" },
       },
     );
-    expect([200, 201]).toContain(putPriceRes.status());
+    expect(patchPriceRes.status()).toBe(200);
+
+    let causalPersisted = false;
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      const pollAudit = await request.get(
+        `${env.gatewayUrl}/api/v1/auditoria-precios/administracion?pagina=1&tamanio=20`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      expect(pollAudit.status()).toBe(200);
+      const body = (await pollAudit.json()) as {
+        items?: Array<{ productId?: string; motivoCambio?: string }>;
+      };
+      if (
+        (body.items ?? []).some(
+          (item) =>
+            item.productId === causalProductId ||
+            item.motivoCambio === "CAUSAL_AUDIT_E2E",
+        )
+      ) {
+        causalPersisted = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    expect(causalPersisted).toBe(true);
 
     const [auditRes] = await Promise.all([
       page.waitForResponse(
@@ -301,9 +439,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       navigateViaSpa(page, "/precios/auditoria"),
     ]);
     expect(auditRes.status()).toBe(200);
-    const auditPayload = (await auditRes.json()) as { items?: unknown[] };
-    expect(Array.isArray(auditPayload.items)).toBe(true);
-    expect((auditPayload.items ?? []).length).toBeGreaterThanOrEqual(1);
+    await expect(page.getByText(/CAUSAL_AUDIT_E2E|145/).first()).toBeVisible();
 
     await navigateViaSubLink(page, "/precios/auditoria/exportar/csv");
     const exportBtn = page.getByRole("button", { name: /exportar|generar/i }).first();
@@ -345,13 +481,14 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     expect(csvText).toMatch(/sku|precio|fecha/i);
   });
 
-  test("5. Promotions: crear promoción CUPON vigente y luego cupón asociado via SPA, recargar, reautenticar y verificar persistencia", async ({
+  test("5. Promotions: crear promoción CUPON vigente y luego cupón asociado via CouponForm (estado, promoción exacta y radio restitución)", async ({
     page,
     request,
   }) => {
     const env = assertRealStackPreflight();
     const token = await issueTokenFromTrustedG7(env.g7ApiBase, "gestor@example.test");
     const nowMs = Date.now();
+    const promoName = `Promo UI ${randomUUID().slice(0, 6)}`;
     const promoRes = await request.post(`${env.gatewayUrl}/api/v1/promociones`, {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -360,7 +497,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
         "Content-Type": "application/json",
       },
       data: {
-        nombre: `Promo UI ${randomUUID().slice(0, 6)}`,
+        nombre: promoName,
         tipoDescuento: "PORCENTAJE",
         valor: 15,
         modalidad: "CUPON",
@@ -389,24 +526,30 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     expect(listRes.status()).toBe(200);
 
     await navigateViaSubLink(page, "/cupones/nuevo");
-    const codeInput = page.getByRole("textbox").first();
+    const codeInput = page.getByLabel(/c[oó]digo del cup[oó]n/i).first();
     await expect(codeInput).toBeVisible();
     await codeInput.fill(code);
-    const promoSelect = page.getByRole("combobox", { name: /promoci/i }).first();
-    if (await promoSelect.isVisible().catch(() => false)) {
-      await promoSelect.click();
-      const opt = page.getByRole("option").first();
-      if (await opt.isVisible().catch(() => false)) await opt.click();
-    }
-    const policySelect = page.getByRole("combobox", { name: /pol[ií]tica|cancelaci/i }).first();
-    if (await policySelect.isVisible().catch(() => false)) {
-      await policySelect.click();
-      const opt = page.getByRole("option", { name: /restaurar/i }).first();
-      if (await opt.isVisible().catch(() => false)) await opt.click();
-    }
 
-    const submitBtn = page.getByRole("button", { name: /guardar|crear/i }).first();
-    await expect(submitBtn).toBeVisible();
+    const promoSelect = page.getByLabel(/promoci[oó]n asociada/i).first();
+    await expect(promoSelect).toBeVisible();
+    await promoSelect.click();
+    const promoOpt = page.getByRole("option", { name: promoName, exact: true }).first();
+    await expect(promoOpt).toBeVisible();
+    await promoOpt.click();
+
+    const statusSelect = page.getByLabel(/estado inicial/i).first();
+    await expect(statusSelect).toBeVisible();
+    await statusSelect.click();
+    const activeOpt = page.getByRole("option", { name: "Activo", exact: true }).first();
+    await expect(activeOpt).toBeVisible();
+    await activeOpt.click();
+
+    const restoreRadio = page.getByRole("radio", { name: "Restaurar uso al cancelar" }).first();
+    await expect(restoreRadio).toBeVisible();
+    await restoreRadio.check();
+
+    const submitBtn = page.getByRole("button", { name: "Crear cupón", exact: true }).first();
+    await expect(submitBtn).toBeEnabled();
     const [createRes] = await Promise.all([
       page.waitForResponse(
         (res) =>
@@ -418,17 +561,24 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     expect([200, 201]).toContain(createRes.status());
 
     await reloadVerifySessionLostAndReauth(page);
-    const [verifyList] = await Promise.all([
-      page.waitForResponse(
-        (res) =>
-          res.request().method() === "GET" &&
-          new URL(res.url()).pathname.startsWith("/api/v1/cupones"),
-      ),
-      navigateViaSpa(page, "/cupones"),
-    ]);
-    expect(verifyList.status()).toBe(200);
-    await expect(page.getByText(code)).toBeVisible();
-    await expect(page.getByText("ACTIVO").first()).toBeVisible();
+    const verifyCouponRes = await request.get(
+      `${env.gatewayUrl}/api/v1/cupones?codigo=${encodeURIComponent(code)}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    expect(verifyCouponRes.status()).toBe(200);
+    const couponListDto = (await verifyCouponRes.json()) as {
+      items?: Array<{
+        codigo?: string;
+        promocionId?: string;
+        estado?: string;
+        politicaCancelacion?: string;
+      }>;
+    };
+    const foundCoupon = (couponListDto.items ?? []).find((c) => c.codigo === code);
+    expect(foundCoupon).toBeTruthy();
+    expect(foundCoupon?.promocionId).toBe(promoDto.promotionId);
+    expect(foundCoupon?.estado).toBe("ACTIVO");
+    expect(foundCoupon?.politicaCancelacion).toBe("RESTAURAR_EN_CANCELACION");
   });
 
   test("6. Inventory: navegar a /inventario y subpágina /inventario/umbrales, mutar umbral, recargar, reautenticar y verificar valor persistido", async ({
@@ -541,14 +691,20 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
         },
       });
       expect(seedRes.status()).toBe(201);
-      const priceRes = await request.put(
+      const priceRes = await request.patch(
         `${env.gatewayUrl}/api/v1/precios/productos/${encodeURIComponent(productId)}`,
         {
           headers: { ...headers, "Idempotency-Key": randomUUID() },
-          data: { precioRegular: "100.00", currency: "PEN", motivoCambio: "COMBO_E2E_SEED" },
+          data: {
+            accionPrecioOferta: "CONSERVAR",
+            priceVersion: 0,
+            precioRegular: 100,
+            moneda: "PEN",
+            motivoCambio: "COMBO_E2E_SEED",
+          },
         },
       );
-      expect([200, 201]).toContain(priceRes.status());
+      expect(priceRes.status()).toBe(200);
     }
 
     const comboName = `ComboE2E-${randomUUID().slice(0, 6)}`;
@@ -563,19 +719,31 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     expect(listRes.status()).toBe(200);
 
     await navigateViaSubLink(page, "/combos/nuevo");
-    await page.getByRole("textbox", { name: /nombre/i }).first().fill(comboName);
-    const comboPriceInput = page.getByRole("spinbutton", { name: /precio/i }).first();
-    if (await comboPriceInput.isVisible().catch(() => false)) {
-      await comboPriceInput.fill("180");
-    }
-    const skuInputs = page.getByRole("textbox", { name: /sku/i });
-    if ((await skuInputs.count()) >= 2) {
-      await skuInputs.nth(0).fill(sku1);
-      await skuInputs.nth(1).fill(sku2);
+    await page.getByLabel("Nombre", { exact: true }).fill(comboName);
+
+    const productSelector = page.getByLabel("Producto", { exact: true }).first();
+    const addComponentBtn = page.getByRole("button", { name: "Agregar componente", exact: true });
+    for (const skuItem of [sku1, sku2]) {
+      await expect(productSelector).toBeVisible();
+      await productSelector.click();
+      await productSelector.fill(skuItem);
+      const option = page.getByRole("option", { name: new RegExp(skuItem, "i") }).first();
+      await expect(option).toBeVisible();
+      await option.click();
+      await expect(addComponentBtn).toBeEnabled();
+      await addComponentBtn.click();
     }
 
-    const submitBtn = page.getByRole("button", { name: /guardar|crear/i }).first();
-    await expect(submitBtn).toBeVisible();
+    await expect(page.getByText(sku1)).toBeVisible();
+    await expect(page.getByText(sku2)).toBeVisible();
+
+    const comboPriceInput = page.getByLabel("Precio del combo (PEN)", { exact: true }).first();
+    await expect(comboPriceInput).toBeVisible();
+    await comboPriceInput.fill("180.00");
+
+    await expect(page.getByText("Precio con beneficio económico")).toBeVisible();
+    const submitBtn = page.getByRole("button", { name: "Crear combo", exact: true }).first();
+    await expect(submitBtn).toBeEnabled();
     const [createRes] = await Promise.all([
       page.waitForResponse(
         (res) =>
@@ -608,11 +776,45 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     await expect(page.getByText(comboName)).toBeVisible();
   });
 
-  test("8a. Bulk (admisión HTTP): descargar plantilla CSV, subir lote válido y verificar 202 QUEUED y persistencia inicial", async ({
+  test("8a. Bulk (admisión HTTP): descargar plantilla CSV V2, preparar maestros reales de Taxonomy, subir lote válido y verificar 202 QUEUED y persistencia inicial", async ({
     page,
     request,
   }) => {
     const env = assertRealStackPreflight();
+    const token = await issueTokenFromTrustedG7(env.g7ApiBase, "gestor@example.test");
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      "X-Correlation-Id": randomUUID(),
+      "Content-Type": "application/json",
+    };
+
+    const catSlug = `cat-blk-${randomUUID().slice(0, 6)}`;
+    const catRes = await request.post(`${env.gatewayUrl}/api/v1/categorias`, {
+      headers,
+      data: { nombre: `Cat Bulk ${catSlug}`, slugConfirmado: catSlug, categoriaPadreId: null },
+    });
+    expect([200, 201]).toContain(catRes.status());
+    const catDto = (await catRes.json()) as { categoriaId: string };
+    const logoPath = resolve(
+      process.env.G6_BACKEND_ROOT ?? resolve(process.cwd(), "../backend"),
+      "apps/taxonomy-svc/test/fixtures/logo.png",
+    );
+    const brandRes = await request.post(`${env.gatewayUrl}/api/v1/marcas`, {
+      headers: { Authorization: `Bearer ${token}`, "X-Correlation-Id": randomUUID() },
+      multipart: {
+        nombre: `Marca Bulk ${randomUUID().slice(0, 6)}`,
+        logo: { name: "logo.png", mimeType: "image/png", buffer: readFileSync(logoPath) },
+      },
+    });
+    expect([200, 201]).toContain(brandRes.status());
+    const brandDto = (await brandRes.json()) as { marcaId: string };
+    const typeRes = await request.post(`${env.gatewayUrl}/api/v1/tipos-producto`, {
+      headers,
+      data: { nombre: `Tipo Bulk ${randomUUID().slice(0, 6)}` },
+    });
+    expect([200, 201]).toContain(typeRes.status());
+    const typeDto = (await typeRes.json()) as { tipoProductoId: string };
+
     await navigateViaSpa(page, "/carga-masiva/descargas");
     const templateBtn = page.getByRole("button", { name: /plantilla|csv/i }).first();
     await expect(templateBtn).toBeVisible();
@@ -641,9 +843,9 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       "",
       "Producto Bulk E2E",
       "Descripcion valida para carga masiva V2",
-      "cat-bulk-e2e",
-      "marca-bulk-e2e",
-      "tipo-bulk-e2e",
+      catDto.categoriaId,
+      brandDto.marcaId,
+      typeDto.tipoProductoId,
       "false",
       "25.00",
       "{}",
@@ -672,7 +874,6 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     expect(batchDto.batch_id).toBeTruthy();
     expect(batchDto.status).toBe("QUEUED");
 
-    const token = await issueTokenFromTrustedG7(env.g7ApiBase, "gestor@example.test");
     const initialRes = await request.get(
       `${env.gatewayUrl}/api/v1/carga-masiva/productos/importaciones/${encodeURIComponent(batchDto.batch_id!)}`,
       { headers: { Authorization: `Bearer ${token}` } },
@@ -691,13 +892,13 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     expect((initialSnap.rows ?? []).length).toBeGreaterThanOrEqual(1);
   });
 
-  test("8b. Bulk (procesamiento integral con mensajería): exige COMPLETED, conteo íntegro de filas, cero errores y sin conciliación pendiente", async ({
+  test("8b. Bulk (procesamiento integral con mensajería): BLOQUEADA_POR_R02 (inventory-svc g6.inventory.from.bulk BLOCKED_CONTRACT)", async ({
     page,
     request,
   }) => {
     test.skip(
-      process.env.G6_BULK_INTEGRAL_BUS_ENABLED !== "1",
-      "Requiere laboratorio con transporte aislado operativo para Bulk<->Catalog (no Azure Chile ni RabbitMQ productivo).",
+      true,
+      "BULK_8B: BLOQUEADA_POR_R02 — inventory-svc mantiene g6.inventory.from.bulk como BLOCKED_CONTRACT en apps/inventory-svc/src/messaging/service-bus-consumer.ts:11; no se habilita por la fuerza.",
     );
     const env = assertRealStackPreflight();
     await navigateViaSpa(page, "/carga-masiva");

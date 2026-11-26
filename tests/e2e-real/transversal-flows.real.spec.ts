@@ -241,19 +241,30 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     expect(skuCtx2.active).toBe(true);
     expect(skuCtx2.eligible).toBe(true);
 
-    // 2. Catalog -> Pricing -> Price Audit (para ambos SKU)
-    const putPrice = await request.put(
+    // 2. Catalog -> Pricing (PATCH DTO oficial) -> Price Audit (causal vía Service Bus aislado)
+    const putPrice = await request.patch(
       `${env.gatewayUrl}/api/v1/precios/productos/${encodeURIComponent(prodDto.productId)}`,
       {
         headers: { ...humanHeaders, "Idempotency-Key": randomUUID() },
         data: {
-          precioRegular: "120.00",
-          currency: "PEN",
+          accionPrecioOferta: "CONSERVAR",
+          priceVersion: 0,
+          precioRegular: 120,
+          moneda: "PEN",
           motivoCambio: "E2E_TRANSVERSAL",
         },
       },
     );
-    expect([200, 201]).toContain(putPrice.status());
+    expect(putPrice.status()).toBe(200);
+    const putPriceDto = (await putPrice.json()) as {
+      product_id: string;
+      precio_regular: string;
+      price_version: number;
+      channel_id: string | null;
+    };
+    expect(putPriceDto.product_id).toBe(prodDto.productId);
+    expect(putPriceDto.precio_regular).toBe("120.00");
+    expect(putPriceDto.price_version).toBeGreaterThanOrEqual(1);
 
     const getPrice = await request.get(
       `${env.gatewayUrl}/api/v1/precios/productos/${encodeURIComponent(prodDto.productId)}`,
@@ -261,18 +272,27 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     );
     expect(getPrice.status()).toBe(200);
 
-    const putPrice2 = await request.put(
+    const putPrice2 = await request.patch(
       `${env.gatewayUrl}/api/v1/precios/productos/${encodeURIComponent(activeProductId2)}`,
       {
         headers: { ...humanHeaders, "Idempotency-Key": randomUUID() },
         data: {
-          precioRegular: "110.00",
-          currency: "PEN",
+          accionPrecioOferta: "CONSERVAR",
+          priceVersion: 0,
+          precioRegular: 110,
+          moneda: "PEN",
           motivoCambio: "E2E_TRANSVERSAL_COMBO",
         },
       },
     );
-    expect([200, 201]).toContain(putPrice2.status());
+    expect(putPrice2.status()).toBe(200);
+    const putPrice2Dto = (await putPrice2.json()) as {
+      product_id: string;
+      precio_regular: string;
+      price_version: number;
+    };
+    expect(putPrice2Dto.product_id).toBe(activeProductId2);
+    expect(putPrice2Dto.precio_regular).toBe("110.00");
 
     const getPrice2 = await request.get(
       `${env.gatewayUrl}/api/v1/precios/productos/${encodeURIComponent(activeProductId2)}`,
@@ -280,11 +300,21 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     );
     expect(getPrice2.status()).toBe(200);
 
-    const auditRes = await request.get(
-      `${env.gatewayUrl}/api/v1/auditoria-precios/administracion?pagina=1&tamanio=10`,
-      { headers: humanHeaders },
-    );
-    expect(auditRes.status()).toBe(200);
+    let auditFound = false;
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      const auditRes = await request.get(
+        `${env.gatewayUrl}/api/v1/auditoria-precios/administracion?pagina=1&tamanio=20`,
+        { headers: humanHeaders },
+      );
+      expect(auditRes.status()).toBe(200);
+      const auditBody = (await auditRes.json()) as { items?: Array<{ sku?: string; productId?: string; motivoCambio?: string }> };
+      if ((auditBody.items ?? []).some((row) => row.motivoCambio === "E2E_TRANSVERSAL" || row.productId === prodDto.productId)) {
+        auditFound = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    expect(auditFound).toBe(true);
 
     // 3. Catalog/Pricing -> Combos (2 componentes distintos y precioCombo positivo)
     const createCombo = await request.post(

@@ -1127,14 +1127,19 @@ async function startLocalG5EvidenceServer({
 
 async function startLocalIsolatedServiceBusBroker() {
   const queues = new Map();
+  const dlq = new Map();
   const inflight = new Map();
   const getQueue = (name) => {
     if (!queues.has(name)) queues.set(name, []);
     return queues.get(name);
   };
+  const getDlq = (name) => {
+    if (!dlq.has(name)) dlq.set(name, []);
+    return dlq.get(name);
+  };
   const server = createServer(async (req, res) => {
     const url = req.url ?? "/";
-    const match = /^\/queues\/([^/]+)\/(messages|receive|peek|complete|abandon)(?:\/([^/]+))?$/.exec(
+    const match = /^\/queues\/([^/]+)\/(messages|receive|peek|dlq|complete|abandon|deadletter)(?:\/([^/]+))?$/.exec(
       url,
     );
     if (!match) {
@@ -1176,6 +1181,12 @@ async function startLocalIsolatedServiceBusBroker() {
       res.end(JSON.stringify(getQueue(queue).slice(0, 10)));
       return;
     }
+    if (req.method === "GET" && action === "dlq") {
+      res.statusCode = 200;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify(getDlq(queue)));
+      return;
+    }
     if (req.method === "POST" && action === "complete" && deliveryId) {
       inflight.delete(deliveryId);
       res.statusCode = 200;
@@ -1186,6 +1197,22 @@ async function startLocalIsolatedServiceBusBroker() {
       const entry = inflight.get(deliveryId);
       inflight.delete(deliveryId);
       if (entry) getQueue(entry.queue).push(entry.msg);
+      res.statusCode = 200;
+      res.end();
+      return;
+    }
+    if (req.method === "POST" && action === "deadletter" && deliveryId) {
+      const entry = inflight.get(deliveryId);
+      inflight.delete(deliveryId);
+      const reasonBody = await readJsonBody(req);
+      if (entry) {
+        getDlq(entry.queue).push({
+          ...entry.msg,
+          deadLetterReason: reasonBody.deadLetterReason ?? "DEAD_LETTERED",
+          deadLetterErrorDescription: reasonBody.deadLetterErrorDescription ?? "",
+          deadLetteredAt: new Date().toISOString(),
+        });
+      }
       res.statusCode = 200;
       res.end();
       return;
@@ -1371,12 +1398,19 @@ async function main() {
         PRICING_SERVICE_TOKEN_URL: g7.tokenUrl,
         PRICING_SERVICE_CLIENT_SECRET: "e2e-pricing-secret",
         PRICING_CATALOG_URL: serviceUrls["catalog-svc"],
+        MESSAGING_PROVIDER: "AZURE_SERVICE_BUS",
+        G6_SERVICE_BUS_PILOT_ENABLED: "true",
+        PRICING_PRICE_CHANGED_PUBLISH_ENABLED: "true",
+        G6_ISOLATED_SERVICE_BUS_URL: isolatedBus.baseUrl,
       },
       "price-audit-svc": {
         ...controlledBaseEnv,
         PORT: String(servicePorts["price-audit-svc"]),
         PGUSER: "price_audit_app",
-        DATABASE_URL: pg.urlFor("price_audit_app"),
+        DATABASE_URL: pg.urlFor("price-audit-app".replaceAll("-", "_")),
+        MESSAGING_PROVIDER: "AZURE_SERVICE_BUS",
+        G6_SERVICE_BUS_PILOT_ENABLED: "true",
+        G6_ISOLATED_SERVICE_BUS_URL: isolatedBus.baseUrl,
       },
       "promotions-svc": {
         ...controlledBaseEnv,
@@ -1485,6 +1519,8 @@ async function main() {
         {
           gatewayUrl,
           catalogServiceUrl: serviceUrls["catalog-svc"],
+          serviceUrls,
+          isolatedBusUrl: isolatedBus.baseUrl,
           g7ApiBase: g7.baseUrl,
           g7Issuer: g7.issuer,
           g7JwksUrl: g7.jwksUrl,
