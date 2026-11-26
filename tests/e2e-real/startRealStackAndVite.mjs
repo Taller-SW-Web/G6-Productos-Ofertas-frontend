@@ -1230,6 +1230,22 @@ async function startLocalG5EvidenceServer({
       res.end(JSON.stringify({ ok: true, batchId }));
       return;
     }
+    if (req.method === "POST" && url === "/__test/pg-query") {
+      const body = await readJsonBody(req);
+      const querySql = typeof body.sql === "string" ? body.sql.trim() : "";
+      if (!/^SELECT\s+/i.test(querySql) || querySql.includes(";")) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: "ONLY_SINGLE_SELECT_ALLOWED" }));
+        return;
+      }
+      const wrapped = `\\t\n\\a\nSELECT coalesce(json_agg(t), '[]'::json)::text FROM (${querySql}) t;\n`;
+      const out = await runPsql(pg.containerName, "g6_e2e_test", wrapped, "pg-query");
+      const jsonLine = out.trim().split(/\r?\n/).filter(Boolean).pop() ?? "[]";
+      res.statusCode = 200;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ rows: JSON.parse(jsonLine) }));
+      return;
+    }
     res.statusCode = 404;
     res.end();
   });
@@ -1621,12 +1637,12 @@ async function main() {
           ) VALUES (
             '${retryProdId}', NULL, '${retrySku}', 'PRICING',
             '${retryPricingOpId}', '${retryPricingCorrId}',
-            '{"sku":"${retrySku}","dependencia":"PRICING"}'::jsonb,
+            '{"product_id":"${retryProdId}","sku_base":"${retrySku}","precio_regular":99.9,"moneda":"PEN","channel_id":null,"motivo_cambio":"ALTA_PRODUCTO"}'::jsonb,
             'PENDING'
           ), (
             '${retryVarProdId}', '${retryVarId}', '${retryVarSku}', 'INVENTORY',
             '${retryVarInvOpId}', '${retryVarInvCorrId}',
-            '{"sku":"${retryVarSku}","dependencia":"INVENTORY"}'::jsonb,
+            '{"sku":"${retryVarSku}","product_id":"${retryVarProdId}","variant_id":"${retryVarId}","default_location_id":"00000000-0000-4000-8000-000000000101"}'::jsonb,
             'PENDING'
           );
           INSERT INTO catalog.outbox (
@@ -1635,11 +1651,13 @@ async function main() {
           ) VALUES (
             '${retryPricingMsgId}', 'pricing.product.initialization.requested', 'command', 1,
             '${retryPricingCorrId}', '${retryPricingOpId}', now() - interval '10 seconds',
-            '{"sku":"${retrySku}"}'::jsonb, now() - interval '10 seconds', now() - interval '10 seconds'
+            '{"product_id":"${retryProdId}","sku_base":"${retrySku}","precio_regular":99.9,"moneda":"PEN","channel_id":null,"motivo_cambio":"ALTA_PRODUCTO"}'::jsonb,
+            now() - interval '10 seconds', now() - interval '10 seconds'
           ), (
             '${retryVarInvMsgId}', 'inventory.sku.initialization.requested', 'command', 1,
             '${retryVarInvCorrId}', '${retryVarInvOpId}', now() - interval '10 seconds',
-            '{"sku":"${retryVarSku}"}'::jsonb, now() - interval '10 seconds', now() - interval '10 seconds'
+            '{"sku":"${retryVarSku}","product_id":"${retryVarProdId}","variant_id":"${retryVarId}","default_location_id":"00000000-0000-4000-8000-000000000101"}'::jsonb,
+            now() - interval '10 seconds', now() - interval '10 seconds'
           );
           COMMIT;
         `;
@@ -1651,7 +1669,7 @@ async function main() {
         const sql = `
           BEGIN;
           UPDATE bulk.batch_jobs
-          SET status = 'FAILED_GENERAL', needs_reconciliation = false, completed_rows = 0, failed_rows = 1
+          SET status = 'COMPLETED', needs_reconciliation = true, completed_rows = 0, failed_rows = 1
           WHERE batch_id = '${safeId}';
           UPDATE bulk.batch_rows
           SET status = 'FAILED', applied_domains = '{}'::text[], failed_domain = 'CATALOGO',
@@ -1730,6 +1748,7 @@ async function main() {
         CATALOG_BULK_CONTENT_TOKEN_URL: g7.tokenUrl,
         CATALOG_BULK_CONTENT_CLIENT_SECRET: "e2e-catalog-secret",
         CATALOG_PREPARATION_TIMEOUT_MS: "100",
+        CATALOG_DEFAULT_LOCATION_ID: "00000000-0000-4000-8000-000000000101",
         CATALOG_SERVICE_TOKEN_URL: g7.tokenUrl,
         CATALOG_SERVICE_CLIENT_SECRET: "e2e-catalog-secret",
         MESSAGING_PROVIDER: "AZURE_SERVICE_BUS",
