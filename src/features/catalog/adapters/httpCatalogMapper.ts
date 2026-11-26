@@ -83,11 +83,11 @@ export function mapVariant(value: unknown, productId: string, preparation: Produ
   const dto = object(value); const id = string(dto.variant_id); const sku = string(dto.sku);
   const prep = preparation.variantes.find(p => p.variantId === id && p.sku === sku);
   if (preparation.productId !== productId || !prep) return blockedCatalog("No se recibió preparación autoritativa para esta variante.");
-  const images = array(dto.images).map(string);
+  const images = array(dto.images ?? []).map(string);
   return { variantId: id, productId, sku, status: choice(dto.status, ["BORRADOR", "ACTIVA", "INACTIVA"] as const),
-    catalogVersion: integer(dto.catalog_version), identifyingAttributes: mapCommercialAttributes(dto.identifying_attributes, schemas),
-    nonIdentifyingAttributes: mapCommercialAttributes(dto.non_identifying_attributes, schemas), images, imageUrl: images[0] ?? "",
-    physicalProfile: physical(dto.physical_profile), inventoryPreparationStatus: prep.inventario.status,
+    catalogVersion: dto.catalog_version === undefined ? null : integer(dto.catalog_version), identifyingAttributes: mapCommercialAttributes(dto.identifying_attributes ?? [], schemas),
+    nonIdentifyingAttributes: mapCommercialAttributes(dto.non_identifying_attributes ?? [], schemas), images, imageUrl: images[0] ?? "",
+    physicalProfile: dto.physical_profile === undefined ? undefined : physical(dto.physical_profile), inventoryPreparationStatus: prep.inventario.status,
     inventoryStatus: prep.inventario.status, inventoryManualRetryAllowed: prep.inventario.manualRetryAllowed,
     inventoryPreparationCode: prep.inventario.code };
 }
@@ -95,7 +95,7 @@ export function mapProduct(value: unknown, preparation: ProductPreparationView, 
   const dto = object(value); const id = string(dto.product_id); const hasVariants = boolean(dto.tiene_variantes);
   if (id !== preparation.productId || hasVariants !== preparation.hasVariants) return blockedCatalog("La preparación recibida pertenece a otro producto.");
   const variants = array(dto.variants).map(v => mapVariant(v, id, preparation, schemas));
-  const images = array(dto.images).map(string);
+  const images = array(dto.images ?? []).map(string);
   const statuses = [preparation.pricing.status, ...(preparation.inventario ? [preparation.inventario.status] : []),
     ...variants.filter(v => v.status === "ACTIVA").map(v => v.inventoryPreparationStatus)];
   const summary = statuses.every(s => s === "COMPLETED") ? "COMPLETED" : statuses.every(s => s === "PENDING") ? "PENDING"
@@ -104,10 +104,10 @@ export function mapProduct(value: unknown, preparation: ProductPreparationView, 
     categoryId: string(dto.categoria_id), categoryName: string(dto.categoria_id),
     typeId: string(dto.tipo_producto_id), typeName: string(dto.tipo_producto_id),
     brandId: string(dto.marca_id), brandName: string(dto.marca_id),
-    status: choice(dto.status, ["BORRADOR", "ACTIVO", "INACTIVO"] as const), catalogVersion: integer(dto.catalog_version),
+    status: choice(dto.status, ["BORRADOR", "ACTIVO", "INACTIVO"] as const), catalogVersion: dto.catalog_version === undefined ? null : integer(dto.catalog_version),
     preparationSummary: summary, description: dto.description == null ? "" : string(dto.description),
-    imageUrl: images[0], images: images.map(url => ({ url })), attributes: mapCommercialAttributes(dto.attributes, schemas),
-    physicalProfile: physical(dto.perfil_fisico), preparation,
+    imageUrl: images[0], images: images.map(url => ({ url })), attributes: mapCommercialAttributes(dto.attributes ?? [], schemas),
+    physicalProfile: dto.perfil_fisico === undefined ? undefined : physical(dto.perfil_fisico), preparation,
     variants: variants.map(v => ({ variantId: v.variantId, sku: v.sku,
       attributesSummary: v.identifyingAttributes.map(formatAttributeValue).join(" / "), status: v.status,
       preparationStatus: v.inventoryPreparationStatus, manualRetryAllowed: v.inventoryManualRetryAllowed })) };

@@ -17,6 +17,50 @@ const productDto = { product_id: pid, slug: "producto", name: "Servidor", sku_ba
 const variantDto = { variant_id: vid, sku: "000-case", status: "BORRADOR", catalog_version: 3, identifying_attributes: [], non_identifying_attributes: [], images: [], physical_profile: null };
 const variantPrep = { ...prep, tiene_variantes: true, inventario: null, variantes: [{ variant_id: vid, sku: "000-case", inventario: { status: "PENDING", manual_retry_allowed: false } }] };
 
+test("CAT-F07: canal sólo se envía en lecturas comerciales", async () => {
+  const admin = harness(() => json({ items: [], meta: { pagina: 1, tamanio: 20, total: 0, totalPaginas: 0 } }));
+  await admin.catalog.list({ page: 1, pageSize: 20, channel: "RETAIL" });
+  expect(admin.calls[0]?.path).toContain("/productos/administracion?");
+  expect(new URL("https://example.test" + admin.calls[0]!.path).searchParams.has("canal")).toBe(false);
+
+  const commercial = harness(() => json({ items: [], pagina: 1, tamanio: 20, total: 0 }), "commercial");
+  await commercial.catalog.list({ page: 1, pageSize: 20, channel: "RETAIL" });
+  expect(new URL("https://example.test" + commercial.calls[0]!.path).searchParams.get("canal")).toBe("RETAIL");
+});
+
+test("CAT-F01/F02: POST/PATCH aceptan campos opcionales omitidos por OpenAPI y rechazan requeridos inválidos", async () => {
+  const productPartial = { product_id: pid, slug: "partial", name: "Partial", status: "BORRADOR", categoria_id: "category", tipo_producto_id: "type", marca_id: "brand", tiene_variantes: false, variants: [] };
+  const variantPartial = { variant_id: vid, sku: "000-partial", status: "BORRADOR" };
+  const h = harness((path, init) => {
+    if (path.endsWith("/preparacion")) return json(prep);
+    if (path.endsWith("/variantes") || path.includes("/variantes/")) return json(variantPartial, init.method === "POST" ? 201 : 200);
+    return json(productPartial, init.method === "POST" && path === "/api/v1/productos" ? 201 : 200);
+  });
+  await expect(h.catalog.create({ ...payload, atributos: [] })).resolves.toMatchObject({ id: pid, catalogVersion: null, images: [], attributes: [], physicalProfile: undefined });
+  await expect(h.catalog.update(pid, { nombre: "Partial", descripcion: "", categoriaId: "category", marcaId: "brand", catalogVersion: 1 })).resolves.toMatchObject({ id: pid, catalogVersion: null });
+  const variantPrepPartial = { ...prep, tiene_variantes: true, inventario: null, variantes: [{ variant_id: vid, sku: "000-partial", inventario: { status: "PENDING", manual_retry_allowed: false } }] };
+  const variantHttp = harness(path => path.endsWith("/preparacion") ? json(variantPrepPartial) : json(variantPartial, 201));
+  await expect(variantHttp.catalog.createVariant(pid, { sku: "000-partial", identifyingAttributes: [] })).resolves.toMatchObject({ variantId: vid, catalogVersion: null });
+
+  const invalidProduct = harness((_path, init) => init.method === "POST" ? json({ ...productPartial, name: 7 }, 201) : json(prep));
+  await expect(invalidProduct.catalog.create(payload)).rejects.toMatchObject({ kind: "write_unknown", details: { responseReceived: "true", payloadValid: "false" } });
+  const invalidVariant = harness((_path, init) => init.method === "POST" ? json({ ...variantPartial, sku: null }, 201) : json(prep));
+  await expect(invalidVariant.catalog.createVariant(pid, { sku: "000-partial" })).rejects.toMatchObject({ kind: "write_unknown", details: { responseReceived: "true", payloadValid: "false" } });
+});
+
+test("CAT-F02: ProductoResumen rechaza slug ausente, nulo, vacío o de tipo incorrecto", async () => {
+  for (const invalidSlug of [undefined, null, "", 7]) {
+    const response = { ...productDto } as Record<string, unknown>;
+    if (invalidSlug === undefined) delete response.slug;
+    else response.slug = invalidSlug;
+    const h = harness((_path, init) => init.method === "POST" ? json(response, 201) : json(prep));
+    await expect(h.catalog.create({ ...payload, atributos: [] })).rejects.toMatchObject({
+      kind: "write_unknown",
+      details: { responseReceived: "true", payloadValid: "false" },
+    });
+  }
+});
+
 test("Mapper producto: null y SKU opcional ausente conservan ausencia; no genera códigos", () => {
   for (const hasVariants of [false, true]) {
     const preparation = mapPreparation(hasVariants ? variantPrep : prep);
@@ -148,14 +192,53 @@ test("HTTP: preparación conserva manual_retry_allowed y 202 solo admite; 409 no
 });
 
 test("HTTP: alta confirmada usa respuesta y preparación; fallo posterior no se presenta como rechazo ni reenvía", async () => {
-  const product = { product_id: pid, name: "Servidor", sku_base: "000-base", status: "BORRADOR", tiene_variantes: false, categoria_id: "category", marca_id: "brand", tipo_producto_id: "type", catalog_version: 12, description: "Desc", attributes: [], images: [], variants: [], perfil_fisico: null };
+  const product = { product_id: pid, slug: "servidor", name: "Servidor", sku_base: "000-base", status: "BORRADOR", tiene_variantes: false, categoria_id: "category", marca_id: "brand", tipo_producto_id: "type", catalog_version: 12, description: "Desc", attributes: [], images: [], variants: [], perfil_fisico: null };
   const h = harness((_path, init) => init.method === "POST" ? json(product, 201) : json(prep));
   const result = await h.catalog.create({ ...payload, atributos: [] });
   expect(result).toMatchObject({ id: pid, name: "Servidor", catalogVersion: 12, status: "BORRADOR", preparation: { inventario: { status: "REJECTED" } } });
   expect(result).not.toHaveProperty("priceInitial"); expect(result.publishedCommercially).toBeUndefined();
   const failed = harness((_path, init) => init.method === "POST" ? json(product, 201) : json({ code: "SERVICIO_NO_DISPONIBLE" }, 503));
-  await expect(failed.catalog.create(payload)).rejects.toMatchObject({ kind: "write_unknown" });
+  await expect(failed.catalog.create(payload)).rejects.toMatchObject({ kind: "write_acknowledged" });
   expect(failed.calls.filter(c => c.init.method === "POST")).toHaveLength(1);
+});
+
+test("CAT-F05: POST sin respuesta HTTP conserva resultado incierto y no se reenvía", async () => {
+  const h = harness((_path, init) => {
+    if (init.method === "POST") throw new Error("timeout before response");
+    return json(prep);
+  });
+  await expect(h.catalog.activate(pid, { catalogVersion: 12 })).rejects.toMatchObject({ kind: "write_unknown", details: { correlationId: expect.stringMatching(/^[a-f0-9-]{36}$/i) } });
+  expect(h.calls.filter(call => call.init.method === "POST")).toHaveLength(1);
+});
+
+test("CAT-F03: preparación conserva Retry-After válido para el polling", async () => {
+  const correlationId = "44444444-4444-4444-8444-444444444444";
+  const transport: CatalogHttpTransport = { request: async () => new Response(JSON.stringify(prep), { status: 200, headers: { "content-type": "application/json", "retry-after": "3", "x-correlation-id": correlationId } }) };
+  const catalog = createHttpCatalogRepository(transport, "admin");
+  await expect(catalog.getPreparation(pid)).resolves.toMatchObject({ productId: pid, retryAfterMs: 3000 });
+});
+
+test("CAT-F05: 2xx contractual reconoce la escritura aunque falle una lectura de enriquecimiento", async () => {
+  const acknowledged = { ...productDto, status: "ACTIVO", catalog_version: 13 };
+  const h = harness((path, init) => {
+    if (path === `/api/v1/productos/${pid}/activar` && init.method === "POST") return json(acknowledged);
+    if (path.endsWith("/preparacion")) return json({ code: "SERVICIO_NO_DISPONIBLE" }, 503);
+    return json({ code: "NO_ENCONTRADO" }, 404);
+  });
+  await expect(h.catalog.activate(pid, { catalogVersion: 12 })).rejects.toMatchObject({ kind: "write_acknowledged", details: { serverAcknowledged: "true" } });
+  expect(h.calls.filter(call => call.init.method === "POST")).toHaveLength(1);
+});
+
+test("CAT-F05: rechazo HTTP contractual es confirmado y no queda como intención incierta", async () => {
+  const h = harness((_path, init) => init.method === "POST" ? json({ code: "VERSION_CONFLICT" }, 409) : json(prep));
+  await expect(h.catalog.activate(pid, { catalogVersion: 12 })).rejects.toMatchObject({ kind: "version_conflict", details: { status: "409" } });
+  expect(h.calls.filter(call => call.init.method === "POST")).toHaveLength(1);
+});
+
+test("CAT-F05: 2xx con payload inválido mantiene incertidumbre del resultado de negocio", async () => {
+  const h = harness((_path, init) => init.method === "POST" ? json({ product_id: "otro", status: "ACTIVO" }) : json(prep));
+  await expect(h.catalog.activate(pid, { catalogVersion: 12 })).rejects.toMatchObject({ kind: "write_unknown", details: { responseReceived: "true", payloadValid: "false" } });
+  expect(h.calls.filter(call => call.init.method === "POST")).toHaveLength(1);
 });
 
 test("SKU: obligatorio en HTTP y mock, conserva ceros y mayúsculas/minúsculas", async () => {
@@ -231,6 +314,17 @@ test("CAT-H4-02: consumidores comerciales conservan sus rutas y no reciben una v
   expect(page.items[0]).toMatchObject({ id: pid, status: null, catalogVersion: null, commerciallyActive: true });
   await expect(loaded.catalog.getById(pid)).resolves.toBeNull();
   expect(loaded.calls.map(call => call.path)).toEqual(["/api/v1/productos?pagina=1&tamanio=20", `/api/v1/productos/${pid}`]);
+});
+
+test("CAT-F07: consulta comercial transmite el canal publicado y rechaza BORRADOR antes de HTTP", async () => {
+  const commercial = harness(path => {
+    expect(path).toContain("canal=RETAIL");
+    return json({ items: [{ product_id: pid, name: "Visible", tiene_variantes: false, categoria_id: "cat", marca_id: "brand", tipo_producto_id: "type" }], pagina: 1, tamanio: 20, total: 1 });
+  }, "commercial");
+  await expect(commercial.catalog.list({ page: 1, pageSize: 20, channel: "RETAIL" })).resolves.toMatchObject({ items: [{ id: pid, status: null, commerciallyActive: true }] });
+  expect(commercial.calls).toHaveLength(1);
+  await expect(commercial.catalog.list({ page: 1, pageSize: 20, channel: "RETAIL", status: "BORRADOR" })).rejects.toMatchObject({ kind: "blocked_contract" });
+  expect(commercial.calls).toHaveLength(1);
 });
 
 test("CAT-H4-03: variante ausente devuelve null y TEXTO no adquiere maxLength no publicado", async () => {

@@ -1,7 +1,11 @@
 import type {
   BulkExportFormat,
   BulkExportJob,
+  BulkAdmissionReconciliation,
+  BulkImportIntent,
   BulkImportBatch,
+  BulkResumeAccepted,
+  BulkResumeRequest,
 } from "../types/bulk";
 
 export interface DownloadResource {
@@ -12,6 +16,10 @@ export interface DownloadResource {
 export interface BulkRepository {
   /** API backend currently rejects resume; mock may support it. */
   resumeSupported?: boolean;
+  /** Disabled unless its configuration gate and independent endpoint evidence are both present. */
+  reconciliationEnabled?: boolean;
+  /** Disabled unless the backend's concurrent replay guarantee is independently evidenced. */
+  replaySupported?: boolean;
   getTemplate(
     format: BulkExportFormat,
     signal?: AbortSignal,
@@ -19,7 +27,20 @@ export interface BulkRepository {
 
   createImport(
     file: File,
-    localSummary?: { detectedRows?: number; correlationId?: string; expectedBatchId?: string; owner?: string; contentHash?: string },
+    localSummary?: { detectedRows?: number; correlationId?: string; owner?: string; contentHash?: string },
+    signal?: AbortSignal,
+  ): Promise<BulkImportBatch>;
+
+  reconcileImport?(
+    correlationId: string,
+    expectedOwner: string,
+    signal?: AbortSignal,
+  ): Promise<BulkAdmissionReconciliation | null>;
+
+  replayImport?(
+    file: File,
+    intent: BulkImportIntent,
+    confirmedByUser: boolean,
     signal?: AbortSignal,
   ): Promise<BulkImportBatch>;
 
@@ -28,8 +49,6 @@ export interface BulkRepository {
     signal?: AbortSignal,
     expectedOwner?: string,
   ): Promise<BulkImportBatch | null>;
-
-  confirmRecoveredImport?(batchId: string, owner: string, correlationId: string): void;
 
   getImportReport(
     batchId: string,
@@ -42,7 +61,8 @@ export interface BulkRepository {
   resumeImport(
     batchId: string,
     signal?: AbortSignal,
-  ): Promise<BulkImportBatch>;
+    request?: BulkResumeRequest,
+  ): Promise<BulkResumeAccepted>;
 
   createExport(
     format: BulkExportFormat,

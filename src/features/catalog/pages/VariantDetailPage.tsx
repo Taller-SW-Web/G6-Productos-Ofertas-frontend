@@ -188,7 +188,7 @@ export function VariantDetailPage() {
                 </StatusBadge>
               </Group>
               <Text size="xs" c="dimmed" mt={4}>
-                ID Sistema: <code>{variant.variantId}</code> | Versión: {variant.catalogVersion ?? 1}
+                ID Sistema: <code>{variant.variantId}</code> | Versión: {variant.catalogVersion ?? "No disponible"}
               </Text>
             </div>
             <Paper p="xs" withBorder bg="var(--po-subtle)">

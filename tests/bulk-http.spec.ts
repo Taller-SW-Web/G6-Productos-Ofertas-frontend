@@ -1,5 +1,4 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { createHash } from "node:crypto";
 import { AddressInfo } from "node:net";
 import { expect, test } from "@playwright/test";
 import { createBulkFetchTransport, createHttpBulkRepository } from "../src/features/bulk/adapters/httpBulkRepository";
@@ -32,12 +31,6 @@ function batch(id = batchId, status = "COMPLETED") {
       code: "PRECIO_INVALIDO", detail: "Precio rechazado", steps: [{ dominio: "CATALOGO", status: "COMPLETED" },
         { dominio: "PRICING", status: "FAILED", code: "PRECIO_INVALIDO", detail: "Precio rechazado" }] }] };
 }
-function contractBatchId(correlationId: string, fileBytes: Buffer): string {
-  const contentHash = createHash("sha256").update(fileBytes).digest("hex");
-  const digest = createHash("sha256").update(`${correlationId}:${contentHash}`).digest("hex");
-  const uuid = `${digest.slice(0, 12)}4${digest.slice(13, 16)}8${digest.slice(17, 20)}${digest.slice(20, 32)}`;
-  return `${uuid.slice(0, 8)}-${uuid.slice(8, 12)}-${uuid.slice(12, 16)}-${uuid.slice(16, 20)}-${uuid.slice(20)}`;
-}
 function uploadedFileBytes(multipart: Buffer, contentType: string): Buffer {
   const marker = Buffer.from('name="archivo"; filename="upload.csv"');
   const start = multipart.indexOf(marker);
@@ -49,9 +42,11 @@ function uploadedFileBytes(multipart: Buffer, contentType: string): Buffer {
   if (end < 0) throw new Error("El multipart no cierra la parte del archivo.");
   return multipart.subarray(headerEnd + 4, end);
 }
-async function withServer(work: (origin: string, requests: Array<{ method?: string; url?: string; contentType?: string; auth?: string; correlation?: string }>) => Promise<void>, scenario: "actual-backend" | "future-contract" | "batch-mismatch" = "actual-backend") {
+async function withServer(work: (origin: string, requests: Array<{ method?: string; url?: string; contentType?: string; auth?: string; correlation?: string }>) => Promise<void>, scenario: "actual-backend" | "future-contract" | "batch-mismatch" | "polling" = "actual-backend") {
   const requests: Array<{ method?: string; url?: string; contentType?: string; auth?: string; correlation?: string }> = [];
   let admittedBatchId = batchId;
+  let batchReads = 0;
+  let exportReads = 0;
   const server = createServer(async (request, response) => {
     if (request.method === "OPTIONS") {
       response.writeHead(204, { "access-control-allow-origin": `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? 5173}`, "access-control-allow-methods": "GET, POST", "access-control-allow-headers": "authorization, content-type, x-correlation-id" });
@@ -68,11 +63,14 @@ async function withServer(work: (origin: string, requests: Array<{ method?: stri
       const contentType = request.headers["content-type"] ?? "";
       const uploaded = uploadedFileBytes(multipart, contentType);
       if (!contentType.startsWith("multipart/form-data; boundary=") || !multipart.toString().includes('name="archivo"') || !uploaded.equals(Buffer.from(validBulkV2Csv)) || !multipart.toString().includes('name="template_version"')) return json(response, 400, { status: 400, code: "ARCHIVO_INVALIDO" });
-      admittedBatchId = contractBatchId(String(request.headers["x-correlation-id"] ?? ""), uploaded);
-      const returnedBatchId = scenario === "batch-mismatch" ? "99999999-9999-4999-8999-999999999999" : admittedBatchId;
-      return json(response, 202, { batch_id: returnedBatchId, status: "QUEUED", template_version: 2, correlation_id: request.headers["x-correlation-id"] });
+      admittedBatchId = batchId;
+      return json(response, 202, { batch_id: admittedBatchId, status: "QUEUED", template_version: 2, correlation_id: request.headers["x-correlation-id"] });
     }
-    if (request.method === "GET" && path === `${root}/importaciones/${admittedBatchId}`) return json(response, 200, batch(admittedBatchId));
+    if (request.method === "GET" && path === `${root}/importaciones/${admittedBatchId}`) {
+      batchReads += 1;
+      if (scenario === "polling" && batchReads === 1) return json(response, 200, { ...batch(admittedBatchId, "PROCESSING"), completed_rows: 0 });
+      return json(response, 200, batch(admittedBatchId));
+    }
     if (request.method === "GET" && path === `${root}/importaciones/missing`) return json(response, 404, { status: 404, code: "LOTE_NO_ENCONTRADO" });
     if (request.method === "GET" && path === `${root}/importaciones/unauthorized`) return json(response, 401, { status: 401, code: "TOKEN_INVALIDO" });
     if (request.method === "GET" && path === `${root}/importaciones/forbidden`) return json(response, 403, { status: 403, code: "SCOPE_INSUFICIENTE" });
@@ -83,7 +81,11 @@ async function withServer(work: (origin: string, requests: Array<{ method?: stri
     if (request.method === "POST" && path === `${root}/importaciones/conflict-batch/reanudar`) return json(response, 409, { status: 409, code: "VERSION_CONFLICT" });
     if (request.method === "POST" && path === `${root}/importaciones/${batchId}/reanudar`) return json(response, 202, { batch_id: batchId, status: "QUEUED", template_version: 2, correlation_id: request.headers["x-correlation-id"] });
     if (request.method === "POST" && path === `${root}/exportaciones`) return json(response, 202, { export_id: exportId, status: "QUEUED", formato: "CSV", created_at: iso });
-    if (request.method === "GET" && path === `${root}/exportaciones/${exportId}`) return json(response, 200, { export_id: exportId, status: scenario === "actual-backend" ? "FAILED_GENERAL" : "COMPLETED", formato: "CSV", created_at: iso, completed_at: iso, download_url: null });
+    if (request.method === "GET" && path === `${root}/exportaciones/${exportId}`) {
+      exportReads += 1;
+      const status = scenario === "actual-backend" ? "FAILED_GENERAL" : scenario === "polling" && exportReads === 1 ? "PROCESSING" : "COMPLETED";
+      return json(response, 200, { export_id: exportId, status, formato: "CSV", created_at: iso, completed_at: iso, download_url: null });
+    }
     if (request.method === "GET" && path === `${root}/exportaciones/${exportId}/archivo`) {
       if (scenario === "actual-backend") return json(response, 503, { status: 503, code: "SERVICIO_NO_DISPONIBLE" });
       response.writeHead(200, { "content-type": "text/csv", "content-disposition": 'attachment; filename="export.csv"', "access-control-allow-origin": `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? 5173}`, "access-control-expose-headers": "content-disposition" }); response.end("sku\nSKU-HTTP-9\n"); return;
@@ -107,13 +109,12 @@ test("Bulk API contra servidor HTTP aislado simula rutas, upload válido, errore
       request.method() === "POST" && new URL(request.url()).pathname === `${root}/importaciones`,
     );
     await page.getByRole("button", { name: "Confirmar importación" }).first().click();
-    const importRequest = await importRequestPromise;
-    const correlationId = importRequest.headers()["x-correlation-id"];
-    const expectedBatchId = contractBatchId(String(correlationId), Buffer.from(validBulkV2Csv));
-    await expect(page).toHaveURL(new RegExp(`${expectedBatchId}$`));
+    await importRequestPromise;
+    const acceptedBatchId = batchId;
+    await expect(page).toHaveURL(new RegExp(`${acceptedBatchId}$`));
     await expect(page.getByText("SKU-HTTP-9")).toBeVisible();
     await expect(page.getByText("Precio rechazado").first()).toBeVisible();
-    await page.goto(`/tests/harness/bulk-http.html?gateway=${encodeURIComponent(gateway)}#/carga-masiva/importaciones/${expectedBatchId}/resultado`);
+    await page.goto(`/tests/harness/bulk-http.html?gateway=${encodeURIComponent(gateway)}#/carga-masiva/importaciones/${acceptedBatchId}/resultado`);
     await expect(page.getByText("SKU-HTTP-9")).toBeVisible();
     const reportDownload = page.waitForEvent("download");
     await page.getByRole("button", { name: "Descargar reporte de errores" }).click();
@@ -150,8 +151,29 @@ test("Bulk API contra servidor HTTP aislado simula rutas, upload válido, errore
       refreshAccessToken: async () => null,
       invalidateAccessToken: () => undefined,
     });
-    await expect(repository.getExportFile(exportId)).rejects.toMatchObject({ status: 503 });
+    await expect(repository.getExportFile(exportId)).resolves.toBeNull();
+    expect(requests.filter((request) => request.url === `${root}/exportaciones/${exportId}/archivo`)).toHaveLength(0);
   }, "actual-backend");
+});
+
+test("Bulk permite una nueva intención explícita con los mismos bytes tras confirmar el lote previo", async ({ page }) => {
+  await withServer(async (gateway, requests) => {
+    await page.goto(`/tests/harness/bulk-http.html?gateway=${encodeURIComponent(gateway)}#/carga-masiva`);
+    const file = { name: "upload.csv", mimeType: "text/csv", buffer: Buffer.from(validBulkV2Csv) };
+    await page.locator('input[type="file"]').setInputFiles(file);
+    await page.getByRole("button", { name: "Continuar a revisión" }).click();
+    await page.getByRole("button", { name: "Confirmar importación" }).first().click();
+    await expect(page).toHaveURL(new RegExp(`${batchId}$`));
+    await page.goto(`/tests/harness/bulk-http.html?gateway=${encodeURIComponent(gateway)}#/carga-masiva`);
+    await page.locator('input[type="file"]').setInputFiles(file);
+    await page.getByRole("button", { name: "Continuar a revisión" }).click();
+    await page.getByRole("button", { name: "Confirmar importación" }).first().click();
+    await expect.poll(() => requests.filter((request) => request.method === "POST" && request.url === `${root}/importaciones`).length).toBe(2);
+    const correlations = requests.filter((request) => request.method === "POST" && request.url === `${root}/importaciones`).map((request) => request.correlation);
+    expect(correlations[0]).toBeTruthy();
+    expect(correlations[1]).toBeTruthy();
+    expect(correlations[1]).not.toBe(correlations[0]);
+  });
 });
 
 test("Bulk HTTP aislado conserva descarga COMPLETED como escenario de contrato futuro simulado", async ({ page }) => {
@@ -164,4 +186,60 @@ test("Bulk HTTP aislado conserva descarga COMPLETED como escenario de contrato f
     expect((await exported).suggestedFilename()).toBe("export.csv");
     expect(requests.some((request) => request.url === `${root}/exportaciones/${exportId}/archivo`)).toBe(true);
   }, "future-contract");
+});
+
+test("Bulk sigue el batchId real automáticamente hasta un estado terminal", async ({ page }) => {
+  await withServer(async (gateway, requests) => {
+    await page.goto(`/tests/harness/bulk-http.html?gateway=${encodeURIComponent(gateway)}#/carga-masiva`);
+    await page.locator('input[type="file"]').setInputFiles({ name: "upload.csv", mimeType: "text/csv", buffer: Buffer.from(validBulkV2Csv) });
+    await page.getByRole("button", { name: "Continuar a revisión" }).click();
+    await page.getByRole("button", { name: "Confirmar importación" }).first().click();
+    await expect(page).toHaveURL(new RegExp(`${batchId}$`));
+    await expect(page.getByText(/En procesamiento/i)).toBeVisible();
+    await expect(page.getByRole("link", { name: "Ver resultado final" }).first()).toBeVisible({ timeout: 10_000 });
+    expect(requests.filter((request) => request.url === `${root}/importaciones/${batchId}`)).toHaveLength(2);
+  }, "polling");
+});
+
+test("Bulk no habilita conciliación con flags aislados", async ({ page }) => {
+  await withServer(async (gateway, requests) => {
+    await page.goto(`/tests/harness/bulk-http.html?gateway=${encodeURIComponent(gateway)}&reconciliation=fixture&replay=fixture&resume=fixture#/carga-masiva`);
+    await page.locator('input[type="file"]').setInputFiles({ name: "upload.csv", mimeType: "text/csv", buffer: Buffer.from(validBulkV2Csv) });
+    await page.getByRole("button", { name: "Continuar a revisión" }).click();
+    await page.getByRole("button", { name: "Confirmar importación" }).first().click();
+    await expect(page).toHaveURL(new RegExp(`${batchId}$`));
+    const posts = requests.filter((request) => request.method === "POST" && request.url === `${root}/importaciones`);
+    const lookups = requests.filter((request) => request.method === "GET" && request.url?.includes("/importaciones/por-correlacion/"));
+    expect(posts).toHaveLength(1);
+    expect(lookups).toHaveLength(0);
+    expect(requests.some((request) => request.method === "POST" && request.url?.includes("por-correlacion"))).toBe(false);
+  });
+});
+
+test("Bulk no reenvía ni concilia automáticamente tras recargar mientras falta manifiesto", async ({ page }) => {
+  await withServer(async (gateway, requests) => {
+    const url = `/tests/harness/bulk-http.html?gateway=${encodeURIComponent(gateway)}&reconciliation=fixture&replay=fixture&resume=fixture#/carga-masiva`;
+    await page.goto(url);
+    await page.locator('input[type="file"]').setInputFiles({ name: "upload.csv", mimeType: "text/csv", buffer: Buffer.from(validBulkV2Csv) });
+    await page.getByRole("button", { name: "Continuar a revisión" }).click();
+    await page.getByRole("button", { name: "Confirmar importación" }).first().click();
+    await page.reload();
+    await expect(page).toHaveURL(new RegExp(`${batchId}$`));
+    expect(requests.filter((request) => request.method === "POST" && request.url === `${root}/importaciones`)).toHaveLength(1);
+    expect(requests.filter((request) => request.method === "GET" && request.url?.includes("/importaciones/por-correlacion/")).length).toBe(0);
+    expect(requests.some((request) => request.method === "POST" && request.url?.includes("por-correlacion"))).toBe(false);
+  });
+});
+
+test("Bulk sigue la exportación y solo habilita la descarga al completarse", async ({ page }) => {
+  await withServer(async (gateway, requests) => {
+    await page.goto(`/tests/harness/bulk-http.html?gateway=${encodeURIComponent(gateway)}#/carga-masiva/descargas`);
+    await page.getByRole("button", { name: "Solicitar exportación" }).click();
+    const downloadButton = page.getByRole("button", { name: "Descargar archivo CSV consolidado" });
+    await expect(downloadButton).toBeEnabled({ timeout: 10_000 });
+    expect(requests.filter((request) => request.url === `${root}/exportaciones/${exportId}`)).toHaveLength(2);
+    const download = page.waitForEvent("download");
+    await downloadButton.click();
+    expect((await download).suggestedFilename()).toBe("export.csv");
+  }, "polling");
 });

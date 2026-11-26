@@ -1,13 +1,18 @@
 import type { G7Session } from "../../promotions/adapters/g7Session";
 import { isGatewayTokenInvalid } from "../../shared/isGatewayTokenInvalid";
+import { hasBulkCapabilityEvidence, isVerifiedBulkHomologationManifest, type VerifiedBulkHomologationManifest } from "./bulkHomologationManifest";
 import type { BulkRepository, DownloadResource } from "../services/bulkRepository";
 import { BulkRepositoryError } from "../services/bulkErrors";
 import type {
+  BulkAdmissionReconciliation,
   BulkDomainStep,
   BulkExportFormat,
   BulkExportJob,
   BulkImportBatch,
   BulkImportRow,
+  BulkResumeAccepted,
+  BulkResumeBlockReason,
+  BulkResumeStep,
 } from "../types/bulk";
 
 const root = "/api/v1/carga-masiva/productos";
@@ -39,6 +44,16 @@ const batchStatuses = ["QUEUED", "PROCESSING", "COMPLETED", "FAILED_GENERAL"] as
 const rowStatuses = ["PENDING", "PROCESSING", "COMPLETED", "FAILED"] as const;
 const domains = ["CATALOGO", "PRICING", "INVENTARIO"] as const;
 const exportStatuses = batchStatuses;
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const resumeBlockReasons = ["LOTE_NO_TERMINAL", "SIN_PASOS_REINTENTABLES", "RESULTADO_INCIERTO", "PROTOCOLO_DOMINIO_NO_HABILITADO"] as const;
+
+export interface BulkHttpRepositoryOptions {
+  publicReads?: boolean;
+  reconciliationEnabled?: boolean;
+  replayEnabled?: boolean;
+  resumeEnabled?: boolean;
+  homologationManifest?: VerifiedBulkHomologationManifest;
+}
 
 function mapStep(value: unknown): BulkDomainStep {
   const item = record(value);
@@ -67,6 +82,41 @@ function mapRow(value: unknown): BulkImportRow {
   if (typeof item.detail === "string") row.detail = item.detail;
   return row;
 }
+function mapResumeEligibility(value: unknown, batch: BulkImportBatch) {
+  if (value === undefined || value === null) return undefined;
+  try {
+    const item = record(value);
+    if (item.protocolo !== "BULK_RETRY_V1" || typeof item.elegible !== "boolean" || !Array.isArray(item.pasos)) return undefined;
+    const steps: BulkResumeStep[] = item.pasos.map((entry) => {
+      const step = record(entry);
+      const rowId = text(step.row_id);
+      if (!uuidPattern.test(rowId) || (step.dominio !== "CATALOGO" && step.dominio !== "INVENTARIO")) return invalid("La elegibilidad contiene un paso inválido.");
+      return { row_id: rowId, domain: step.dominio };
+    });
+    const uniqueSteps = new Set(steps.map((step) => `${step.row_id}:${step.domain}`));
+    if (uniqueSteps.size !== steps.length) return undefined;
+    const blockedReason = item.motivo_bloqueo;
+    if (item.elegible) {
+      if (steps.length === 0 || blockedReason !== null || batch.status !== "COMPLETED" ||
+          typeof batch.total_rows !== "number" || !batch.rows || batch.rows.length !== batch.total_rows) return undefined;
+      if (steps.some((candidate) => candidate.domain !== "CATALOGO")) return undefined;
+      const candidatesAreVerifiable = steps.every((candidate) => {
+        const matchingRows = batch.rows!.filter((row) => String(row.row_id) === candidate.row_id);
+        if (matchingRows.length !== 1) return false;
+        const row = matchingRows[0]!;
+        if (row.status === "COMPLETED" || row.applied_domains.includes(candidate.domain)) return false;
+        const matchingSteps = row.steps.filter((step) => step.domain === candidate.domain);
+        return matchingSteps.length === 1 && matchingSteps[0]?.status !== "COMPLETED";
+      });
+      if (!candidatesAreVerifiable) return undefined;
+      return { protocol: "BULK_RETRY_V1" as const, eligible: true, steps, blockedReason: null };
+    }
+    if (steps.length !== 0 || typeof blockedReason !== "string" || !(resumeBlockReasons as readonly string[]).includes(blockedReason)) return undefined;
+    return { protocol: "BULK_RETRY_V1" as const, eligible: false, steps, blockedReason: blockedReason as BulkResumeBlockReason };
+  } catch {
+    return undefined;
+  }
+}
 function mapBatch(value: unknown): BulkImportBatch {
   const item = record(value);
   const batch: BulkImportBatch = {
@@ -80,17 +130,51 @@ function mapBatch(value: unknown): BulkImportBatch {
     created_at: typeof item.created_at === "string" ? item.created_at : "",
     updated_at: typeof item.updated_at === "string" ? item.updated_at : "",
   };
+  if (item.correlation_id !== undefined) {
+    const correlationId = text(item.correlation_id);
+    if (!uuidPattern.test(correlationId)) return invalid("La correlación del lote consultado no es válida.");
+    batch.correlation_id = correlationId;
+  }
   if (Array.isArray(item.rows)) batch.rows = item.rows.map(mapRow);
+  const eligibility = mapResumeEligibility(item.reanudacion, batch);
+  if (eligibility) batch.reanudacion = eligibility;
   return batch;
 }
-function mapAccepted(value: unknown): BulkImportBatch {
+function mapAccepted(value: unknown, expectedCorrelationId: string): BulkImportBatch {
   const accepted = record(value);
   if (oneOf(accepted.status, ["QUEUED"] as const) !== "QUEUED" || count(accepted.template_version) !== 2) return invalid();
+  const batchId = text(accepted.batch_id);
+  const correlationId = text(accepted.correlation_id);
+  if (!uuidPattern.test(batchId) || !uuidPattern.test(correlationId) || correlationId !== expectedCorrelationId) {
+    return invalid("La respuesta de admisión contiene una identidad incompleta, inválida o contradictoria; el resultado queda incierto.");
+  }
   return {
-    batch_id: text(accepted.batch_id), status: "QUEUED", total_rows: null,
+    batch_id: batchId, status: "QUEUED", total_rows: null,
     completed_rows: 0, failed_rows: 0, needs_reconciliation: false,
     created_at: "", updated_at: "",
   };
+}
+export function mapResumeAccepted(value: unknown, expectedBatchId: string, expectedOriginalCorrelationId?: string): BulkResumeAccepted {
+  const accepted = record(value);
+  const status = oneOf(accepted.status, ["QUEUED"] as const);
+  const batchId = text(accepted.batch_id);
+  const originalCorrelationId = text(accepted.correlation_id);
+  if (status !== "QUEUED" || count(accepted.template_version) !== 2 ||
+      !uuidPattern.test(batchId) || batchId !== expectedBatchId || !uuidPattern.test(originalCorrelationId) ||
+      (expectedOriginalCorrelationId !== undefined && originalCorrelationId !== expectedOriginalCorrelationId)) {
+    return invalid("La aceptación de reanudación tiene una identidad incompleta o no corresponde al lote original.");
+  }
+  return { batch_id: batchId, correlation_id: originalCorrelationId, status: "QUEUED", template_version: 2 };
+}
+export function mapReconciliation(value: unknown, expectedCorrelationId: string): BulkAdmissionReconciliation {
+  const item = record(value);
+  const batchId = text(item.batch_id);
+  const correlationId = text(item.correlation_id);
+  const status = oneOf(item.status, batchStatuses);
+  if (!uuidPattern.test(batchId) || !uuidPattern.test(correlationId) || correlationId !== expectedCorrelationId || count(item.template_version) !== 2) {
+    return invalid("La conciliación devolvió una identidad incompleta, inválida o contradictoria.");
+  }
+  return { batch_id: batchId, correlation_id: correlationId, status, template_version: 2 };
 }
 function mapExport(value: unknown): BulkExportJob {
   const item = record(value);
@@ -103,14 +187,19 @@ function mapExport(value: unknown): BulkExportJob {
     ...(typeof item.download_url === "string" ? { download_url: item.download_url } : {}),
   };
 }
-function safeFileName(value: string | null, fallback: string): string {
+function safeFileName(value: string | null, fallback: string, expectedExtension: string): string {
   const candidate = value?.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
   let decoded = candidate?.[2];
   if (candidate?.[1]) {
     try { decoded = decodeURIComponent(candidate[1]); }
     catch { decoded = undefined; }
   }
-  return decoded && !/[\\/\r\n]/.test(decoded) ? decoded : fallback;
+  const leaf = decoded?.split(/[\\/]/).pop();
+  const safe = leaf ? [...leaf].map((char) => {
+    const code = char.charCodeAt(0);
+    return code < 32 || code === 127 || '<>:"|?*'.includes(char) ? "_" : char;
+  }).join("").replace(/^\.+/, "").replace(/[. ]+$/, "").trim().slice(0, 180) : undefined;
+  return safe && safe.toLowerCase().endsWith(expectedExtension) ? safe : fallback;
 }
 
 export function createBulkFetchTransport(origin: string, fetcher: typeof fetch = fetch): BulkHttpTransport {
@@ -122,7 +211,11 @@ export function createBulkFetchTransport(origin: string, fetcher: typeof fetch =
   return { request: (path, init) => fetcher(url.origin + path, { ...init, credentials: "omit", redirect: "error", cache: "no-store" }) };
 }
 
-export function createHttpBulkRepository(transport: BulkHttpTransport, session: AuthSession, options: { publicReads?: boolean } = {}): BulkRepository {
+export function createHttpBulkRepository(transport: BulkHttpTransport, session: AuthSession, options: BulkHttpRepositoryOptions = {}): BulkRepository {
+  const manifest = isVerifiedBulkHomologationManifest(options.homologationManifest) ? options.homologationManifest : undefined;
+  const reconciliationEnabled = options.reconciliationEnabled === true && hasBulkCapabilityEvidence(manifest, "reconciliation");
+  const replaySupported = options.replayEnabled === true && reconciliationEnabled && hasBulkCapabilityEvidence(manifest, "replay");
+  const resumeSupported = options.resumeEnabled === true && hasBulkCapabilityEvidence(manifest, "catalogRetry");
   const exportIntentKey = async (format: BulkExportFormat, userId: string) => {
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${userId}\u0000${format}`)));
     return `g6:bulk:export-uncertain:${[...digest].map(byte => byte.toString(16).padStart(2, "0")).join("")}`;
@@ -183,59 +276,101 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
     const type = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
     if (response.status !== 200 || (type !== "text/csv" && type !== xlsxMime)) invalid("El servicio no entregó un archivo CSV o XLSX válido.");
     if (expectedMime && type !== expectedMime) invalid("El tipo MIME del archivo no coincide con el formato solicitado.");
-    return { blob: await response.blob(), fileName: safeFileName(response.headers.get("content-disposition"), fallback) };
+    const blob = await response.blob();
+    if (blob.size === 0) invalid("El servicio entregó un archivo vacío.");
+    const extension = expectedMime === xlsxMime ? ".xlsx" : ".csv";
+    return { blob, fileName: safeFileName(response.headers.get("content-disposition"), fallback, extension) };
+  }
+  async function submitImport(file: File, summary: { owner?: string; contentHash?: string; correlationId?: string; detectedRows?: number } | undefined, signal: AbortSignal | undefined, replay: boolean): Promise<BulkImportBatch> {
+    const userId = session.snapshot?.().user?.id;
+    const correlationId = summary?.correlationId;
+    if (!userId) throw new BulkRepositoryError("Inicia sesión antes de importar.", "configuration");
+    if (!correlationId || !uuidPattern.test(correlationId)) throw new BulkRepositoryError("La correlación de la intención no es un UUID válido.", "configuration");
+    if (summary?.owner !== userId || !summary.contentHash || !/^[0-9a-f]{64}$/i.test(summary.contentHash)) throw new BulkRepositoryError("La identidad G7 y el hash no pertenecen a una intención API validada.", "configuration");
+    const actualHash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", await file.arrayBuffer()))].map(value => value.toString(16).padStart(2, "0")).join("");
+    if (actualHash !== summary.contentHash) throw new BulkRepositoryError("El archivo seleccionado no coincide con el hash de la intención persistida.", "configuration");
+    if (session.snapshot?.().user?.id !== userId) throw new BulkRepositoryError("La sesión cambió mientras se verificaba el archivo; se conserva la intención original.", "unknown");
+    const intentKey = `g6:bulk:import-pending:${encodeURIComponent(userId)}:${encodeURIComponent(correlationId)}`;
+    try {
+      const raw = sessionStorage.getItem(intentKey);
+      if (replay) {
+        if (!replaySupported) throw new BulkRepositoryError("El backend aún no acredita replay idempotente concurrente; no se reenvió el POST.", "configuration");
+        if (!raw) throw new BulkRepositoryError("No existe la intención incierta original para reproducir.", "configuration");
+        const marker = JSON.parse(raw) as Record<string, unknown>;
+        if (marker.userId !== userId || marker.correlationId !== correlationId || marker.contentHash !== actualHash || marker.state !== "PENDING_RECONCILIATION") {
+          throw new BulkRepositoryError("El archivo no coincide con la intención incierta original; no se reenvió el POST.", "configuration");
+        }
+      } else {
+        if (raw) throw new BulkRepositoryError("Esta correlación ya pertenece a una intención pendiente. Se conserva y no se reenvió.", "unknown");
+        sessionStorage.setItem(intentKey, JSON.stringify({ userId, correlationId, contentHash: actualHash, state: "IN_FLIGHT", at: Date.now() }));
+      }
+    } catch (error) {
+      if (error instanceof BulkRepositoryError) throw error;
+      throw new BulkRepositoryError("No se pudo persistir o validar el marcador de admisión; no se envió la importación.", "unknown");
+    }
+    const form = new FormData(); form.append("archivo", file); form.append("template_version", "2");
+    try {
+      const accepted = mapAccepted(await json(await send(`${root}/importaciones`, "POST", signal, form, false, correlationId, userId), 202, signal), correlationId);
+      if (session.snapshot?.().user?.id !== userId) throw new BulkRepositoryError("La sesión cambió antes de confirmar la admisión. Se conserva la intención original.", "unknown");
+      try { sessionStorage.removeItem(intentKey); } catch { /* page-level intent remains fail-closed */ }
+      return accepted;
+    } catch (error) {
+      if (replay) {
+        try { const marker = JSON.parse(sessionStorage.getItem(intentKey) ?? "{}"); sessionStorage.setItem(intentKey, JSON.stringify({ ...marker, state: "PENDING_RECONCILIATION" })); } catch { /* preserve original intent */ }
+      } else if (error instanceof BulkRepositoryError && (error.category === "rejected" || error.category === "configuration")) {
+        try { sessionStorage.removeItem(intentKey); } catch { /* preserve fail-closed intent */ }
+      } else {
+        try { const marker = JSON.parse(sessionStorage.getItem(intentKey) ?? "{}"); sessionStorage.setItem(intentKey, JSON.stringify({ ...marker, state: "PENDING_RECONCILIATION" })); } catch { /* preserve fail-closed intent */ }
+      }
+      throw error;
+    }
   }
   return {
-    resumeSupported: false,
-    confirmRecoveredImport(batchId, owner, correlationId) {
-      if (session.snapshot?.().user?.id !== owner) return;
-      const key = `g6:bulk:import-pending:${encodeURIComponent(owner)}:${encodeURIComponent(correlationId)}`;
-      try { const marker = JSON.parse(sessionStorage.getItem(key) ?? "null") as { userId?: string; correlationId?: string; expectedBatchId?: string } | null; if (marker?.userId === owner && marker.correlationId === correlationId && marker.expectedBatchId === batchId) sessionStorage.removeItem(key); } catch { /* inaccessible intent stays fail-closed */ }
+    resumeSupported,
+    reconciliationEnabled,
+    replaySupported,
+    async getTemplate(format, signal) { return download(`${root}/plantilla?formato=${format}`, `plantilla-productos.${format.toLowerCase()}`, signal, format === "XLSX" ? xlsxMime : "text/csv"); },
+    async createImport(file, summary, signal) { return submitImport(file, summary, signal, false); },
+    async replayImport(file, intent, confirmedByUser, signal) {
+      if (!replaySupported) throw new BulkRepositoryError("El backend aún no acredita replay idempotente concurrente; no se reenvió el POST.", "configuration");
+      if (!confirmedByUser) throw new BulkRepositoryError("Confirma explícitamente la repetición de la misma intención.", "configuration");
+      return submitImport(file, intent, signal, true);
     },
-    async getTemplate(format, signal) { return download(`${root}/plantilla?formato=${format}`, `plantilla-productos.${format.toLowerCase()}`, signal); },
-    async createImport(file, summary, signal) {
-      const userId = session.snapshot?.().user?.id;
-      if (!userId) throw new BulkRepositoryError("Inicia sesión antes de importar.", "configuration");
-      const correlationId = summary?.correlationId ?? crypto.randomUUID();
-      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(correlationId)) throw new BulkRepositoryError("La correlación no es un UUID válido.", "configuration");
-      if (!summary?.expectedBatchId || summary.owner !== userId || !summary.contentHash || !/^[0-9a-f]{64}$/i.test(summary.contentHash)) throw new BulkRepositoryError("La identidad G7, el hash y el lote esperado no pertenecen a una intención API validada.", "configuration");
-      const actualHash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", await file.arrayBuffer()))].map(value => value.toString(16).padStart(2, "0")).join("");
-      if (actualHash !== summary.contentHash) throw new BulkRepositoryError("El archivo seleccionado no coincide con el hash de la intención persistida.", "configuration");
-      const batchDigest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${correlationId}:${actualHash}`)))].map(value => value.toString(16).padStart(2, "0")).join("");
-      const uuidValue = batchDigest.slice(0, 12) + "4" + batchDigest.slice(13, 16) + "8" + batchDigest.slice(17, 20) + batchDigest.slice(20, 32);
-      const computedBatchId = [uuidValue.slice(0, 8), uuidValue.slice(8, 12), uuidValue.slice(12, 16), uuidValue.slice(16, 20), uuidValue.slice(20)].join("-");
-      if (computedBatchId !== summary.expectedBatchId) throw new BulkRepositoryError("El batchId no coincide con la correlación, el hash ni el propietario actuales.", "configuration");
-      if (!summary?.expectedBatchId) throw new BulkRepositoryError("Falta el batchId determinista persistido antes del envío.", "configuration");
-      const intentKey = `g6:bulk:import-pending:${encodeURIComponent(userId)}:${encodeURIComponent(correlationId)}`;
+    async reconcileImport(correlationId, expectedOwner, signal) {
+      if (!reconciliationEnabled) throw new BulkRepositoryError("La conciliación permanece deshabilitada hasta acreditar el endpoint y su compatibilidad.", "configuration");
+      if (!uuidPattern.test(correlationId)) throw new BulkRepositoryError("La correlación de conciliación no es un UUID válido.", "configuration");
+      if (!expectedOwner || session.snapshot?.().user?.id !== expectedOwner) throw new BulkRepositoryError("La sesión no corresponde al propietario original de la intención.", "configuration");
       try {
-        if (sessionStorage.getItem(intentKey)) throw new BulkRepositoryError("Esta importación tiene una intención previa pendiente. Se conserva su correlación y no se reenvió.", "unknown");
-        sessionStorage.setItem(intentKey, JSON.stringify({ userId, correlationId, expectedBatchId: summary.expectedBatchId, contentHash: actualHash, state: "IN_FLIGHT", at: Date.now() }));
+        const response = await send(`${root}/importaciones/por-correlacion/${encodeURIComponent(correlationId)}`, "GET", signal, undefined, false, correlationId, expectedOwner);
+        const result = mapReconciliation(await json(response, 200, signal), correlationId);
+        signal?.throwIfAborted();
+        if (session.snapshot?.().user?.id !== expectedOwner) throw new BulkRepositoryError("La sesión cambió durante la conciliación; la intención se conserva sin cambios.", "unknown");
+        return result;
       } catch (error) {
-        if (error instanceof BulkRepositoryError) throw error;
-        throw new BulkRepositoryError("No se pudo persistir la correlación; no se envió la importación.", "unknown");
-      }
-      const form = new FormData(); form.append("archivo", file); form.append("template_version", "2");
-      try {
-        const accepted = mapAccepted(await json(await send(`${root}/importaciones`, "POST", signal, form, false, correlationId, userId), 202, signal));
-        if (accepted.batch_id !== summary.expectedBatchId) throw new BulkRepositoryError("El lote admitido no coincide con el batchId determinista; requiere verificación externa.", "unknown", 202, "BATCH_ID_MISMATCH");
-        try { sessionStorage.removeItem(intentKey); } catch { /* accepted response retains the batch id in URL */ }
-        return accepted;
-      } catch (error) {
-        if (error instanceof BulkRepositoryError && (error.category === "rejected" || error.category === "configuration")) { try { sessionStorage.removeItem(intentKey); } catch { /* preserve fail-closed intent */ } }
-        else { try { const marker = JSON.parse(sessionStorage.getItem(intentKey) ?? "{}"); sessionStorage.setItem(intentKey, JSON.stringify({ ...marker, state: "PENDING_RECONCILIATION" })); } catch { /* preserve fail-closed intent */ } }
+        if (error instanceof BulkRepositoryError && error.status === 404 && error.code === "LOTE_NO_ENCONTRADO") return null;
         throw error;
       }
     },
     async getImport(batchId, signal, expectedOwner) {
       if (expectedOwner && session.snapshot?.().user?.id !== expectedOwner) throw new BulkRepositoryError("La sesión no corresponde al propietario original del lote.", "configuration");
-      try { return mapBatch(await json(await send(`${root}/importaciones/${encodeURIComponent(batchId)}`, "GET", signal, undefined, false, crypto.randomUUID(), expectedOwner), 200, signal)); }
+      try {
+        const batch = mapBatch(await json(await send(`${root}/importaciones/${encodeURIComponent(batchId)}`, "GET", signal, undefined, false, crypto.randomUUID(), expectedOwner), 200, signal));
+        if (batch.batch_id !== batchId) invalid("El lote consultado no coincide con el identificador solicitado.");
+        return batch;
+      }
       catch (error) { if (error instanceof BulkRepositoryError && error.status === 404 && error.code === "LOTE_NO_ENCONTRADO") return null; throw error; }
     },
-    async getImportReport(batchId, signal) { return download(`${root}/importaciones/${encodeURIComponent(batchId)}/reporte`, `reporte-${batchId}.csv`, signal); },
-    async resumeImport(batchId, signal) {
+    async getImportReport(batchId, signal) { return download(`${root}/importaciones/${encodeURIComponent(batchId)}/reporte`, `reporte-${batchId}.csv`, signal, "text/csv"); },
+    async resumeImport(batchId, signal, request) {
+      if (!resumeSupported) throw new BulkRepositoryError("Backend y consumidor aún no acreditan BULK_RETRY_V1; la reanudación sigue bloqueada.", "rejected", 409, "RETRY_PROTOCOL_NOT_APPROVED");
+      if (!request || !uuidPattern.test(request.correlationId) || request.motivo !== null) throw new BulkRepositoryError("La reanudación requiere una correlación estable y el motivo contractual.", "configuration");
       const key = `g6:bulk:resume-blocked:${encodeURIComponent(session.snapshot?.().user?.id ?? "anonymous")}:${encodeURIComponent(batchId)}`;
       if (sessionStorage.getItem(key) === "1") throw new BulkRepositoryError("Backend no habilitó el protocolo de reanudación para este lote.", "rejected", 409, "RETRY_PROTOCOL_NOT_APPROVED");
-      try { return mapAccepted(await json(await send(`${root}/importaciones/${encodeURIComponent(batchId)}/reanudar`, "POST", signal), 202, signal)); }
+      const owner = session.snapshot?.().user?.id;
+      try {
+        const accepted = await json(await send(`${root}/importaciones/${encodeURIComponent(batchId)}/reanudar`, "POST", signal, JSON.stringify({ motivo: request.motivo }), true, request.correlationId, owner), 202, signal);
+        return mapResumeAccepted(accepted, batchId, request.originalCorrelationId);
+      }
       catch (error) {
         if (error instanceof BulkRepositoryError && error.code === "RETRY_PROTOCOL_NOT_APPROVED") { try { sessionStorage.setItem(key, "1"); } catch { /* backend rejection remains visible */ } }
         throw error;
@@ -263,12 +398,16 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
       }
     },
     async getExport(exportId, signal) {
-      try { return mapExport(await json(await send(`${root}/exportaciones/${encodeURIComponent(exportId)}`, "GET", signal), 200, signal)); }
+      try {
+        const job = mapExport(await json(await send(`${root}/exportaciones/${encodeURIComponent(exportId)}`, "GET", signal), 200, signal));
+        if (job.export_id !== exportId) invalid("La exportación consultada no coincide con el identificador solicitado.");
+        return job;
+      }
       catch (error) { if (error instanceof BulkRepositoryError && error.status === 404 && error.code === "LOTE_NO_ENCONTRADO") return null; throw error; }
     },
     async getExportFile(exportId, signal) {
       const job = await this.getExport(exportId, signal);
-      if (!job) return null;
+      if (!job || job.status !== "COMPLETED") return null;
       const expectedMime = job.format === "XLSX" ? xlsxMime : "text/csv";
       const extension = job.format.toLowerCase();
       const resource = await download(`${root}/exportaciones/${encodeURIComponent(exportId)}/archivo`, `exportacion-${exportId}.${extension}`, signal, expectedMime);

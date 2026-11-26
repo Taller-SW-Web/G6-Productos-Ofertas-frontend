@@ -5,6 +5,9 @@ export type ProductStatus = "BORRADOR" | "ACTIVO" | "INACTIVO";
 export type VariantStatus = "BORRADOR" | "ACTIVA" | "INACTIVA";
 export type PreparationStatus = "PENDING" | "COMPLETED" | "REJECTED";
 export type SaleModel = "simple" | "variants";
+/** Values published by Docs OpenAPI 0.7.0-rc.2, components.schemas.Canal. */
+export const catalogChannels = ["MARKETPLACE", "CHATBOT", "RETAIL", "VENTAS"] as const;
+export type CatalogChannel = (typeof catalogChannels)[number];
 
 export interface PhysicalProfile {
   pesoKg: number;
@@ -40,12 +43,13 @@ export interface VariantPreparation {
   };
   inventoryStatus?: PreparationStatus;
   manualRetryAllowed?: boolean;
-  lastCheckedAt?: string;
 }
 
 export interface ProductPreparationView {
   productId: string;
   hasVariants: boolean;
+  /** Derived from the HTTP Retry-After header; never sent to the provider. */
+  retryAfterMs?: number;
   pricing: {
     status: PreparationStatus;
     manualRetryAllowed: boolean;
@@ -108,6 +112,7 @@ export interface CatalogQuery {
   typeIdsExcluded?: readonly string[];
   saleModel?: "all" | "simple" | "variants";
   status?: "all" | ProductStatus;
+  channel?: CatalogChannel;
   page: number;
   pageSize: number;
 }
@@ -196,6 +201,7 @@ export class CatalogError extends Error {
       | "forbidden"
       | "session"
       | "blocked_contract"
+      | "write_acknowledged"
       | "write_unknown",
     message: string,
     public readonly details?: Record<string, string>,
@@ -229,8 +235,8 @@ export interface VariantDetailView {
   nonIdentifyingAttributes: ProductAttributeValue[];
   images: string[];
   imageUrl: string;
-  physicalProfile: VariantPhysicalProfile | null;
-  catalogVersion: number;
+  physicalProfile: VariantPhysicalProfile | null | undefined;
+  catalogVersion: number | null;
   inventoryPreparationStatus: PreparationStatus;
   inventoryPreparationCode?: string | null;
   inventoryManualRetryAllowed: boolean;

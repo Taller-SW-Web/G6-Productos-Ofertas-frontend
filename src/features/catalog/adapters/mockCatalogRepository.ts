@@ -1631,7 +1631,7 @@ export class MockCatalogRepository implements CatalogRepository {
       }
       current.physicalProfile = normalizePhysicalProfile(rawPf);
     }
-    current.catalogVersion += payload.catalogVersion ? 1 : 1;
+    current.catalogVersion = (current.catalogVersion ?? 0) + 1;
     this.changed();
 
     return JSON.parse(JSON.stringify(current));

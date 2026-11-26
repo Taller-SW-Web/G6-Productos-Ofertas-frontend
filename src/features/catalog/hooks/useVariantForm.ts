@@ -216,6 +216,7 @@ export function useVariantForm({ parentProduct, initialVariant, scenario, onSucc
     try {
       let result: VariantDetailView;
       if (initialVariant) {
+        if (initialVariant.catalogVersion === null) throw new CatalogError("blocked_contract", "Catálogo no devolvió catalog_version; la edición no puede enviarse de forma segura.");
         const payload: VariantUpdatePayload = { nonIdentifyingAttributes,
           imageUrl: formData.imageUrl.trim() || undefined, physicalProfile, catalogVersion: initialVariant.catalogVersion };
         result = await catalog.updateVariant(parentProduct.id, initialVariant.variantId, payload, scenario);

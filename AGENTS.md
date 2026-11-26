@@ -19,6 +19,12 @@
 - **P0:** discrepancia bloqueante de integración/consistencia; **no la resuelves inventando un payload, ruta o estado**.
 - **UI complete:** pantalla visualmente utilizable; **NO equivale a API integrada ni validada**.
 
+## Objetivo vigente — Hito 5
+
+> CI/CD incluyendo revision Seguridad — Evidencia de Pruebas de integración — Evidencia de Pruebas de performance — Uso de API Management y Mecanismo asincrónico entre Microservicios
+
+H5 es el hito objetivo; H4 es histórico. Los contratos canónicos H5 son OpenAPI y AsyncAPI `0.7.0-rc.1`, sujetos a sus estados de homologación. Los mockups y fixtures H4 no son evidencia de integración H5.
+
 ## 1. PRIMER PASO SIEMPRE: identifica dónde estás
 
 **Antes de cualquier modificación**, localiza el directorio raíz de Frontend. Nunca asumas que la terminal está en el directorio correcto.
@@ -407,3 +413,14 @@ ESTADO FINAL:
 ---
 
 **Mandato final:** no improvisar contratos ni decisiones de negocio. Usa fuentes verificadas, adapta código a la arquitectura real, entrega cambios pequeños comprobables y declara con precisión qué quedó implementado, simulado, bloqueado o sin probar.
+
+
+## Política CI Draft → Ready
+
+- Abre los PR en Draft y mantenlos así durante la implementación, las pruebas focalizadas y las correcciones. Al completar la implementación, comunica el enlace del PR, el HEAD SHA, el resumen de cambios y las pruebas realizadas para dejarlo disponible para revisión.
+- Mientras haya observaciones obligatorias del auditor, el PR permanece en Draft. Corrige en el mismo PR, publica los cambios y comunica que están listos para nueva revisión. Repite hasta que no queden observaciones bloqueantes. Las recomendaciones opcionales o clasificadas expresamente como no bloqueantes no impiden avanzar.
+- Terminar el desarrollo o superar pruebas locales no equivale a aprobar la implementación propia. Solo pasa el PR a Ready for Review cuando se haya comunicado que la revisión terminó satisfactoriamente y exista autorización para continuar. No se exige formato, documento ni registro adicional para comunicar observaciones o autorización.
+- Si después de una revisión favorable haces una corrección sustancial, comunícala antes de avanzar para determinar si requiere otra revisión. No repitas auditorías completas por cambios menores que no alteren los aspectos técnicos evaluados, salvo indicación expresa.
+- No se ejecutan suites locales completas de manera rutinaria; usa pruebas focalizadas para depurar. La validación integral obligatoria se ejecuta en GitHub Actions al pasar el PR a Ready for Review. El PR no se considera validado hasta que todos los checks obligatorios pasen para la revisión actual.
+- Si CI requiere cambios de código, vuelve a Draft durante las correcciones y solicita nueva revisión cuando corresponda. Cada commit nuevo en Ready invalida los resultados anteriores y vuelve a ejecutar CI; al volver a Draft, las suites pesadas quedan diferidas. Toda evidencia identifica el código y SHA probados.
+- Una revisión técnica favorable no autoriza el merge. El merge requiere checks obligatorios satisfactorios, cumplimiento de las protecciones de GitHub y la autorización correspondiente. No se hace merge con checks pendientes o fallidos. Ready for Review no autoriza despliegues de producción.

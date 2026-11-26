@@ -22,6 +22,8 @@
     "test:e2e:full": "playwright test",
     "test:e2e:admin-perf": "node scripts/run-admin-performance.mjs",
     "test:e2e:smoke:bulk": "playwright test tests/bulk.spec.ts",
+    "test:e2e:catalog-real": "playwright test --config tests/catalog-http-real.config.ts tests/catalog-http-real.spec.ts",
+    "test:e2e:bulk-real": "playwright test --config tests/bulk-http-real.config.ts tests/bulk-http-real.spec.ts",
     "test:e2e:bulk:api": "playwright test tests/bulk-http.spec.ts --reporter=line",
     "test:ci": "npm run test && npm run test:e2e -- --reporter=line && npm run test:e2e:pricing -- --reporter=line",
     "test:unit:pricing": "vitest run --config src/features/pricing/adapters/vitest.config.ts",
@@ -58,7 +60,7 @@
     "globals": "17.13.0",
     "jsdom": "^26.1.0",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.71.1",
+    "typescript-eslint": "8.73.0",
     "vite": "8.3.4",
     "vitest": "^5.0.5"
   }

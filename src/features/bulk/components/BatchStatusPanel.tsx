@@ -19,8 +19,7 @@ export interface BatchStatusPanelProps {
   onResume?: () => void;
   refreshing?: boolean;
   resuming?: boolean;
-  // Explicit eligibility for the resume action. When omitted, callers that opt
-  // into resume keep the legacy terminal+reconciliation rule.
+  // Only a validated BULK_RETRY_V1 response can authorize the resume action.
   canResume?: boolean;
   showDetailsLink?: boolean;
 }
@@ -46,8 +45,12 @@ export function BatchStatusPanel({
   const isFailedGeneral = batch.status === "FAILED_GENERAL";
   const isProcessing = batch.status === "PROCESSING";
   const isQueued = batch.status === "QUEUED";
-  const resumeEligible =
-    canResume ?? (isTerminal && batch.needs_reconciliation);
+  const resumeEligible = Boolean(
+    canResume === true && batch.status === "COMPLETED" &&
+    batch.reanudacion?.protocol === "BULK_RETRY_V1" &&
+    batch.reanudacion.eligible && batch.reanudacion.steps.length > 0 &&
+    batch.reanudacion.blockedReason === null,
+  );
 
   // Semantic presentation for StatusBadge
   const statusSemantic = isSuccess
@@ -151,7 +154,18 @@ export function BatchStatusPanel({
           >
             Se procesaron {batch.completed_rows} filas exitosamente y {batch.failed_rows} presentaron rechazo en algún dominio.
             {batch.needs_reconciliation &&
-              " Los dominios completados conservan sus registros (no hay rollback destructivo). Puede descargar el reporte de errores o reanudar el lote para reintentar operaciones pendientes."}
+              " Los dominios completados conservan sus registros. La reanudación solo aparece cuando el backend informa elegibilidad contractual BULK_RETRY_V1."}
+          </FeedbackAlert>
+        )}
+
+        {batch.reanudacion?.protocol === "BULK_RETRY_V1" && (
+          <FeedbackAlert
+            semantic={batch.reanudacion.eligible ? "info" : "warning"}
+            title="Elegibilidad de reanudación informada por el backend"
+          >
+            {batch.reanudacion.eligible
+              ? <>Pasos candidatos informativos: {batch.reanudacion.steps.map((step) => `${step.row_id} · ${step.domain}`).join(", ")}. El servidor vuelve a validar la autorización al solicitar la reanudación.</>
+              : <>La reanudación está bloqueada por el backend: {batch.reanudacion.blockedReason}.</>}
           </FeedbackAlert>
         )}
 
@@ -160,7 +174,7 @@ export function BatchStatusPanel({
             semantic="error"
             title="Fallo general en la importación"
           >
-            No se pudo completar el procesamiento del lote. Revisa el archivo y vuelve a intentarlo.
+            No se pudo completar el procesamiento del lote. Revisa el estado del servicio antes de iniciar otra operación.
           </FeedbackAlert>
         )}
 

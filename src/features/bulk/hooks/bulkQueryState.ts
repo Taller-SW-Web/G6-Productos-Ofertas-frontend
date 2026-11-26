@@ -7,6 +7,19 @@ export type BatchQueryState =
   | { status: "not_found" }
   | { status: "error"; message: string };
 
+export function shouldPollBatch(batch: BulkImportBatch | null | undefined): boolean {
+  return batch?.status === "QUEUED" || batch?.status === "PROCESSING";
+}
+
+export function shouldPollExport(job: BulkExportJob | null | undefined): boolean {
+  return job?.status === "QUEUED" || job?.status === "PROCESSING";
+}
+
+export function getBulkPollDelay(attempt: number, random = Math.random): number {
+  const base = Math.min(2_000 * 2 ** Math.max(0, attempt), 30_000);
+  return Math.min(30_000, Math.round(base * (0.8 + random() * 0.4)));
+}
+
 export interface BatchQueryResponse {
   key: string;
   state: BatchQueryState;
@@ -15,11 +28,13 @@ export interface BatchQueryResponse {
 export interface LastSuccessfulBatch {
   batchId: string;
   batch: BulkImportBatch;
+  owner?: string;
 }
 
 export function selectBatchQueryView(input: {
   batchId: string | undefined;
   requestKey: string;
+  owner?: string;
   response?: BatchQueryResponse;
   lastSuccess?: LastSuccessfulBatch;
 }) {
@@ -31,7 +46,7 @@ export function selectBatchQueryView(input: {
     ? null
     : state?.status === "success"
       ? state.batch
-      : lastSuccess && lastSuccess.batchId === input.batchId
+      : lastSuccess && lastSuccess.batchId === input.batchId && lastSuccess.owner === input.owner
         ? lastSuccess.batch
         : null;
   const error = state?.status === "error" ? state.message : null;
@@ -66,14 +81,36 @@ export function isExportSnapshotStale(input: {
   );
 }
 
-// A batch only has reconcilable work when it still holds failed rows flagged for
-// reconciliation. When the provider returned row detail we trust it; otherwise we
-// fall back to the aggregate counters, never inventing pending operations.
+// Retry eligibility is a server decision. Batch status and reconciliation flags
+// are not enough evidence to expose a retry action.
 export function hasReconcilableOperations(batch: BulkImportBatch): boolean {
-  if (batch.rows && batch.rows.length > 0) {
-    return batch.rows.some((row) => row.status === "FAILED" && row.needs_reconciliation);
-  }
-  return batch.needs_reconciliation && batch.failed_rows > 0;
+  const eligibility = batch.reanudacion;
+  if (eligibility?.protocol !== "BULK_RETRY_V1" || !eligibility.eligible || eligibility.steps.length === 0 || eligibility.blockedReason !== null) return false;
+  if (batch.status !== "COMPLETED" || typeof batch.total_rows !== "number" || !batch.rows || batch.rows.length !== batch.total_rows) return false;
+  if (new Set(eligibility.steps.map((step) => `${step.row_id}:${step.domain}`)).size !== eligibility.steps.length) return false;
+  return eligibility.steps.every((candidate) => {
+    if (candidate.domain !== "CATALOGO") return false;
+    const rows = batch.rows!.filter((row) => String(row.row_id) === candidate.row_id);
+    if (rows.length !== 1) return false;
+    const row = rows[0]!;
+    if (row.status === "COMPLETED" || row.applied_domains.includes(candidate.domain)) return false;
+    const steps = row.steps.filter((step) => step.domain === candidate.domain);
+    return steps.length === 1 && steps[0]?.status !== "COMPLETED";
+  });
+}
+
+/** A retry 202 is only an admission receipt. This predicate accepts a later GET
+ * as confirmation only when it identifies the same batch and proves progress. */
+export function confirmsBulkResumeProgress(input: {
+  batch: BulkImportBatch;
+  batchId: string;
+  originalCorrelationId?: string;
+}): boolean {
+  const { batch } = input;
+  if (batch.batch_id !== input.batchId ||
+      (input.originalCorrelationId !== undefined && batch.correlation_id !== input.originalCorrelationId)) return false;
+  if (batch.status === "QUEUED" || batch.status === "PROCESSING") return true;
+  return (batch.status === "COMPLETED" || batch.status === "FAILED_GENERAL") && batch.reanudacion?.eligible !== true;
 }
 
 // Single source of truth for "resume is allowed". It refuses to operate on a
@@ -92,8 +129,7 @@ export function canResumeBatch(input: {
   if (input.loading || input.error !== null || input.isStale || input.isNotFound || input.resuming) {
     return false;
   }
-  if (batch.status !== "COMPLETED" && batch.status !== "FAILED_GENERAL") return false;
-  if (!batch.needs_reconciliation) return false;
+  if (batch.status !== "COMPLETED") return false;
   return hasReconcilableOperations(batch);
 }
 

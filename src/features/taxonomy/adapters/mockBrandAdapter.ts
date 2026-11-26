@@ -312,6 +312,8 @@ export const mockBrandAdapter: BrandRepository = {
         resultado: "exito",
         mensaje: "Baja confirmada por Catálogo. La marca pasó a estado Inactivo.",
         operacionId,
+        entityId: op.marcaId,
+        entityType: "BRAND",
       };
     }
     if (op.estado === "completada") {
@@ -319,6 +321,8 @@ export const mockBrandAdapter: BrandRepository = {
         resultado: "exito",
         mensaje: "La marca ya cuenta con la baja confirmada.",
         operacionId,
+        entityId: op.marcaId,
+        entityType: "BRAND",
       };
     }
     op.estado = "no-concluyente";
@@ -331,6 +335,8 @@ export const mockBrandAdapter: BrandRepository = {
       resultado: "no-concluyente",
       mensaje: "La verificación no fue concluyente. La marca conserva su estado actual.",
       operacionId,
+      entityId: op.marcaId,
+      entityType: "BRAND",
     };
   },
 };

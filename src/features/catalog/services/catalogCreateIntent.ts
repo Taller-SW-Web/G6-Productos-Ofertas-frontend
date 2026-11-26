@@ -30,8 +30,8 @@ export async function runCatalogCreateIntent<T>(userId: string | undefined, reso
     clear(key);
     return result;
   } catch (error) {
-    if (error instanceof CatalogError && error.kind !== "write_unknown") clear(key);
-    else { try { sessionStorage.setItem(key, JSON.stringify({ state: "unknown", scopeHash, at: Date.now() })); } catch { /* pre-dispatch marker remains */ } }
+    if (error instanceof CatalogError && error.kind !== "write_unknown" && error.kind !== "write_acknowledged") clear(key);
+    else { try { sessionStorage.setItem(key, JSON.stringify({ state: error instanceof CatalogError && error.kind === "write_acknowledged" ? "acknowledged" : "unknown", scopeHash, at: Date.now() })); } catch { /* pre-dispatch marker remains */ } }
     throw error;
   }
 }

@@ -13,6 +13,20 @@ export interface CatalogHttpTransport {
   ): Promise<Response>;
 }
 
+export const CATALOG_RETRY_AFTER_MS = Symbol("catalogRetryAfterMs");
+export const CATALOG_RESPONSE_CORRELATION_ID = Symbol("catalogResponseCorrelationId");
+
+function retryAfterMilliseconds(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const seconds = /^\s*(\d+(?:\.\d+)?)\s*$/.exec(value);
+  if (seconds) {
+    const milliseconds = Number(seconds[1]) * 1000;
+    return Number.isFinite(milliseconds) && milliseconds >= 0 ? milliseconds : undefined;
+  }
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined;
+}
+
 export function blockedCatalog(message: string): never {
   throw new CatalogError("blocked_contract", message);
 }
@@ -103,6 +117,7 @@ export function createCatalogHttp(transport: CatalogHttpTransport) {
         !isCommercialWrite
           ? "No se pudo consultar el servicio. Intente consultar nuevamente."
           : "No se pudo confirmar la escritura. Conserve los datos y consulte el resultado antes de volver a enviarla.",
+        isCommercialWrite ? { correlationId: correlation } : undefined,
       );
     }
     if (!response.ok) {
@@ -153,14 +168,25 @@ export function createCatalogHttp(transport: CatalogHttpTransport) {
       throw new CatalogError(
         isCommercialWrite ? "write_unknown" : "server",
         "La respuesta no permite confirmar el resultado.",
+        isCommercialWrite ? { correlationId: response.headers.get("X-Correlation-Id") ?? correlation } : undefined,
       );
     }
     try {
-      return await response.json();
+      const value: unknown = await response.json();
+      const retryAfterMs = retryAfterMilliseconds(response.headers.get("Retry-After"));
+      if (retryAfterMs !== undefined && value && typeof value === "object" && !Array.isArray(value)) {
+        Object.defineProperty(value, CATALOG_RETRY_AFTER_MS, { value: retryAfterMs });
+      }
+      const responseCorrelationId = response.headers.get("X-Correlation-Id");
+      if (responseCorrelationId && value && typeof value === "object" && !Array.isArray(value)) {
+        Object.defineProperty(value, CATALOG_RESPONSE_CORRELATION_ID, { value: responseCorrelationId });
+      }
+      return value;
     } catch {
       throw new CatalogError(
         isCommercialWrite ? "write_unknown" : "server",
         "El servicio devolvió una respuesta ilegible.",
+        isCommercialWrite ? { correlationId: response.headers.get("X-Correlation-Id") ?? correlation } : undefined,
       );
     }
   };

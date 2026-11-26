@@ -31,7 +31,8 @@ test("UI API 1440: POST contractual, error 409 visible, datos conservados y sin 
   expect(posts).toBe(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.evaluate(() => window.scrollTo(0, 0));
-  await page.screenshot({ path: test.info().outputPath("catalogo-http-error-1440.png"), fullPage: true });
+  if (process.env.G6_H5_DISABLE_SCREENSHOTS !== "1")
+    await page.screenshot({ path: test.info().outputPath("catalogo-http-error-1440.png"), fullPage: true });
 });
 
 for (const status of [401, 403, 503]) {
@@ -60,7 +61,48 @@ test("UI API: lectura administrativa bloqueada conserva preparación independien
   await expect(page.getByText("Inventario: Rechazado", { exact: true })).toBeVisible();
   await expect(page.getByText("404 - Producto inexistente", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Reintentar preparación/ })).toHaveCount(0);
-  await page.screenshot({ path: test.info().outputPath("catalogo-preparacion-parcial-1440.png"), fullPage: true });
+  if (process.env.G6_H5_DISABLE_SCREENSHOTS !== "1")
+    await page.screenshot({ path: test.info().outputPath("catalogo-preparacion-parcial-1440.png"), fullPage: true });
+});
+
+test("UI Catalog: HTTP 202 comunica admisión y conserva PENDING hasta consultar el resultado de Catálogo", async ({ page }) => {
+  const productId = "11111111-1111-4111-8111-111111111111";
+  let preparationReads = 0;
+  let retries = 0;
+  await page.route("https://gateway.test/api/v1/**", async route => {
+    const request = route.request();
+    const { pathname } = new URL(request.url());
+    const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*", "Access-Control-Allow-Methods": "GET, POST, PATCH" };
+    if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers });
+    if (pathname.endsWith("/preparacion")) {
+      preparationReads++;
+      const pending = retries > 0;
+      return route.fulfill({ status: 200, headers, json: {
+        product_id: productId, tiene_variantes: false,
+        pricing: { status: pending ? "PENDING" : "REJECTED", manual_retry_allowed: !pending, code: pending ? null : "PRICE_NOT_READY" },
+        inventario: { status: "PENDING", manual_retry_allowed: false }, variantes: [],
+      } });
+    }
+    if (request.method() === "POST" && pathname.endsWith("/preparacion/reintentar")) {
+      retries++;
+      return route.fulfill({ status: 202, headers, json: {
+        status: "ACCEPTED", operation_id: "22222222-2222-4222-8222-222222222222",
+        correlation_id: "33333333-3333-4333-8333-333333333333",
+      } });
+    }
+    if (pathname === `/api/v1/productos/administracion/${productId}`)
+      return route.fulfill({ status: 403, headers, json: { code: "SCOPE_INSUFICIENTE" } });
+    return route.fulfill({ status: 404, headers, json: { code: "PRODUCTO_NO_ENCONTRADO" } });
+  });
+
+  await page.goto(`/tests/harness/catalog-http.html?path=/productos/${productId}/preparacion`);
+  await expect(page.getByText("Pricing: Rechazado", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Reintentar preparación de Pricing" }).click();
+  await expect(page.getByText("Solicitud admitida. Consulte la preparación para conocer el resultado final.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Pricing: En preparación", { exact: true })).toBeVisible();
+  await expect(page.getByText("Precio regular base inicializado correctamente en Pricing. Estado terminal confirmado.", { exact: true })).toHaveCount(0);
+  expect(retries).toBe(1);
+  expect(preparationReads).toBeGreaterThanOrEqual(2);
 });
 
 test("UI API: un 403 de categorías no bloquea los productos y un 403 filtrado permite limpiar la consulta", async ({ page }) => {
@@ -109,7 +151,7 @@ test("UI API 1440: un borrador reaparece en el listado y se edita con la versió
   let typeId = "type-api";
   const sentVersions: number[] = [];
   const productWrite = () => ({
-    product_id: id, status: "BORRADOR", catalog_version: version, name: "Borrador H4", description,
+    product_id: id, slug: "borrador-h4", status: "BORRADOR", catalog_version: version, name: "Borrador H4", description,
     sku_base: "H4-DRAFT", categoria_id: "cat-api", marca_id: "brand-api", tipo_producto_id: typeId,
     tiene_variantes: false, images: [], attributes: [], variants: [], perfil_fisico: null,
   });

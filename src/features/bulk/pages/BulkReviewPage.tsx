@@ -15,26 +15,28 @@ import { BulkFileReview } from "../components/BulkFileReview";
 import { useBulkUploadContext } from "../context/BulkUploadContext";
 import { BulkRepositoryError } from "../services/bulkService";
 import { useBulkRepository } from "../hooks/useBulkRepository";
+import { useBulkAdmissionRecovery } from "../hooks/useBulkAdmissionRecovery";
 import { runSingleFlight } from "../utils/asyncGuards";
 
 export function BulkReviewPage() {
   const navigate = useNavigate();
   const bulkRepository = useBulkRepository();
+  const { view: reconciliationView, reconcileAgain } = useBulkAdmissionRecovery();
   const isSubmittingRef = useRef(false);
   const pageIsActiveRef = useRef(true);
-  const recoveryControllerRef = useRef<AbortController | null>(null);
-  const [recoveryStatus, setRecoveryStatus] = useState<"idle" | "loading" | "not_found" | "unauthorized" | "forbidden" | "unavailable">("idle");
+  const [replaySubmitting, setReplaySubmitting] = useState(false);
+  const [replayError, setReplayError] = useState<string | null>(null);
   const {
     selectedFile,
     fileCheck,
     admissionStatus,
     pendingCorrelationId,
+    pendingAdmission,
     expectedBatchId,
-    confirmRecoveredBatch,
     recoveryOwnerIsCurrent,
-    recoveryOwnerId,
     beginAdmission,
     finishAdmission,
+    confirmReconciliation,
     submissionError,
   } = useBulkUploadContext();
 
@@ -44,53 +46,6 @@ export function BulkReviewPage() {
       pageIsActiveRef.current = false;
     };
   }, []);
-
-  useEffect(() => {
-    if (admissionStatus !== "uncertain" || !expectedBatchId || !recoveryOwnerIsCurrent()) return;
-    const controller = new AbortController();
-    recoveryControllerRef.current?.abort();
-    recoveryControllerRef.current = controller;
-    queueMicrotask(() => {
-      if (controller.signal.aborted) return;
-      setRecoveryStatus("loading");
-      void bulkRepository.getImport(expectedBatchId, controller.signal, recoveryOwnerId() ?? undefined).then(batch => {
-        if (controller.signal.aborted || !pageIsActiveRef.current || !recoveryOwnerIsCurrent()) return;
-        if (batch?.batch_id === expectedBatchId && confirmRecoveredBatch(expectedBatchId)) {
-          const owner = recoveryOwnerId();
-          if (owner && pendingCorrelationId) bulkRepository.confirmRecoveredImport?.(expectedBatchId, owner, pendingCorrelationId);
-          setRecoveryStatus("idle");
-          navigate(`/carga-masiva/importaciones/${batch.batch_id}`);
-        } else setRecoveryStatus("not_found");
-      }).catch((error: unknown) => {
-        if (controller.signal.aborted) return;
-        const status = error instanceof BulkRepositoryError ? error.status : undefined;
-        setRecoveryStatus(status === 401 ? "unauthorized" : status === 403 ? "forbidden" : "unavailable");
-      });
-    });
-    return () => { controller.abort(); if (recoveryControllerRef.current === controller) recoveryControllerRef.current = null; };
-  }, [admissionStatus, bulkRepository, confirmRecoveredBatch, expectedBatchId, navigate, pendingCorrelationId, recoveryOwnerId, recoveryOwnerIsCurrent]);
-
-  const recheckImport = async () => {
-    if (!expectedBatchId || !recoveryOwnerIsCurrent() || recoveryStatus === "loading") return;
-    const controller = new AbortController();
-    recoveryControllerRef.current?.abort();
-    recoveryControllerRef.current = controller;
-    setRecoveryStatus("loading");
-    try {
-      const batch = await bulkRepository.getImport(expectedBatchId, controller.signal, recoveryOwnerId() ?? undefined);
-      if (controller.signal.aborted || !pageIsActiveRef.current || !recoveryOwnerIsCurrent()) return;
-      if (batch?.batch_id === expectedBatchId && confirmRecoveredBatch(expectedBatchId)) {
-        const owner = recoveryOwnerId();
-        if (owner && pendingCorrelationId) bulkRepository.confirmRecoveredImport?.(expectedBatchId, owner, pendingCorrelationId);
-        setRecoveryStatus("idle");
-        navigate(`/carga-masiva/importaciones/${batch.batch_id}`);
-      } else setRecoveryStatus("not_found");
-    } catch (error: unknown) {
-      if (controller.signal.aborted) return;
-      const status = error instanceof BulkRepositoryError ? error.status : undefined;
-      setRecoveryStatus(status === 401 ? "unauthorized" : status === 403 ? "forbidden" : "unavailable");
-    }
-  };
 
   // If page is accessed directly without selecting a file
   if (!selectedFile || !fileCheck) {
@@ -106,6 +61,15 @@ export function BulkReviewPage() {
           ]}
         />
         <Stack gap="lg">
+          {pendingAdmission && (
+            <FeedbackAlert semantic="warning" title="Admisión incierta recuperada">
+              <p>{reconciliationView.message}</p>
+              <p>Correlación conservada: {pendingAdmission.correlationId}</p>
+              {(reconciliationView.status === "timed_out" || reconciliationView.status === "authentication_required" || reconciliationView.status === "blocked") && (
+                <Button variant="outline" onClick={reconcileAgain}>Volver a conciliar</Button>
+              )}
+            </FeedbackAlert>
+          )}
           <EmptyState
             title="Ningún archivo seleccionado"
             description="Para revisar la estructura debe seleccionar primero un archivo CSV o XLSX en la pantalla de carga masiva."
@@ -133,13 +97,12 @@ export function BulkReviewPage() {
         const batch = await bulkRepository.createImport(selectedFile, {
           detectedRows: fileCheck.detectedRows,
           correlationId: task.correlationId,
-          ...(task.expectedBatchId && task.owner && task.contentHash ? {
-            expectedBatchId: task.expectedBatchId,
+          ...(task.owner && task.contentHash ? {
             owner: task.owner,
             contentHash: task.contentHash,
           } : {}),
         });
-        const isCurrentAdmission = finishAdmission(task, "accepted");
+        const isCurrentAdmission = finishAdmission(task, "accepted", null, batch.batch_id);
         if (isCurrentAdmission && pageIsActiveRef.current && task.isCurrent()) {
           // Navigate only when this review screen still owns the current operation.
           navigate(`/carga-masiva/importaciones/${batch.batch_id}`);
@@ -156,6 +119,30 @@ export function BulkReviewPage() {
         finishAdmission(task, status, { category, message });
       }
     });
+  };
+
+  const handleReplaySameIntent = async () => {
+    if (!selectedFile || !pendingAdmission || !bulkRepository.replaySupported || !recoveryOwnerIsCurrent() || replaySubmitting) return;
+    if (!window.confirm("¿Reintentar exactamente la misma intención? Se conservarán el archivo, SHA-256, usuario y X-Correlation-Id originales.")) return;
+    setReplaySubmitting(true);
+    setReplayError(null);
+    try {
+      const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", await selectedFile.arrayBuffer()));
+      const contentHash = [...digest].map((value) => value.toString(16).padStart(2, "0")).join("");
+      if (contentHash !== pendingAdmission.contentHash) throw new Error("Selecciona el archivo original; su SHA-256 no coincide con la intención incierta.");
+      const batch = await bulkRepository.replayImport?.(selectedFile, {
+        owner: pendingAdmission.owner,
+        contentHash,
+        correlationId: pendingAdmission.correlationId,
+      }, true);
+      if (!batch) throw new Error("El repositorio no habilitó el replay idempotente.");
+      if (confirmReconciliation(pendingAdmission, batch.batch_id)) navigate(`/carga-masiva/importaciones/${batch.batch_id}`);
+      else throw new Error("La sesión o el marcador cambiaron; se conserva la admisión incierta.");
+    } catch (error) {
+      setReplayError(error instanceof Error ? error.message : "No se pudo repetir la misma intención.");
+    } finally {
+      setReplaySubmitting(false);
+    }
   };
 
   const hasBlockingErrors = !fileCheck.valid;
@@ -214,13 +201,27 @@ export function BulkReviewPage() {
             {submissionError.message}
             {admissionUncertain && (
               <>
-                <div>Se consulta el batchId determinista. Si el GET devuelve 404, el resultado sigue sin acreditarse y no se reenvía el archivo.</div>
+                <div>{reconciliationView.message}</div>
                 {pendingCorrelationId && <div>Correlación recuperada: {pendingCorrelationId}</div>}
-                {recoveryStatus === "not_found" && <div>GET 404: lote no localizado; la admisión original permanece incierta.</div>}
-                {recoveryStatus === "unauthorized" && <div>La sesión expiró. Inicia sesión con el propietario original antes de consultar.</div>}
-                {recoveryStatus === "forbidden" && <div>La identidad original no tiene permiso para consultar el lote.</div>}
-                {recoveryStatus === "unavailable" && <div>La consulta no está disponible; la intención sigue protegida.</div>}
-                <Button variant="outline" onClick={() => void recheckImport()} loading={recoveryStatus === "loading"} disabled={!recoveryOwnerIsCurrent()}>Volver a consultar lote</Button>
+                {reconciliationView.status === "timed_out" && (
+                  <Group mt="sm" gap="sm">
+                    <Button variant="outline" onClick={reconcileAgain}>
+                      Volver a conciliar
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => void handleReplaySameIntent()}
+                      loading={replaySubmitting}
+                      disabled={!bulkRepository.replaySupported || !selectedFile || !pendingAdmission || !recoveryOwnerIsCurrent()}
+                    >
+                      Reintentar la misma intención
+                    </Button>
+                  </Group>
+                )}
+                {replayError && <div role="alert">{replayError}</div>}
+                {reconciliationView.status === "timed_out" && !bulkRepository.replaySupported && (
+                  <div>El replay permanece bloqueado hasta acreditar idempotencia concurrente del backend.</div>
+                )}
               </>
             )}
           </FeedbackAlert>
