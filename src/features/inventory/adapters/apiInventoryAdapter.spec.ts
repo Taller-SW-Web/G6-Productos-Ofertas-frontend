@@ -2408,7 +2408,7 @@ describe("apiInventoryAdapter — dashboard KPIs (obtenerDashboardInventario)", 
     expect(dist).toHaveLength(1);
   });
 
-  it("fallos parciales: secciones no soportadas (alertas/stock) no invalidan KPIs ni distribución", async () => {
+  it("fallos parciales: secciones con error o sin contrato no invalidan KPIs ni distribución", async () => {
     const { repository } = setup(async () => jsonResponse(DASHBOARD_DTO));
     const [kpiRes, alertsRes, distRes, stockRes] = await Promise.allSettled([
       repository.getDashboardKpis(),
@@ -2424,10 +2424,9 @@ describe("apiInventoryAdapter — dashboard KPIs (obtenerDashboardInventario)", 
 });
 
 describe("apiInventoryAdapter — operaciones sin fuente contractual", () => {
-  it("rechaza con CONTRATO_BLOQUEADO las lecturas cuyo modelo no cubre el contrato", async () => {
+  it("rechaza con CONTRATO_BLOQUEADO las lecturas de Catálogo sin dependencias inyectadas", async () => {
     const { repository, request } = setup(async () => jsonResponse({}));
     for (const promise of [
-      repository.getDashboardAlerts(),
       repository.getCategories(),
       repository.getBrands(),
     ]) {
@@ -2435,8 +2434,188 @@ describe("apiInventoryAdapter — operaciones sin fuente contractual", () => {
       expect(error.code).toBe("CONTRATO_BLOQUEADO");
     }
     expect(request).not.toHaveBeenCalled();
-    await expect(repository.getLocations()).rejects.toMatchObject({ code: "RESPUESTA_INCOMPATIBLE" });
-    expect(request.mock.calls[0]?.[0]).toBe("/api/v1/inventario/dashboard");
+  });
+});
+
+describe("Fase 2 H01/H02 — Alertas operativas y ubicaciones autoritativas", () => {
+  const locLurin = "9129b578-631e-1735-8427-b683fb524380";
+  const locEmpty = "33333333-3333-4333-8333-333333333333";
+
+  it("getDashboardAlerts consulta /api/v1/inventario/alertas con paginación y mapea AGOTADO/STOCK_BAJO", async () => {
+    const { repository, calls } = setup(async (path) => {
+      const url = new URL(path, "https://gateway.test");
+      expect(url.pathname).toBe("/api/v1/inventario/alertas");
+      expect(url.searchParams.get("pagina")).toBe("1");
+      expect(url.searchParams.get("tamanio")).toBe("100");
+      return jsonResponse({
+        items: [
+          {
+            alertaId: `SKU-ZERO:${locLurin}:AGOTADO`,
+            sku: "SKU-ZERO",
+            ubicacion: {
+              locationId: locLurin,
+              codigo: "ALM-LURIN",
+              nombre: "Almacén Lurín",
+              tipo: "ALMACEN_CENTRAL",
+            },
+            estado: "AGOTADO",
+            available: 0,
+            umbralEfectivo: 5,
+            observadoEn: "2026-11-26T00:00:00.000Z",
+            targetRoute: `/inventario?sku=SKU-ZERO&locationId=${locLurin}`,
+          },
+          {
+            alertaId: `SKU-LOW:${locLurin}:STOCK_BAJO`,
+            sku: "SKU-LOW",
+            ubicacion: {
+              locationId: locLurin,
+              codigo: "ALM-LURIN",
+              nombre: "Almacén Lurín",
+              tipo: "ALMACEN_CENTRAL",
+            },
+            estado: "STOCK_BAJO",
+            available: 3,
+            umbralEfectivo: 5,
+            observadoEn: "2026-11-26T00:00:00.000Z",
+            targetRoute: `/inventario?sku=SKU-LOW&locationId=${locLurin}`,
+          },
+        ],
+        meta: { pagina: 1, tamanio: 100, total: 2, totalPaginas: 1 },
+      });
+    });
+
+    const alerts = await repository.getDashboardAlerts();
+    expect(calls).toHaveLength(1);
+    expect(alerts).toHaveLength(2);
+    expect(alerts[0]).toMatchObject({
+      id: `SKU-ZERO:${locLurin}:AGOTADO`,
+      severity: "error",
+      sku: "SKU-ZERO",
+      locationId: locLurin,
+      targetRoute: `/inventario?sku=SKU-ZERO&locationId=${locLurin}`,
+    });
+    expect(alerts[1]).toMatchObject({
+      id: `SKU-LOW:${locLurin}:STOCK_BAJO`,
+      severity: "warning",
+      sku: "SKU-LOW",
+    });
+  });
+
+  it("getDashboardAlerts devuelve vacío en status=DISPONIBLE y bloquea filtros de Catálogo sin listCatalogSkus", async () => {
+    const { repository, request } = setup(async () =>
+      jsonResponse({ items: [], meta: { pagina: 1, tamanio: 100, total: 0, totalPaginas: 0 } }),
+    );
+
+    await expect(repository.getDashboardAlerts({ status: "DISPONIBLE" })).resolves.toEqual([]);
+    expect(request).not.toHaveBeenCalled();
+
+    await expect(
+      rejection(repository.getDashboardAlerts({ category: "cat-1" })),
+    ).resolves.toMatchObject({ code: "CONTRATO_BLOQUEADO" });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("getDashboardAlerts propaga 401/403/503 y rechaza DTO incompatible", async () => {
+    const unauth = setup(async () => jsonResponse({ code: "TOKEN_INVALIDO" }, 401));
+    await expect(rejection(unauth.repository.getDashboardAlerts())).resolves.toMatchObject({
+      code: "NO_AUTENTICADO",
+    });
+
+    const forbidden = setup(async () => jsonResponse({ code: "SCOPE_INSUFICIENTE" }, 403));
+    await expect(rejection(forbidden.repository.getDashboardAlerts())).resolves.toMatchObject({
+      code: "SIN_PERMISO",
+    });
+
+    const badDto = setup(async () =>
+      jsonResponse({
+        items: [{ alertaId: "x", sku: "A" }],
+        meta: { pagina: 1, tamanio: 100, total: 1, totalPaginas: 1 },
+      }),
+    );
+    await expect(rejection(badDto.repository.getDashboardAlerts())).resolves.toMatchObject({
+      code: "RESPUESTA_INCOMPATIBLE",
+    });
+  });
+
+  it("getLocations consulta /api/v1/inventario/ubicaciones incluyendo inactivas y sin stock con nombres reales", async () => {
+    const { repository, calls } = setup(async (path) => {
+      const url = new URL(path, "https://gateway.test");
+      expect(url.pathname).toBe("/api/v1/inventario/ubicaciones");
+      expect(url.searchParams.get("soloActivas")).toBe("false");
+      return jsonResponse({
+        items: [
+          {
+            id: locLurin,
+            code: "ALM-LURIN",
+            name: "Centro de distribución Lurín",
+            type: "ALMACEN_CENTRAL",
+            active: true,
+          },
+          {
+            id: locEmpty,
+            code: "ALM-VACIO",
+            name: "Almacén Sin Stock",
+            type: "ALMACEN",
+            active: false,
+          },
+        ],
+        meta: { pagina: 1, tamanio: 100, total: 2, totalPaginas: 1 },
+      });
+    });
+
+    const locations = await repository.getLocations();
+    expect(calls).toHaveLength(1);
+    expect(locations).toEqual([
+      { id: locLurin, name: "Centro de distribución Lurín", active: true },
+      { id: locEmpty, name: "Almacén Sin Stock", active: false },
+    ]);
+  });
+
+  it("getLocations pagina múltiples páginas de /api/v1/inventario/ubicaciones y detecta duplicados", async () => {
+    const loc3 = "44444444-4444-4444-8444-444444444444";
+    const all = [
+      { id: locLurin, code: "ALM-1", name: "Ubicación 1", type: "ALMACEN", active: true },
+      { id: locEmpty, code: "ALM-2", name: "Ubicación 2", type: "ALMACEN", active: true },
+      { id: loc3, code: "TDA-3", name: "Ubicación 3", type: "TIENDA", active: false },
+    ];
+    const { repository, calls } = setup(async (path) => {
+      const url = new URL(path, "https://gateway.test");
+      const pagina = Number(url.searchParams.get("pagina"));
+      const slice = all.slice((pagina - 1) * 2, pagina * 2);
+      return jsonResponse({
+        items: slice,
+        meta: { pagina, tamanio: 2, total: 3, totalPaginas: 2 },
+      });
+    });
+
+    const result = await repository.getLocations();
+    expect(calls).toHaveLength(2);
+    expect(result).toHaveLength(3);
+    expect(result.map((l) => l.id)).toEqual([locLurin, locEmpty, loc3]);
+
+    const dup = setup(async () =>
+      jsonResponse({
+        items: [all[0], all[0]],
+        meta: { pagina: 1, tamanio: 2, total: 2, totalPaginas: 1 },
+      }),
+    );
+    await expect(rejection(dup.repository.getLocations())).resolves.toMatchObject({
+      code: "RESPUESTA_INCOMPATIBLE",
+    });
+  });
+
+  it("getLocations rechaza respuestas incompatibles y maneja listas vacías (total 0)", async () => {
+    const empty = setup(async () =>
+      jsonResponse({ items: [], meta: { pagina: 1, tamanio: 100, total: 0, totalPaginas: 0 } }),
+    );
+    await expect(empty.repository.getLocations()).resolves.toEqual([]);
+
+    const bad = setup(async () =>
+      jsonResponse({ items: [{ id: locLurin }], meta: { pagina: 1, tamanio: 100, total: 1, totalPaginas: 1 } }),
+    );
+    await expect(rejection(bad.repository.getLocations())).resolves.toMatchObject({
+      code: "RESPUESTA_INCOMPATIBLE",
+    });
   });
 });
 
