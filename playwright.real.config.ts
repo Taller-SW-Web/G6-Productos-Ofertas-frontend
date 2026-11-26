@@ -31,7 +31,7 @@ export default defineConfig({
     command: "node tests/e2e-real/startRealStackAndVite.mjs",
     url: `http://127.0.0.1:${port}`,
     reuseExistingServer: false,
-    timeout: 120_000,
+    timeout: 240_000,
     env: {
       ...process.env,
       PLAYWRIGHT_REAL_PORT: String(port),

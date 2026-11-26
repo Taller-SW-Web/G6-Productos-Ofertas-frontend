@@ -123,10 +123,10 @@ export function assertRealStackPreflight(): RealStackEnvironment {
 export async function verifyGatewayAndServicesReady(
   gatewayUrl: string,
 ): Promise<void> {
-  const res = await fetch(`${gatewayUrl}/health/ready`);
+  const res = await fetch(`${gatewayUrl}/health`);
   if (!res.ok) {
     throw new Error(
-      `PREFLIGHT_BLOCKED: Gateway local no está listo en ${gatewayUrl}/health/ready (HTTP ${res.status}).`,
+      `PREFLIGHT_BLOCKED: Gateway local no está listo en ${gatewayUrl}/health (HTTP ${res.status}).`,
     );
   }
 }

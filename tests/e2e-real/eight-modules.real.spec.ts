@@ -892,15 +892,45 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     expect((initialSnap.rows ?? []).length).toBeGreaterThanOrEqual(1);
   });
 
-  test("8b. Bulk (procesamiento integral con mensajería): BLOQUEADA_POR_R02 (inventory-svc g6.inventory.from.bulk BLOCKED_CONTRACT)", async ({
+  test("8b. Bulk (procesamiento integral con mensajería): exige COMPLETED, conteo íntegro de filas, cero errores y sin conciliación pendiente", async ({
     page,
     request,
   }) => {
-    test.skip(
-      true,
-      "BULK_8B: BLOQUEADA_POR_R02 — inventory-svc mantiene g6.inventory.from.bulk como BLOCKED_CONTRACT en apps/inventory-svc/src/messaging/service-bus-consumer.ts:11; no se habilita por la fuerza.",
-    );
     const env = assertRealStackPreflight();
+    const token = await issueTokenFromTrustedG7(env.g7ApiBase, "gestor@example.test");
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      "X-Correlation-Id": randomUUID(),
+      "Content-Type": "application/json",
+    };
+
+    const catSlug = `cat-blk8b-${randomUUID().slice(0, 6)}`;
+    const catRes = await request.post(`${env.gatewayUrl}/api/v1/categorias`, {
+      headers,
+      data: { nombre: `Cat Bulk 8b ${catSlug}`, slugConfirmado: catSlug, categoriaPadreId: null },
+    });
+    expect([200, 201]).toContain(catRes.status());
+    const catDto = (await catRes.json()) as { categoriaId: string };
+    const logoPath = resolve(
+      process.env.G6_BACKEND_ROOT ?? resolve(process.cwd(), "../backend"),
+      "apps/taxonomy-svc/test/fixtures/logo.png",
+    );
+    const brandRes = await request.post(`${env.gatewayUrl}/api/v1/marcas`, {
+      headers: { Authorization: `Bearer ${token}`, "X-Correlation-Id": randomUUID() },
+      multipart: {
+        nombre: `Marca Bulk 8b ${randomUUID().slice(0, 6)}`,
+        logo: { name: "logo.png", mimeType: "image/png", buffer: readFileSync(logoPath) },
+      },
+    });
+    expect([200, 201]).toContain(brandRes.status());
+    const brandDto = (await brandRes.json()) as { marcaId: string };
+    const typeRes = await request.post(`${env.gatewayUrl}/api/v1/tipos-producto`, {
+      headers,
+      data: { nombre: `Tipo Bulk 8b ${randomUUID().slice(0, 6)}` },
+    });
+    expect([200, 201]).toContain(typeRes.status());
+    const typeDto = (await typeRes.json()) as { tipoProductoId: string };
+
     await navigateViaSpa(page, "/carga-masiva");
     const fileInput = page.locator('input[type="file"]').first();
     await expect(fileInput).toBeAttached();
@@ -914,9 +944,9 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       "",
       "Prod Bulk Integral",
       "Descripcion valida para procesamiento integral V2",
-      "cat-bulk-e2e",
-      "marca-bulk-e2e",
-      "tipo-bulk-e2e",
+      catDto.categoriaId,
+      brandDto.marcaId,
+      typeDto.tipoProductoId,
       "false",
       "25.00",
       "{}",
@@ -945,7 +975,6 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     expect(batchDto.batch_id).toBeTruthy();
     expect(batchDto.status).toBe("QUEUED");
 
-    const token = await issueTokenFromTrustedG7(env.g7ApiBase, "gestor@example.test");
     let batchSnapshot: {
       batch_id?: string;
       status?: string;

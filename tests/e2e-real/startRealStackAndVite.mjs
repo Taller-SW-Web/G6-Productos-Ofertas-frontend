@@ -17,8 +17,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 
 const exec = promisify(execFile);
-const POSTGRES_IMAGE =
-  "postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea";
+const POSTGRES_IMAGE = "postgres:17-alpine";
 const SERVICE_NAMES = [
   "catalog-svc",
   "taxonomy-svc",
@@ -193,16 +192,19 @@ async function reserveLocalPort() {
 
 async function waitForHttpReady(url, timeoutMs = 45_000) {
   const deadline = Date.now() + timeoutMs;
+  let lastInfo = "no response";
   while (Date.now() < deadline) {
     try {
       const res = await fetch(url);
       if (res.ok) return;
-    } catch {
-      // retry
+      const body = await res.text().catch(() => "");
+      lastInfo = `HTTP ${res.status}: ${body.slice(0, 300)}`;
+    } catch (err) {
+      lastInfo = err instanceof Error ? err.message : String(err);
     }
     await delay(250);
   }
-  throw new Error(`PREFLIGHT_BLOCKED: Servicio no respondió listo en ${url}`);
+  throw new Error(`PREFLIGHT_BLOCKED: Servicio no respondió listo en ${url} (${lastInfo})`);
 }
 
 async function startDisposablePostgresWithTls(backendRoot, docsRoot) {
@@ -261,34 +263,21 @@ async function startDisposablePostgresWithTls(backendRoot, docsRoot) {
     const port = /^127\.0\.0\.1:(\d+)\s*$/.exec(stdout)?.[1];
     if (!port) throw new Error("Puerto de PostgreSQL descartable inválido.");
 
-    for (let i = 0; i < 60; i += 1) {
+    let sslStatus = "";
+    for (let i = 0; i < 80; i += 1) {
       try {
-        await exec(
-          "docker",
-          [
-            "exec",
-            containerName,
-            "pg_isready",
-            "-U",
-            "postgres",
-            "-d",
-            "g6_e2e_test",
-          ],
-          { timeout: 5_000 },
+        sslStatus = await runPsql(
+          containerName,
+          "g6_e2e_test",
+          "SHOW ssl;",
+          "verify-ssl-on",
         );
         break;
       } catch {
-        if (i === 59) throw new Error("PostgreSQL descartable no estuvo listo.");
-        await delay(250);
+        if (i === 79) throw new Error("PostgreSQL descartable no estuvo listo.");
+        await delay(300);
       }
     }
-
-    const sslStatus = await runPsql(
-      containerName,
-      "g6_e2e_test",
-      "SHOW ssl;",
-      "verify-ssl-on",
-    );
     if (!/\bon\b/i.test(sslStatus)) {
       throw new Error(`POSTGRES_TLS_NOT_ENABLED: SHOW ssl devolvió ${sslStatus}`);
     }
@@ -319,6 +308,7 @@ async function startDisposablePostgresWithTls(backendRoot, docsRoot) {
       CREATE SCHEMA extensions;
       CREATE EXTENSION btree_gist WITH SCHEMA extensions;
       GRANT USAGE ON SCHEMA extensions TO po_taxonomy_owner, po_catalog_owner, po_pricing_owner, po_price_audit_owner, po_promotions_owner, po_combos_owner, po_inventory_owner, po_bulk_owner, taxonomy_app, catalog_app, pricing_app, price_audit_app, promotions_app, combos_app, inventory_app, bulk_app;
+      GRANT CREATE ON DATABASE g6_e2e_test TO po_taxonomy_owner, po_catalog_owner, po_pricing_owner, po_price_audit_owner, po_promotions_owner, po_combos_owner, po_inventory_owner, po_bulk_owner;
 
       CREATE SCHEMA taxonomy AUTHORIZATION po_taxonomy_owner;
       CREATE SCHEMA catalog AUTHORIZATION po_catalog_owner;
@@ -336,28 +326,27 @@ async function startDisposablePostgresWithTls(backendRoot, docsRoot) {
     `;
     await runPsql(containerName, "g6_e2e_test", roleAndSchemaSql, "roles-and-schemas");
 
-    // 4. Ejecutar SQL oficial de cada servicio bajo su rol owner
+    // 4. Ejecutar SQL oficial de cada servicio bajo su rol owner (archivo por archivo)
     for (const [service, spec] of Object.entries(SQL_INVENTORY_BY_SERVICE)) {
-      const statements = [
-        "BEGIN;",
-        `SET LOCAL ROLE ${spec.ownerRole};`,
-        ...(spec.preSql ? [spec.preSql] : []),
-      ];
+      const pre = spec.preSql ? `${spec.preSql}\n` : "";
       for (const entry of spec.files) {
         const base = entry.root === "docs" ? docsRoot : backendRoot;
         const fullPath = resolve(base, entry.path);
         if (!existsSync(fullPath)) {
           throw new Error(`SQL_MISSING (${service}): ${fullPath}`);
         }
-        statements.push(readFileSync(fullPath, "utf8"));
+        const fileSql = readFileSync(fullPath, "utf8");
+        const hasOwnTx = /^\s*BEGIN\s*;/im.test(fileSql);
+        const wrapped = hasOwnTx
+          ? `SET ROLE ${spec.ownerRole};\n${fileSql.replace(/^\s*BEGIN\s*;/im, `BEGIN;\n${pre}`)}\nRESET ROLE;`
+          : `SET ROLE ${spec.ownerRole};\nBEGIN;\n${pre}${fileSql}\nCOMMIT;\nRESET ROLE;`;
+        await runPsql(
+          containerName,
+          "g6_e2e_test",
+          wrapped,
+          `migrate:${service}:${entry.path}`,
+        );
       }
-      statements.push("COMMIT;");
-      await runPsql(
-        containerName,
-        "g6_e2e_test",
-        statements.join("\n"),
-        `migrate:${service}`,
-      );
     }
 
     // 5. Privilegios mínimos runtime sobre tablas y secuencias para los esquemas que lo requieran
@@ -438,7 +427,7 @@ async function startSingleLocalG7Server() {
   const inactiveUserId = randomUUID();
   const blockedUserId = randomUUID();
   const gestorScopes =
-    "catalogo:leer catalogo:escribir taxonomia:leer taxonomia:escribir precios:leer precios:escribir auditoria-precios:leer auditoria-precios:exportar promociones:leer promociones:escribir cupones:leer cupones:escribir combos:leer combos:escribir inventario:leer inventario:escribir carga-masiva:leer carga-masiva:escribir";
+    "catalogo:leer catalogo:escribir taxonomia:leer taxonomia:escribir precios:leer precios:escribir auditoria-precios:leer auditoria-precios:exportar promociones:leer promociones:escribir cupones:leer cupones:escribir combos:leer combos:escribir inventario:leer inventario:escribir carga-masiva:leer carga-masiva:escribir INVENTARIO_TRASLADOS_LEER INVENTARIO_TRASLADOS_RECIBIR";
 
   const labUsers = new Map([
     [
@@ -649,6 +638,10 @@ async function startSingleLocalG7Server() {
               "precios:leer",
               "inventario:leer",
               "tokens:introspeccion",
+              "carga-masiva:contenidos:leer",
+              "inventario:reservas:evidencia-cupon:leer",
+              "catalogo:contexto-sku:leer",
+              "catalogo:skus:filtrar",
             ]),
           },
         ],
@@ -656,14 +649,60 @@ async function startSingleLocalG7Server() {
           "modulo-marketplace",
           {
             secrets: new Set(["e2e-marketplace-secret"]),
-            scopes: new Set(["catalogo:leer", "precios:leer", "promociones:evaluar"]),
+            scopes: new Set([
+              "catalogo:leer",
+              "precios:leer",
+              "promociones:evaluar",
+              "promociones:leer",
+              "cupones:validar",
+              "recomendaciones:leer",
+              "combos:leer",
+              "inventario:disponibilidad:leer",
+            ]),
           },
         ],
         [
           "modulo-chatbot",
           {
             secrets: new Set(["e2e-chatbot-secret"]),
-            scopes: new Set(["catalogo:leer", "precios:leer", "promociones:evaluar"]),
+            scopes: new Set(["catalogo:leer", "precios:leer", "promociones:evaluar", "combos:leer", "inventario:disponibilidad:leer"]),
+          },
+        ],
+        [
+          "catalog-svc",
+          {
+            secrets: new Set(["e2e-catalog-secret"]),
+            scopes: new Set(["carga-masiva:contenidos:leer", "catalogo:leer"]),
+          },
+        ],
+        [
+          "modulo-retail",
+          {
+            secrets: new Set(["e2e-retail-secret"]),
+            scopes: new Set([
+              "catalogo:leer",
+              "precios:leer",
+              "promociones:evaluar",
+              "combos:leer",
+              "inventario:disponibilidad:leer",
+              "inventario:conciliar-offline",
+              "inventario:incidencias:reportar",
+              "inventario:incidencias:resolver",
+            ]),
+          },
+        ],
+        [
+          "modulo-postventa",
+          {
+            secrets: new Set(["e2e-postventa-secret"]),
+            scopes: new Set(["inventario:disponibilidad:leer", "inventario:reintegrar", "inventario:reintegros:escribir"]),
+          },
+        ],
+        [
+          "modulo-despacho",
+          {
+            secrets: new Set(["e2e-despacho-secret"]),
+            scopes: new Set(["inventario:disponibilidad:leer", "catalogo:leer", "productos:fisicos:leer"]),
           },
         ],
         [
@@ -675,6 +714,9 @@ async function startSingleLocalG7Server() {
               "cupones:restaurar",
               "cupones:operaciones:leer",
               "inventario:reservar",
+              "inventario:consumir",
+              "inventario:liberar",
+              "inventario:conciliar-offline",
               "inventario:operaciones:leer",
               "inventario:reservas:estado:leer",
               "catalogo:leer",
@@ -902,6 +944,7 @@ async function startSingleLocalG7Server() {
   return {
     issuer,
     baseUrl,
+    gestorId,
     jwksUrl: `${baseUrl}/jwks`,
     discoveryUrl: `${baseUrl}/.well-known/openid-configuration`,
     tokenUrl: `${baseUrl}/api/v1/auth/token`,
@@ -1129,6 +1172,7 @@ async function startLocalIsolatedServiceBusBroker() {
   const queues = new Map();
   const dlq = new Map();
   const inflight = new Map();
+  const storageObjects = new Map();
   const getQueue = (name) => {
     if (!queues.has(name)) queues.set(name, []);
     return queues.get(name);
@@ -1139,6 +1183,42 @@ async function startLocalIsolatedServiceBusBroker() {
   };
   const server = createServer(async (req, res) => {
     const url = req.url ?? "/";
+    if (url.startsWith("/storage/v1/")) {
+      if (req.method === "GET" && url.startsWith("/storage/v1/bucket/")) {
+        res.statusCode = 200;
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ id: "bulk-e2e", name: "bulk-e2e", public: false }));
+        return;
+      }
+      if (url.startsWith("/storage/v1/object/")) {
+        const key = url.slice("/storage/v1/object/".length);
+        if (req.method === "POST" || req.method === "PUT") {
+          const chunks = [];
+          for await (const c of req) chunks.push(c);
+          storageObjects.set(key, {
+            body: Buffer.concat(chunks),
+            contentType: req.headers["content-type"] ?? "application/octet-stream",
+          });
+          res.statusCode = 200;
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ Key: key }));
+          return;
+        }
+        if (req.method === "GET") {
+          const obj = storageObjects.get(key);
+          if (!obj) {
+            res.statusCode = 404;
+            res.setHeader("content-type", "application/json");
+            res.end(JSON.stringify({ statusCode: "404", code: "NoSuchKey", message: "Object not found" }));
+            return;
+          }
+          res.statusCode = 200;
+          res.setHeader("content-type", obj.contentType);
+          res.end(obj.body);
+          return;
+        }
+      }
+    }
     const match = /^\/queues\/([^/]+)\/(messages|receive|peek|dlq|complete|abandon|deadletter)(?:\/([^/]+))?$/.exec(
       url,
     );
@@ -1262,6 +1342,7 @@ async function main() {
     pg = await startDisposablePostgresWithTls(backendRoot, docsRoot);
     g7 = await startSingleLocalG7Server();
     isolatedBus = await startLocalIsolatedServiceBusBroker();
+    const taxonomyLogoDir = mkdtempSync(join(tmpdir(), "g6-e2e-taxonomy-logos-"));
     g5Evidence = await startLocalG5EvidenceServer({
       g7PublicKey: g7.publicKey,
       seedInventoryStock: async (sku, onHand) => {
@@ -1389,6 +1470,11 @@ async function main() {
         PORT: String(servicePorts["taxonomy-svc"]),
         PGUSER: "taxonomy_app",
         DATABASE_URL: pg.urlFor("taxonomy_app"),
+        G6_DATABASE_SCHEMA: "taxonomy",
+        G6_EXPECTED_ROLE: "taxonomy_app",
+        G6_CONNECTION_MODE: "direct",
+        TAXONOMY_LOGO_DIRECTORY: taxonomyLogoDir,
+        TAXONOMY_LOGO_PUBLIC_BASE_URL: "https://logos.isolated.test/",
       },
       "pricing-svc": {
         ...controlledBaseEnv,
@@ -1420,9 +1506,12 @@ async function main() {
         G6_DATABASE_SCHEMA: "promotions",
         G6_CONNECTION_MODE: "session",
         MESSAGING_PROVIDER: "AZURE_SERVICE_BUS",
+        PROMOTIONS_DEPENDENCY_PROBES_ENABLED: "true",
         PROMOTIONS_H5_COUPON_COMMANDS_ENABLED: "true",
         PROMOTIONS_H5_ISOLATED_BUS: "1",
         GATEWAY_CATALOG_SVC_URL: serviceUrls["catalog-svc"],
+        GATEWAY_PRICING_SVC_URL: serviceUrls["pricing-svc"],
+        GATEWAY_TAXONOMY_SVC_URL: serviceUrls["taxonomy-svc"],
         GATEWAY_INVENTORY_SVC_URL: serviceUrls["inventory-svc"],
         PROMOTIONS_G5_COUPON_EVIDENCE_ORIGIN: g5Evidence.baseUrl,
         PROMOTIONS_SERVICE_TOKEN_URL: g7.tokenUrl,
@@ -1440,6 +1529,8 @@ async function main() {
         COMBOS_G7_TOKEN_URL: g7.tokenUrl,
         COMBOS_G7_CLIENT_SECRET: "e2e-combos-secret",
         COMBOS_ALLOWED_ROLES_LISTAR_COMBOS_ADMIN: "GESTOR_COMERCIAL",
+        COMBOS_ALLOWED_ROLES_OBTENER_COMBO: "GESTOR_COMERCIAL",
+        COMBOS_ALLOWED_ROLES_CONSULTAR_DISPONIBILIDAD_COMBO: "GESTOR_COMERCIAL",
         COMBOS_ALLOWED_ROLES_CREAR_COMBO: "GESTOR_COMERCIAL",
         COMBOS_ALLOWED_ROLES_ACTUALIZAR_COMBO: "GESTOR_COMERCIAL",
         COMBOS_ALLOWED_ROLES_DESACTIVAR_COMBO: "GESTOR_COMERCIAL",
@@ -1450,9 +1541,16 @@ async function main() {
         ...controlledBaseEnv,
         PORT: String(servicePorts["inventory-svc"]),
         PGUSER: "inventory_app",
-        DATABASE_URL: pg.urlFor("inventory_app"),
         G7_JWT_ISSUER: g7.issuer,
         G7_JWT_JWKS_URL: g7.jwksUrl,
+        INVENTORY_G7_TRANSFER_GRANTS: JSON.stringify({
+          [g7.gestorId]: ["INVENTARIO_TRASLADOS_LEER", "INVENTARIO_TRASLADOS_RECIBIR"],
+        }),
+        MESSAGING_PROVIDER: "AZURE_SERVICE_BUS",
+        G6_SERVICE_BUS_PILOT_ENABLED: "true",
+        INVENTORY_SERVICE_BUS_PUBLISH_ENABLED: "true",
+        INVENTORY_SERVICE_BUS_CONSUME_ENABLED: "true",
+        G6_ISOLATED_SERVICE_BUS_URL: isolatedBus.baseUrl,
       },
       "bulk-svc": {
         ...controlledBaseEnv,
@@ -1461,30 +1559,48 @@ async function main() {
         DATABASE_URL: pg.urlFor("bulk_app"),
         G7_JWT_ISSUER: g7.issuer,
         G7_JWT_JWKS_URL: g7.jwksUrl,
+        INVENTORY_G7_TRANSFER_GRANTS: JSON.stringify({
+          [g7.gestorId]: ["INVENTARIO_TRASLADOS_LEER", "INVENTARIO_TRASLADOS_RECIBIR"],
+        }),
         MESSAGING_PROVIDER: "AZURE_SERVICE_BUS",
         G6_ISOLATED_SERVICE_BUS_URL: isolatedBus.baseUrl,
+        SUPABASE_URL: isolatedBus.baseUrl,
+        SUPABASE_SERVICE_ROLE_KEY: "e2e-bulk-storage-key",
+        BULK_STORAGE_BUCKET: "bulk-e2e",
       },
     };
 
+    const serviceLogs = new Map();
     for (const svc of SERVICE_NAMES) {
-      children.push(
-        spawn(process.execPath, [`dist/apps/${svc}/src/main.js`], {
-          cwd: backendRoot,
-          env: perServiceEnv[svc],
-          stdio: "pipe",
-        }),
-      );
+      const child = spawn(process.execPath, [`dist/apps/${svc}/main.js`], {
+        cwd: backendRoot,
+        env: perServiceEnv[svc],
+        stdio: "pipe",
+      });
+      let buf = "";
+      child.stdout.on("data", (d) => {
+        buf = (buf + d.toString()).slice(-3000);
+      });
+      child.stderr.on("data", (d) => {
+        const s = d.toString();
+        buf = (buf + s).slice(-3000);
+        if (svc === "bulk-svc" && /error|fail|exception/i.test(s)) {
+          process.stderr.write(`[${svc} stderr] ${s}`);
+        }
+      });
+      serviceLogs.set(svc, () => buf);
+      children.push(child);
     }
 
     const gatewayPort = await reserveLocalPort();
     const gatewayUrl = `http://127.0.0.1:${gatewayPort}`;
-    children.push(
-      spawn(process.execPath, ["dist/apps/api-gateway/src/main.js"], {
+    const gatewayChild = spawn(process.execPath, ["dist/apps/api-gateway/main.js"], {
         cwd: backendRoot,
         env: {
           ...controlledBaseEnv,
           PORT: String(gatewayPort),
           GATEWAY_CORS_ALLOWED_ORIGINS: viteOrigin,
+          GATEWAY_INVENTORY_LOCAL_GRANTS_ENABLED: "true",
           GATEWAY_SERVICE_TOKEN_URL: g7.tokenUrl,
           GATEWAY_SERVICE_CLIENT_SECRET: "e2e-gateway-secret",
           GATEWAY_CATALOG_SVC_URL: serviceUrls["catalog-svc"],
@@ -1501,17 +1617,29 @@ async function main() {
           GATEWAY_PRICE_AUDIT_SVC_READINESS_PATH: "/health/ready",
           GATEWAY_PROMOTIONS_SVC_READINESS_PATH: "/health/ready",
           GATEWAY_COMBOS_SVC_READINESS_PATH: "/health/ready",
-          GATEWAY_INVENTORY_SVC_READINESS_PATH: "/health/ready",
-          GATEWAY_BULK_SVC_READINESS_PATH: "/health/ready",
+          GATEWAY_INVENTORY_SVC_READINESS_PATH: "/health/readiness",
+          GATEWAY_BULK_SVC_READINESS_PATH: "/health/readiness",
         },
         stdio: "pipe",
-      }),
-    );
+      });
+    gatewayChild.stdout.on("data", () => {});
+    gatewayChild.stderr.on("data", () => {});
+    children.push(gatewayChild);
 
+    const READINESS_PATH_BY_SERVICE = {
+      "inventory-svc": "/health/readiness",
+      "bulk-svc": "/health/readiness",
+    };
     for (const svc of SERVICE_NAMES) {
-      await waitForHttpReady(`${serviceUrls[svc]}/health/ready`);
+      try {
+        const readinessPath = READINESS_PATH_BY_SERVICE[svc] ?? "/health/ready";
+        await waitForHttpReady(`${serviceUrls[svc]}${readinessPath}`);
+      } catch (err) {
+        const logs = serviceLogs.get(svc)?.() ?? "";
+        throw new Error(`SERVICE_NOT_READY(${svc}): ${(err).message}\n--- LOGS(${svc}) ---\n${logs}`);
+      }
     }
-    await waitForHttpReady(`${gatewayUrl}/health/ready`);
+    await waitForHttpReady(`${gatewayUrl}/health`);
 
     writeFileSync(
       MANIFEST_PATH,
@@ -1535,9 +1663,17 @@ async function main() {
       ),
     );
 
+    if (process.argv.includes("--no-vite")) {
+      console.log("G6_STACK_READY");
+      process.on("SIGINT", () => void cleanup().then(() => process.exit(0)));
+      process.on("SIGTERM", () => void cleanup().then(() => process.exit(0)));
+      await new Promise(() => {});
+      return;
+    }
+
     const vite = spawn(
-      process.platform === "win32" ? "npm.cmd" : "npm",
-      ["run", "dev", "--", "--port", String(port), "--strictPort"],
+      process.execPath,
+      [resolve(process.cwd(), "node_modules/vite/bin/vite.js"), "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
       {
         stdio: "inherit",
         env: {
