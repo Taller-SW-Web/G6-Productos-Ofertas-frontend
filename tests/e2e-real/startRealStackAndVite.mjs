@@ -18,6 +18,7 @@ import { promisify } from "node:util";
 
 const exec = promisify(execFile);
 const POSTGRES_IMAGE = "postgres:17-alpine";
+let failNextCatalogTokenCount = 0;
 const SERVICE_NAMES = [
   "catalog-svc",
   "taxonomy-svc",
@@ -702,7 +703,6 @@ async function startSingleLocalG7Server() {
               "promociones:evaluar",
               "combos:leer",
               "inventario:disponibilidad:leer",
-              "inventario:conciliar-offline",
               "inventario:incidencias:reportar",
               "inventario:incidencias:resolver",
             ]),
@@ -759,6 +759,18 @@ async function startSingleLocalG7Server() {
         res.end(JSON.stringify({ code: "CLIENT_AUTH_INVALID" }));
         return;
       }
+      if (
+        clientId === "modulo-productos" &&
+        requestedScopes.includes("catalogo:leer") &&
+        failNextCatalogTokenCount > 0
+      ) {
+        failNextCatalogTokenCount -= 1;
+        console.error(`[g7-stub] returning 503 for ${clientId} scope=${scope}`);
+        res.statusCode = 503;
+        res.setHeader("content-type", "application/problem+json");
+        res.end(JSON.stringify({ code: "G7_TEMPORARY_UNAVAILABLE" }));
+        return;
+      }
       const audience = wantsVentas
         ? "api-ventas"
         : wantsSeguridad
@@ -774,6 +786,7 @@ async function startSingleLocalG7Server() {
             aud: [audience],
             roles: [],
             scope,
+            ...(clientId === "modulo-ventas" ? { store_ref: "TIENDA-CERT-01" } : {}),
           }),
           tokenType: "Bearer",
           expiresIn: 600,
@@ -1027,6 +1040,7 @@ async function startLocalG5EvidenceServer({
   seedCatalogActiveProduct,
   seedCatalogPendingPreparation,
   seedBulkMarkRetryable,
+  pgQuery,
   seedInventoryStoreLocation,
   seedCatalogBarcode,
   seedInventoryTransfer,
@@ -1230,6 +1244,14 @@ async function startLocalG5EvidenceServer({
       res.end(JSON.stringify({ ok: true, batchId }));
       return;
     }
+    if (req.method === "POST" && url === "/__test/g7-fail-next-catalog-token") {
+      failNextCatalogTokenCount = 1;
+      console.error("[g7-stub] armed failNextCatalogTokenCount=1");
+      res.statusCode = 200;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
     if (req.method === "POST" && url === "/__test/pg-query") {
       const body = await readJsonBody(req);
       const querySql = typeof body.sql === "string" ? body.sql.trim() : "";
@@ -1239,7 +1261,7 @@ async function startLocalG5EvidenceServer({
         return;
       }
       const wrapped = `\\t\n\\a\nSELECT coalesce(json_agg(t), '[]'::json)::text FROM (${querySql}) t;\n`;
-      const out = await runPsql(pg.containerName, "g6_e2e_test", wrapped, "pg-query");
+      const out = await pgQuery(wrapped);
       const jsonLine = out.trim().split(/\r?\n/).filter(Boolean).pop() ?? "[]";
       res.statusCode = 200;
       res.setHeader("content-type", "application/json");
@@ -1704,6 +1726,7 @@ async function main() {
         `;
         await runPsql(pg.containerName, "g6_e2e_test", sql, `seed-bulk-retryable:${safeId}`);
       },
+      pgQuery: async (sql) => runPsql(pg.containerName, "g6_e2e_test", sql, "pg-query"),
     });
 
     const controlledBaseEnv = {
@@ -1749,6 +1772,7 @@ async function main() {
         CATALOG_BULK_CONTENT_CLIENT_SECRET: "e2e-catalog-secret",
         CATALOG_PREPARATION_TIMEOUT_MS: "100",
         CATALOG_DEFAULT_LOCATION_ID: "00000000-0000-4000-8000-000000000101",
+        CATALOG_BULK_RESULT_V2_ENABLED: "true",
         CATALOG_SERVICE_TOKEN_URL: g7.tokenUrl,
         CATALOG_SERVICE_CLIENT_SECRET: "e2e-catalog-secret",
         MESSAGING_PROVIDER: "AZURE_SERVICE_BUS",
