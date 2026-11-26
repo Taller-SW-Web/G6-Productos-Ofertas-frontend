@@ -231,7 +231,7 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
     if (expectedOwner && session.snapshot?.().user?.id !== expectedOwner) throw new BulkRepositoryError("La sesión cambió antes del despacho; no se envió la importación.", "configuration");
     const request = (accessToken: string) => transport.request(path, {
       method, signal: bounded,
-      headers: { Accept: "application/json, text/csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ...(options.publicReads && method === "GET" ? {} : { Authorization: `Bearer ${accessToken}` }), "X-Correlation-Id": correlationId, ...(json ? { "Content-Type": "application/json" } : {}) },
+      headers: { Accept: "application/json, text/csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", Authorization: `Bearer ${accessToken}`, "X-Correlation-Id": correlationId, ...(json ? { "Content-Type": "application/json" } : {}) },
       ...(body === undefined ? {} : { body }),
     });
     let response: Response;
@@ -241,7 +241,7 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
       if (bounded.aborted) throw error;
       throw new BulkRepositoryError("No se pudo conectar con Gateway. Revisa la conexión e inténtalo de nuevo.", "communication");
     }
-    if (!(options.publicReads && method === "GET") && await isGatewayTokenInvalid(response)) {
+    if (await isGatewayTokenInvalid(response)) {
       if (method === "POST") session.invalidateAccessToken(token);
       else {
         const renewed = await session.refreshAccessToken(token, bounded).catch(() => null);

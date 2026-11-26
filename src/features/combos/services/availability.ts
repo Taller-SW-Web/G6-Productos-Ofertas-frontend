@@ -166,6 +166,8 @@ export function isUnavailableForNewSales(combo: { status: ComboStatus; availabil
 
 const STATE_LABELS: Record<AvailabilityState, { label: string; semantic: AvailabilityMessage["semantic"] }> = {
   DISPONIBLE: { label: "Disponible (estimado)", semantic: "success" },
+  NO_DISPONIBLE: { label: "No disponible", semantic: "warning" },
+  INDETERMINADO: { label: "Disponibilidad indeterminada", semantic: "info" },
   AGOTADO: { label: "Agotado (0 confirmado)", semantic: "warning" },
   DESACTUALIZADA: { label: "Disponibilidad desactualizada", semantic: "warning" },
   INCOMPLETA: { label: "Disponibilidad incompleta", semantic: "info" },
@@ -180,6 +182,7 @@ export function availabilityMessage(combo: { status: ComboStatus; availability: 
   if (state === "DISPONIBLE" && combo.availability.quantity !== null) {
     return { label: `${combo.availability.quantity} combos estimados`, semantic: "success" };
   }
+  if (state === "NO_DISPONIBLE") return { label: "No disponible", semantic: "warning" };
   if (state === "DESACTUALIZADA" && combo.availability.quantity !== null) {
     return { label: `Desactualizada (${combo.availability.quantity} combos estimados)`, semantic: "warning" };
   }

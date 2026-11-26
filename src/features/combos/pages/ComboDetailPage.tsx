@@ -6,7 +6,6 @@ import { useCombosRuntime } from "../hooks/useCombosRuntime";
 import { formatMoney } from "../services/comboRules";
 import {
   availabilityMessageText,
-  calculateInformativeAvailability,
   isVerifiedPositiveAvailability,
   isUnavailableForNewSales,
 } from "../services/availability";
@@ -36,7 +35,7 @@ export function ComboDetailPage({ unavailable = false }: { unavailable?: boolean
 }
 
 function ComboDetailForId({ comboId, unavailable }: { comboId: string; unavailable: boolean }) {
-  const { combos, catalog, pricing, availability: availabilityPort } = useCombosRuntime();
+  const { combos, pricing } = useCombosRuntime();
   const [params] = useSearchParams();
   const scenario = params.get("scenario");
   const [state, setState] = useState<DetailState>({ key: "", status: "loading" });
@@ -49,6 +48,9 @@ function ComboDetailForId({ comboId, unavailable }: { comboId: string; unavailab
   const [submitting, setSubmitting] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const identity = useRef(new RequestIdentity());
+  const editButton = useRef<HTMLAnchorElement>(null);
+  const deactivateButton = useRef<HTMLButtonElement>(null);
+  const focusAfterClose = useRef<"edit" | "deactivate" | null>(null);
   const combosRevision = useMockStateRevision(["combos", "catalog", "pricing"]);
   const requestKey = JSON.stringify([comboId, retry, scenario, combosRevision]);
 
@@ -78,6 +80,21 @@ function ComboDetailForId({ comboId, unavailable }: { comboId: string; unavailab
 
   const combo = state.key === requestKey && state.status === "success" ? state.combo : null;
   const isLoading = state.key !== requestKey || state.status === "loading";
+  useEffect(() => {
+    if (confirm || !focusAfterClose.current) return;
+    let frame = 0;
+    const restore = () => {
+      const destination = focusAfterClose.current === "edit" ? editButton.current : deactivateButton.current;
+      if (document.querySelector('[role="dialog"]') || !destination?.isConnected) {
+        frame = requestAnimationFrame(restore);
+        return;
+      }
+      focusAfterClose.current = null;
+      destination.focus();
+    };
+    frame = requestAnimationFrame(restore);
+    return () => cancelAnimationFrame(frame);
+  }, [combo?.status, confirm, isLoading]);
   const error = state.key === requestKey && state.status === "error" ? state.message : null;
   const comboStatus = combo?.status;
   const componentsKey = combo ? combo.components.map((component) => `${component.sku}:${component.quantity}`).join("|") : "";
@@ -118,32 +135,21 @@ function ComboDetailForId({ comboId, unavailable }: { comboId: string; unavailab
     return () => controller.abort();
   }, [combo, pricing, priceKey, scenario]);
 
-  // COM-03: recompute informative availability from the injectable snapshot and
-  // the shared Catalog activity.
+  // The API runtime uses the contractual availability read; the explicit mock
+  // repository computes from its isolated fixture snapshot.
   useEffect(() => {
     if (!combo || comboStatus === undefined) return;
     let active = true;
     const controller = new AbortController();
-    const components = combo.components.map((component) => ({ sku: component.sku, quantity: component.quantity }));
-    void Promise.all([
-      catalog.resolveSkus(components.map((component) => component.sku), controller.signal),
-      availabilityPort.readStocks(components.map((component) => component.sku), controller.signal),
-    ]).then(([resolved, readings]) => {
+    void combos.readAvailability(comboId, comboStatus, controller.signal).then((availability) => {
       if (!active) return;
-      const sellable = new Map(resolved.map((entry) => [entry.sku, entry.sellable]));
-      const computed = calculateInformativeAvailability(
-        comboStatus,
-        components.map((component) => ({ sku: component.sku, quantity: component.quantity, active: sellable.get(component.sku) ?? null })),
-        new Map(readings.map((reading) => [reading.sku, reading])),
-      );
-      setAvailabilityState({ key: availabilityKey, status: "success", availability: applyAvailabilityScenario(computed, scenario) });
+      setAvailabilityState({ key: availabilityKey, status: "success", availability: applyAvailabilityScenario(availability, scenario) });
     }).catch((reason: unknown) => {
       if (!active) return;
       setAvailabilityState({ key: availabilityKey, status: "error", message: reason instanceof Error ? reason.message : "La disponibilidad no está disponible." });
     });
     return () => { active = false; controller.abort(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [availabilityPort, catalog, comboStatus, availabilityKey, scenario]);
+  }, [combos, combo, comboId, comboStatus, availabilityKey, scenario]);
 
   async function deactivate() {
     const current = state.status === "success" ? state.combo : null;
@@ -153,6 +159,7 @@ function ComboDetailForId({ comboId, unavailable }: { comboId: string; unavailab
     try {
       const updated = await combos.deactivate(current.id);
       setState((previous) => previous.key === requestKey && previous.status === "success" ? { ...previous, combo: updated } : previous);
+      focusAfterClose.current = "edit";
       setConfirm(false);
     } catch (reason) {
       setMutationError(reason instanceof Error ? reason.message : "No se pudo desactivar el combo.");
@@ -183,7 +190,7 @@ function ComboDetailForId({ comboId, unavailable }: { comboId: string; unavailab
   const storedPublicTotal = sumStored(combo, "publicUnitMinor");
 
   return <>
-    <PageHeader title={unavailable ? "Combo no disponible" : combo.name} description={combo.description ?? undefined} breadcrumbs={breadcrumbs} actions={<Group><Button component={Link} to={`/combos/${combo.id}/editar`} variant="outline">Editar</Button>{combo.status === "ACTIVO" && !unavailable && <Button color="danger" onClick={() => setConfirm(true)}>Desactivar combo</Button>}</Group>} />
+    <PageHeader title={unavailable ? "Combo no disponible" : combo.name} description={combo.description ?? undefined} breadcrumbs={breadcrumbs} actions={<Group><Button ref={editButton} component={Link} to={`/combos/${combo.id}/editar`} variant="outline">Editar</Button>{combo.status === "ACTIVO" && !unavailable && <Button ref={deactivateButton} color="danger" onClick={() => { focusAfterClose.current = "deactivate"; setConfirm(true); }}>Desactivar combo</Button>}</Group>} />
     {mutationError && <FeedbackAlert semantic="error" title="No se pudo desactivar el combo">{mutationError}</FeedbackAlert>}
     {isUnavailable && <FeedbackAlert semantic={availabilityInfo.state === "DISPONIBLE" ? "info" : "warning"} title={availabilityMessageText(comboView)}>{availabilityInfo.reason ?? "El estado administrativo se conserva; la disponibilidad es informativa y no garantiza stock."}</FeedbackAlert>}
 
@@ -233,7 +240,7 @@ function ComboDetailForId({ comboId, unavailable }: { comboId: string; unavailab
       <Group>{unavailable && <Button component={Link} to={`/combos/${combo.id}`} variant="outline">Ver definición</Button>}{!unavailable && isUnavailable && <Button component={Link} to={`/combos/${combo.id}/no-disponible`} variant="outline">Ver situación de disponibilidad</Button>}<Button component={Link} to="/combos" variant="subtle">Volver a combos</Button></Group>
     </Stack>
 
-    <ConfirmDialog opened={confirm} title="Desactivar combo" confirmLabel="Desactivar combo" destructive submitting={submitting} onCancel={() => setConfirm(false)} onConfirm={() => void deactivate()} error={mutationError ? <Text c="red" role="alert">{mutationError}</Text> : undefined}>
+    <ConfirmDialog opened={confirm} title="Desactivar combo" confirmLabel="Desactivar combo" destructive submitting={submitting} returnFocus={false} onCancel={() => { focusAfterClose.current = "deactivate"; setConfirm(false); }} onConfirm={() => void deactivate()} error={mutationError ? <Text c="red" role="alert">{mutationError}</Text> : undefined}>
       <Text>El combo <strong>{combo.name}</strong> dejará de ofrecerse para nuevas ventas. Su definición histórica y sus componentes permanecerán conservados.</Text>
     </ConfirmDialog>
   </>;

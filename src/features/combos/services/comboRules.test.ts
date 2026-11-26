@@ -313,11 +313,30 @@ describe("COM-01 · resolución autoritativa de SKU contra el Catálogo comparti
       "00/A,SKU",
       "VAR-01",
     ]);
-    expect(calls).toEqual([["00/A,SKU", "VAR-01"]]);
-    expect(result.map((item) => item.sku)).toEqual(["00/A,SKU", "VAR-01"]);
+    expect(calls).toEqual([["00/A,SKU", "00/A,SKU", "VAR-01"]]);
+    expect(result.map((item) => item.sku)).toEqual(["00/A,SKU", "00/A,SKU", "VAR-01"]);
     expect(result.every((item) => item.sellable)).toBe(true);
     await catalog.resolveSkus(["00/A,SKU"]);
     expect(calls).toHaveLength(2);
+  });
+
+  it("divide en lotes máximos de 100 sin cambiar el orden ni duplicados", async () => {
+    const repository = new MockCatalogRepository();
+    const calls: string[][] = [];
+    (repository as CatalogRepository).resolveComboSkus = async (skus) => {
+      calls.push([...skus]);
+      return skus.map((sku) => ({
+        sku, resultado: "ELEGIBLE" as const, productId: "prod-1", nombre: "Producto",
+        productoPadre: { productId: "prod-1", nombre: "Producto", tieneVariantes: false, estado: "ACTIVO" as const },
+        variante: null, estado: "ACTIVO" as const, tipoProductoId: "tipo-normal",
+      }));
+    };
+    const requested = Array.from({ length: 101 }, (_, index) => index === 100 ? "00/A,SKU" : `SKU-${index}`);
+    requested[0] = "00/A,SKU";
+    const result = await new CatalogCombosAdapter({ catalog: repository }).resolveSkus(requested);
+    expect(calls.map((batch) => batch.length)).toEqual([100, 1]);
+    expect(calls.flat()).toEqual(requested);
+    expect(result.map((item) => item.sku)).toEqual(requested);
   });
 
   it("busca candidatos usando una sola página filtrada de Catálogo", async () => {

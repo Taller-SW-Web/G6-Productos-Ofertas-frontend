@@ -68,9 +68,8 @@ function ReadOnlyView({ initialOperationId }: { initialOperationId: string }) {
   const [busy, setBusy] = useState(false);
   const [updated, setUpdated] = useState("");
   const pending = useRef<AbortController | null>(null);
-  // The G7 session gates the UI; Azure's existing academic PUBLIC_READ_ONLY
-  // policy authorizes these GETs. Never downgrade a rejected bearer to anonymous.
-  const client = useMemo(() => gateway && session ? createReadOnlyClient(gateway, session, fetch, { publicReadOnly: true }) : null, [gateway, session]);
+  // The G7 session gates the UI and sends Bearer on every GET.
+  const client = useMemo(() => gateway && session ? createReadOnlyClient(gateway, session, fetch) : null, [gateway, session]);
   const operations = readOperations.filter(item => item.module === module);
   const operation = readOperations.find(item => item.id === id)!;
   const currentSnapshot = serializeFilters(operation, values);
