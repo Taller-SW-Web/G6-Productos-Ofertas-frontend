@@ -94,7 +94,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     await expect(skuInput).toBeVisible();
     await skuInput.fill(skuBase);
 
-    const priceInput = page.getByRole("spinbutton", { name: /precio/i }).first();
+    const priceInput = page.getByRole('textbox', { name: /Precio base inicial/ });
     await expect(priceInput).toBeVisible();
     await priceInput.fill("120");
 
@@ -105,14 +105,17 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     ] as const) {
       const sel = page.getByRole("combobox", { name: selectLabel }).first();
       await expect(sel).toBeVisible();
-      await sel.click();
-      const opt = page.getByRole("option", { name: optionLabel, exact: true }).first();
-      await expect(opt).toBeVisible();
-      await opt.click();
+      if (await sel.inputValue() !== optionLabel) {
+        await sel.click();
+        const opt = page.getByRole("option", { name: optionLabel, exact: true }).first();
+        await expect(opt).toBeVisible();
+        await opt.click();
+      }
+      await expect(sel).toHaveValue(optionLabel);
     }
 
     const submitBtn = page.getByRole("button", { name: /guardar|crear/i }).first();
-    await expect(submitBtn).toBeVisible();
+    await expect(submitBtn).toBeEnabled();
     const [createRes] = await Promise.all([
       page.waitForResponse(
         (res) =>
@@ -122,8 +125,8 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       submitBtn.click(),
     ]);
     expect([200, 201]).toContain(createRes.status());
-    const createdDto = (await createRes.json()) as { productId?: string };
-    expect(createdDto.productId).toBeTruthy();
+    const createdDto = (await createRes.json()) as { product_id: string };
+    expect(createdDto.product_id).toBeTruthy();
 
     await reloadVerifySessionLostAndReauth(page);
     const [listRes] = await Promise.all([
@@ -138,7 +141,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     await expect(page.getByText(uniqueName)).toBeVisible();
 
     const adminRes = await request.get(
-      `${env.gatewayUrl}/api/v1/productos/administracion/${encodeURIComponent(createdDto.productId!)}`,
+      `${env.gatewayUrl}/api/v1/productos/administracion/${encodeURIComponent(createdDto.product_id)}`,
       { headers: { Authorization: `Bearer ${token}` } },
     );
     expect(adminRes.status()).toBe(200);
@@ -147,12 +150,12 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       estado: string;
       categoriaId: string;
     };
-    expect(adminDto.productId).toBe(createdDto.productId);
+    expect(adminDto.productId).toBe(createdDto.product_id);
     expect(adminDto.estado).toBe("BORRADOR");
     expect(adminDto.categoriaId).toBeTruthy();
 
     const prepRes = await request.get(
-      `${env.gatewayUrl}/api/v1/productos/${encodeURIComponent(createdDto.productId!)}/preparacion`,
+      `${env.gatewayUrl}/api/v1/productos/${encodeURIComponent(createdDto.product_id)}/preparacion`,
       { headers: { Authorization: `Bearer ${token}` } },
     );
     expect(prepRes.status()).toBe(200);
@@ -161,7 +164,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       pricing: { status: string };
       inventario: { status: string };
     };
-    expect(prepDto.product_id).toBe(createdDto.productId);
+    expect(prepDto.product_id).toBe(createdDto.product_id);
     expect(prepDto.pricing.status).toBe("PENDING");
     expect(prepDto.inventario.status).toBe("PENDING");
   });
@@ -171,7 +174,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
   }) => {
     const catName = `CatE2E-${randomUUID().slice(0, 6)}`;
     await navigateViaSpa(page, "/categorias");
-    const newCat = page.locator('a[href="/categorias/nueva"]').first();
+    const newCat = page.getByRole('button', { name: 'Crear categoría', exact: true });
     await expect(newCat).toBeVisible();
     await newCat.click();
 
@@ -187,7 +190,11 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
           res.request().method() === "POST" &&
           new URL(res.url()).pathname === "/api/v1/categorias",
       ),
-      submitBtn.click(),
+      (async () => {
+        await submitBtn.click();
+        await page.getByRole('dialog', { name: 'Confirmar slug SEO' })
+          .getByRole('button', { name: 'Crear categoría', exact: true }).click();
+      })(),
     ]);
     expect([200, 201]).toContain(createRes.status());
     const catDto = (await createRes.json()) as { categoriaId?: string };
@@ -275,17 +282,14 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     const initialPriceDto = (await seedPriceRes.json()) as {
       product_id: string;
       price_version: number;
-      precio_regular: string;
+      precio_regular: number;
       channel_id: string | null;
     };
     expect(initialPriceDto.product_id).toBe(targetProductId);
-    expect(initialPriceDto.precio_regular).toBe("80.00");
+    expect(initialPriceDto.precio_regular).toBe(80);
 
     await navigateViaSpa(page, "/precios");
-    await navigateViaSubLink(
-      page,
-      `/precios/editar?targetId=${encodeURIComponent(targetProductId)}&channel=global&scope=product`,
-    );
+    await page.getByRole('link', { name: 'Editar precio', exact: true }).click();
 
     const regularInput = page.getByLabel(/nuevo precio regular/i).first();
     await expect(regularInput).toBeVisible();
@@ -316,12 +320,12 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     const dto = (await patchRes.json()) as {
       product_id: string;
       price_version: number;
-      precio_regular: string;
+      precio_regular: number;
       channel_id: string | null;
     };
     expect(dto.product_id).toBe(targetProductId);
     expect(dto.price_version).toBeGreaterThan(initialPriceDto.price_version);
-    expect(dto.precio_regular).toBe("99.50");
+    expect(dto.precio_regular).toBe(99.5);
 
     await reloadVerifySessionLostAndReauth(page);
     const persistedRes = await request.get(
@@ -330,12 +334,11 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     );
     expect(persistedRes.status()).toBe(200);
     const persistedDto = (await persistedRes.json()) as {
-      precioRegular?: string;
-      precio_regular?: string;
+      precio_regular: number;
       priceVersion?: number;
       price_version?: number;
     };
-    expect(persistedDto.precio_regular ?? persistedDto.precioRegular).toBe("99.50");
+    expect(persistedDto.precio_regular).toBe(99.5);
     expect(persistedDto.price_version ?? persistedDto.priceVersion).toBe(dto.price_version);
   });
 
@@ -414,13 +417,13 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       );
       expect(pollAudit.status()).toBe(200);
       const body = (await pollAudit.json()) as {
-        items?: Array<{ productId?: string; motivoCambio?: string }>;
+        items?: Array<{ product_id?: string; motivo_cambio?: string }>;
       };
       if (
         (body.items ?? []).some(
           (item) =>
-            item.productId === causalProductId ||
-            item.motivoCambio === "CAUSAL_AUDIT_E2E",
+            item.product_id === causalProductId &&
+            item.motivo_cambio === "CAUSAL_AUDIT_E2E",
         )
       ) {
         causalPersisted = true;
@@ -442,7 +445,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     await expect(page.getByText(/CAUSAL_AUDIT_E2E|145/).first()).toBeVisible();
 
     await navigateViaSubLink(page, "/precios/auditoria/exportar/csv");
-    const exportBtn = page.getByRole("button", { name: /exportar|generar/i }).first();
+    const exportBtn = page.getByRole("button", { name: 'Solicitar CSV', exact: true });
     await expect(exportBtn).toBeVisible();
     const [exportRes] = await Promise.all([
       page.waitForResponse(
@@ -453,13 +456,13 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       exportBtn.click(),
     ]);
     expect([200, 202]).toContain(exportRes.status());
-    const job = (await exportRes.json()) as { exportId?: string; status?: string };
-    expect(job.exportId).toBeTruthy();
+    const job = (await exportRes.json()) as { export_id: string; status: string };
+    expect(job.export_id).toBeTruthy();
 
     let exportStatus = job.status ?? "";
     for (let attempt = 0; attempt < 25; attempt += 1) {
       const pollRes = await request.get(
-        `${env.gatewayUrl}/api/v1/auditoria-precios/exportaciones/${encodeURIComponent(job.exportId!)}`,
+        `${env.gatewayUrl}/api/v1/auditoria-precios/exportaciones/${encodeURIComponent(job.export_id)}`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
       expect(pollRes.status()).toBe(200);
@@ -471,7 +474,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     expect(exportStatus).toBe("COMPLETED");
 
     const downloadRes = await request.get(
-      `${env.gatewayUrl}/api/v1/auditoria-precios/exportaciones/${encodeURIComponent(job.exportId!)}/archivo`,
+      `${env.gatewayUrl}/api/v1/auditoria-precios/exportaciones/${encodeURIComponent(job.export_id)}/archivo`,
       { headers: { Authorization: `Bearer ${token}`, Accept: "text/csv" } },
     );
     expect(downloadRes.status()).toBe(200);
@@ -604,7 +607,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     ]);
     expect(thresholdRes.status()).toBe(200);
 
-    const thresholdInput = page.getByRole("spinbutton").first();
+    const thresholdInput = page.getByLabel('Umbral global de stock bajo', { exact: true });
     await expect(thresholdInput).toBeVisible();
     await thresholdInput.fill("12");
 
@@ -631,7 +634,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       navigateViaSubLink(page, "/inventario/umbrales"),
     ]);
     expect(afterReload.status()).toBe(200);
-    await expect(page.getByRole("spinbutton").first()).toHaveValue("12");
+    await expect(page.getByLabel('Umbral global de stock bajo', { exact: true })).toHaveValue("12");
   });
 
   test("7. Combos: preprovisionar dos SKU activos con precios, crear combo via SPA con componentes y precioCombo, recargar y verificar composición", async ({
