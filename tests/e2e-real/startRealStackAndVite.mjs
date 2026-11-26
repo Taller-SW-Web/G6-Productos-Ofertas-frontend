@@ -126,7 +126,7 @@ export const SQL_INVENTORY_BY_SERVICE = {
   },
 };
 
-function runPsql(containerName, database, sqlContent, label) {
+function runPsql(containerName, database, sqlContent, label, extraArgs = []) {
   return new Promise((resolvePromise, rejectPromise) => {
     const child = spawn(
       "docker",
@@ -135,6 +135,8 @@ function runPsql(containerName, database, sqlContent, label) {
         "-i",
         containerName,
         "psql",
+        "-X",
+        ...extraArgs,
         "-v",
         "ON_ERROR_STOP=1",
         "-U",
@@ -1262,9 +1264,9 @@ async function startLocalG5EvidenceServer({
           res.end(JSON.stringify({ error: "ONLY_SINGLE_SELECT_ALLOWED" }));
           return;
         }
-        const wrapped = `\\t\n\\a\nSELECT coalesce(json_agg(t), '[]'::json)::text FROM (${querySql}) t;\n`;
-        const out = await pgQuery(wrapped);
-        const jsonLine = out.trim().split(/\r?\n/).filter(Boolean).pop() ?? "[]";
+        const wrapped = `SELECT coalesce(json_agg(t), '[]'::json)::text FROM (${querySql}) t;\n`;
+        const out = await pgQuery(wrapped, ["-t", "-A"]);
+        const jsonLine = out.trim() || "[]";
         res.statusCode = 200;
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify({ rows: JSON.parse(jsonLine) }));
@@ -1734,7 +1736,7 @@ async function main() {
         `;
         await runPsql(pg.containerName, "g6_e2e_test", sql, `seed-bulk-retryable:${safeId}`);
       },
-      pgQuery: async (sql) => runPsql(pg.containerName, "g6_e2e_test", sql, "pg-query"),
+      pgQuery: async (sql, extraArgs = []) => runPsql(pg.containerName, "g6_e2e_test", sql, "pg-query", extraArgs),
     });
 
     const controlledBaseEnv = {
@@ -1928,7 +1930,7 @@ async function main() {
       child.stderr.on("data", (d) => {
         const s = d.toString();
         buf = (buf + s).slice(-3000);
-        if ((svc === "bulk-svc" || process.env.G6_STACK_DEBUG === "1") && /error|fail|exception/i.test(s)) {
+        if ((svc === "bulk-svc" || svc === "catalog-svc" || process.env.G6_STACK_DEBUG === "1") && /error|fail|exception/i.test(s)) {
           process.stderr.write(`[${svc} stderr] ${s}`);
         }
       });
