@@ -732,7 +732,11 @@ function verifyTechnicalG7Bearer(authHeader, publicKey, requiredAudience, requir
   }
 }
 
-async function startLocalG5EvidenceServer({ g7PublicKey, seedInventoryStock }) {
+async function startLocalG5EvidenceServer({
+  g7PublicKey,
+  seedInventoryStock,
+  seedCatalogActiveProduct,
+}) {
   const g5CertDir = mkdtempSync(join(tmpdir(), "g6-e2e-g5-tls-"));
   const g5KeyPath = join(g5CertDir, "server.key");
   const g5CertPath = join(g5CertDir, "server.crt");
@@ -824,6 +828,39 @@ async function startLocalG5EvidenceServer({ g7PublicKey, seedInventoryStock }) {
       res.end(JSON.stringify({ ok: true, sku, on_hand: onHand }));
       return;
     }
+    if (req.method === "POST" && url === "/__test/catalog-active-product") {
+      const body = await readJsonBody(req);
+      const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const skuRe = /^[A-Za-z0-9_-]{3,64}$/;
+      const productId = typeof body.productId === "string" ? body.productId.trim() : "";
+      const skuBase = typeof body.skuBase === "string" ? body.skuBase.trim() : "";
+      const categoriaId = typeof body.categoriaId === "string" ? body.categoriaId.trim() : "";
+      const marcaId = typeof body.marcaId === "string" ? body.marcaId.trim() : "";
+      const tipoProductoId =
+        typeof body.tipoProductoId === "string" ? body.tipoProductoId.trim() : "";
+      if (
+        !uuidRe.test(productId) ||
+        !skuRe.test(skuBase) ||
+        !uuidRe.test(categoriaId) ||
+        !uuidRe.test(marcaId) ||
+        !uuidRe.test(tipoProductoId)
+      ) {
+        res.statusCode = 400;
+        res.end();
+        return;
+      }
+      await seedCatalogActiveProduct({
+        productId,
+        skuBase,
+        categoriaId,
+        marcaId,
+        tipoProductoId,
+      });
+      res.statusCode = 201;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ ok: true, productId, skuBase, estado: "ACTIVO" }));
+      return;
+    }
     res.statusCode = 404;
     res.end();
   });
@@ -896,6 +933,38 @@ async function main() {
           DO UPDATE SET on_hand = EXCLUDED.on_hand, reserved = 0, blocked = 0;
         `;
         await runPsql(pg.containerName, "g6_e2e_test", sql, `seed-stock:${sku}`);
+      },
+      seedCatalogActiveProduct: async ({
+        productId,
+        skuBase,
+        categoriaId,
+        marcaId,
+        tipoProductoId,
+      }) => {
+        const slug = `prod-activo-${skuBase.toLowerCase()}`;
+        const sql = `
+          BEGIN;
+          INSERT INTO catalog.products (
+            id, nombre, descripcion, categoria_id, tipo_producto_id, marca_id,
+            sku_base, slug, tiene_variantes, estado, catalog_version
+          ) VALUES (
+            '${productId}',
+            'Producto Activo N01 ${skuBase}',
+            'Fixture comercial preprovisionada en PostgreSQL descartable para N01',
+            '${categoriaId}',
+            '${tipoProductoId}',
+            '${marcaId}',
+            '${skuBase}',
+            '${slug}',
+            false,
+            'ACTIVO',
+            1
+          );
+          INSERT INTO catalog.sku_identity (sku, product_id)
+          VALUES ('${skuBase}', '${productId}');
+          COMMIT;
+        `;
+        await runPsql(pg.containerName, "g6_e2e_test", sql, `seed-catalog:${skuBase}`);
       },
     });
 

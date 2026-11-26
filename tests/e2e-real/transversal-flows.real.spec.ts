@@ -7,6 +7,30 @@ import {
   verifyGatewayAndServicesReady,
 } from "./realStackPreflight.ts";
 
+interface CatalogAdminProductDto {
+  productId: string;
+  skuBase: string;
+  estado: "BORRADOR" | "ACTIVO" | "INACTIVO";
+  categoriaId: string;
+  marcaId: string;
+  tipoProductoId: string;
+}
+
+interface CatalogCommercialProductDto {
+  product_id: string;
+  sku_base: string;
+  nombre: string;
+  estado?: string;
+}
+
+interface CatalogSkuContextDto {
+  productId: string;
+  sku: string;
+  isVariant: boolean;
+  active: boolean;
+  eligible: boolean;
+}
+
 test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Microservicios + N01 técnico (ESCRITA_NO_EJECUTADA)", () => {
   test("causalidad real: Taxonomy -> Catalog -> Pricing/Inventory -> Audit -> Combos -> Coupons + N01 técnico separado", async ({
     page,
@@ -80,35 +104,82 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     const typeDto = (await typeRes.json()) as { tipoProductoId: string };
     expect(typeDto.tipoProductoId).toBeTruthy();
 
-    const skuBase = `SKU-N01-${randomUUID().slice(0, 8).toUpperCase()}`;
+    const draftSkuBase = `SKU-DRAFT-${randomUUID().slice(0, 8).toUpperCase()}`;
     const createProd = await request.post(`${env.gatewayUrl}/api/v1/productos`, {
       headers: { ...humanHeaders, "Idempotency-Key": randomUUID() },
       data: {
-        nombre: `Prod Transversal ${randomUUID().slice(0, 6)}`,
-        descripcion: "Producto transversal E2E para pruebas reales H5",
+        nombre: `Prod Borrador ${randomUUID().slice(0, 6)}`,
+        descripcion: "Alta administrativa BORRADOR E2E H5",
         categoriaId: catDto.categoriaId,
         marcaId: brandDto.marcaId,
         tipoProductoId: typeDto.tipoProductoId,
-        skuBase,
+        skuBase: draftSkuBase,
         tieneVariantes: false,
         precioBaseInicial: 120,
       },
     });
     expect([200, 201]).toContain(createProd.status());
-    const prodDto = (await createProd.json()) as { productId: string };
-    expect(prodDto.productId).toBeTruthy();
+    const draftProdDto = (await createProd.json()) as { productId: string };
+    expect(draftProdDto.productId).toBeTruthy();
+
+    // Evidencia A: Alta administrativa permanece en BORRADOR con preparaciones pendientes
+    const adminReadRes = await request.get(
+      `${env.gatewayUrl}/api/v1/productos/administracion/${encodeURIComponent(draftProdDto.productId)}`,
+      { headers: humanHeaders },
+    );
+    expect(adminReadRes.status()).toBe(200);
+    const adminProdDto = (await adminReadRes.json()) as CatalogAdminProductDto;
+    expect(adminProdDto.productId).toBe(draftProdDto.productId);
+    expect(adminProdDto.skuBase).toBe(draftSkuBase);
+    expect(adminProdDto.estado).toBe("BORRADOR");
+    expect(adminProdDto.categoriaId).toBe(catDto.categoriaId);
+    expect(adminProdDto.marcaId).toBe(brandDto.marcaId);
+    expect(adminProdDto.tipoProductoId).toBe(typeDto.tipoProductoId);
+
+    const prepRes = await request.get(
+      `${env.gatewayUrl}/api/v1/productos/${encodeURIComponent(draftProdDto.productId)}/preparacion`,
+      { headers: humanHeaders },
+    );
+    expect(prepRes.status()).toBe(200);
+    const prepDto = (await prepRes.json()) as {
+      estadoProducto?: string;
+      pricing?: { estado?: string };
+      inventory?: { estado?: string };
+    };
+    expect(prepDto.estadoProducto ?? "BORRADOR").toBe("BORRADOR");
+    expect(prepDto.pricing?.estado).not.toBe("COMPLETADA");
+    expect(prepDto.inventory?.estado).not.toBe("COMPLETADA");
+
+    // Evidencia B: Fixture comercial preprovisionada ACTIVO en PostgreSQL descartable para N01
+    // (No acredita el ciclo completo de publicación asíncrona Catalog -> Pricing/Inventory -> Catalog)
+    if (!env.g5SeedOrigin || !env.g5EvidenceOrigin) {
+      throw new Error("PREFLIGHT_BLOCKED: g5SeedOrigin y g5EvidenceOrigin requeridos para N01.");
+    }
+    const activeProductId = randomUUID();
+    const skuBase = `SKU-N01-${randomUUID().slice(0, 8).toUpperCase()}`;
+    const seedCatalogRes = await request.post(
+      `${env.g5SeedOrigin}/__test/catalog-active-product`,
+      {
+        data: {
+          productId: activeProductId,
+          skuBase,
+          categoriaId: catDto.categoriaId,
+          marcaId: brandDto.marcaId,
+          tipoProductoId: typeDto.tipoProductoId,
+        },
+      },
+    );
+    expect(seedCatalogRes.status()).toBe(201);
+    const prodDto = { productId: activeProductId };
 
     const readProdRes = await request.get(
       `${env.gatewayUrl}/api/v1/productos/${encodeURIComponent(prodDto.productId)}`,
       { headers: humanHeaders },
     );
     expect(readProdRes.status()).toBe(200);
-    const readProdDto = (await readProdRes.json()) as {
-      productId?: string;
-      skuBase?: string;
-    };
-    expect(readProdDto.productId).toBe(prodDto.productId);
-    expect(readProdDto.skuBase).toBe(skuBase);
+    const readProdDto = (await readProdRes.json()) as CatalogCommercialProductDto;
+    expect(readProdDto.product_id).toBe(prodDto.productId);
+    expect(readProdDto.sku_base).toBe(skuBase);
 
     const catalogServiceToken = await issueTechnicalServiceToken(
       env.g7ApiBase,
@@ -120,12 +191,11 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
       { headers: { Authorization: `Bearer ${catalogServiceToken}` } },
     );
     expect(skuCtxRes.status()).toBe(200);
-    const skuCtx = (await skuCtxRes.json()) as {
-      productId?: string;
-      sku?: string;
-    };
+    const skuCtx = (await skuCtxRes.json()) as CatalogSkuContextDto;
     expect(skuCtx.productId).toBe(prodDto.productId);
     expect(skuCtx.sku).toBe(skuBase);
+    expect(skuCtx.active).toBe(true);
+    expect(skuCtx.eligible).toBe(true);
 
     // 2. Catalog -> Pricing -> Price Audit
     const putPrice = await request.put(
@@ -453,9 +523,7 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
       await new Promise((r) => setTimeout(r, 250));
     }
     expect(restoreSnapshot.status).toBe("COMPLETED");
-    expect(["RESTORED", "POLICY_KEEPS_CONSUMPTION", "NO_CONSUMPTION"]).toContain(
-      restoreSnapshot.result?.outcome,
-    );
+    expect(restoreSnapshot.result?.outcome).toBe("RESTORED");
 
     // 4e. Rechazo contractual HTTP (commercial_snapshot_ref !== order_id -> 400 Problem Details)
     const badOpId = randomUUID();
