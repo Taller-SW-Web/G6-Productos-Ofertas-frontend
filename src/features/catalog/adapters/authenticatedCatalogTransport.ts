@@ -2,8 +2,12 @@ import type { G7Session } from "../../promotions/adapters/g7Session";
 import { isGatewayTokenInvalid } from "../../shared/isGatewayTokenInvalid";
 import { createCatalogFetchTransport, type CatalogHttpTransport } from "./catalogHttp";
 
-// Keep the public read demo on its existing transport. Administration uses G7.
-export function createAuthenticatedCatalogTransport(origin: string, session: G7Session, _options: { publicReads?: boolean } = {}): CatalogHttpTransport {
+// Todas las solicitudes comerciales usan Bearer G7; publicReads es compatibilidad inerte.
+export function createAuthenticatedCatalogTransport(
+  origin: string,
+  session: G7Session,
+  _options: { /** @deprecated Compatibilidad inerte; sin efecto bajo G7. */ publicReads?: boolean } = {},
+): CatalogHttpTransport {
   const transport = createCatalogFetchTransport(origin);
   return {
     async request(path, init) {

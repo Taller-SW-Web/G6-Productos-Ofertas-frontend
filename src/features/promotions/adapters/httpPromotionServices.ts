@@ -29,6 +29,7 @@ import { isGatewayTokenInvalid } from "../../shared/isGatewayTokenInvalid";
 
 export interface PromotionHttpOptions {
   gatewayOrigin: string;
+  /** @deprecated Compatibilidad inerte; sin efecto bajo G7 obligatorio. */
   publicReads?: boolean;
   getAccessToken(signal: AbortSignal): Promise<string | null>;
   refreshAccessToken?(

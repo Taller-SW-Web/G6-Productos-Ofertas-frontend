@@ -52,6 +52,25 @@ describe("Frontend G7-only Bearer enforcement (R2)", () => {
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer header.payload.signature");
   });
 
+  it("allows omitting optional canal on listarProductos, obtenerProducto, consultarPrecios and obtenerPrecioSku with Bearer G7", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ items: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const client = createReadOnlyClient("https://gateway.example.test", makeSession(), fetchMock);
+    await client.read("listarProductos", {}, new AbortController().signal);
+    await client.read("obtenerProducto", { productoId: "prod-1" }, new AbortController().signal);
+    await client.read("consultarPrecios", {}, new AbortController().signal);
+    await client.read("obtenerPrecioSku", { sku: "SKU-1" }, new AbortController().signal);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    for (const call of fetchMock.mock.calls) {
+      const [, init] = call as [string, RequestInit];
+      expect((init.headers as Record<string, string>).Authorization).toBe("Bearer header.payload.signature");
+    }
+  });
+
   it("always sends Authorization Bearer in taxonomyGatewayRuntime even if publicReads is passed", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ items: [] }), {

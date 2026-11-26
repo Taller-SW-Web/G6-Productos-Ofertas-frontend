@@ -48,6 +48,7 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}
 const resumeBlockReasons = ["LOTE_NO_TERMINAL", "SIN_PASOS_REINTENTABLES", "RESULTADO_INCIERTO", "PROTOCOLO_DOMINIO_NO_HABILITADO"] as const;
 
 export interface BulkHttpRepositoryOptions {
+  /** @deprecated Compatibilidad inerte; sin efecto bajo G7 obligatorio. */
   publicReads?: boolean;
   reconciliationEnabled?: boolean;
   replayEnabled?: boolean;

@@ -44,7 +44,7 @@ export function createAuthenticatedTaxonomyGateway(
   gatewayOrigin: string,
   session: TaxonomySession,
   fetcher: typeof fetch = fetch,
-  _options: { publicReads?: boolean } = {},
+  _options: { /** @deprecated Compatibilidad inerte; sin efecto bajo G7. */ publicReads?: boolean } = {},
 ): TaxonomyGatewayTransport {
   const origin = secureGatewayOrigin(gatewayOrigin);
   return {

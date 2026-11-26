@@ -10,10 +10,8 @@ export interface ReadSession {
 export type ReadResult = { kind: "data"; value: unknown } | { kind: "file"; blob: Blob; filename: string };
 export class ReadFailure extends Error {}
 
-// These commercial reads allow an omitted channel for a verified human JWT.
-// Azure PUBLIC_READ_ONLY has no such principal; the user must choose the channel.
-export const requiresPublicReadChannel = (id: string) =>
-  ["listarProductos", "obtenerProducto", "consultarPrecios", "obtenerPrecioSku"].includes(id);
+/** @deprecated Compatibilidad inerte; bajo G7 obligatorio `canal` es opcional según OpenAPI. */
+export const requiresPublicReadChannel = (_id: string) => false;
 
 const DATE_TIME_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(Z|([+-])(\d{2}):(\d{2}))$/;
@@ -106,12 +104,15 @@ async function limitedBody(response: Response): Promise<Uint8Array> {
   return result;
 }
 
-export function createReadOnlyClient(origin: string, session: ReadSession, fetcher: typeof fetch = fetch, _options: { publicReadOnly?: boolean } = {}) {
+export function createReadOnlyClient(
+  origin: string,
+  session: ReadSession,
+  fetcher: typeof fetch = fetch,
+  _options: { /** @deprecated Compatibilidad inerte; sin efecto bajo G7. */ publicReadOnly?: boolean } = {},
+) {
   const base = secureBase(origin, true);
   return {
     async read(id: string, values: Readonly<Record<string, string>>, cancellation: AbortSignal): Promise<ReadResult> {
-      if (requiresPublicReadChannel(id) && !values.canal?.trim())
-        throw new ReadFailure("Selecciona el canal para consultar los datos comerciales.");
       const path = buildReadPath(id, values);
       const signal = AbortSignal.any([cancellation, AbortSignal.timeout(65000)]);
       signal.throwIfAborted();
