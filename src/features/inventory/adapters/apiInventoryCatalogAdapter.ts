@@ -37,8 +37,15 @@ export class ApiInventoryCatalogAdapter implements InventoryCatalogRepository {
     const items: InventoryLocationOption[] = [];
     const seen = new Set<string>();
     let total: number | undefined;
+    let expectedPageSize: number | undefined;
 
     for (let page = 1; total === undefined || items.length < total; page++) {
+      if (page > 1000) {
+        throw new InventoryError(
+          "RESPUESTA_INCOMPATIBLE",
+          "Inventario excedió el límite de paginación de ubicaciones.",
+        );
+      }
       const response = await this.transport.request(
         `/api/v1/inventario/ubicaciones?soloActivas=false&tamanio=100&pagina=${page}`,
         { method: "GET" },
@@ -67,7 +74,12 @@ export class ApiInventoryCatalogAdapter implements InventoryCatalogRepository {
           name?: unknown;
           active?: unknown;
         }>;
-        meta?: { total?: unknown; pagina?: unknown };
+        meta?: {
+          total?: unknown;
+          pagina?: unknown;
+          tamanio?: unknown;
+          totalPaginas?: unknown;
+        };
       };
       if (!body || !Array.isArray(body.items) || !body.meta) {
         throw new InventoryError(
@@ -76,10 +88,43 @@ export class ApiInventoryCatalogAdapter implements InventoryCatalogRepository {
         );
       }
       const pageTotal = Number(body.meta.total);
-      if (!Number.isSafeInteger(pageTotal) || pageTotal < 0) {
+      const pageSize = Number(body.meta.tamanio);
+      if (
+        !Number.isSafeInteger(pageTotal) ||
+        pageTotal < 0 ||
+        !Number.isSafeInteger(pageSize) ||
+        pageSize < 1 ||
+        pageSize > 100
+      ) {
         throw new InventoryError(
           "RESPUESTA_INCOMPATIBLE",
-          "Inventario devolvió total inválido de ubicaciones.",
+          "Inventario devolvió metadatos inválidos de paginación de ubicaciones.",
+        );
+      }
+      if (expectedPageSize === undefined) expectedPageSize = pageSize;
+      else if (pageSize !== expectedPageSize) {
+        throw new InventoryError(
+          "RESPUESTA_INCOMPATIBLE",
+          "Inventario cambió el tamaño de página de ubicaciones durante la consulta.",
+        );
+      }
+      const pages = Math.ceil(pageTotal / pageSize);
+      const expectedLength =
+        page > pages ? 0 : Math.min(pageSize, pageTotal - (page - 1) * pageSize);
+      if (
+        body.meta.pagina !== page ||
+        body.meta.totalPaginas !== pages ||
+        body.items.length !== expectedLength
+      ) {
+        throw new InventoryError(
+          "RESPUESTA_INCOMPATIBLE",
+          "Inventario devolvió una página de ubicaciones inconsistente.",
+        );
+      }
+      if (total !== undefined && total !== pageTotal) {
+        throw new InventoryError(
+          "RESPUESTA_INCOMPATIBLE",
+          "El total de ubicaciones cambió durante la consulta.",
         );
       }
       total = pageTotal;

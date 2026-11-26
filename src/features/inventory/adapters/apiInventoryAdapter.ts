@@ -1186,6 +1186,7 @@ export function createHttpInventoryRepository(
       const output: InventoryLocationOption[] = [];
       const seenIds = new Set<string>();
       let total: number | undefined;
+      let expectedPageSize: number | undefined;
 
       for (let page = 1; total === undefined || output.length < total; page++) {
         if (page > MAX_PAGES) {
@@ -1208,13 +1209,26 @@ export function createHttpInventoryRepository(
         );
         const meta = stockObject(response.meta);
         const pageTotal = stockInt(meta.total);
-        const pages = Math.ceil(pageTotal / PAGE_SIZE);
+        const pageSize = stockInt(meta.tamanio);
+        if (pageSize < 1 || pageSize > PAGE_SIZE) {
+          throw new InventoryError(
+            "RESPUESTA_INCOMPATIBLE",
+            "Inventario devolvió un tamaño de página de ubicaciones inválido.",
+          );
+        }
+        if (expectedPageSize === undefined) expectedPageSize = pageSize;
+        else if (pageSize !== expectedPageSize) {
+          throw new InventoryError(
+            "RESPUESTA_INCOMPATIBLE",
+            "Inventario cambió el tamaño de página de ubicaciones durante la consulta.",
+          );
+        }
+        const pages = Math.ceil(pageTotal / pageSize);
         const expectedLength =
-          page > pages ? 0 : Math.min(PAGE_SIZE, pageTotal - (page - 1) * PAGE_SIZE);
+          page > pages ? 0 : Math.min(pageSize, pageTotal - (page - 1) * pageSize);
         if (
           !Array.isArray(response.items) ||
           meta.pagina !== page ||
-          meta.tamanio !== PAGE_SIZE ||
           meta.totalPaginas !== pages ||
           response.items.length !== expectedLength
         ) {

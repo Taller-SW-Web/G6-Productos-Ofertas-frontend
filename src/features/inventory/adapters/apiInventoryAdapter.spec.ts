@@ -2571,6 +2571,39 @@ describe("Fase 2 H01/H02 — Alertas operativas y ubicaciones autoritativas", ()
     ]);
   });
 
+  it("getLocations pagina múltiples páginas de /api/v1/inventario/ubicaciones y detecta duplicados", async () => {
+    const loc3 = "44444444-4444-4444-8444-444444444444";
+    const all = [
+      { id: locLurin, code: "ALM-1", name: "Ubicación 1", type: "ALMACEN", active: true },
+      { id: locEmpty, code: "ALM-2", name: "Ubicación 2", type: "ALMACEN", active: true },
+      { id: loc3, code: "TDA-3", name: "Ubicación 3", type: "TIENDA", active: false },
+    ];
+    const { repository, calls } = setup(async (path) => {
+      const url = new URL(path, "https://gateway.test");
+      const pagina = Number(url.searchParams.get("pagina"));
+      const slice = all.slice((pagina - 1) * 2, pagina * 2);
+      return jsonResponse({
+        items: slice,
+        meta: { pagina, tamanio: 2, total: 3, totalPaginas: 2 },
+      });
+    });
+
+    const result = await repository.getLocations();
+    expect(calls).toHaveLength(2);
+    expect(result).toHaveLength(3);
+    expect(result.map((l) => l.id)).toEqual([locLurin, locEmpty, loc3]);
+
+    const dup = setup(async () =>
+      jsonResponse({
+        items: [all[0], all[0]],
+        meta: { pagina: 1, tamanio: 2, total: 2, totalPaginas: 1 },
+      }),
+    );
+    await expect(rejection(dup.repository.getLocations())).resolves.toMatchObject({
+      code: "RESPUESTA_INCOMPATIBLE",
+    });
+  });
+
   it("getLocations rechaza respuestas incompatibles y maneja listas vacías (total 0)", async () => {
     const empty = setup(async () =>
       jsonResponse({ items: [], meta: { pagina: 1, tamanio: 100, total: 0, totalPaginas: 0 } }),
