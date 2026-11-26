@@ -131,33 +131,83 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     const g5Token = await issueTechnicalServiceToken(
       env.g7ApiBase,
       "modulo-ventas",
-      "cupones:consumir cupones:restaurar cupones:operaciones:leer stock:reservar",
+      "cupones:consumir cupones:restaurar cupones:operaciones:leer stock:reservar inventario:reservas:estado:leer",
     );
     const consumeOpId = randomUUID();
-    const orderId = `PED-E2E-${randomUUID().slice(0, 8)}`;
+    const reserveOpId = randomUUID();
+    const orderId = randomUUID();
     const effectiveAt = new Date().toISOString();
-    const reservationId = randomUUID();
 
-    // 4.0 Registrar reserva real en Inventory + evidencia G5 coherente en g5SeedOrigin
+    // 4.0 Preparar stock real, crear reserva Inventory (CrearReservaRequest) hasta COMPLETED y verificar estado ACTIVA/VIGENTE
     if (!env.g5SeedOrigin || !env.g5EvidenceOrigin) {
       throw new Error("PREFLIGHT_BLOCKED: g5SeedOrigin y g5EvidenceOrigin requeridos para N01.");
     }
     expect(env.g5EvidenceOrigin.startsWith("https://127.0.0.1:")).toBe(true);
     expect(env.g5SeedOrigin.startsWith("http://127.0.0.1:")).toBe(true);
-    const skuForCoupon = `SKU-N01-${randomUUID().slice(0, 6)}`;
-    await request.post(`${env.gatewayUrl}/api/v1/inventario/reservas`, {
+
+    const skuForCoupon = `SKU-N01-${randomUUID().slice(0, 6).toUpperCase()}`;
+    const stockSeedRes = await request.post(`${env.g5SeedOrigin}/__test/inventory-stock`, {
+      data: { sku: skuForCoupon, on_hand: 25 },
+    });
+    expect(stockSeedRes.status()).toBe(201);
+
+    const createReserveRes = await request.post(`${env.gatewayUrl}/api/v1/inventario/reservas`, {
       headers: {
         Authorization: `Bearer ${g5Token}`,
         "X-Correlation-Id": randomUUID(),
-        "Idempotency-Key": randomUUID(),
+        "Idempotency-Key": reserveOpId,
         "Content-Type": "application/json",
       },
       data: {
-        reservation_id: reservationId,
+        operation_id: reserveOpId,
         order_id: orderId,
-        items: [{ sku: skuForCoupon, quantity: 1 }],
+        channel_id: "MARKETPLACE",
+        lines: [{ sku: skuForCoupon, quantity: 1 }],
       },
     });
+    expect([200, 202]).toContain(createReserveRes.status());
+
+    let reserveOpSnapshot: {
+      operation_id?: string;
+      status?: string;
+      reservation_id?: string | null;
+    } = {};
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      const pollReserve = await request.get(
+        `${env.gatewayUrl}/api/v1/inventario/operaciones/${encodeURIComponent(reserveOpId)}`,
+        { headers: { Authorization: `Bearer ${g5Token}` } },
+      );
+      expect(pollReserve.status()).toBe(200);
+      reserveOpSnapshot = (await pollReserve.json()) as typeof reserveOpSnapshot;
+      if (reserveOpSnapshot.status === "COMPLETED" || reserveOpSnapshot.status === "REJECTED") {
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    expect(reserveOpSnapshot.status).toBe("COMPLETED");
+    const reservationId = reserveOpSnapshot.reservation_id ?? "";
+    expect(reservationId).toMatch(/^[0-9a-f-]{36}$/i);
+
+    const reserveStateRes = await request.get(
+      `${env.gatewayUrl}/api/v1/inventario/reservas/${encodeURIComponent(reservationId)}/estado?order_id=${encodeURIComponent(orderId)}`,
+      { headers: { Authorization: `Bearer ${g5Token}` } },
+    );
+    expect(reserveStateRes.status()).toBe(200);
+    const reserveState = (await reserveStateRes.json()) as {
+      reservation_id: string;
+      order_id: string;
+      estado_persistido: string;
+      vigencia_efectiva: string;
+      expires_at: string;
+      permite_consumo_cupon: boolean;
+    };
+    expect(reserveState.reservation_id).toBe(reservationId);
+    expect(reserveState.order_id).toBe(orderId);
+    expect(reserveState.estado_persistido).toBe("ACTIVA");
+    expect(reserveState.vigencia_efectiva).toBe("VIGENTE");
+    expect(reserveState.permite_consumo_cupon).toBe(true);
+    expect(Date.parse(reserveState.expires_at)).toBeGreaterThan(Date.now());
+
     const snapRes = await request.post(
       `${env.g5SeedOrigin}/__test/g5-snapshots`,
       {
@@ -172,6 +222,7 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
           lines: [
             {
               sku: skuForCoupon,
+              product_id: prodDto.productId,
               quantity: 1,
               regular_price: "120.00",
               offer_price: null,
@@ -371,18 +422,28 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
 
     // 4g. Rechazo asíncrono por reserva inexistente en Inventory (202 admisión -> REJECTED)
     const noResOpId = randomUUID();
-    const noResOrderId = `PED-NORES-${randomUUID().slice(0, 8)}`;
+    const noResOrderId = randomUUID();
+    const missingReservationId = randomUUID();
     const noResTime = new Date().toISOString();
     await request.post(`${env.g5SeedOrigin}/__test/g5-snapshots`, {
       data: {
         order_id: noResOrderId,
-        reservation_id: randomUUID(),
+        reservation_id: missingReservationId,
         commercial_snapshot_ref: noResOrderId,
         channel_id: "MARKETPLACE",
         coupon_code: couponCode,
         effective_at: noResTime,
         customer_ref: null,
-        lines: [{ sku: skuForCoupon, quantity: 1, regular_price: "120.00", offer_price: null, currency: "PEN" }],
+        lines: [
+          {
+            sku: skuForCoupon,
+            product_id: prodDto.productId,
+            quantity: 1,
+            regular_price: "120.00",
+            offer_price: null,
+            currency: "PEN",
+          },
+        ],
       },
     });
     const noResAdm = await request.post(`${env.gatewayUrl}/api/v1/cupones/consumos`, {
@@ -398,7 +459,7 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
         coupon_code: couponCode,
         channel_id: "MARKETPLACE",
         effective_at: noResTime,
-        reservation_id: randomUUID(),
+        reservation_id: missingReservationId,
         commercial_snapshot_ref: noResOrderId,
       },
     });

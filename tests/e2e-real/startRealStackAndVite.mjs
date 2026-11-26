@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { generateKeyPairSync, randomUUID, sign } from "node:crypto";
+import { createVerify, generateKeyPairSync, randomUUID, sign } from "node:crypto";
 import {
   existsSync,
   mkdtempSync,
@@ -370,6 +370,10 @@ async function startDisposablePostgresWithTls(backendRoot, docsRoot) {
       GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA bulk TO bulk_app;
       GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA promotions TO promotions_app;
       GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA promotions TO promotions_app;
+
+      INSERT INTO inventory.locations (id, code, name, type, active)
+      VALUES ('00000000-0000-4000-8000-000000000101', 'CENTRAL', 'Almacén Central E2E', 'ALMACEN_CENTRAL', true)
+      ON CONFLICT (code) DO NOTHING;
     `;
     await runPsql(containerName, "g6_e2e_test", runtimeGrantsSql, "runtime-grants");
 
@@ -563,29 +567,60 @@ async function startSingleLocalG7Server() {
       const clientSecret = params.get("client_secret") ?? "";
       const scope = (params.get("scope") ?? "").trim();
       const allowedClients = new Map([
-        ["promotions-svc", new Set(["e2e-promotions-secret", "e2e-promotions-h5-secret"])],
-        ["modulo-productos", new Set(["e2e-promotions-secret", "e2e-promotions-h5-secret", "e2e-catalog-secret"])],
-        ["modulo-ventas", new Set(["e2e-ventas-secret"])],
-      ]);
-      const allowedScopes = new Set([
-        "ventas:pedidos:evidencia-cupon:leer",
-        "catalogo:leer",
-        "inventario:leer",
+        [
+          "promotions-svc",
+          {
+            secrets: new Set(["e2e-promotions-secret", "e2e-promotions-h5-secret"]),
+            scopes: new Set([
+              "ventas:pedidos:evidencia-cupon:leer",
+              "inventario:reservas:estado:leer",
+              "catalogo:leer",
+              "inventario:leer",
+            ]),
+          },
+        ],
+        [
+          "modulo-productos",
+          {
+            secrets: new Set([
+              "e2e-promotions-secret",
+              "e2e-promotions-h5-secret",
+              "e2e-catalog-secret",
+            ]),
+            scopes: new Set(["catalogo:leer", "inventario:leer"]),
+          },
+        ],
+        [
+          "modulo-ventas",
+          {
+            secrets: new Set(["e2e-ventas-secret"]),
+            scopes: new Set([
+              "cupones:consumir",
+              "cupones:restaurar",
+              "cupones:operaciones:leer",
+              "stock:reservar",
+              "inventario:reservas:estado:leer",
+              "catalogo:leer",
+              "inventario:leer",
+            ]),
+          },
+        ],
       ]);
       const requestedScopes = scope.split(/\s+/).filter(Boolean);
-      const validSecret = allowedClients.get(clientId)?.has(clientSecret) ?? false;
+      const clientPolicy = allowedClients.get(clientId);
+      const validSecret = clientPolicy?.secrets.has(clientSecret) ?? false;
       const validScopes =
         requestedScopes.length > 0 &&
-        requestedScopes.every((s) => allowedScopes.has(s));
-      if (grantType !== "client_credentials" || !validSecret || !validScopes) {
+        requestedScopes.every((s) => clientPolicy?.scopes.has(s) ?? false);
+      const wantsVentas = requestedScopes.includes("ventas:pedidos:evidencia-cupon:leer");
+      const mixedAudience = wantsVentas && requestedScopes.length > 1;
+      if (grantType !== "client_credentials" || !validSecret || !validScopes || mixedAudience) {
         res.statusCode = 401;
         res.setHeader("content-type", "application/problem+json");
         res.end(JSON.stringify({ code: "CLIENT_AUTH_INVALID" }));
         return;
       }
-      const audience = requestedScopes.includes("ventas:pedidos:evidencia-cupon:leer")
-        ? "api-ventas"
-        : "api-productos";
+      const audience = wantsVentas ? "api-ventas" : "api-productos";
       res.statusCode = 200;
       res.setHeader("content-type", "application/json");
       res.end(
@@ -646,11 +681,57 @@ async function startSingleLocalG7Server() {
     jwksUrl: `${baseUrl}/jwks`,
     discoveryUrl: `${baseUrl}/.well-known/openid-configuration`,
     tokenUrl: `${baseUrl}/api/v1/auth/token`,
+    publicKey,
     close: () => new Promise((r) => server.close(() => r())),
   };
 }
 
-async function startLocalG5EvidenceServer() {
+function verifyTechnicalG7Bearer(authHeader, publicKey, requiredAudience, requiredScope) {
+  if (typeof authHeader !== "string" || !authHeader.startsWith("Bearer ")) {
+    return { ok: false, status: 401, code: "TOKEN_INVALIDO" };
+  }
+  const token = authHeader.slice("Bearer ".length).trim();
+  const parts = token.split(".");
+  if (parts.length !== 3) {
+    return { ok: false, status: 401, code: "TOKEN_INVALIDO" };
+  }
+  const [headerB64, payloadB64, sigB64] = parts;
+  try {
+    const header = JSON.parse(Buffer.from(headerB64, "base64url").toString("utf8"));
+    if (header?.alg !== "RS256") {
+      return { ok: false, status: 401, code: "TOKEN_INVALIDO" };
+    }
+    const verifier = createVerify("RSA-SHA256");
+    verifier.update(`${headerB64}.${payloadB64}`);
+    verifier.end();
+    if (!verifier.verify(publicKey, Buffer.from(sigB64, "base64url"))) {
+      return { ok: false, status: 401, code: "TOKEN_INVALIDO" };
+    }
+    const payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf8"));
+    const now = Math.floor(Date.now() / 1000);
+    if (typeof payload.exp !== "number" || payload.exp <= now) {
+      return { ok: false, status: 401, code: "TOKEN_EXPIRADO" };
+    }
+    const audList = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+    if (!audList.includes(requiredAudience)) {
+      return { ok: false, status: 403, code: "AUDIENCIA_INVALIDA" };
+    }
+    if (payload.tipo !== "servicio" || payload.sub !== "promotions-svc") {
+      return { ok: false, status: 403, code: "CLIENTE_NO_AUTORIZADO" };
+    }
+    const scopes = String(payload.scope ?? "")
+      .split(/\s+/)
+      .filter(Boolean);
+    if (!scopes.includes(requiredScope)) {
+      return { ok: false, status: 403, code: "SCOPE_INSUFICIENTE" };
+    }
+    return { ok: true, payload };
+  } catch {
+    return { ok: false, status: 401, code: "TOKEN_INVALIDO" };
+  }
+}
+
+async function startLocalG5EvidenceServer({ g7PublicKey, seedInventoryStock }) {
   const g5CertDir = mkdtempSync(join(tmpdir(), "g6-e2e-g5-tls-"));
   const g5KeyPath = join(g5CertDir, "server.key");
   const g5CertPath = join(g5CertDir, "server.crt");
@@ -683,11 +764,16 @@ async function startLocalG5EvidenceServer() {
         url,
       );
       if (req.method === "GET" && match) {
-        const auth = String(req.headers["authorization"] ?? "");
-        if (!auth.startsWith("Bearer ")) {
-          res.statusCode = 401;
+        const authResult = verifyTechnicalG7Bearer(
+          req.headers["authorization"],
+          g7PublicKey,
+          "api-ventas",
+          "ventas:pedidos:evidencia-cupon:leer",
+        );
+        if (!authResult.ok) {
+          res.statusCode = authResult.status;
           res.setHeader("content-type", "application/problem+json");
-          res.end(JSON.stringify({ code: "TOKEN_INVALIDO" }));
+          res.end(JSON.stringify({ code: authResult.code }));
           return;
         }
         const orderId = decodeURIComponent(match[1]);
@@ -720,6 +806,21 @@ async function startLocalG5EvidenceServer() {
       res.statusCode = 201;
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+    if (req.method === "POST" && url === "/__test/inventory-stock") {
+      const body = await readJsonBody(req);
+      const sku = typeof body.sku === "string" ? body.sku.trim() : "";
+      const onHand = Number(body.on_hand);
+      if (!/^[A-Za-z0-9_-]{3,64}$/.test(sku) || !Number.isInteger(onHand) || onHand < 0) {
+        res.statusCode = 400;
+        res.end();
+        return;
+      }
+      await seedInventoryStock(sku, onHand);
+      res.statusCode = 201;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ ok: true, sku, on_hand: onHand }));
       return;
     }
     res.statusCode = 404;
@@ -784,7 +885,18 @@ async function main() {
   try {
     pg = await startDisposablePostgresWithTls(backendRoot, docsRoot);
     g7 = await startSingleLocalG7Server();
-    g5Evidence = await startLocalG5EvidenceServer();
+    g5Evidence = await startLocalG5EvidenceServer({
+      g7PublicKey: g7.publicKey,
+      seedInventoryStock: async (sku, onHand) => {
+        const sql = `
+          INSERT INTO inventory.stock_balance (sku_id, location_id, on_hand, reserved, blocked, stock_version)
+          VALUES ('${sku}', '00000000-0000-4000-8000-000000000101', ${onHand}, 0, 0, 1)
+          ON CONFLICT (sku_id, location_id)
+          DO UPDATE SET on_hand = EXCLUDED.on_hand, reserved = 0, blocked = 0;
+        `;
+        await runPsql(pg.containerName, "g6_e2e_test", sql, `seed-stock:${sku}`);
+      },
+    });
 
     const controlledBaseEnv = {
       PATH: process.env.PATH ?? "",
