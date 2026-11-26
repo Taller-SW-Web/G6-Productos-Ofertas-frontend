@@ -4,15 +4,18 @@ import type {
   InventoryCategoryOption,
   InventoryLocationOption,
 } from "../services/inventoryCatalogRepository";
+import { InventoryError } from "../services/inventoryErrors";
+import type { InventoryHttpTransport } from "./apiInventoryAdapter";
 
-// Esqueleto HTTP para catálogo de inventario.
-// BLOCKED_CONTRACT:
-// - Ubicaciones: no existe endpoint publicado en `Contrato_Api.md §4` ni en
-//   `openapi.yaml` 0.5.0 (owner Inventory, fuente física `inventory.locations`).
-// - Categorías/marcas: disponibles vía `/categorias` y `/marcas`, pero su
-//   integración HTTP para poblar filtros queda pendiente de definición (paginación).
+// Adaptador HTTP de opciones de catálogo/ubicaciones de inventario (H5).
+// - Ubicaciones: conectadas al endpoint autoritativo `GET /api/v1/inventario/ubicaciones`
+//   cuando se inyecta transporte HTTP; sin transporte falla explícitamente sin mock.
+// - Categorías/marcas: su integración HTTP para poblar filtros queda pendiente de
+//   definición (paginación).
 
 export class ApiInventoryCatalogAdapter implements InventoryCatalogRepository {
+  constructor(private readonly transport?: InventoryHttpTransport) {}
+
   async getCategories(): Promise<InventoryCategoryOption[]> {
     return Promise.reject(this.unimplemented("getCategories"));
   }
@@ -22,9 +25,136 @@ export class ApiInventoryCatalogAdapter implements InventoryCatalogRepository {
   }
 
   async getLocations(): Promise<InventoryLocationOption[]> {
-    return Promise.reject(
-      this.blocked("getLocations", "Ubicaciones: sin endpoint HTTP publicado"),
-    );
+    if (!this.transport) {
+      return Promise.reject(
+        this.blocked(
+          "getLocations",
+          "Ubicaciones requiere transporte HTTP autenticado inyectado",
+        ),
+      );
+    }
+
+    const items: InventoryLocationOption[] = [];
+    const seen = new Set<string>();
+    let total: number | undefined;
+    let expectedPageSize: number | undefined;
+
+    for (let page = 1; total === undefined || items.length < total; page++) {
+      if (page > 1000) {
+        throw new InventoryError(
+          "RESPUESTA_INCOMPATIBLE",
+          "Inventario excedió el límite de paginación de ubicaciones.",
+        );
+      }
+      const response = await this.transport.request(
+        `/api/v1/inventario/ubicaciones?soloActivas=false&tamanio=100&pagina=${page}`,
+        { method: "GET" },
+      );
+      if (response.status === 401) {
+        throw new InventoryError(
+          "NO_AUTENTICADO",
+          "Inventario rechazó la autorización.",
+        );
+      }
+      if (response.status === 403) {
+        throw new InventoryError(
+          "SIN_PERMISO",
+          "Tu rol no permite consultar ubicaciones.",
+        );
+      }
+      if (!response.ok) {
+        throw new InventoryError(
+          "SERVICIO_NO_DISPONIBLE",
+          "Inventario no pudo completar la consulta de ubicaciones.",
+        );
+      }
+      const body = (await response.json()) as {
+        items?: Array<{
+          id?: unknown;
+          name?: unknown;
+          active?: unknown;
+        }>;
+        meta?: {
+          total?: unknown;
+          pagina?: unknown;
+          tamanio?: unknown;
+          totalPaginas?: unknown;
+        };
+      };
+      if (!body || !Array.isArray(body.items) || !body.meta) {
+        throw new InventoryError(
+          "RESPUESTA_INCOMPATIBLE",
+          "Inventario devolvió una respuesta incompatible de ubicaciones.",
+        );
+      }
+      const pageTotal = Number(body.meta.total);
+      const pageSize = Number(body.meta.tamanio);
+      if (
+        !Number.isSafeInteger(pageTotal) ||
+        pageTotal < 0 ||
+        !Number.isSafeInteger(pageSize) ||
+        pageSize < 1 ||
+        pageSize > 100
+      ) {
+        throw new InventoryError(
+          "RESPUESTA_INCOMPATIBLE",
+          "Inventario devolvió metadatos inválidos de paginación de ubicaciones.",
+        );
+      }
+      if (expectedPageSize === undefined) expectedPageSize = pageSize;
+      else if (pageSize !== expectedPageSize) {
+        throw new InventoryError(
+          "RESPUESTA_INCOMPATIBLE",
+          "Inventario cambió el tamaño de página de ubicaciones durante la consulta.",
+        );
+      }
+      const pages = Math.ceil(pageTotal / pageSize);
+      const expectedLength =
+        page > pages ? 0 : Math.min(pageSize, pageTotal - (page - 1) * pageSize);
+      if (
+        body.meta.pagina !== page ||
+        body.meta.totalPaginas !== pages ||
+        body.items.length !== expectedLength
+      ) {
+        throw new InventoryError(
+          "RESPUESTA_INCOMPATIBLE",
+          "Inventario devolvió una página de ubicaciones inconsistente.",
+        );
+      }
+      if (total !== undefined && total !== pageTotal) {
+        throw new InventoryError(
+          "RESPUESTA_INCOMPATIBLE",
+          "El total de ubicaciones cambió durante la consulta.",
+        );
+      }
+      total = pageTotal;
+
+      for (const row of body.items) {
+        if (
+          typeof row.id !== "string" ||
+          !row.id.trim() ||
+          typeof row.name !== "string" ||
+          !row.name.trim() ||
+          typeof row.active !== "boolean"
+        ) {
+          throw new InventoryError(
+            "RESPUESTA_INCOMPATIBLE",
+            "Inventario devolvió una ubicación inválida.",
+          );
+        }
+        if (seen.has(row.id)) {
+          throw new InventoryError(
+            "RESPUESTA_INCOMPATIBLE",
+            "Inventario repitió una ubicación entre páginas.",
+          );
+        }
+        seen.add(row.id);
+        items.push({ id: row.id, name: row.name, active: row.active });
+      }
+      if (pageTotal === 0) break;
+    }
+
+    return items;
   }
 
   private unimplemented(operation: string): Error {

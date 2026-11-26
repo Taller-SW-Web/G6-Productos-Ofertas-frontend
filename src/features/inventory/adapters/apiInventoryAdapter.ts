@@ -5,7 +5,9 @@ import {
 import type { InventoryRepository } from "../services/inventoryRepository";
 import type {
   DashboardFiltersQuery,
+  InventoryAlert,
   InventoryKpiSummary,
+  InventoryLocationOption,
   LocationDistribution,
   ReceiveTransferPayload,
   StockItem,
@@ -113,16 +115,12 @@ const MAX_PAGES = 1000;
 const BLOCKED_DETAILS = {
   getDashboardKpisFilter:
     "obtenerDashboardInventario no admite filtrar por texto libre, estado de stock, categoría o marca; quita ese filtro para consultar el agregado",
-  getDashboardAlerts:
-    "no existe operación de alertas en el contrato de Inventario",
   getLocationDistribution:
     "obtenerDashboardInventario no admite filtrar por texto libre, estado de stock, categoría o marca",
   getCategories:
     "operación de Catálogo (no de Inventario); destino de la integración de filtros pendiente de definición (paginación)",
   getBrands:
     "operación de Catálogo (no de Inventario); destino de la integración de filtros pendiente de definición (paginación)",
-  getLocations:
-    "sin endpoint HTTP publicado (fuente física inventory.locations)",
 } as const;
 
 function blocked(operation: string, detail: string): InventoryError {
@@ -186,6 +184,62 @@ function toPhysicalStockItem(value: unknown): StockItem {
     available: stockInt(dto.available), threshold: stockInt(dto.umbralEfectivo),
     status: dto.estado, stockVersion: stockInt(dto.stockVersion), updatedAt,
   };
+}
+
+function toAlertItem(value: unknown): InventoryAlert {
+  const dto = stockObject(value);
+  const alertaId = stockText(dto.alertaId);
+  const sku = stockText(dto.sku);
+  const location = stockObject(dto.ubicacion);
+  const locationId = stockText(location.locationId);
+  const codigo = stockText(location.codigo);
+  const nombre = stockText(location.nombre);
+  stockText(location.tipo);
+  if (dto.estado !== "AGOTADO" && dto.estado !== "STOCK_BAJO") {
+    throw new InventoryError(
+      "RESPUESTA_INCOMPATIBLE",
+      "Inventario devolvió un estado de alerta desconocido.",
+    );
+  }
+  const available = stockInt(dto.available);
+  const umbralEfectivo = stockInt(dto.umbralEfectivo);
+  const observadoEn = stockText(dto.observadoEn);
+  if (!Number.isFinite(Date.parse(observadoEn))) {
+    throw new InventoryError(
+      "RESPUESTA_INCOMPATIBLE",
+      "Inventario devolvió una fecha de observación de alerta inválida.",
+    );
+  }
+  const targetRoute = stockText(dto.targetRoute);
+
+  return {
+    id: alertaId,
+    severity: dto.estado === "AGOTADO" ? "error" : "warning",
+    title:
+      dto.estado === "AGOTADO"
+        ? `Stock agotado: ${sku}`
+        : `Stock bajo: ${sku}`,
+    message: `${nombre} (${codigo}) — Disponible: ${available}, umbral efectivo: ${umbralEfectivo}.`,
+    actionLabel: "Ver saldo",
+    targetRoute,
+    sku,
+    locationId,
+  };
+}
+
+function toLocationOption(value: unknown): InventoryLocationOption {
+  const dto = stockObject(value);
+  const id = stockText(dto.id);
+  stockText(dto.code);
+  const name = stockText(dto.name);
+  stockText(dto.type);
+  if (typeof dto.active !== "boolean") {
+    throw new InventoryError(
+      "RESPUESTA_INCOMPATIBLE",
+      "Inventario devolvió un estado de ubicación inválido.",
+    );
+  }
+  return { id, name, active: dto.active };
 }
 function isAbort(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
@@ -989,10 +1043,127 @@ export function createHttpInventoryRepository(
       );
     },
 
-    getDashboardAlerts() {
-      return Promise.reject(
-        blocked("getDashboardAlerts", BLOCKED_DETAILS.getDashboardAlerts),
-      );
+    async getDashboardAlerts(
+      filters?: DashboardFiltersQuery,
+    ): Promise<InventoryAlert[]> {
+      const category = contractFilterValue(filters?.category);
+      const brand = contractFilterValue(filters?.brand);
+      if ((category || brand) && !dependencies.listCatalogSkus) {
+        throw blocked(
+          "getDashboardAlerts",
+          "Los filtros de categoría y marca necesitan metadatos de Catálogo.",
+        );
+      }
+
+      const status = contractFilterValue(filters?.status);
+      if (
+        status &&
+        status !== "DISPONIBLE" &&
+        status !== "AGOTADO" &&
+        status !== "STOCK_BAJO"
+      ) {
+        throw new InventoryError(
+          "VALIDACION",
+          "El estado de alerta solicitado no es válido.",
+        );
+      }
+      if (status === "DISPONIBLE") {
+        // Las alertas operativas publican únicamente AGOTADO y STOCK_BAJO.
+        return [];
+      }
+
+      const sku = filters?.search?.trim() || undefined;
+      const locationId = contractFilterValue(filters?.locationId);
+
+      const output: InventoryAlert[] = [];
+      const seenIds = new Set<string>();
+      let total: number | undefined;
+
+      for (let page = 1; total === undefined || output.length < total; page++) {
+        if (page > MAX_PAGES) {
+          throw new InventoryError(
+            "RESPUESTA_INCOMPATIBLE",
+            "Inventario excedió el límite de paginación de alertas.",
+          );
+        }
+        const params = new URLSearchParams({
+          tamanio: String(PAGE_SIZE),
+          pagina: String(page),
+        });
+        if (sku) params.set("sku", sku);
+        if (locationId) params.set("locationId", locationId);
+        if (status) params.set("estado", status);
+
+        const response = stockObject(
+          await json(
+            `/api/v1/inventario/alertas?${params}`,
+            { method: "GET" },
+            false,
+          ),
+        );
+        const meta = stockObject(response.meta);
+        const pageTotal = stockInt(meta.total);
+        const pages = Math.ceil(pageTotal / PAGE_SIZE);
+        const expectedLength =
+          page > pages ? 0 : Math.min(PAGE_SIZE, pageTotal - (page - 1) * PAGE_SIZE);
+        if (
+          !Array.isArray(response.items) ||
+          meta.pagina !== page ||
+          meta.tamanio !== PAGE_SIZE ||
+          meta.totalPaginas !== pages ||
+          response.items.length !== expectedLength
+        ) {
+          throw new InventoryError(
+            "RESPUESTA_INCOMPATIBLE",
+            "Inventario devolvió una página de alertas inconsistente.",
+          );
+        }
+        if (total !== undefined && total !== pageTotal) {
+          throw new InventoryError(
+            "RESPUESTA_INCOMPATIBLE",
+            "El total de alertas cambió durante la consulta.",
+          );
+        }
+        total = pageTotal;
+
+        for (const rawItem of response.items) {
+          const item = toAlertItem(rawItem);
+          if (seenIds.has(item.id)) {
+            throw new InventoryError(
+              "RESPUESTA_INCOMPATIBLE",
+              "Inventario repitió una alerta en páginas distintas.",
+            );
+          }
+          if (
+            (sku && item.sku !== sku) ||
+            (locationId && item.locationId !== locationId)
+          ) {
+            throw new InventoryError(
+              "RESPUESTA_INCOMPATIBLE",
+              "Inventario devolvió una alerta ajena a los filtros.",
+            );
+          }
+          seenIds.add(item.id);
+          output.push(item);
+        }
+        if (pageTotal === 0) break;
+      }
+
+      if (category || brand) {
+        const catalog = new Map(
+          (await dependencies.listCatalogSkus!()).map((item) => [item.sku, item]),
+        );
+        return output.filter((alert) => {
+          const metadata = alert.sku ? catalog.get(alert.sku) : undefined;
+          return (
+            Boolean(metadata) &&
+            (!category || category === metadata!.categoryId) &&
+            (!brand || brand === metadata!.brandId)
+          );
+        });
+      }
+
+      return output;
     },
 
     async getLocationDistribution(
@@ -1011,6 +1182,84 @@ export function createHttpInventoryRepository(
 
     async getBrands() { if (!dependencies.getBrands) throw blocked("getBrands", "Catálogo no proporcionó marcas administrativas"); return dependencies.getBrands(); },
 
-    async getLocations() { return (await this.getLocationDistribution()).map(item => ({ id: item.locationId, name: `ID ${item.locationId}`, active: true })); },
+    async getLocations(): Promise<InventoryLocationOption[]> {
+      const output: InventoryLocationOption[] = [];
+      const seenIds = new Set<string>();
+      let total: number | undefined;
+      let expectedPageSize: number | undefined;
+
+      for (let page = 1; total === undefined || output.length < total; page++) {
+        if (page > MAX_PAGES) {
+          throw new InventoryError(
+            "RESPUESTA_INCOMPATIBLE",
+            "Inventario excedió el límite de paginación de ubicaciones.",
+          );
+        }
+        const params = new URLSearchParams({
+          soloActivas: "false",
+          tamanio: String(PAGE_SIZE),
+          pagina: String(page),
+        });
+        const response = stockObject(
+          await json(
+            `/api/v1/inventario/ubicaciones?${params}`,
+            { method: "GET" },
+            false,
+          ),
+        );
+        const meta = stockObject(response.meta);
+        const pageTotal = stockInt(meta.total);
+        const pageSize = stockInt(meta.tamanio);
+        if (pageSize < 1 || pageSize > PAGE_SIZE) {
+          throw new InventoryError(
+            "RESPUESTA_INCOMPATIBLE",
+            "Inventario devolvió un tamaño de página de ubicaciones inválido.",
+          );
+        }
+        if (expectedPageSize === undefined) expectedPageSize = pageSize;
+        else if (pageSize !== expectedPageSize) {
+          throw new InventoryError(
+            "RESPUESTA_INCOMPATIBLE",
+            "Inventario cambió el tamaño de página de ubicaciones durante la consulta.",
+          );
+        }
+        const pages = Math.ceil(pageTotal / pageSize);
+        const expectedLength =
+          page > pages ? 0 : Math.min(pageSize, pageTotal - (page - 1) * pageSize);
+        if (
+          !Array.isArray(response.items) ||
+          meta.pagina !== page ||
+          meta.totalPaginas !== pages ||
+          response.items.length !== expectedLength
+        ) {
+          throw new InventoryError(
+            "RESPUESTA_INCOMPATIBLE",
+            "Inventario devolvió una página de ubicaciones inconsistente.",
+          );
+        }
+        if (total !== undefined && total !== pageTotal) {
+          throw new InventoryError(
+            "RESPUESTA_INCOMPATIBLE",
+            "El total de ubicaciones cambió durante la consulta.",
+          );
+        }
+        total = pageTotal;
+
+        for (const rawItem of response.items) {
+          const item = toLocationOption(rawItem);
+          if (seenIds.has(item.id)) {
+            throw new InventoryError(
+              "RESPUESTA_INCOMPATIBLE",
+              "Inventario repitió una ubicación en páginas distintas.",
+            );
+          }
+          seenIds.add(item.id);
+          output.push(item);
+        }
+        if (pageTotal === 0) break;
+      }
+
+      return output;
+    },
   };
 }
