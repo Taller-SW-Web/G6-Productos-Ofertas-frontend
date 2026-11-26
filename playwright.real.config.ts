@@ -11,6 +11,10 @@ if (process.env.VITE_DATA_MODE && process.env.VITE_DATA_MODE !== "api") {
   );
 }
 
+const gatewayOrigin =
+  process.env.VITE_GATEWAY_ORIGIN ?? process.env.G6_REAL_GATEWAY_URL ?? "";
+const g7ApiBase = process.env.VITE_G7_API_BASE ?? "";
+
 export default defineConfig({
   testDir: "./tests/e2e-real",
   testMatch: "**/*.real.spec.ts",
@@ -34,6 +38,8 @@ export default defineConfig({
     env: {
       ...process.env,
       VITE_DATA_MODE: "api",
+      ...(gatewayOrigin ? { VITE_GATEWAY_ORIGIN: gatewayOrigin } : {}),
+      ...(g7ApiBase ? { VITE_G7_API_BASE: g7ApiBase } : {}),
     },
   },
 });
