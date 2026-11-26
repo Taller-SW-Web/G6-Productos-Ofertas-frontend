@@ -372,7 +372,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     await expect(page.getByText(comboName)).toBeVisible();
   });
 
-  test("8. Bulk: descargar plantilla CSV, importar lote, capturar batchId y hacer polling hasta estado terminal", async ({
+  test("8. Bulk: descargar plantilla CSV, importar lote, capturar batch_id y hacer polling hasta estado terminal", async ({
     page,
     request,
   }) => {
@@ -410,23 +410,15 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       uploadBtn.click(),
     ]);
     expect([200, 201, 202]).toContain(importRes.status());
-    const batchDto = (await importRes.json()) as { batchId?: string };
-    expect(batchDto.batchId).toBeTruthy();
+    const batchDto = (await importRes.json()) as { batch_id?: string; status?: string };
+    expect(batchDto.batch_id).toBeTruthy();
 
     const token = await issueTokenFromTrustedG7(env.g7ApiBase, "gestor@example.test");
-    const TERMINAL_BULK_STATES = new Set([
-      "COMPLETADO",
-      "COMPLETADO_CON_ERRORES",
-      "FALLIDO",
-      "RECHAZADO",
-      "COMPLETED",
-      "COMPLETED_WITH_ERRORS",
-      "FAILED",
-    ]);
-    let batchSnapshot: { batchId?: string; status?: string; rows?: unknown[] } = {};
+    const TERMINAL_BULK_STATES = new Set(["COMPLETED", "FAILED_GENERAL"]);
+    let batchSnapshot: { batch_id?: string; status?: string; rows?: unknown[] } = {};
     for (let attempt = 0; attempt < 25; attempt += 1) {
       const pollRes = await request.get(
-        `${env.gatewayUrl}/api/v1/carga-masiva/productos/importaciones/${encodeURIComponent(batchDto.batchId!)}`,
+        `${env.gatewayUrl}/api/v1/carga-masiva/productos/importaciones/${encodeURIComponent(batchDto.batch_id!)}`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
       expect(pollRes.status()).toBe(200);
@@ -436,7 +428,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       }
       await new Promise((r) => setTimeout(r, 250));
     }
-    expect(batchSnapshot.batchId).toBe(batchDto.batchId);
+    expect(batchSnapshot.batch_id).toBe(batchDto.batch_id);
     expect(TERMINAL_BULK_STATES.has(batchSnapshot.status ?? "")).toBe(true);
     expect(Array.isArray(batchSnapshot.rows)).toBe(true);
     expect((batchSnapshot.rows ?? []).length).toBeGreaterThanOrEqual(1);
