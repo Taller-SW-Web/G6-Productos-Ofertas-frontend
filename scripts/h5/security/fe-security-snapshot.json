@@ -1,0 +1,231 @@
+{
+  "e2e_sharding": {
+    "mode": "AUTOMATIC_FALLBACK",
+    "missing_manifest_specs": 6,
+    "example": "tests/h5/security-boundary.spec.ts",
+    "source": "https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/45508348798/job/138849573451",
+    "coordination": "Update shards/manifests after PR 79 merge"
+  },
+  "historical_playwright": {
+    "classification": "INTERMITTENT_UNRESOLVED",
+    "wide_runs": [
+      "59/62",
+      "61/62",
+      "37/38"
+    ],
+    "isolated_retries": "PASS",
+    "security_boundary": "7/7 PASS L1_SYNTHETIC",
+    "limits": "Isolated retries do not turn historical failures into PASS"
+  },
+  "identity_headers_level": "L1_SYNTHETIC",
+  "real_g7": "BLOCKED_G7",
+  "real_server_headers": "SERVER_HEADERS_NOT_VERIFIED",
+  "repo": "Taller-SW-Web/G6-Productos-Ofertas-frontend",
+  "source_sha": "1a5b8dcfdc644c52100ccf2674f93f36043ccdda",
+  "source_tree_dirty": true,
+  "source_fingerprint_sha256": "4764000120cb5a29c081b608497c74ef41e65b3e1dba9d090e4e8847ec4e4e47",
+  "docs_sha": "c9e1e5c217616d28229fccf5315fb97a1ae061a9",
+  "timestamp_utc": "2026-11-25T02:38:02.486Z",
+  "node_version": "v24.22.0",
+  "lock_sha256": "d838bb331d1dd700faace5c5764bbf891f929deeb47f1c539b2c28220405aac5",
+  "scanner_status": {
+    "unit": "PASS",
+    "browser": "PASS",
+    "audit": "PASS",
+    "gitleaks": "FAIL",
+    "gitleaks_scanner": "FAIL",
+    "gitleaks_diff": "PASS",
+    "codeql": "GITHUB_ADMIN_NOT_VERIFIED",
+    "server_headers": "SERVER_HEADERS_NOT_VERIFIED"
+  },
+  "cases": [
+    {
+      "case_id": "LOP-A01-SARIF-NEGATIVES",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "PASS"
+    },
+    {
+      "case_id": "LOP-A01-CODEQL-ACTIVE",
+      "implementation_state": "READY_FOR_INTEGRATION",
+      "execution_result": "BLOCKED_GH_ADMIN",
+      "owner": "GitHub Admin"
+    },
+    {
+      "case_id": "LOP-A02-SCA",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "PASS",
+      "details": {
+        "production": {
+          "info": 0,
+          "low": 0,
+          "moderate": 0,
+          "high": 0,
+          "critical": 0
+        },
+        "dev": {
+          "info": 0,
+          "low": 0,
+          "moderate": 0,
+          "high": 0,
+          "critical": 0
+        },
+        "unknown": {
+          "info": 0,
+          "low": 0,
+          "moderate": 0,
+          "high": 0,
+          "critical": 0
+        }
+      }
+    },
+    {
+      "case_id": "LOP-A02-GITLEAKS-HISTORY",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "FAIL",
+      "reason": "HISTORY_REVIEW_PENDING",
+      "scanner_result": "FAIL",
+      "owner": "Frontend/security"
+    },
+    {
+      "case_id": "LOP-A02-GITLEAKS-DIFF",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "PASS",
+      "owner": "Frontend/security"
+    },
+    {
+      "case_id": "LOP-A02-NEGATIVE-FIXTURES",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "PASS",
+      "limits": "Gitleaks integration fixture is skipped when tool unavailable"
+    },
+    {
+      "case_id": "LOP-A03-ANONYMOUS",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "PASS",
+      "limits": "Synthetic provider; no real JWT or grants",
+      "level": "L1_SYNTHETIC",
+      "real_g7": "BLOCKED_G7",
+      "real_server_headers": "SERVER_HEADERS_NOT_VERIFIED"
+    },
+    {
+      "case_id": "LOP-A03-SCOPE-M2M-FIXTURE",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "PASS",
+      "limits": "Synthetic provider; no real JWT or grants",
+      "level": "L1_SYNTHETIC",
+      "real_g7": "BLOCKED_G7",
+      "real_server_headers": "SERVER_HEADERS_NOT_VERIFIED"
+    },
+    {
+      "case_id": "LOP-A03-CORS-PREFLIGHT",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "PASS",
+      "limits": "Synthetic provider; no real JWT or grants",
+      "level": "L1_SYNTHETIC",
+      "real_g7": "BLOCKED_G7",
+      "real_server_headers": "SERVER_HEADERS_NOT_VERIFIED"
+    },
+    {
+      "case_id": "LOP-A03-CORS-DENIED",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "PASS",
+      "limits": "Synthetic provider; no real JWT or grants",
+      "level": "L1_SYNTHETIC",
+      "real_g7": "BLOCKED_G7",
+      "real_server_headers": "SERVER_HEADERS_NOT_VERIFIED"
+    },
+    {
+      "case_id": "LOP-A03-CSP-ISOLATED",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "PASS",
+      "limits": "Synthetic provider; no real JWT or grants",
+      "level": "L1_SYNTHETIC",
+      "real_g7": "BLOCKED_G7",
+      "real_server_headers": "SERVER_HEADERS_NOT_VERIFIED"
+    },
+    {
+      "case_id": "LOP-A03-XSS-UI",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "PASS",
+      "limits": "Synthetic provider; no real JWT or grants",
+      "level": "L1_SYNTHETIC",
+      "real_g7": "BLOCKED_G7",
+      "real_server_headers": "SERVER_HEADERS_NOT_VERIFIED"
+    },
+    {
+      "case_id": "LOP-A03-REFRESH-MULTITAB-LOGOUT",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "PASS",
+      "owner": "Frontend",
+      "limits": "Synthetic provider, new tab and logout; active-tab revocation remains external",
+      "level": "L1_SYNTHETIC",
+      "real_g7": "BLOCKED_G7",
+      "real_server_headers": "SERVER_HEADERS_NOT_VERIFIED"
+    },
+    {
+      "case_id": "LOP-A03-JWT-SYNTHETIC",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "PASS",
+      "limits": "Synthetic provider, no G7 authority",
+      "level": "L1_SYNTHETIC",
+      "real_g7": "BLOCKED_G7",
+      "real_server_headers": "SERVER_HEADERS_NOT_VERIFIED"
+    },
+    {
+      "case_id": "LOP-A03-REAL-JWT-SCOPE",
+      "implementation_state": "READY_FOR_INTEGRATION",
+      "execution_result": "BLOCKED_G7",
+      "owner": "G7",
+      "level": "L2_PENDING",
+      "real_g7": "BLOCKED_G7",
+      "real_server_headers": "SERVER_HEADERS_NOT_VERIFIED"
+    },
+    {
+      "case_id": "LOP-A03-REAL-CSP-CORS",
+      "implementation_state": "READY_FOR_INTEGRATION",
+      "execution_result": "NOT_RUN",
+      "owner": "Frontend/Infra",
+      "level": "L2_PENDING",
+      "real_g7": "BLOCKED_G7",
+      "real_server_headers": "SERVER_HEADERS_NOT_VERIFIED"
+    },
+    {
+      "case_id": "LOP-A04-INT06",
+      "implementation_state": "READY_FOR_INTEGRATION",
+      "execution_result": "PASS",
+      "owner": "Taxonomy"
+    },
+    {
+      "case_id": "LOP-A05-CI-INTEGRATION",
+      "implementation_state": "READY_FOR_INTEGRATION",
+      "execution_result": "BLOCKED_GH_ADMIN",
+      "owner": "Frontend/GitHub Admin"
+    },
+    {
+      "case_id": "LOP-A06-BUNDLE-MOCK",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "PASS",
+      "artifact_sha256": "417a9bd63ec669aba2770a9f3e37bd45c6346881cfa8cccbd0a00c9df2c45a15"
+    },
+    {
+      "case_id": "LOP-A06-BUNDLE-API",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "PASS",
+      "artifact_sha256": "375b291e279a9fa52c0fb2f0353ab3ad235e04f0f9a0beadf678952fa84b0b9c"
+    },
+    {
+      "case_id": "LOP-A07-SERVICE-BUS",
+      "implementation_state": "READY_FOR_INTEGRATION",
+      "execution_result": "BLOCKED_SB",
+      "owner": "Axel/Azure"
+    },
+    {
+      "case_id": "LOP-A07-TAXONOMY-HTTP",
+      "implementation_state": "READY_FOR_INTEGRATION",
+      "execution_result": "NOT_RUN",
+      "reason": "NOT_EXECUTED",
+      "owner": "Taxonomy",
+      "limits": "Backend branch under test, PostgreSQL disposable; not deployed"
+    }
+  ]
+}

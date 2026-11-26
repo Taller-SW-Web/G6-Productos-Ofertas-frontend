@@ -31,7 +31,8 @@ test("UI API 1440: POST contractual, error 409 visible, datos conservados y sin 
   expect(posts).toBe(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.evaluate(() => window.scrollTo(0, 0));
-  await page.screenshot({ path: test.info().outputPath("catalogo-http-error-1440.png"), fullPage: true });
+  if (process.env.G6_H5_DISABLE_SCREENSHOTS !== "1")
+    await page.screenshot({ path: test.info().outputPath("catalogo-http-error-1440.png"), fullPage: true });
 });
 
 for (const status of [401, 403, 503]) {
@@ -60,7 +61,8 @@ test("UI API: lectura administrativa bloqueada conserva preparación independien
   await expect(page.getByText("Inventario: Rechazado", { exact: true })).toBeVisible();
   await expect(page.getByText("404 - Producto inexistente", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Reintentar preparación/ })).toHaveCount(0);
-  await page.screenshot({ path: test.info().outputPath("catalogo-preparacion-parcial-1440.png"), fullPage: true });
+  if (process.env.G6_H5_DISABLE_SCREENSHOTS !== "1")
+    await page.screenshot({ path: test.info().outputPath("catalogo-preparacion-parcial-1440.png"), fullPage: true });
 });
 
 test("UI Catalog: HTTP 202 comunica admisión y conserva PENDING hasta consultar el resultado de Catálogo", async ({ page }) => {
