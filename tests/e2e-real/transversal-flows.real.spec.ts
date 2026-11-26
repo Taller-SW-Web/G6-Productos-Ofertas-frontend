@@ -133,7 +133,56 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
       "modulo-ventas",
       "cupones:consumir cupones:restaurar cupones:operaciones:leer",
     );
+    const consumeKey = randomUUID();
+    const orderId = randomUUID();
+    const consumeBody = { codigo: couponCode, orderId };
+    const consumeHeaders = {
+      Authorization: `Bearer ${g5Token}`,
+      "X-Correlation-Id": randomUUID(),
+      "Idempotency-Key": consumeKey,
+      "Content-Type": "application/json",
+    };
+
+    // 4a. Consumo N01
     const consumeRes = await request.post(
+      `${env.gatewayUrl}/api/v1/cupones/consumos`,
+      { headers: consumeHeaders, data: consumeBody },
+    );
+    expect([200, 202]).toContain(consumeRes.status());
+    const consumeOp = (await consumeRes.json()) as { operation_id?: string };
+    expect(consumeOp.operation_id).toBeTruthy();
+
+    // 4b. Duplicación idempotente (mismo Idempotency-Key + payload)
+    const dupConsumeRes = await request.post(
+      `${env.gatewayUrl}/api/v1/cupones/consumos`,
+      { headers: consumeHeaders, data: consumeBody },
+    );
+    expect([200, 202]).toContain(dupConsumeRes.status());
+
+    // 4c. Consulta estado terminal de operación N01
+    const opStatusRes = await request.get(
+      `${env.gatewayUrl}/api/v1/cupones/operaciones/${encodeURIComponent(consumeOp.operation_id!)}`,
+      { headers: { Authorization: `Bearer ${g5Token}` } },
+    );
+    expect(opStatusRes.status()).toBe(200);
+
+    // 4d. Restauración N01
+    const restoreRes = await request.post(
+      `${env.gatewayUrl}/api/v1/cupones/restauraciones`,
+      {
+        headers: {
+          Authorization: `Bearer ${g5Token}`,
+          "X-Correlation-Id": randomUUID(),
+          "Idempotency-Key": randomUUID(),
+          "Content-Type": "application/json",
+        },
+        data: { codigo: couponCode, orderId, motivo: "CANCELACION_E2E" },
+      },
+    );
+    expect([200, 202]).toContain(restoreRes.status());
+
+    // 4e. Rechazo contractual ante cupón inexistente
+    const rejectRes = await request.post(
       `${env.gatewayUrl}/api/v1/cupones/consumos`,
       {
         headers: {
@@ -142,12 +191,9 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
           "Idempotency-Key": randomUUID(),
           "Content-Type": "application/json",
         },
-        data: {
-          codigo: couponCode,
-          orderId: randomUUID(),
-        },
+        data: { codigo: "NO-EXISTE-9999", orderId: randomUUID() },
       },
     );
-    expect([200, 202]).toContain(consumeRes.status());
+    expect([404, 422]).toContain(rejectRes.status());
   });
 });

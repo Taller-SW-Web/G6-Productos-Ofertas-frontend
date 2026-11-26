@@ -9,9 +9,9 @@ export const REAL_STACK_MANIFEST_PATH = resolve(
 export interface RealStackEnvironment {
   gatewayUrl: string;
   g7ApiBase: string;
-  databaseUrl: string;
   g7Issuer: string;
   g7JwksUrl: string;
+  viteOrigin: string;
   dataMode: "api";
   adminApiEnabled: true;
 }
@@ -73,11 +73,11 @@ export function assertRealStackPreflight(): RealStackEnvironment {
     process.env.VITE_GATEWAY_ORIGIN ??
     manifest.gatewayUrl;
   const g7ApiBaseRaw = process.env.VITE_G7_API_BASE ?? manifest.g7ApiBase;
-  const dbRaw = process.env.G6_REAL_PG_URL ?? manifest.databaseUrl;
   const g7Issuer = process.env.G6_REAL_G7_ISSUER ?? manifest.g7Issuer;
   const g7JwksUrl = process.env.G6_REAL_G7_JWKS_URL ?? manifest.g7JwksUrl;
+  const viteOrigin = manifest.viteOrigin ?? "http://127.0.0.1:4173";
 
-  if (!gatewayRaw || !g7ApiBaseRaw || !dbRaw || !g7Issuer || !g7JwksUrl) {
+  if (!gatewayRaw || !g7ApiBaseRaw || !g7Issuer || !g7JwksUrl) {
     throw new Error(
       "PREFLIGHT_BLOCKED: Faltan variables obligatorias del stack real. Ejecuta mediante playwright.real.config.ts.",
     );
@@ -85,15 +85,14 @@ export function assertRealStackPreflight(): RealStackEnvironment {
 
   assertSafeLocalUrl(gatewayRaw, "G6_REAL_GATEWAY_URL");
   assertSafeLocalUrl(g7ApiBaseRaw, "VITE_G7_API_BASE");
-  assertSafeLocalUrl(dbRaw, "G6_REAL_PG_URL");
   assertSafeLocalUrl(g7JwksUrl, "G6_REAL_G7_JWKS_URL");
 
   return {
     gatewayUrl: gatewayRaw.replace(/\/$/, ""),
     g7ApiBase: g7ApiBaseRaw.replace(/\/$/, ""),
-    databaseUrl: dbRaw,
     g7Issuer,
     g7JwksUrl,
+    viteOrigin,
     dataMode: "api",
     adminApiEnabled: true,
   };
@@ -190,6 +189,15 @@ export async function navigateViaSpa(
   const navLink = page.locator(`nav a[href="${href}"]`).first();
   await navLink.waitFor({ state: "visible" });
   await navLink.click();
+}
+
+export async function navigateViaSubLink(
+  page: SpaPageLike,
+  href: string,
+): Promise<void> {
+  const subLink = page.locator(`main a[href="${href}"], a[href="${href}"]`).first();
+  await subLink.waitFor({ state: "visible" });
+  await subLink.click();
 }
 
 export async function reloadVerifySessionLostAndReauth(

@@ -1,10 +1,17 @@
 import { execFile, spawn } from "node:child_process";
 import { generateKeyPairSync, randomUUID, sign } from "node:crypto";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import { once } from "node:events";
-import { resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 
@@ -25,6 +32,113 @@ const MANIFEST_PATH = resolve(
   process.cwd(),
   "tests/e2e-real/.runtime-stack.json",
 );
+
+/**
+ * Inventario ordenado de scripts SQL aplicados por microservicio.
+ * Ningún error de esquema o migración se oculta; cualquier fallo aborta el arranque.
+ */
+export const SQL_INVENTORY_BY_SERVICE = {
+  taxonomy: [
+    "apps/api-gateway/test/fixtures/phase1-taxonomy-0001.sql",
+    "apps/taxonomy-svc/migrations/0002_deactivation_source_version.sql",
+    "apps/taxonomy-svc/migrations/0003_deactivation_timeout_setting.sql",
+    "apps/taxonomy-svc/migrations/0004_product_type_pending_version.sql",
+    "apps/taxonomy-svc/migrations/0005_configurable_list_values.sql",
+    "apps/taxonomy-svc/migrations-candidate/h5/0001_outbox_delivery.sql",
+  ],
+  catalog: [
+    "apps/catalog-svc/test/fixtures/0001_create_catalog.sql",
+    "apps/catalog-svc/migrations/0002_create_sku_barcodes.sql",
+    "apps/catalog-svc/migrations/0003_product_publication_history.sql",
+    "apps/catalog-svc/migrations/0004_historical_preparation_requests.sql",
+    "apps/catalog-svc/migrations/0005_catalog_function_search_path.sql",
+    "apps/catalog-svc/migrations-candidate/h5/0001_outbox_delivery.sql",
+    "apps/catalog-svc/migrations-candidate/h5/0002_taxonomy_reply_transport.sql",
+    "apps/catalog-svc/migrations-candidate/h5/0003_bulk_retry_receipts.sql",
+  ],
+  pricing: [
+    "apps/pricing-svc/test/fixtures/pricing.sql",
+    "apps/pricing-svc/migrations/0002_schedule_effective_events.sql",
+    "apps/pricing-svc/migrations/0003_initialization_operation_index.sql",
+    "apps/pricing-svc/migrations/0004_price_import_idempotency.sql",
+    "apps/pricing-svc/migrations-candidate/h5/0001_outbox_delivery.sql",
+    "apps/pricing-svc/migrations/0003_service_bus_h5_routes_r2.sql",
+  ],
+  price_audit: [
+    "apps/price-audit-svc/test/fixtures/price-audit.sql",
+    "apps/price-audit-svc/migrations/0002_typed_price_change.sql",
+  ],
+  promotions: [
+    "apps/promotions-svc/migrations-candidate/h5/0001_coupon_http_operations.sql",
+    "apps/promotions-svc/migrations-candidate/h5/0002_coupon_http_runtime_role.sql",
+  ],
+  combos: ["apps/combos-svc/migrations/0002_create_combo_creation_receipts.sql"],
+  inventory: [
+    "apps/catalog-svc/test/fixtures/inventory-initial.sql",
+    "apps/catalog-svc/test/fixtures/inventory-operations.sql",
+    "apps/inventory-svc/migrations/20261104_0001_lifecycle_offline_reconciliation.sql",
+    "apps/inventory-svc/migrations-candidate/h5/0001_outbox_delivery.sql",
+  ],
+  bulk: [
+    "apps/bulk-svc/test/fixtures/0001_create_bulk_persistence.sql",
+    "apps/bulk-svc/migrations/0002_export_source_snapshot.sql",
+    "apps/bulk-svc/migrations/0003_export_claim_lease.sql",
+    "apps/bulk-svc/migrations/0004_catalog_claim_check_content.sql",
+    "apps/bulk-svc/migrations/0005_actor_ownership.sql",
+    "apps/bulk-svc/migrations/0006_owner_correlation_identity.sql",
+    "apps/bulk-svc/migrations/0007_bulk_retry_v1.sql",
+    "apps/bulk-svc/migrations/0008_h5_outbox_delivery.sql",
+  ],
+};
+
+function runPsql(containerName, database, sqlContent, label) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const child = spawn(
+      "docker",
+      [
+        "exec",
+        "-i",
+        containerName,
+        "psql",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-U",
+        "postgres",
+        "-d",
+        database,
+      ],
+      { stdio: ["pipe", "pipe", "pipe"] },
+    );
+
+    let stderr = "";
+    let stdout = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (err) => {
+      rejectPromise(
+        new Error(`PSQL_SPAWN_FAILED (${label}): ${err.message}`),
+      );
+    });
+    child.on("close", (code) => {
+      if (code !== 0) {
+        rejectPromise(
+          new Error(
+            `PSQL_FAILED (${label}, exit=${code}): ${stderr || stdout}`,
+          ),
+        );
+        return;
+      }
+      resolvePromise(stdout);
+    });
+
+    child.stdin.write(sqlContent, "utf8");
+    child.stdin.end();
+  });
+}
 
 async function reserveLocalPort() {
   return new Promise((resolvePort, reject) => {
@@ -57,9 +171,12 @@ async function waitForHttpReady(url, timeoutMs = 45_000) {
   throw new Error(`PREFLIGHT_BLOCKED: Servicio no respondió listo en ${url}`);
 }
 
-async function startDisposablePostgres(backendRoot) {
+async function startDisposablePostgresWithTls(backendRoot) {
   const containerName = `g6-e2e-stack-${randomUUID()}`;
   const password = randomUUID();
+  const certDir = mkdtempSync(join(tmpdir(), "g6-e2e-pg-tls-"));
+  const caCertPath = join(certDir, "server.crt");
+
   await exec(
     "docker",
     [
@@ -79,106 +196,124 @@ async function startDisposablePostgres(backendRoot) {
     { timeout: 60_000 },
   );
 
-  const { stdout } = await exec("docker", ["port", containerName, "5432/tcp"]);
-  const port = /^127\.0\.0\.1:(\d+)\s*$/.exec(stdout)?.[1];
-  if (!port) {
-    await exec("docker", ["rm", "--force", "--volumes", containerName]).catch(
-      () => undefined,
-    );
-    throw new Error("Puerto de PostgreSQL descartable inválido.");
-  }
+  try {
+    const { stdout } = await exec("docker", ["port", containerName, "5432/tcp"]);
+    const port = /^127\.0\.0\.1:(\d+)\s*$/.exec(stdout)?.[1];
+    if (!port) throw new Error("Puerto de PostgreSQL descartable inválido.");
 
-  for (let i = 0; i < 60; i += 1) {
-    try {
-      await exec(
-        "docker",
-        [
-          "exec",
-          containerName,
-          "pg_isready",
-          "-U",
-          "postgres",
-          "-d",
-          "g6_e2e_test",
-        ],
-        { timeout: 5_000 },
-      );
-      break;
-    } catch {
-      if (i === 59) {
-        await exec("docker", ["rm", "--force", "--volumes", containerName]).catch(
-          () => undefined,
+    for (let i = 0; i < 60; i += 1) {
+      try {
+        await exec(
+          "docker",
+          [
+            "exec",
+            containerName,
+            "pg_isready",
+            "-U",
+            "postgres",
+            "-d",
+            "g6_e2e_test",
+          ],
+          { timeout: 5_000 },
         );
-        throw new Error("PostgreSQL descartable no estuvo listo a tiempo.");
+        break;
+      } catch {
+        if (i === 59) throw new Error("PostgreSQL descartable no estuvo listo.");
+        await delay(250);
       }
-      await delay(250);
     }
-  }
 
-  const schemasSql = `
-    CREATE SCHEMA IF NOT EXISTS extensions;
-    CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA extensions;
-    CREATE SCHEMA IF NOT EXISTS catalog;
-    CREATE SCHEMA IF NOT EXISTS taxonomy;
-    CREATE SCHEMA IF NOT EXISTS pricing;
-    CREATE SCHEMA IF NOT EXISTS price_audit;
-    CREATE SCHEMA IF NOT EXISTS promotions;
-    CREATE SCHEMA IF NOT EXISTS combos;
-    CREATE SCHEMA IF NOT EXISTS inventory;
-    CREATE SCHEMA IF NOT EXISTS bulk;
-  `;
-  await exec(
-    "docker",
-    [
+    // Generar certificado TLS autofirmado con SAN IP:127.0.0.1 para verify-full real
+    await exec("docker", [
       "exec",
-      "-i",
       containerName,
-      "psql",
-      "-v",
-      "ON_ERROR_STOP=1",
-      "-U",
-      "postgres",
-      "-d",
+      "sh",
+      "-c",
+      'apk add --no-cache openssl >/dev/null && openssl req -x509 -newkey rsa:2048 -nodes -keyout /var/lib/postgresql/server.key -out /var/lib/postgresql/server.crt -days 1 -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1,DNS:localhost" && chown postgres:postgres /var/lib/postgresql/server.key /var/lib/postgresql/server.crt && chmod 600 /var/lib/postgresql/server.key',
+    ]);
+    await exec("docker", [
+      "cp",
+      `${containerName}:/var/lib/postgresql/server.crt`,
+      caCertPath,
+    ]);
+    await runPsql(
+      containerName,
       "g6_e2e_test",
-    ],
-    { input: schemasSql },
-  ).catch(() => undefined);
+      "ALTER SYSTEM SET ssl = 'on'; ALTER SYSTEM SET ssl_cert_file = '/var/lib/postgresql/server.crt'; ALTER SYSTEM SET ssl_key_file = '/var/lib/postgresql/server.key'; SELECT pg_reload_conf();",
+      "enable-postgres-tls",
+    );
 
-  const sqlCandidates = [
-    resolve(backendRoot, "apps/bulk-svc/test/fixtures/0001_create_bulk_persistence.sql"),
-    resolve(backendRoot, "apps/bulk-svc/migrations/0008_h5_outbox_delivery.sql"),
-  ];
-  for (const file of sqlCandidates) {
-    if (existsSync(file)) {
-      const content = readFileSync(file, "utf8");
-      await exec(
-        "docker",
-        [
-          "exec",
-          "-i",
-          containerName,
-          "psql",
-          "-v",
-          "ON_ERROR_STOP=1",
-          "-U",
-          "postgres",
-          "-d",
-          "g6_e2e_test",
-        ],
-        { input: content },
-      ).catch(() => undefined);
+    const roleAndSchemaSql = `
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'catalog_app') THEN
+          CREATE ROLE catalog_app LOGIN PASSWORD '${password}';
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'po_pricing_owner') THEN
+          CREATE ROLE po_pricing_owner NOLOGIN;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'pricing_app') THEN
+          CREATE ROLE pricing_app LOGIN PASSWORD '${password}';
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'combos_app') THEN
+          CREATE ROLE combos_app LOGIN PASSWORD '${password}';
+        END IF;
+      END $$;
+      CREATE SCHEMA IF NOT EXISTS extensions;
+      CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA extensions;
+      CREATE SCHEMA IF NOT EXISTS catalog AUTHORIZATION catalog_app;
+      CREATE SCHEMA IF NOT EXISTS taxonomy;
+      CREATE SCHEMA IF NOT EXISTS pricing AUTHORIZATION po_pricing_owner;
+      CREATE SCHEMA IF NOT EXISTS price_audit;
+      CREATE SCHEMA IF NOT EXISTS promotions;
+      CREATE SCHEMA IF NOT EXISTS combos AUTHORIZATION combos_app;
+      CREATE SCHEMA IF NOT EXISTS inventory;
+      CREATE SCHEMA IF NOT EXISTS bulk;
+      GRANT USAGE ON SCHEMA extensions TO po_pricing_owner, catalog_app, combos_app;
+    `;
+    await runPsql(containerName, "g6_e2e_test", roleAndSchemaSql, "roles-and-schemas");
+
+    for (const [service, files] of Object.entries(SQL_INVENTORY_BY_SERVICE)) {
+      for (const rel of files) {
+        const fullPath = resolve(backendRoot, rel);
+        if (!existsSync(fullPath)) {
+          throw new Error(`SQL_MISSING (${service}): ${fullPath}`);
+        }
+        const sql = readFileSync(fullPath, "utf8");
+        const wrapped =
+          service === "pricing"
+            ? `BEGIN; SET LOCAL ROLE po_pricing_owner;\n${sql}\nCOMMIT;`
+            : sql;
+        await runPsql(containerName, "g6_e2e_test", wrapped, `${service}:${rel}`);
+      }
     }
-  }
 
-  return {
-    containerName,
-    databaseUrl: `postgresql://postgres:${password}@127.0.0.1:${port}/g6_e2e_test`,
-    stop: async () => {
-      await exec("docker", ["rm", "--force", "--volumes", containerName], {
-        timeout: 15_000,
-      }).catch(() => undefined);
-    },
-  };
+    await runPsql(
+      containerName,
+      "g6_e2e_test",
+      "SELECT 1 FROM information_schema.tables WHERE table_schema IN ('catalog','taxonomy','pricing','price_audit','promotions','combos','inventory','bulk') LIMIT 1;",
+      "verify-schemas-non-empty",
+    );
+
+    return {
+      containerName,
+      port: Number(port),
+      password,
+      caCertPath,
+      databaseUrl: `postgresql://postgres:${password}@127.0.0.1:${port}/g6_e2e_test`,
+      stop: async () => {
+        rmSync(certDir, { recursive: true, force: true });
+        await exec("docker", ["rm", "--force", "--volumes", containerName], {
+          timeout: 15_000,
+        }).catch(() => undefined);
+      },
+    };
+  } catch (err) {
+    rmSync(certDir, { recursive: true, force: true });
+    await exec("docker", ["rm", "--force", "--volumes", containerName], {
+      timeout: 15_000,
+    }).catch(() => undefined);
+    throw err;
+  }
 }
 
 async function readJsonBody(req) {
@@ -232,6 +367,7 @@ async function startSingleLocalG7Server(issuer = "https://g7-local.test/auth") {
     return `${header}.${payload}.${sig}`;
   }
 
+  let baseUrl = "";
   const server = createServer(async (req, res) => {
     const url = req.url ?? "/";
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -240,6 +376,17 @@ async function startSingleLocalG7Server(issuer = "https://g7-local.test/auth") {
     if (req.method === "OPTIONS") {
       res.statusCode = 204;
       res.end();
+      return;
+    }
+    if (req.method === "GET" && url === "/.well-known/openid-configuration") {
+      res.setHeader("content-type", "application/json");
+      res.end(
+        JSON.stringify({
+          issuer,
+          jwks_uri: `${baseUrl}/jwks`,
+          token_endpoint: `${baseUrl}/auth/service-token`,
+        }),
+      );
       return;
     }
     if (req.method === "GET" && url === "/jwks") {
@@ -340,57 +487,123 @@ async function startSingleLocalG7Server(issuer = "https://g7-local.test/auth") {
   if (!addr || typeof addr === "string") {
     throw new Error("No se pudo iniciar servidor local G7/JWKS.");
   }
-  const baseUrl = `http://127.0.0.1:${addr.port}`;
+  baseUrl = `http://127.0.0.1:${addr.port}`;
   return {
     issuer,
     baseUrl,
     jwksUrl: `${baseUrl}/jwks`,
+    discoveryUrl: `${baseUrl}/.well-known/openid-configuration`,
+    tokenUrl: `${baseUrl}/auth/service-token`,
     close: () => new Promise((r) => server.close(() => r())),
   };
 }
 
 async function main() {
   const port = Number(process.env.PLAYWRIGHT_REAL_PORT ?? 4173);
+  const viteOrigin = `http://127.0.0.1:${port}`;
   const backendRoot = resolve(
     process.env.G6_BACKEND_ROOT ?? resolve(process.cwd(), "../backend"),
   );
 
-  const pg = await startDisposablePostgres(backendRoot);
-  const g7 = await startSingleLocalG7Server();
+  let pg;
+  let g7;
   const children = [];
 
-  const controlledBaseEnv = {
-    PATH: process.env.PATH ?? "",
-    SYSTEMROOT: process.env.SYSTEMROOT ?? "",
-    TEMP: process.env.TEMP ?? "",
-    TMP: process.env.TMP ?? "",
-    NODE_ENV: "test",
-    G6_SECURITY_MODE: "G7_AUTHENTICATED",
-    GATEWAY_G5_H5_ENABLED: "true",
-    AUTH_ISSUER: g7.issuer,
-    AUTH_JWKS_URL: g7.jwksUrl,
-    DATABASE_URL: pg.databaseUrl,
-    CATALOG_DATABASE_URL: pg.databaseUrl,
-    TAXONOMY_DATABASE_URL: pg.databaseUrl,
-    PRICING_DATABASE_URL: pg.databaseUrl,
-    PRICE_AUDIT_DATABASE_URL: pg.databaseUrl,
-    PROMOTIONS_DATABASE_URL: pg.databaseUrl,
-    COMBOS_DATABASE_URL: pg.databaseUrl,
-    INVENTORY_DATABASE_URL: pg.databaseUrl,
-    BULK_DATABASE_URL: pg.databaseUrl,
+  const cleanup = async (vite) => {
+    vite?.kill("SIGTERM");
+    for (const child of children) child.kill("SIGTERM");
+    await g7?.close();
+    await pg?.stop();
+    rmSync(MANIFEST_PATH, { force: true });
   };
 
   try {
+    pg = await startDisposablePostgresWithTls(backendRoot);
+    g7 = await startSingleLocalG7Server();
+
+    const controlledBaseEnv = {
+      PATH: process.env.PATH ?? "",
+      SYSTEMROOT: process.env.SYSTEMROOT ?? "",
+      TEMP: process.env.TEMP ?? "",
+      TMP: process.env.TMP ?? "",
+      NODE_ENV: "test",
+      G6_SECURITY_MODE: "G7_AUTHENTICATED",
+      GATEWAY_G5_H5_ENABLED: "true",
+      AUTH_ISSUER: g7.issuer,
+      AUTH_JWKS_URL: g7.jwksUrl,
+      SECURITY_ISSUER: g7.issuer,
+      SECURITY_DISCOVERY_URL: g7.discoveryUrl,
+      SECURITY_JWKS_URL: g7.jwksUrl,
+      PGHOST: "127.0.0.1",
+      PGPORT: String(pg.port),
+      PGDATABASE: "g6_e2e_test",
+      PGPASSWORD: pg.password,
+      PGSSLMODE: "verify-full",
+      PGSSLROOTCERT: pg.caCertPath,
+      DATABASE_URL: pg.databaseUrl,
+    };
+
     const serviceUrls = {};
     const servicePorts = {};
     for (const svc of SERVICE_NAMES) {
       const p = await reserveLocalPort();
       servicePorts[svc] = p;
       serviceUrls[svc] = `http://127.0.0.1:${p}`;
+    }
+
+    const perServiceEnv = {
+      "catalog-svc": {
+        ...controlledBaseEnv,
+        PORT: String(servicePorts["catalog-svc"]),
+        PGUSER: "catalog_app",
+        G6_DATABASE_SCHEMA: "catalog",
+        G6_EXPECTED_ROLE: "catalog_app",
+        G6_CONNECTION_MODE: "direct",
+      },
+      "taxonomy-svc": {
+        ...controlledBaseEnv,
+        PORT: String(servicePorts["taxonomy-svc"]),
+      },
+      "pricing-svc": {
+        ...controlledBaseEnv,
+        PORT: String(servicePorts["pricing-svc"]),
+        PRICING_SERVICE_TOKEN_URL: g7.tokenUrl,
+        PRICING_SERVICE_CLIENT_SECRET: "e2e-pricing-secret",
+        PRICING_CATALOG_URL: serviceUrls["catalog-svc"],
+      },
+      "price-audit-svc": {
+        ...controlledBaseEnv,
+        PORT: String(servicePorts["price-audit-svc"]),
+      },
+      "promotions-svc": {
+        ...controlledBaseEnv,
+        PORT: String(servicePorts["promotions-svc"]),
+      },
+      "combos-svc": {
+        ...controlledBaseEnv,
+        PORT: String(servicePorts["combos-svc"]),
+        COMBOS_SVC_PORT: String(servicePorts["combos-svc"]),
+        PGUSER: "combos_app",
+        COMBOS_CATALOG_URL: serviceUrls["catalog-svc"],
+        COMBOS_PRICING_URL: serviceUrls["pricing-svc"],
+        COMBOS_G7_TOKEN_URL: g7.tokenUrl,
+        COMBOS_G7_CLIENT_SECRET: "e2e-combos-secret",
+      },
+      "inventory-svc": {
+        ...controlledBaseEnv,
+        PORT: String(servicePorts["inventory-svc"]),
+      },
+      "bulk-svc": {
+        ...controlledBaseEnv,
+        PORT: String(servicePorts["bulk-svc"]),
+      },
+    };
+
+    for (const svc of SERVICE_NAMES) {
       children.push(
         spawn(process.execPath, [`dist/apps/${svc}/src/main.js`], {
           cwd: backendRoot,
-          env: { ...controlledBaseEnv, PORT: String(p) },
+          env: perServiceEnv[svc],
           stdio: "pipe",
         }),
       );
@@ -404,6 +617,7 @@ async function main() {
         env: {
           ...controlledBaseEnv,
           PORT: String(gatewayPort),
+          GATEWAY_CORS_ALLOWED_ORIGINS: viteOrigin,
           GATEWAY_CATALOG_SVC_URL: serviceUrls["catalog-svc"],
           GATEWAY_TAXONOMY_SVC_URL: serviceUrls["taxonomy-svc"],
           GATEWAY_PRICING_SVC_URL: serviceUrls["pricing-svc"],
@@ -430,15 +644,16 @@ async function main() {
     }
     await waitForHttpReady(`${gatewayUrl}/health/ready`);
 
+    // Nunca escribir contraseña de PostgreSQL en el manifiesto
     writeFileSync(
       MANIFEST_PATH,
       JSON.stringify(
         {
           gatewayUrl,
           g7ApiBase: g7.baseUrl,
-          databaseUrl: pg.databaseUrl,
           g7Issuer: g7.issuer,
           g7JwksUrl: g7.jwksUrl,
+          viteOrigin,
           dataMode: "api",
           adminApiEnabled: true,
         },
@@ -463,24 +678,13 @@ async function main() {
       },
     );
 
-    const cleanup = async () => {
-      vite.kill("SIGTERM");
-      for (const child of children) child.kill("SIGTERM");
-      await g7.close();
-      await pg.stop();
-      rmSync(MANIFEST_PATH, { force: true });
-    };
-
-    process.on("SIGINT", () => void cleanup().then(() => process.exit(0)));
-    process.on("SIGTERM", () => void cleanup().then(() => process.exit(0)));
+    process.on("SIGINT", () => void cleanup(vite).then(() => process.exit(0)));
+    process.on("SIGTERM", () => void cleanup(vite).then(() => process.exit(0)));
     vite.on("exit", (code) => {
-      void cleanup().then(() => process.exit(code ?? 0));
+      void cleanup(vite).then(() => process.exit(code ?? 0));
     });
   } catch (err) {
-    for (const child of children) child.kill("SIGTERM");
-    await g7.close();
-    await pg.stop();
-    rmSync(MANIFEST_PATH, { force: true });
+    await cleanup();
     throw err;
   }
 }

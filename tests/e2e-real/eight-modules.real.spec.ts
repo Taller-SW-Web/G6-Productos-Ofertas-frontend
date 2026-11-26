@@ -4,6 +4,7 @@ import {
   assertRealStackPreflight,
   loginViaReactUi,
   navigateViaSpa,
+  navigateViaSubLink,
   reloadVerifySessionLostAndReauth,
   verifyGatewayAndServicesReady,
 } from "./realStackPreflight.ts";
@@ -227,16 +228,26 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     await expect(page.getByText(code)).toBeVisible();
   });
 
-  test("6. Inventory: mutar umbral global via SPA, recargar, reautenticar y verificar persistencia", async ({
+  test("6. Inventory: navegar a /inventario y subpágina /inventario/umbrales, mutar umbral, recargar, reautenticar y verificar valor persistido", async ({
     page,
   }) => {
+    const [stockRes] = await Promise.all([
+      page.waitForResponse(
+        (res) =>
+          res.request().method() === "GET" &&
+          new URL(res.url()).pathname.startsWith("/api/v1/inventario"),
+      ),
+      navigateViaSpa(page, "/inventario"),
+    ]);
+    expect(stockRes.status()).toBe(200);
+
     const [thresholdRes] = await Promise.all([
       page.waitForResponse(
         (res) =>
           res.request().method() === "GET" &&
           new URL(res.url()).pathname === "/api/v1/inventario/umbrales",
       ),
-      navigateViaSpa(page, "/inventario/umbrales"),
+      navigateViaSubLink(page, "/inventario/umbrales"),
     ]);
     expect(thresholdRes.status()).toBe(200);
 
@@ -257,15 +268,17 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     expect([200, 204]).toContain(putRes.status());
 
     await reloadVerifySessionLostAndReauth(page);
+    await navigateViaSpa(page, "/inventario");
     const [afterReload] = await Promise.all([
       page.waitForResponse(
         (res) =>
           res.request().method() === "GET" &&
           new URL(res.url()).pathname === "/api/v1/inventario/umbrales",
       ),
-      navigateViaSpa(page, "/inventario/umbrales"),
+      navigateViaSubLink(page, "/inventario/umbrales"),
     ]);
     expect(afterReload.status()).toBe(200);
+    await expect(page.getByRole("spinbutton").first()).toHaveValue("12");
   });
 
   test("7. Combos: crear combo via SPA, consultar por ID y verificar composición persistida", async ({
