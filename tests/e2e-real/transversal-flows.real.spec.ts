@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 import {
   assertRealStackPreflight,
@@ -80,6 +82,11 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     const catDto = (await createCat.json()) as { categoriaId: string };
     expect(catDto.categoriaId).toBeTruthy();
 
+    const logoPath = resolve(
+      process.cwd(),
+      "../backend/apps/taxonomy-svc/test/fixtures/logo.png",
+    );
+    const logoBuffer = readFileSync(logoPath);
     const brandRes = await request.post(`${env.gatewayUrl}/api/v1/marcas`, {
       headers: {
         Authorization: capturedBearer,
@@ -87,7 +94,11 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
       },
       multipart: {
         nombre: `Marca Trans ${randomUUID().slice(0, 6)}`,
-        logoUrl: "https://example.test/logo-e2e.png",
+        logo: {
+          name: "logo.png",
+          mimeType: "image/png",
+          buffer: logoBuffer,
+        },
       },
     });
     expect([200, 201]).toContain(brandRes.status());
@@ -142,13 +153,16 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     );
     expect(prepRes.status()).toBe(200);
     const prepDto = (await prepRes.json()) as {
-      estadoProducto?: string;
-      pricing?: { estado?: string };
-      inventory?: { estado?: string };
+      product_id: string;
+      tiene_variantes: boolean;
+      pricing: { status: string };
+      inventario: { status: string };
+      variantes: unknown[];
     };
-    expect(prepDto.estadoProducto ?? "BORRADOR").toBe("BORRADOR");
-    expect(prepDto.pricing?.estado).not.toBe("COMPLETADA");
-    expect(prepDto.inventory?.estado).not.toBe("COMPLETADA");
+    expect(prepDto.product_id).toBe(draftProdDto.productId);
+    expect(prepDto.tiene_variantes).toBe(false);
+    expect(prepDto.pricing.status).toBe("PENDING");
+    expect(prepDto.inventario.status).toBe("PENDING");
 
     // Evidencia B: Fixture comercial preprovisionada ACTIVO en PostgreSQL descartable para N01
     // (No acredita el ciclo completo de publicación asíncrona Catalog -> Pricing/Inventory -> Catalog)
@@ -197,7 +211,34 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     expect(skuCtx.active).toBe(true);
     expect(skuCtx.eligible).toBe(true);
 
-    // 2. Catalog -> Pricing -> Price Audit
+    // Segundo producto comercial ACTIVO preprovisionado para formar Combo de 2 SKU distintos
+    const activeProductId2 = randomUUID();
+    const skuBase2 = `SKU-N01-B-${randomUUID().slice(0, 6).toUpperCase()}`;
+    const seedCatalogRes2 = await request.post(
+      `${env.g5SeedOrigin}/__test/catalog-active-product`,
+      {
+        data: {
+          productId: activeProductId2,
+          skuBase: skuBase2,
+          categoriaId: catDto.categoriaId,
+          marcaId: brandDto.marcaId,
+          tipoProductoId: typeDto.tipoProductoId,
+        },
+      },
+    );
+    expect(seedCatalogRes2.status()).toBe(201);
+    const skuCtxRes2 = await request.get(
+      `${env.gatewayUrl}/api/v1/productos/skus/${encodeURIComponent(skuBase2)}/contexto`,
+      { headers: { Authorization: `Bearer ${catalogServiceToken}` } },
+    );
+    expect(skuCtxRes2.status()).toBe(200);
+    const skuCtx2 = (await skuCtxRes2.json()) as CatalogSkuContextDto;
+    expect(skuCtx2.productId).toBe(activeProductId2);
+    expect(skuCtx2.sku).toBe(skuBase2);
+    expect(skuCtx2.active).toBe(true);
+    expect(skuCtx2.eligible).toBe(true);
+
+    // 2. Catalog -> Pricing -> Price Audit (para ambos SKU)
     const putPrice = await request.put(
       `${env.gatewayUrl}/api/v1/precios/productos/${encodeURIComponent(prodDto.productId)}`,
       {
@@ -217,20 +258,43 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     );
     expect(getPrice.status()).toBe(200);
 
+    const putPrice2 = await request.put(
+      `${env.gatewayUrl}/api/v1/precios/productos/${encodeURIComponent(activeProductId2)}`,
+      {
+        headers: { ...humanHeaders, "Idempotency-Key": randomUUID() },
+        data: {
+          precioRegular: "110.00",
+          currency: "PEN",
+          motivoCambio: "E2E_TRANSVERSAL_COMBO",
+        },
+      },
+    );
+    expect([200, 201]).toContain(putPrice2.status());
+
+    const getPrice2 = await request.get(
+      `${env.gatewayUrl}/api/v1/precios/productos/${encodeURIComponent(activeProductId2)}`,
+      { headers: humanHeaders },
+    );
+    expect(getPrice2.status()).toBe(200);
+
     const auditRes = await request.get(
       `${env.gatewayUrl}/api/v1/auditoria-precios/administracion?pagina=1&tamanio=10`,
       { headers: humanHeaders },
     );
     expect(auditRes.status()).toBe(200);
 
-    // 3. Catalog/Inventory -> Combos
+    // 3. Catalog/Pricing -> Combos (2 componentes distintos y precioCombo positivo)
     const createCombo = await request.post(
       `${env.gatewayUrl}/api/v1/combos/administracion`,
       {
         headers: { ...humanHeaders, "Idempotency-Key": randomUUID() },
         data: {
-          nombre: `Combo Trans ${randomUUID().slice(0, 6)}`,
-          productoId: prodDto.productId,
+          nombre: `Combo transversal E2E ${randomUUID().slice(0, 6)}`,
+          componentes: [
+            { sku: skuBase, cantidad: 1 },
+            { sku: skuBase2, cantidad: 1 },
+          ],
+          precioCombo: 200,
         },
       },
     );
@@ -243,6 +307,14 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
       { headers: humanHeaders },
     );
     expect(getCombo.status()).toBe(200);
+    const comboDetail = (await getCombo.json()) as {
+      comboId?: string;
+      componentes?: Array<{ sku?: string; cantidad?: number }>;
+    };
+    expect(comboDetail.comboId).toBe(comboDto.comboId);
+    const comboSkus = (comboDetail.componentes ?? []).map((c) => c.sku);
+    expect(comboSkus).toContain(skuBase);
+    expect(comboSkus).toContain(skuBase2);
 
     // 4. Promotions -> Promoción CUPON vigente + Cupón elegible + N01 consumo/restauración (cliente técnico modulo-ventas)
     const nowMs = Date.now();

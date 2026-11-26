@@ -388,12 +388,34 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     ]);
     expect(templateRes.status()).toBe(200);
     expect(templateRes.headers()["content-type"]).toContain("text/csv");
+    const templateCsvText = await templateRes.text();
+    const templateHeaderLine = templateCsvText.replace(/^\uFEFF/, "").split(/\r?\n/)[0]?.trim();
+    const expectedV2Headers =
+      "operacion,producto_id,catalog_version,sku_base,sku_variante,nombre,descripcion,categoria_id,marca_id,tipo_producto_id,tiene_variantes,precio_regular,atributos_producto,atributos_variante,imagen_url,stock_inicial";
+    expect(templateHeaderLine).toBe(expectedV2Headers);
 
     await navigateViaSpa(page, "/carga-masiva");
     const fileInput = page.locator('input[type="file"]').first();
     await expect(fileInput).toBeAttached();
-    const csvContent =
-      "sku_base,nombre,precio_regular,stock_inicial\nBULK-E2E-1,Prod Bulk,25.00,10\n";
+    const bulkRow = [
+      "ALTA",
+      "",
+      "",
+      `BULK-E2E-${randomUUID().slice(0, 6).toUpperCase()}`,
+      "",
+      "Producto Bulk E2E",
+      "Descripcion valida para carga masiva V2",
+      "cat-bulk-e2e",
+      "marca-bulk-e2e",
+      "tipo-bulk-e2e",
+      "false",
+      "25.00",
+      "{}",
+      "",
+      "https://example.test/bulk-e2e.png",
+      "10",
+    ].join(",");
+    const csvContent = `${templateHeaderLine}\r\n${bulkRow}\r\n`;
     await fileInput.setInputFiles({
       name: "lote-admision-e2e.csv",
       mimeType: "text/csv",
@@ -445,8 +467,27 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     await navigateViaSpa(page, "/carga-masiva");
     const fileInput = page.locator('input[type="file"]').first();
     await expect(fileInput).toBeAttached();
-    const csvContent =
-      "sku_base,nombre,precio_regular,stock_inicial\nBULK-E2E-INT-1,Prod Bulk Integral,25.00,10\n";
+    const v2Headers =
+      "operacion,producto_id,catalog_version,sku_base,sku_variante,nombre,descripcion,categoria_id,marca_id,tipo_producto_id,tiene_variantes,precio_regular,atributos_producto,atributos_variante,imagen_url,stock_inicial";
+    const integralRow = [
+      "ALTA",
+      "",
+      "",
+      `BULK-E2E-INT-${randomUUID().slice(0, 6).toUpperCase()}`,
+      "",
+      "Prod Bulk Integral",
+      "Descripcion valida para procesamiento integral V2",
+      "cat-bulk-e2e",
+      "marca-bulk-e2e",
+      "tipo-bulk-e2e",
+      "false",
+      "25.00",
+      "{}",
+      "",
+      "https://example.test/bulk-integral-e2e.png",
+      "10",
+    ].join(",");
+    const csvContent = `${v2Headers}\r\n${integralRow}\r\n`;
     await fileInput.setInputFiles({
       name: "lote-integral-e2e.csv",
       mimeType: "text/csv",

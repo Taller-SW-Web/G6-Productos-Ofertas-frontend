@@ -586,8 +586,10 @@ async function startSingleLocalG7Server() {
               "e2e-promotions-secret",
               "e2e-promotions-h5-secret",
               "e2e-catalog-secret",
+              "e2e-pricing-secret",
+              "e2e-combos-secret",
             ]),
-            scopes: new Set(["catalogo:leer", "inventario:leer"]),
+            scopes: new Set(["catalogo:leer", "precios:leer", "inventario:leer"]),
           },
         ],
         [
@@ -942,6 +944,12 @@ async function main() {
         tipoProductoId,
       }) => {
         const slug = `prod-activo-${skuBase.toLowerCase()}`;
+        const pricingOpId = randomUUID();
+        const pricingCorrId = randomUUID();
+        const pricingMsgId = randomUUID();
+        const inventoryOpId = randomUUID();
+        const inventoryCorrId = randomUUID();
+        const inventoryMsgId = randomUUID();
         const sql = `
           BEGIN;
           INSERT INTO catalog.products (
@@ -957,11 +965,38 @@ async function main() {
             '${skuBase}',
             '${slug}',
             false,
-            'ACTIVO',
-            1
+            'BORRADOR',
+            0
           );
-          INSERT INTO catalog.sku_identity (sku, product_id)
-          VALUES ('${skuBase}', '${productId}');
+          INSERT INTO catalog.product_images (product_id, url, principal, posicion)
+          VALUES ('${productId}', 'https://example.test/productos/${skuBase.toLowerCase()}.png', true, 0);
+          INSERT INTO catalog.sku_physical_profiles (sku_identity_id, peso_kg, largo_cm, ancho_cm, alto_cm)
+          SELECT id, 1.25, 20, 15, 10
+          FROM catalog.sku_identity
+          WHERE sku = '${skuBase}';
+          INSERT INTO catalog.activation_checks (
+            product_id, variant_id, sku, dependency, operation_id, correlation_id,
+            request_payload, state, result_payload, result_message_id
+          ) VALUES
+          (
+            '${productId}', NULL, '${skuBase}', 'PRICING',
+            '${pricingOpId}', '${pricingCorrId}',
+            '{"sku":"${skuBase}","dependencia":"PRICING"}'::jsonb,
+            'COMPLETED',
+            '{"ok":true,"estado":"COMPLETADA"}'::jsonb,
+            '${pricingMsgId}'
+          ),
+          (
+            '${productId}', NULL, '${skuBase}', 'INVENTORY',
+            '${inventoryOpId}', '${inventoryCorrId}',
+            '{"sku":"${skuBase}","dependencia":"INVENTORY"}'::jsonb,
+            'COMPLETED',
+            '{"ok":true,"estado":"COMPLETADA"}'::jsonb,
+            '${inventoryMsgId}'
+          );
+          UPDATE catalog.products
+          SET estado = 'ACTIVO', catalog_version = 1
+          WHERE id = '${productId}';
           COMMIT;
         `;
         await runPsql(pg.containerName, "g6_e2e_test", sql, `seed-catalog:${skuBase}`);
@@ -1005,6 +1040,9 @@ async function main() {
         G6_DATABASE_SCHEMA: "catalog",
         G6_EXPECTED_ROLE: "catalog_app",
         G6_CONNECTION_MODE: "direct",
+        CATALOG_TAXONOMY_URL: serviceUrls["taxonomy-svc"],
+        CATALOG_SERVICE_TOKEN_URL: g7.tokenUrl,
+        CATALOG_SERVICE_CLIENT_SECRET: "e2e-catalog-secret",
       },
       "taxonomy-svc": {
         ...controlledBaseEnv,
