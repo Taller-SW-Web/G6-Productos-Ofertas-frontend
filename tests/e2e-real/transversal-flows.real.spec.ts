@@ -133,97 +133,193 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
       "modulo-ventas",
       "cupones:consumir cupones:restaurar cupones:operaciones:leer",
     );
-    const consumeKey = randomUUID();
-    const orderId = randomUUID();
-    const consumeBody = { codigo: couponCode, orderId };
+    const consumeOpId = randomUUID();
+    const orderId = `PED-E2E-${randomUUID().slice(0, 8)}`;
+    const reservationId = randomUUID();
+    const consumeBody = {
+      operation_id: consumeOpId,
+      order_id: orderId,
+      coupon_code: couponCode,
+      channel_id: "MARKETPLACE",
+      effective_at: new Date().toISOString(),
+      reservation_id: reservationId,
+      commercial_snapshot_ref: orderId,
+    };
     const consumeHeaders = {
       Authorization: `Bearer ${g5Token}`,
       "X-Correlation-Id": randomUUID(),
-      "Idempotency-Key": consumeKey,
+      "Idempotency-Key": consumeOpId,
       "Content-Type": "application/json",
     };
 
-    // 4a. Consumo N01 + polling hasta estado terminal
+    // 4a. Admisión consumo N01
     const consumeRes = await request.post(
       `${env.gatewayUrl}/api/v1/cupones/consumos`,
       { headers: consumeHeaders, data: consumeBody },
     );
     expect([200, 202]).toContain(consumeRes.status());
-    const consumeOp = (await consumeRes.json()) as { operation_id?: string };
-    expect(consumeOp.operation_id).toBeTruthy();
+    const consumeOp = (await consumeRes.json()) as {
+      operation_id?: string;
+      status?: string;
+    };
+    expect(consumeOp.operation_id).toBe(consumeOpId);
 
-    // 4b. Duplicación idempotente (mismo Idempotency-Key + payload debe conservar operation_id)
+    // 4b. Duplicación idempotente (mismo Idempotency-Key === operation_id y mismo payload)
     const dupConsumeRes = await request.post(
       `${env.gatewayUrl}/api/v1/cupones/consumos`,
       { headers: consumeHeaders, data: consumeBody },
     );
     expect([200, 202]).toContain(dupConsumeRes.status());
     const dupOp = (await dupConsumeRes.json()) as { operation_id?: string };
-    expect(dupOp.operation_id).toBe(consumeOp.operation_id);
+    expect(dupOp.operation_id).toBe(consumeOpId);
 
-    // 4c. Polling hasta estado terminal de operación N01
-    let terminalStatus = "";
-    for (let attempt = 0; attempt < 20; attempt += 1) {
+    // 4c. Polling explícito hasta estado terminal válido (ACCEPTED | PROCESSING | COMPLETED | REJECTED)
+    let consumeSnapshot: {
+      operation_id?: string;
+      order_id?: string;
+      operation_type?: string;
+      status?: string;
+      result?: Record<string, unknown> | null;
+    } = {};
+    for (let attempt = 0; attempt < 25; attempt += 1) {
       const opStatusRes = await request.get(
-        `${env.gatewayUrl}/api/v1/cupones/operaciones/${encodeURIComponent(consumeOp.operation_id!)}`,
+        `${env.gatewayUrl}/api/v1/cupones/operaciones/${encodeURIComponent(consumeOpId)}?order_id=${encodeURIComponent(orderId)}`,
         { headers: { Authorization: `Bearer ${g5Token}` } },
       );
       expect(opStatusRes.status()).toBe(200);
-      const opBody = (await opStatusRes.json()) as { status?: string };
-      terminalStatus = opBody.status ?? "";
-      if (["COMPLETED", "APPLIED", "REJECTED", "FAILED"].includes(terminalStatus)) {
+      consumeSnapshot = (await opStatusRes.json()) as typeof consumeSnapshot;
+      expect(["ACCEPTED", "PROCESSING", "COMPLETED", "REJECTED"]).toContain(
+        consumeSnapshot.status,
+      );
+      expect(consumeSnapshot.operation_id).toBe(consumeOpId);
+      expect(consumeSnapshot.order_id).toBe(orderId);
+      expect(consumeSnapshot.operation_type).toBe("CONSUMIR_CUPON");
+      if (
+        consumeSnapshot.status === "COMPLETED" ||
+        consumeSnapshot.status === "REJECTED"
+      ) {
         break;
       }
       await new Promise((r) => setTimeout(r, 250));
     }
-    expect(["COMPLETED", "APPLIED"]).toContain(terminalStatus);
+    expect(consumeSnapshot.status).toBe("COMPLETED");
+    expect(consumeSnapshot.result).toBeTruthy();
 
-    // 4d. Restauración N01 + polling hasta estado terminal
+    // 4d. Restauración N01 referenciando consumption_operation_id + polling hasta estado terminal
+    const restoreOpId = randomUUID();
     const restoreRes = await request.post(
       `${env.gatewayUrl}/api/v1/cupones/restauraciones`,
       {
         headers: {
           Authorization: `Bearer ${g5Token}`,
           "X-Correlation-Id": randomUUID(),
-          "Idempotency-Key": randomUUID(),
+          "Idempotency-Key": restoreOpId,
           "Content-Type": "application/json",
         },
-        data: { codigo: couponCode, orderId, motivo: "CANCELACION_E2E" },
+        data: {
+          operation_id: restoreOpId,
+          order_id: orderId,
+          consumption_operation_id: consumeOpId,
+          cancellation_reason: "CANCELACION_E2E",
+          cancelled_at: new Date().toISOString(),
+        },
       },
     );
     expect([200, 202]).toContain(restoreRes.status());
-    const restoreOp = (await restoreRes.json()) as { operation_id?: string };
-    expect(restoreOp.operation_id).toBeTruthy();
 
-    let restoreTerminal = "";
-    for (let attempt = 0; attempt < 20; attempt += 1) {
+    let restoreSnapshot: {
+      operation_id?: string;
+      order_id?: string;
+      operation_type?: string;
+      status?: string;
+      result?: { outcome?: string } | null;
+    } = {};
+    for (let attempt = 0; attempt < 25; attempt += 1) {
       const restorePoll = await request.get(
-        `${env.gatewayUrl}/api/v1/cupones/operaciones/${encodeURIComponent(restoreOp.operation_id!)}`,
+        `${env.gatewayUrl}/api/v1/cupones/operaciones/${encodeURIComponent(restoreOpId)}?order_id=${encodeURIComponent(orderId)}`,
         { headers: { Authorization: `Bearer ${g5Token}` } },
       );
       expect(restorePoll.status()).toBe(200);
-      const body = (await restorePoll.json()) as { status?: string };
-      restoreTerminal = body.status ?? "";
-      if (["COMPLETED", "APPLIED", "RESTORED", "REJECTED", "FAILED"].includes(restoreTerminal)) {
+      restoreSnapshot = (await restorePoll.json()) as typeof restoreSnapshot;
+      expect(["ACCEPTED", "PROCESSING", "COMPLETED", "REJECTED"]).toContain(
+        restoreSnapshot.status,
+      );
+      expect(restoreSnapshot.operation_type).toBe("RESTAURAR_CUPON");
+      if (
+        restoreSnapshot.status === "COMPLETED" ||
+        restoreSnapshot.status === "REJECTED"
+      ) {
         break;
       }
       await new Promise((r) => setTimeout(r, 250));
     }
-    expect(["COMPLETED", "APPLIED", "RESTORED"]).toContain(restoreTerminal);
+    expect(restoreSnapshot.status).toBe("COMPLETED");
+    expect(["RESTORED", "POLICY_KEEPS_CONSUMPTION", "NO_CONSUMPTION"]).toContain(
+      restoreSnapshot.result?.outcome,
+    );
 
-    // 4e. Rechazo contractual ante cupón inexistente
-    const rejectRes = await request.post(
+    // 4e. Rechazo contractual HTTP (commercial_snapshot_ref !== order_id -> 400 Problem Details)
+    const badOpId = randomUUID();
+    const badContractRes = await request.post(
       `${env.gatewayUrl}/api/v1/cupones/consumos`,
       {
         headers: {
           Authorization: `Bearer ${g5Token}`,
           "X-Correlation-Id": randomUUID(),
-          "Idempotency-Key": randomUUID(),
+          "Idempotency-Key": badOpId,
           "Content-Type": "application/json",
         },
-        data: { codigo: "NO-EXISTE-9999", orderId: randomUUID() },
+        data: {
+          operation_id: badOpId,
+          order_id: orderId,
+          coupon_code: couponCode,
+          channel_id: "MARKETPLACE",
+          effective_at: new Date().toISOString(),
+          reservation_id: randomUUID(),
+          commercial_snapshot_ref: "MISMATCH-REF",
+        },
       },
     );
-    expect([404, 422]).toContain(rejectRes.status());
+    expect(badContractRes.status()).toBe(400);
+
+    // 4f. Rechazo asíncrono de negocio (cupón inexistente: 202 admisión -> REJECTED por worker)
+    const missingCouponOpId = randomUUID();
+    const missingOrderId = `PED-MISS-${randomUUID().slice(0, 8)}`;
+    const missingRes = await request.post(
+      `${env.gatewayUrl}/api/v1/cupones/consumos`,
+      {
+        headers: {
+          Authorization: `Bearer ${g5Token}`,
+          "X-Correlation-Id": randomUUID(),
+          "Idempotency-Key": missingCouponOpId,
+          "Content-Type": "application/json",
+        },
+        data: {
+          operation_id: missingCouponOpId,
+          order_id: missingOrderId,
+          coupon_code: "NO-EXISTE-9999",
+          channel_id: "MARKETPLACE",
+          effective_at: new Date().toISOString(),
+          reservation_id: randomUUID(),
+          commercial_snapshot_ref: missingOrderId,
+        },
+      },
+    );
+    expect([200, 202]).toContain(missingRes.status());
+    let missingSnapshot: { status?: string; result?: { result_code?: string } | null } = {};
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      const pollMissing = await request.get(
+        `${env.gatewayUrl}/api/v1/cupones/operaciones/${encodeURIComponent(missingCouponOpId)}?order_id=${encodeURIComponent(missingOrderId)}`,
+        { headers: { Authorization: `Bearer ${g5Token}` } },
+      );
+      expect(pollMissing.status()).toBe(200);
+      missingSnapshot = (await pollMissing.json()) as typeof missingSnapshot;
+      if (missingSnapshot.status === "REJECTED" || missingSnapshot.status === "COMPLETED") {
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    expect(missingSnapshot.status).toBe("REJECTED");
+    expect(missingSnapshot.result?.result_code).toBeTruthy();
   });
 });

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import {
   assertRealStackPreflight,
+  issueTokenFromTrustedG7,
   loginViaReactUi,
   navigateViaSpa,
   navigateViaSubLink,
@@ -170,9 +171,11 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     await expect(page.getByText("99.50")).toBeVisible();
   });
 
-  test("4. Price Audit: crear exportación CSV, esperar estado terminal y verificar descarga", async ({
+  test("4. Price Audit: crear exportación CSV, hacer polling explícito hasta COMPLETED y verificar descarga", async ({
     page,
+    request,
   }) => {
+    const env = assertRealStackPreflight();
     const [auditRes] = await Promise.all([
       page.waitForResponse(
         (res) =>
@@ -198,13 +201,27 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     const job = (await exportRes.json()) as { exportId?: string; status?: string };
     expect(job.exportId).toBeTruthy();
 
-    const jobPollRes = await page.waitForResponse(
-      (res) =>
-        res.request().method() === "GET" &&
-        new URL(res.url()).pathname ===
-          `/api/v1/auditoria-precios/exportaciones/${job.exportId}`,
+    const token = await issueTokenFromTrustedG7(env.g7ApiBase, "gestor@example.test");
+    let exportStatus = job.status ?? "";
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      const pollRes = await request.get(
+        `${env.gatewayUrl}/api/v1/auditoria-precios/exportaciones/${encodeURIComponent(job.exportId!)}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      expect(pollRes.status()).toBe(200);
+      const pollDto = (await pollRes.json()) as { status?: string };
+      exportStatus = pollDto.status ?? "";
+      if (exportStatus === "COMPLETED" || exportStatus === "FAILED_GENERAL") break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    expect(exportStatus).toBe("COMPLETED");
+
+    const downloadRes = await request.get(
+      `${env.gatewayUrl}/api/v1/auditoria-precios/exportaciones/${encodeURIComponent(job.exportId!)}/archivo`,
+      { headers: { Authorization: `Bearer ${token}`, Accept: "text/csv" } },
     );
-    expect(jobPollRes.status()).toBe(200);
+    expect(downloadRes.status()).toBe(200);
+    expect(downloadRes.headers()["content-type"]).toContain("text/csv");
   });
 
   test("5. Promotions: crear cupón via SPA, recargar, reautenticar y verificar estado ACTIVO persistido", async ({
@@ -352,9 +369,11 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     await expect(page.getByText(comboName)).toBeVisible();
   });
 
-  test("8. Bulk: descargar plantilla CSV, importar lote, capturar batchId y esperar estado terminal", async ({
+  test("8. Bulk: descargar plantilla CSV, importar lote, capturar batchId y hacer polling hasta estado terminal", async ({
     page,
+    request,
   }) => {
+    const env = assertRealStackPreflight();
     await navigateViaSpa(page, "/carga-masiva/descargas");
     const templateBtn = page.getByRole("button", { name: /plantilla|csv/i }).first();
     await expect(templateBtn).toBeVisible();
@@ -391,12 +410,25 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     const batchDto = (await importRes.json()) as { batchId?: string };
     expect(batchDto.batchId).toBeTruthy();
 
-    const batchStatusRes = await page.waitForResponse(
-      (res) =>
-        res.request().method() === "GET" &&
-        new URL(res.url()).pathname ===
-          `/api/v1/carga-masiva/productos/importaciones/${batchDto.batchId}`,
-    );
-    expect(batchStatusRes.status()).toBe(200);
+    const token = await issueTokenFromTrustedG7(env.g7ApiBase, "gestor@example.test");
+    let batchSnapshot: { status?: string; rows?: unknown[] } = {};
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      const pollRes = await request.get(
+        `${env.gatewayUrl}/api/v1/carga-masiva/productos/importaciones/${encodeURIComponent(batchDto.batchId!)}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      expect(pollRes.status()).toBe(200);
+      batchSnapshot = (await pollRes.json()) as typeof batchSnapshot;
+      if (
+        ["COMPLETED", "COMPLETED_WITH_ERRORS", "FAILED", "PARTIAL"].includes(
+          batchSnapshot.status ?? "",
+        )
+      ) {
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    expect(batchSnapshot.status).toBeTruthy();
+    expect(Array.isArray(batchSnapshot.rows)).toBe(true);
   });
 });

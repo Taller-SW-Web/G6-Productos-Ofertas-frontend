@@ -675,6 +675,13 @@ async function main() {
         ...controlledBaseEnv,
         PORT: String(servicePorts["promotions-svc"]),
         PGUSER: "promotions_app",
+        G6_DATABASE_SCHEMA: "promotions",
+        G6_CONNECTION_MODE: "session",
+        RABBITMQ_URL: "",
+        MESSAGING_PROVIDER: "AZURE_SERVICE_BUS",
+        SERVICE_BUS_NAMESPACE_FQDN: "isolated-test.servicebus.windows.net",
+        PROMOTIONS_H5_COUPON_COMMANDS_ENABLED: "true",
+        PROMOTIONS_H5_ISOLATED_BUS: "1",
         DATABASE_URL: pg.urlFor("promotions_app"),
       },
       "combos-svc": {
