@@ -120,6 +120,7 @@ export const SQL_INVENTORY_BY_SERVICE = {
       { root: "backend", path: "apps/bulk-svc/migrations/0006_owner_correlation_identity.sql" },
       { root: "backend", path: "apps/bulk-svc/migrations/0007_bulk_retry_v1.sql" },
       { root: "backend", path: "apps/bulk-svc/migrations/0008_h5_outbox_delivery.sql" },
+      { root: "backend", path: "apps/bulk-svc/migrations/0009_h5_outbox_delivery_all_destinations.sql" },
     ],
   },
 };
@@ -642,6 +643,8 @@ async function startSingleLocalG7Server() {
               "inventario:reservas:evidencia-cupon:leer",
               "catalogo:contexto-sku:leer",
               "catalogo:skus:filtrar",
+              "taxonomia:leer",
+              "inventario:disponibilidad:leer",
             ]),
           },
         ],
@@ -673,6 +676,20 @@ async function startSingleLocalG7Server() {
           {
             secrets: new Set(["e2e-catalog-secret"]),
             scopes: new Set(["carga-masiva:contenidos:leer", "catalogo:leer"]),
+          },
+        ],
+        [
+          "bulk-svc",
+          {
+            secrets: new Set(["e2e-bulk-secret"]),
+            scopes: new Set(["catalogo:leer", "precios:leer", "inventario:disponibilidad:leer"]),
+          },
+        ],
+        [
+          "inventory-svc",
+          {
+            secrets: new Set(["e2e-inventory-secret"]),
+            scopes: new Set(["catalogo:leer"]),
           },
         ],
         [
@@ -1008,6 +1025,11 @@ async function startLocalG5EvidenceServer({
   g7PublicKey,
   seedInventoryStock,
   seedCatalogActiveProduct,
+  seedCatalogPendingPreparation,
+  seedBulkMarkRetryable,
+  seedInventoryStoreLocation,
+  seedCatalogBarcode,
+  seedInventoryTransfer,
 }) {
   const g5CertDir = mkdtempSync(join(tmpdir(), "g6-e2e-g5-tls-"));
   const g5KeyPath = join(g5CertDir, "server.key");
@@ -1131,6 +1153,81 @@ async function startLocalG5EvidenceServer({
       res.statusCode = 201;
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify({ ok: true, productId, skuBase, estado: "ACTIVO" }));
+      return;
+    }
+    if (req.method === "POST" && url === "/__test/inventory-store-location") {
+      const body = await readJsonBody(req);
+      const locationId = typeof body.locationId === "string" ? body.locationId.trim() : randomUUID();
+      const code = typeof body.code === "string" ? body.code.trim() : "TIENDA-CERT-01";
+      const externalRef = typeof body.external_ref === "string" ? body.external_ref.trim() : code;
+      const sku = typeof body.sku === "string" ? body.sku.trim() : "";
+      const onHand = Number.isInteger(Number(body.on_hand)) ? Number(body.on_hand) : 20;
+      await seedInventoryStoreLocation({ locationId, code, externalRef, sku, onHand });
+      res.statusCode = 201;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ ok: true, locationId, code, external_ref: externalRef }));
+      return;
+    }
+    if (req.method === "POST" && url === "/__test/catalog-barcode") {
+      const body = await readJsonBody(req);
+      const sku = typeof body.sku === "string" ? body.sku.trim() : "";
+      const barcode = typeof body.codigo_barras === "string" ? body.codigo_barras.trim() : "";
+      if (!sku || !barcode) {
+        res.statusCode = 400;
+        res.end();
+        return;
+      }
+      await seedCatalogBarcode({ sku, barcode });
+      res.statusCode = 201;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ ok: true, sku, codigo_barras: barcode }));
+      return;
+    }
+    if (req.method === "POST" && url === "/__test/inventory-transfer") {
+      const body = await readJsonBody(req);
+      const trasladoId = typeof body.trasladoId === "string" ? body.trasladoId.trim() : randomUUID();
+      const sku = typeof body.sku === "string" ? body.sku.trim() : "";
+      const targetLocationId = typeof body.targetLocationId === "string" ? body.targetLocationId.trim() : "";
+      if (!sku || !targetLocationId) {
+        res.statusCode = 400;
+        res.end();
+        return;
+      }
+      await seedInventoryTransfer({ trasladoId, sku, targetLocationId });
+      res.statusCode = 201;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ ok: true, trasladoId }));
+      return;
+    }
+    if (req.method === "POST" && url === "/__test/catalog-pending-preparation") {
+      const body = await readJsonBody(req);
+      const categoriaId = typeof body.categoriaId === "string" ? body.categoriaId.trim() : "";
+      const marcaId = typeof body.marcaId === "string" ? body.marcaId.trim() : "";
+      const tipoProductoId = typeof body.tipoProductoId === "string" ? body.tipoProductoId.trim() : "";
+      const sourceVariantId = typeof body.sourceVariantId === "string" ? body.sourceVariantId.trim() : "";
+      if (!categoriaId || !marcaId || !tipoProductoId || !sourceVariantId) {
+        res.statusCode = 400;
+        res.end();
+        return;
+      }
+      const seeded = await seedCatalogPendingPreparation({ categoriaId, marcaId, tipoProductoId, sourceVariantId });
+      res.statusCode = 200;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ ok: true, ...seeded }));
+      return;
+    }
+    if (req.method === "POST" && url === "/__test/bulk-mark-retryable") {
+      const body = await readJsonBody(req);
+      const batchId = typeof body.batchId === "string" ? body.batchId.trim() : "";
+      if (!batchId) {
+        res.statusCode = 400;
+        res.end();
+        return;
+      }
+      await seedBulkMarkRetryable({ batchId });
+      res.statusCode = 200;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ ok: true, batchId }));
       return;
     }
     res.statusCode = 404;
@@ -1354,6 +1451,37 @@ async function main() {
         `;
         await runPsql(pg.containerName, "g6_e2e_test", sql, `seed-stock:${sku}`);
       },
+      seedInventoryStoreLocation: async ({ locationId, code, externalRef, sku, onHand }) => {
+        const sql = `
+          INSERT INTO inventory.locations (id, code, name, type, external_ref, active)
+          VALUES ('${locationId}', '${code}', 'Tienda Cert ${code}', 'TIENDA', '${externalRef}', true)
+          ON CONFLICT (id) DO UPDATE SET external_ref = EXCLUDED.external_ref, active = true;
+          ${sku ? `
+          INSERT INTO inventory.stock_balance (sku_id, location_id, on_hand, reserved, blocked, stock_version)
+          VALUES ('${sku}', '${locationId}', ${onHand}, 0, 0, 1)
+          ON CONFLICT (sku_id, location_id) DO UPDATE SET on_hand = EXCLUDED.on_hand, reserved = 0, blocked = 0;
+          ` : ""}
+        `;
+        await runPsql(pg.containerName, "g6_e2e_test", sql, `seed-store:${code}`);
+      },
+      seedCatalogBarcode: async ({ sku, barcode }) => {
+        const sql = `
+          INSERT INTO catalog.sku_barcodes (codigo_barras, sku_identity_id, created_by)
+          SELECT '${barcode}', id, 'cert-seed'
+          FROM catalog.sku_identity
+          WHERE sku = '${sku}'
+          ON CONFLICT (codigo_barras) DO NOTHING;
+        `;
+        await runPsql(pg.containerName, "g6_e2e_test", sql, `seed-barcode:${barcode}`);
+      },
+      seedInventoryTransfer: async ({ trasladoId, sku, targetLocationId }) => {
+        const sql = `
+          INSERT INTO inventory.traslados (id, traslado_id, sku_id, source_location_id, target_location_id, quantity_shipped, quantity_received, estado)
+          VALUES ('${trasladoId}', '${trasladoId}', '${sku}', '00000000-0000-4000-8000-000000000101', '${targetLocationId}', 5, 0, 'EN_TRANSITO')
+          ON CONFLICT (id) DO NOTHING;
+        `;
+        await runPsql(pg.containerName, "g6_e2e_test", sql, `seed-transfer:${trasladoId}`);
+      },
       seedCatalogActiveProduct: async ({
         productId,
         skuBase,
@@ -1419,6 +1547,145 @@ async function main() {
         `;
         await runPsql(pg.containerName, "g6_e2e_test", sql, `seed-catalog:${skuBase}`);
       },
+      seedCatalogPendingPreparation: async ({ categoriaId, marcaId, tipoProductoId, sourceVariantId }) => {
+        const retryProdId = randomUUID();
+        const retrySku = `SKU-RETRY-${retryProdId.slice(0, 6).toUpperCase()}`;
+        const retryPricingOpId = randomUUID();
+        const retryPricingCorrId = randomUUID();
+        const retryPricingMsgId = randomUUID();
+        const retryVarProdId = randomUUID();
+        const retryVarId = randomUUID();
+        const retryVarSku = `SKU-RETRYV-${retryVarId.slice(0, 6).toUpperCase()}`;
+        const retryVarInvOpId = randomUUID();
+        const retryVarInvCorrId = randomUUID();
+        const retryVarInvMsgId = randomUUID();
+        const sql = `
+          BEGIN;
+          INSERT INTO catalog.products (
+            id, nombre, descripcion, categoria_id, tipo_producto_id, marca_id,
+            sku_base, slug, tiene_variantes, estado, catalog_version
+          ) VALUES (
+            '${retryProdId}',
+            'Producto Retry ${retrySku}',
+            'Fixture retryable en estado BORRADOR',
+            '${categoriaId}',
+            '${tipoProductoId}',
+            '${marcaId}',
+            '${retrySku}',
+            'prod-retry-${retrySku.toLowerCase()}',
+            false,
+            'BORRADOR',
+            0
+          ), (
+            '${retryVarProdId}',
+            'Producto Var Retry ${retryVarSku}',
+            'Fixture variante retryable en estado BORRADOR',
+            '${categoriaId}',
+            '${tipoProductoId}',
+            '${marcaId}',
+            'SKU-BASE-${retryVarSku}',
+            'prod-var-retry-${retryVarSku.toLowerCase()}',
+            true,
+            'BORRADOR',
+            0
+          );
+          INSERT INTO catalog.variants (
+            id, product_id, sku, identifying_key, estado, catalog_version
+          )
+          SELECT
+            '${retryVarId}',
+            '${retryVarProdId}',
+            '${retryVarSku}',
+            identifying_key,
+            'BORRADOR',
+            0
+          FROM catalog.variants WHERE id = '${sourceVariantId}';
+          INSERT INTO catalog.variant_attribute_values (
+            variant_id, caracteristica_id, nombre_snapshot, valor_id, valor, es_identificador
+          )
+          SELECT
+            '${retryVarId}',
+            caracteristica_id,
+            nombre_snapshot,
+            valor_id,
+            valor,
+            es_identificador
+          FROM catalog.variant_attribute_values WHERE variant_id = '${sourceVariantId}';
+          INSERT INTO catalog.product_images (product_id, url, principal, posicion)
+          VALUES ('${retryProdId}', 'https://example.test/pr.png', true, 0);
+          INSERT INTO catalog.variant_images (variant_id, url)
+          VALUES ('${retryVarId}', 'https://example.test/vr.png');
+          INSERT INTO catalog.activation_checks (
+            product_id, variant_id, sku, dependency, operation_id, correlation_id,
+            request_payload, state
+          ) VALUES (
+            '${retryProdId}', NULL, '${retrySku}', 'PRICING',
+            '${retryPricingOpId}', '${retryPricingCorrId}',
+            '{"sku":"${retrySku}","dependencia":"PRICING"}'::jsonb,
+            'PENDING'
+          ), (
+            '${retryVarProdId}', '${retryVarId}', '${retryVarSku}', 'INVENTORY',
+            '${retryVarInvOpId}', '${retryVarInvCorrId}',
+            '{"sku":"${retryVarSku}","dependencia":"INVENTORY"}'::jsonb,
+            'PENDING'
+          );
+          INSERT INTO catalog.outbox (
+            message_id, event_name, kind, schema_version, correlation_id,
+            operation_id, occurred_at, payload, created_at, published_at
+          ) VALUES (
+            '${retryPricingMsgId}', 'pricing.product.initialization.requested', 'command', 1,
+            '${retryPricingCorrId}', '${retryPricingOpId}', now() - interval '10 seconds',
+            '{"sku":"${retrySku}"}'::jsonb, now() - interval '10 seconds', now() - interval '10 seconds'
+          ), (
+            '${retryVarInvMsgId}', 'inventory.sku.initialization.requested', 'command', 1,
+            '${retryVarInvCorrId}', '${retryVarInvOpId}', now() - interval '10 seconds',
+            '{"sku":"${retryVarSku}"}'::jsonb, now() - interval '10 seconds', now() - interval '10 seconds'
+          );
+          COMMIT;
+        `;
+        await runPsql(pg.containerName, "g6_e2e_test", sql, `seed-pending-prep:${retryProdId}`);
+        return { retryProdId, retryVarProdId, retryVarId };
+      },
+      seedBulkMarkRetryable: async ({ batchId }) => {
+        const safeId = batchId.replaceAll("'", "''");
+        const sql = `
+          BEGIN;
+          UPDATE bulk.batch_jobs
+          SET status = 'FAILED_GENERAL', needs_reconciliation = false, completed_rows = 0, failed_rows = 1
+          WHERE batch_id = '${safeId}';
+          UPDATE bulk.batch_rows
+          SET status = 'FAILED', applied_domains = '{}'::text[], failed_domain = 'CATALOGO',
+              needs_reconciliation = false, error_code = 'CATALOG_AUTH_TEMPORARY_UNAVAILABLE'
+          WHERE batch_job_id = (SELECT id FROM bulk.batch_jobs WHERE batch_id = '${safeId}');
+          UPDATE bulk.row_domain_steps
+          SET status = 'FAILED', error_code = 'CATALOG_AUTH_TEMPORARY_UNAVAILABLE'
+          WHERE batch_row_id IN (
+            SELECT id FROM bulk.batch_rows WHERE batch_job_id = (SELECT id FROM bulk.batch_jobs WHERE batch_id = '${safeId}')
+          ) AND domain = 'CATALOGO';
+          INSERT INTO bulk.domain_attempts (
+            attempt_id, batch_row_id, domain, business_operation_id, attempt_number,
+            status, effect_state, retriable, receipt_message_id, error_code
+          )
+          SELECT
+            gen_random_uuid(),
+            r.id,
+            'CATALOGO',
+            ((i.payload->'catalogCommands'->0)->>'operation_id')::uuid,
+            1,
+            'REJECTED',
+            'NONE',
+            true,
+            gen_random_uuid(),
+            'CATALOG_AUTH_TEMPORARY_UNAVAILABLE'
+          FROM bulk.batch_rows r
+          JOIN bulk.batch_jobs j ON j.id = r.batch_job_id
+          JOIN bulk.inbox i ON i.message_id = j.batch_id::text AND i.handler = 'bulk.import.admission'
+          WHERE j.batch_id = '${safeId}'
+          ON CONFLICT DO NOTHING;
+          COMMIT;
+        `;
+        await runPsql(pg.containerName, "g6_e2e_test", sql, `seed-bulk-retryable:${safeId}`);
+      },
     });
 
     const controlledBaseEnv = {
@@ -1459,10 +1726,14 @@ async function main() {
         G6_EXPECTED_ROLE: "catalog_app",
         G6_CONNECTION_MODE: "direct",
         CATALOG_TAXONOMY_URL: serviceUrls["taxonomy-svc"],
+        CATALOG_BULK_CONTENTS_URL: serviceUrls["bulk-svc"],
+        CATALOG_BULK_CONTENT_TOKEN_URL: g7.tokenUrl,
+        CATALOG_BULK_CONTENT_CLIENT_SECRET: "e2e-catalog-secret",
+        CATALOG_PREPARATION_TIMEOUT_MS: "100",
         CATALOG_SERVICE_TOKEN_URL: g7.tokenUrl,
         CATALOG_SERVICE_CLIENT_SECRET: "e2e-catalog-secret",
         MESSAGING_PROVIDER: "AZURE_SERVICE_BUS",
-        CATALOG_H5_DESTINATIONS: "g6.bulk.from.catalog",
+        CATALOG_H5_DESTINATIONS: "g6.bulk.from.catalog,g6.pricing.from.catalog,g6.inventory.from.catalog,g6.taxonomy.from.catalog,g6.promotions.from.catalog,g6.combos.from.catalog",
         G6_ISOLATED_SERVICE_BUS_URL: isolatedBus.baseUrl,
       },
       "taxonomy-svc": {
@@ -1475,6 +1746,12 @@ async function main() {
         G6_CONNECTION_MODE: "direct",
         TAXONOMY_LOGO_DIRECTORY: taxonomyLogoDir,
         TAXONOMY_LOGO_PUBLIC_BASE_URL: "https://logos.isolated.test/",
+        MESSAGING_PROVIDER: "AZURE_SERVICE_BUS",
+        TAXONOMY_SERVICE_BUS_ENABLED: "true",
+        TAXONOMY_SERVICE_BUS_SEND_ENABLED: "true",
+        TAXONOMY_SERVICE_BUS_RECEIVE_ENABLED: "true",
+        SERVICE_BUS_NAMESPACE_FQDN: "g6-taxonomy-local.servicebus.windows.net",
+        G6_ISOLATED_SERVICE_BUS_URL: isolatedBus.baseUrl,
       },
       "pricing-svc": {
         ...controlledBaseEnv,
@@ -1497,6 +1774,7 @@ async function main() {
         MESSAGING_PROVIDER: "AZURE_SERVICE_BUS",
         G6_SERVICE_BUS_PILOT_ENABLED: "true",
         G6_ISOLATED_SERVICE_BUS_URL: isolatedBus.baseUrl,
+        AUDIT_EXPORT_DIRECTORY: mkdtempSync(join(tmpdir(), "g6-e2e-price-audit-exports-")),
       },
       "promotions-svc": {
         ...controlledBaseEnv,
@@ -1528,6 +1806,7 @@ async function main() {
         COMBOS_PRICING_URL: serviceUrls["pricing-svc"],
         COMBOS_G7_TOKEN_URL: g7.tokenUrl,
         COMBOS_G7_CLIENT_SECRET: "e2e-combos-secret",
+        COMBOS_CATALOG_CONTEXT_AUTHORIZED: "true",
         COMBOS_ALLOWED_ROLES_LISTAR_COMBOS_ADMIN: "GESTOR_COMERCIAL",
         COMBOS_ALLOWED_ROLES_OBTENER_COMBO: "GESTOR_COMERCIAL",
         COMBOS_ALLOWED_ROLES_CONSULTAR_DISPONIBILIDAD_COMBO: "GESTOR_COMERCIAL",
@@ -1535,7 +1814,7 @@ async function main() {
         COMBOS_ALLOWED_ROLES_ACTUALIZAR_COMBO: "GESTOR_COMERCIAL",
         COMBOS_ALLOWED_ROLES_DESACTIVAR_COMBO: "GESTOR_COMERCIAL",
         COMBOS_ALLOWED_CLIENTS_COMBOS_READ:
-          "modulo-productos,modulo-marketplace,modulo-chatbot,modulo-ventas",
+          "modulo-marketplace,modulo-chatbot,modulo-retail",
       },
       "inventory-svc": {
         ...controlledBaseEnv,
@@ -1567,6 +1846,16 @@ async function main() {
         SUPABASE_URL: isolatedBus.baseUrl,
         SUPABASE_SERVICE_ROLE_KEY: "e2e-bulk-storage-key",
         BULK_STORAGE_BUCKET: "bulk-e2e",
+        BULK_CORRELATION_RECONCILIATION_ENABLED: "true",
+        BULK_CATALOG_V3_ENABLED: "true",
+        BULK_CATALOG_V3_AUTHORIZATION_VERIFIED: "true",
+        BULK_RETRY_CATALOG_V1_ENABLED: "true",
+        BULK_EXPORT_CATALOG_URL: serviceUrls["catalog-svc"],
+        BULK_EXPORT_PRICING_URL: serviceUrls["pricing-svc"],
+        BULK_EXPORT_INVENTORY_URL: serviceUrls["inventory-svc"],
+        BULK_EXPORT_TOKEN_URL: g7.tokenUrl,
+        BULK_EXPORT_CLIENT_SECRET: "e2e-bulk-secret",
+        BULK_DEFAULT_LOCATION_ID: "00000000-0000-4000-8000-000000000101",
       },
     };
 
@@ -1579,12 +1868,16 @@ async function main() {
       });
       let buf = "";
       child.stdout.on("data", (d) => {
-        buf = (buf + d.toString()).slice(-3000);
+        const s = d.toString();
+        buf = (buf + s).slice(-3000);
+        if (process.env.G6_STACK_DEBUG === "1" && /error|fail|exception|not_ready|warn|no disponible|503|401|403/i.test(s)) {
+          process.stderr.write(`[${svc} out] ${s}`);
+        }
       });
       child.stderr.on("data", (d) => {
         const s = d.toString();
         buf = (buf + s).slice(-3000);
-        if (svc === "bulk-svc" && /error|fail|exception/i.test(s)) {
+        if ((svc === "bulk-svc" || process.env.G6_STACK_DEBUG === "1") && /error|fail|exception/i.test(s)) {
           process.stderr.write(`[${svc} stderr] ${s}`);
         }
       });
