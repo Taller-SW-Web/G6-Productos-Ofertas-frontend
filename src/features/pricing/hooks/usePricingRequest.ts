@@ -7,7 +7,7 @@ const readCache = new Map<string, unknown>();
 export type RequestState<T> =
   | { status: "loading" }
   | { status: "success"; result: T }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string; retryable?: boolean };
 export function usePricingRead<T>(
   requestKey: string,
   read: (signal: AbortSignal) => Promise<T>,
@@ -52,6 +52,7 @@ export function usePricingRead<T>(
                 error instanceof Error
                   ? error.message
                   : "Consulta no disponible.",
+              retryable: error instanceof PricingFailure && error.retryable,
             },
           });
       },
