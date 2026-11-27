@@ -165,8 +165,14 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       inventario: { status: string };
     };
     expect(prepDto.product_id).toBe(createdDto.product_id);
-    expect(prepDto.pricing.status).toBe("PENDING");
-    expect(prepDto.inventario.status).toBe("PENDING");
+    await expect.poll(async () => {
+      const result = await request.get(`${env.gatewayUrl}/api/v1/productos/${createdDto.product_id}/preparacion`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(result.status()).toBe(200);
+      const preparation = await result.json();
+      return [preparation.pricing.status, preparation.inventario.status];
+    }, { timeout: 10000 }).toEqual(['COMPLETED', 'COMPLETED']);
   });
 
   test("2. Taxonomy: crear categoría via SPA, recargar, reautenticar y consultar por categoriaId", async ({
@@ -492,6 +498,32 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     const token = await issueTokenFromTrustedG7(env.g7ApiBase, "gestor@example.test");
     const nowMs = Date.now();
     const promoName = `Promo UI ${randomUUID().slice(0, 6)}`;
+    const fixtureHeaders = { Authorization: `Bearer ${token}`, 'X-Correlation-Id': randomUUID() };
+    const fixtureSlug = `coupon-ui-${randomUUID().slice(0, 8)}`;
+    const fixtureCategory = await request.post(`${env.gatewayUrl}/api/v1/categorias`, {
+      headers: fixtureHeaders, data: { nombre: fixtureSlug, slugConfirmado: fixtureSlug, categoriaPadreId: null },
+    });
+    expect(fixtureCategory.status()).toBe(201);
+    const fixtureBrand = await request.post(`${env.gatewayUrl}/api/v1/marcas`, {
+      headers: fixtureHeaders, multipart: { nombre: fixtureSlug, logo: {
+        name: 'logo.png', mimeType: 'image/png', buffer: readFileSync(resolve(
+          process.env.G6_BACKEND_ROOT ?? resolve(process.cwd(), '../backend'),
+          'apps/taxonomy-svc/test/fixtures/logo.png')),
+      } },
+    });
+    expect(fixtureBrand.status()).toBe(201);
+    const fixtureType = await request.post(`${env.gatewayUrl}/api/v1/tipos-producto`, {
+      headers: fixtureHeaders, data: { nombre: fixtureSlug },
+    });
+    expect(fixtureType.status()).toBe(201);
+    const fixtureProductId = randomUUID();
+    const fixtureProduct = await request.post(`${env.g5SeedOrigin}/__test/catalog-active-product`, {
+      data: { productId: fixtureProductId, skuBase: `COUPON-${randomUUID().slice(0, 8)}`,
+        categoriaId: (await fixtureCategory.json()).categoriaId,
+        marcaId: (await fixtureBrand.json()).marcaId,
+        tipoProductoId: (await fixtureType.json()).tipoProductoId },
+    });
+    expect(fixtureProduct.status()).toBe(201);
     const promoRes = await request.post(`${env.gatewayUrl}/api/v1/promociones`, {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -507,7 +539,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
         estado: "ACTIVO",
         validFrom: new Date(nowMs - 60_000).toISOString(),
         validUntil: new Date(nowMs + 24 * 60 * 60 * 1000).toISOString(),
-        alcance: { productIds: [randomUUID()], skus: [`SKU-PROMO-${randomUUID().slice(0, 4)}`] },
+        alcance: { productIds: [fixtureProductId], skus: [] },
         prioridad: 10,
         canalesHabilitados: ["MARKETPLACE"],
         politicaCombinacion: { ofertaPricing: true, promocionAutomatica: false, cupon: true },
@@ -722,7 +754,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     expect(listRes.status()).toBe(200);
 
     await navigateViaSubLink(page, "/combos/nuevo");
-    await page.getByLabel("Nombre", { exact: true }).fill(comboName);
+    await page.getByRole('textbox', { name: /^Nombre/ }).fill(comboName);
 
     const productSelector = page.getByLabel("Producto", { exact: true }).first();
     const addComponentBtn = page.getByRole("button", { name: "Agregar componente", exact: true });
@@ -737,8 +769,8 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       await addComponentBtn.click();
     }
 
-    await expect(page.getByText(sku1)).toBeVisible();
-    await expect(page.getByText(sku2)).toBeVisible();
+    await expect(page.getByText(sku1, { exact: true })).toBeVisible();
+    await expect(page.getByText(sku2, { exact: true })).toBeVisible();
 
     const comboPriceInput = page.getByLabel("Precio del combo (PEN)", { exact: true }).first();
     await expect(comboPriceInput).toBeVisible();
@@ -756,8 +788,8 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       submitBtn.click(),
     ]);
     expect([200, 201]).toContain(createRes.status());
-    const comboDto = (await createRes.json()) as { comboId?: string };
-    expect(comboDto.comboId).toBeTruthy();
+    const comboDto = (await createRes.json()) as { combo_id: string };
+    expect(comboDto.combo_id).toBeTruthy();
 
     await reloadVerifySessionLostAndReauth(page);
     await navigateViaSpa(page, "/combos");
@@ -765,18 +797,20 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       page.waitForResponse(
         (res) =>
           res.request().method() === "GET" &&
-          new URL(res.url()).pathname === `/api/v1/combos/${comboDto.comboId}`,
+          new URL(res.url()).pathname === `/api/v1/combos/${comboDto.combo_id}`,
       ),
-      navigateViaSubLink(page, `/combos/${comboDto.comboId}`),
+      navigateViaSubLink(page, `/combos/${comboDto.combo_id}`),
     ]);
     expect(detailRes.status()).toBe(200);
     const detailDto = (await detailRes.json()) as {
-      comboId?: string;
-      componentes?: Array<{ sku?: string; cantidad?: number }>;
+      combo_id: string;
+      components: Array<{ sku: string; quantity: number }>;
     };
-    expect(detailDto.comboId).toBe(comboDto.comboId);
-    expect((detailDto.componentes ?? []).length).toBeGreaterThanOrEqual(2);
-    await expect(page.getByText(comboName)).toBeVisible();
+    expect(detailDto.combo_id).toBe(comboDto.combo_id);
+    expect(detailDto.components).toEqual(expect.arrayContaining([
+      { sku: sku1, quantity: 1 }, { sku: sku2, quantity: 1 },
+    ]));
+    await expect(page.getByRole('heading', { name: comboName, exact: true })).toBeVisible();
   });
 
   test("8a. Bulk (admisión HTTP): descargar plantilla CSV V2, preparar maestros reales de Taxonomy, subir lote válido y verificar 202 QUEUED y persistencia inicial", async ({
@@ -821,15 +855,18 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
     await navigateViaSpa(page, "/carga-masiva/descargas");
     const templateBtn = page.getByRole("button", { name: /plantilla|csv/i }).first();
     await expect(templateBtn).toBeVisible();
-    const [templateRes] = await Promise.all([
+    const [templateRes, templateDownload] = await Promise.all([
       page.waitForResponse((res) =>
         new URL(res.url()).pathname.startsWith("/api/v1/carga-masiva/productos/plantilla"),
       ),
+      page.waitForEvent('download'),
       templateBtn.click(),
     ]);
     expect(templateRes.status()).toBe(200);
     expect(templateRes.headers()["content-type"]).toContain("text/csv");
-    const templateCsvText = await templateRes.text();
+    const templatePath = await templateDownload.path();
+    expect(templatePath).not.toBeNull();
+    const templateCsvText = readFileSync(templatePath!, 'utf8');
     const templateHeaderLine = templateCsvText.replace(/^\uFEFF/, "").split(/\r?\n/)[0]?.trim();
     const expectedV2Headers =
       "operacion,producto_id,catalog_version,sku_base,sku_variante,nombre,descripcion,categoria_id,marca_id,tipo_producto_id,tiene_variantes,precio_regular,atributos_producto,atributos_variante,imagen_url,stock_inicial";
@@ -851,7 +888,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       typeDto.tipoProductoId,
       "false",
       "25.00",
-      "{}",
+      "[]",
       "",
       "https://example.test/bulk-e2e.png",
       "10",
@@ -862,7 +899,8 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       mimeType: "text/csv",
       buffer: Buffer.from(csvContent, "utf8"),
     });
-    const uploadBtn = page.getByRole("button", { name: /importar|cargar|subir/i }).first();
+    await page.getByRole('button', { name: 'Continuar a revisión', exact: true }).click();
+    const uploadBtn = page.getByRole('button', { name: 'Confirmar importación', exact: true }).first();
     await expect(uploadBtn).toBeVisible();
     const [importRes] = await Promise.all([
       page.waitForResponse(
@@ -952,7 +990,7 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       typeDto.tipoProductoId,
       "false",
       "25.00",
-      "{}",
+      "[]",
       "",
       "https://example.test/bulk-integral-e2e.png",
       "10",
@@ -963,7 +1001,8 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       mimeType: "text/csv",
       buffer: Buffer.from(csvContent, "utf8"),
     });
-    const uploadBtn = page.getByRole("button", { name: /importar|cargar|subir/i }).first();
+    await page.getByRole('button', { name: 'Continuar a revisión', exact: true }).click();
+    const uploadBtn = page.getByRole('button', { name: 'Confirmar importación', exact: true }).first();
     await expect(uploadBtn).toBeVisible();
     const [importRes] = await Promise.all([
       page.waitForResponse(
@@ -987,7 +1026,12 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       needs_reconciliation?: boolean;
       rows?: Array<{ row_id?: string; status?: string }>;
     } = {};
-    for (let attempt = 0; attempt < 25; attempt += 1) {
+    // Same 40s asynchronous budget as certify-158-endpoints.mjs. Pricing's
+    // relay publishes one durable delivery per second; the preceding admission
+    // can leave six deliveries queued before this batch's R14 result.
+    const observationStart = Date.now();
+    const observationDeadline = observationStart + 40_000;
+    while (Date.now() < observationDeadline) {
       const pollRes = await request.get(
         `${env.gatewayUrl}/api/v1/carga-masiva/productos/importaciones/${encodeURIComponent(batchDto.batch_id!)}`,
         { headers: { Authorization: `Bearer ${token}` } },
@@ -999,7 +1043,19 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       }
       await new Promise((r) => setTimeout(r, 250));
     }
+    console.log('Bulk terminal observation', { elapsedMs: Date.now() - observationStart, status: batchSnapshot.status });
     expect(batchSnapshot.batch_id).toBe(batchDto.batch_id);
+    if (batchSnapshot.status !== 'COMPLETED') {
+      const diagnostics = await request.post(`${env.g5SeedOrigin}/__test/pg-query`, {
+        data: { sql: `SELECT o.event_name, d.destination, d.sent_at, d.next_attempt_at, d.last_error FROM pricing.outbox o JOIN pricing.outbox_delivery d USING(message_id) WHERE o.payload::text LIKE '%${batchDto.batch_id}%'` },
+      });
+      console.error('Bulk Pricing delivery diagnostic', await diagnostics.text());
+      const brokerResponse = await request.get(`${env.isolatedBusUrl}/__test/broker-evidence`);
+      const broker = await brokerResponse.json();
+      console.error('Bulk broker diagnostic', JSON.stringify(broker.evidence.filter(
+        (event: { queue: string }) => ['g6.pricing.from.bulk', 'g6.bulk.from.pricing'].includes(event.queue),
+      )));
+    }
     expect(batchSnapshot.status).toBe("COMPLETED");
     expect(batchSnapshot.total_rows).toBeGreaterThanOrEqual(1);
     expect(batchSnapshot.completed_rows).toBe(batchSnapshot.total_rows);
@@ -1024,7 +1080,8 @@ test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Micr
       mimeType: "text/csv",
       buffer: Buffer.from(invalidCsv, "utf8"),
     });
-    const uploadBtn = page.getByRole("button", { name: /importar|cargar|subir/i }).first();
+    await page.getByRole('button', { name: 'Continuar a revisión', exact: true }).click();
+    const uploadBtn = page.getByRole('button', { name: 'Confirmar importación', exact: true }).first();
     await expect(uploadBtn).toBeVisible();
     const [importRes] = await Promise.all([
       page.waitForResponse(

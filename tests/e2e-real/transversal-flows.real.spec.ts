@@ -64,7 +64,6 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     const humanHeaders = {
       Authorization: capturedBearer,
       "X-Correlation-Id": randomUUID(),
-      "Content-Type": "application/json",
       Accept: "application/json",
     };
 
@@ -130,17 +129,17 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
       },
     });
     expect([200, 201]).toContain(createProd.status());
-    const draftProdDto = (await createProd.json()) as { productId: string };
-    expect(draftProdDto.productId).toBeTruthy();
+    const draftProdDto = (await createProd.json()) as { product_id: string };
+    expect(draftProdDto.product_id).toBeTruthy();
 
-    // Evidencia A: Alta administrativa permanece en BORRADOR con preparaciones pendientes
+    // Evidencia A: BORRADOR persists while its asynchronous preparation completes.
     const adminReadRes = await request.get(
-      `${env.gatewayUrl}/api/v1/productos/administracion/${encodeURIComponent(draftProdDto.productId)}`,
+      `${env.gatewayUrl}/api/v1/productos/administracion/${encodeURIComponent(draftProdDto.product_id)}`,
       { headers: humanHeaders },
     );
     expect(adminReadRes.status()).toBe(200);
     const adminProdDto = (await adminReadRes.json()) as CatalogAdminProductDto;
-    expect(adminProdDto.productId).toBe(draftProdDto.productId);
+    expect(adminProdDto.productId).toBe(draftProdDto.product_id);
     expect(adminProdDto.skuBase).toBe(draftSkuBase);
     expect(adminProdDto.estado).toBe("BORRADOR");
     expect(adminProdDto.categoriaId).toBe(catDto.categoriaId);
@@ -148,7 +147,7 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     expect(adminProdDto.tipoProductoId).toBe(typeDto.tipoProductoId);
 
     const prepRes = await request.get(
-      `${env.gatewayUrl}/api/v1/productos/${encodeURIComponent(draftProdDto.productId)}/preparacion`,
+      `${env.gatewayUrl}/api/v1/productos/${encodeURIComponent(draftProdDto.product_id)}/preparacion`,
       { headers: humanHeaders },
     );
     expect(prepRes.status()).toBe(200);
@@ -159,10 +158,14 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
       inventario: { status: string };
       variantes: unknown[];
     };
-    expect(prepDto.product_id).toBe(draftProdDto.productId);
+    expect(prepDto.product_id).toBe(draftProdDto.product_id);
     expect(prepDto.tiene_variantes).toBe(false);
-    expect(prepDto.pricing.status).toBe("PENDING");
-    expect(prepDto.inventario.status).toBe("PENDING");
+    await expect.poll(async () => {
+      const result = await request.get(`${env.gatewayUrl}/api/v1/productos/${draftProdDto.product_id}/preparacion`, { headers: humanHeaders });
+      expect(result.status()).toBe(200);
+      const preparation = await result.json();
+      return [preparation.pricing.status, preparation.inventario.status];
+    }, { timeout: 10000 }).toEqual(['COMPLETED', 'COMPLETED']);
 
     // Evidencia B: Fixture comercial preprovisionada ACTIVO en PostgreSQL descartable para N01
     // (No acredita el ciclo completo de publicación asíncrona Catalog -> Pricing/Inventory -> Catalog)
@@ -258,12 +261,12 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     expect(putPrice.status()).toBe(200);
     const putPriceDto = (await putPrice.json()) as {
       product_id: string;
-      precio_regular: string;
+      precio_regular: number;
       price_version: number;
       channel_id: string | null;
     };
     expect(putPriceDto.product_id).toBe(prodDto.productId);
-    expect(putPriceDto.precio_regular).toBe("120.00");
+    expect(putPriceDto.precio_regular).toBe(120);
     expect(putPriceDto.price_version).toBeGreaterThanOrEqual(1);
 
     const getPrice = await request.get(
@@ -288,11 +291,11 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
     expect(putPrice2.status()).toBe(200);
     const putPrice2Dto = (await putPrice2.json()) as {
       product_id: string;
-      precio_regular: string;
+      precio_regular: number;
       price_version: number;
     };
     expect(putPrice2Dto.product_id).toBe(activeProductId2);
-    expect(putPrice2Dto.precio_regular).toBe("110.00");
+    expect(putPrice2Dto.precio_regular).toBe(110);
 
     const getPrice2 = await request.get(
       `${env.gatewayUrl}/api/v1/precios/productos/${encodeURIComponent(activeProductId2)}`,
@@ -307,8 +310,8 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
         { headers: humanHeaders },
       );
       expect(auditRes.status()).toBe(200);
-      const auditBody = (await auditRes.json()) as { items?: Array<{ sku?: string; productId?: string; motivoCambio?: string }> };
-      if ((auditBody.items ?? []).some((row) => row.motivoCambio === "E2E_TRANSVERSAL" || row.productId === prodDto.productId)) {
+      const auditBody = (await auditRes.json()) as { items?: Array<{ sku?: string; product_id?: string; motivo_cambio?: string }> };
+      if ((auditBody.items ?? []).some((row) => row.motivo_cambio === "E2E_TRANSVERSAL" && row.product_id === prodDto.productId)) {
         auditFound = true;
         break;
       }
@@ -332,20 +335,20 @@ test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Mic
       },
     );
     expect([200, 201]).toContain(createCombo.status());
-    const comboDto = (await createCombo.json()) as { comboId: string };
-    expect(comboDto.comboId).toBeTruthy();
+    const comboDto = (await createCombo.json()) as { combo_id: string };
+    expect(comboDto.combo_id).toBeTruthy();
 
     const getCombo = await request.get(
-      `${env.gatewayUrl}/api/v1/combos/${encodeURIComponent(comboDto.comboId)}`,
+      `${env.gatewayUrl}/api/v1/combos/${encodeURIComponent(comboDto.combo_id)}`,
       { headers: humanHeaders },
     );
     expect(getCombo.status()).toBe(200);
     const comboDetail = (await getCombo.json()) as {
-      comboId?: string;
-      componentes?: Array<{ sku?: string; cantidad?: number }>;
+      combo_id: string;
+      components: Array<{ sku: string; quantity: number }>;
     };
-    expect(comboDetail.comboId).toBe(comboDto.comboId);
-    const comboSkus = (comboDetail.componentes ?? []).map((c) => c.sku);
+    expect(comboDetail.combo_id).toBe(comboDto.combo_id);
+    const comboSkus = comboDetail.components.map((c) => c.sku);
     expect(comboSkus).toContain(skuBase);
     expect(comboSkus).toContain(skuBase2);
 

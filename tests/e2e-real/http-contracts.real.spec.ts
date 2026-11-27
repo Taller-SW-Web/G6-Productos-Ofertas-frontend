@@ -222,7 +222,7 @@ test.describe("Contratos HTTP, seguridad G7 y resiliencia React -> Gateway -> Ba
 
     // Navegación SPA hacia Categorías (formulario completo válido antes de inyectar 503)
     await navigateViaSpa(page, "/categorias");
-    const newCatLink = page.locator('a[href="/categorias/nueva"]').first();
+    const newCatLink = page.getByRole('button', { name: 'Crear categoría', exact: true });
     await expect(newCatLink).toBeVisible();
     await newCatLink.click();
 
@@ -257,12 +257,18 @@ test.describe("Contratos HTTP, seguridad G7 y resiliencia React -> Gateway -> Ba
           res.request().method() === "POST" &&
           new URL(res.url()).pathname === "/api/v1/categorias",
       ),
-      submitBtn.click(),
+      (async () => {
+        await submitBtn.click();
+        await page.getByRole('dialog', { name: 'Confirmar slug SEO' })
+          .getByRole('button', { name: 'Crear categoría', exact: true }).click();
+      })(),
     ]);
     expect(err503.status()).toBe(503);
     await page.waitForTimeout(300);
     expect(postAttempts).toBe(1);
     await page.unroute("**/api/v1/categorias");
+    await page.getByRole('dialog', { name: 'Confirmar slug SEO' })
+      .getByRole('button', { name: 'Cancelar', exact: true }).click();
 
     // 429 con Retry-After mediante navegación SPA a Dashboard Inventario
     await page.route("**/api/v1/inventario/dashboard*", async (route) => {
@@ -321,7 +327,7 @@ test.describe("Contratos HTTP, seguridad G7 y resiliencia React -> Gateway -> Ba
       { service: "taxonomy-svc", humanReadPath: "/api/v1/categorias/administracion?pagina=1&tamanio=5", humanWritePath: "/api/v1/categorias" },
       { service: "pricing-svc", humanReadPath: "/api/v1/precios?skus=SKU-NO-EXISTE" },
       { service: "price-audit-svc", humanReadPath: "/api/v1/auditoria-precios/administracion?pagina=1&tamanio=5" },
-      { service: "promotions-svc", humanReadPath: "/api/v1/promociones" },
+      { service: "promotions-svc", humanReadPath: "/api/v1/promociones/administracion?pagina=1&tamanio=5" },
       { service: "combos-svc", humanReadPath: "/api/v1/combos" },
       { service: "inventory-svc", humanReadPath: "/api/v1/inventario/umbrales" },
       { service: "bulk-svc", humanReadPath: "/api/v1/carga-masiva/productos/plantilla?formato=CSV" },
@@ -336,12 +342,12 @@ test.describe("Contratos HTTP, seguridad G7 y resiliencia React -> Gateway -> Ba
       const gwOk = await request.get(`${env.gatewayUrl}${p.humanReadPath}`, {
         headers: { Authorization: `Bearer ${gestorJwt}`, "X-Correlation-Id": corrId },
       });
-      expect(gwOk.status()).toBe(200);
+      expect(gwOk.status(), `${p.service} Gateway ${p.humanReadPath}: ${await gwOk.text()}`).toBe(200);
 
       const directOk = await request.get(`${providerBase}${p.humanReadPath}`, {
         headers: { Authorization: `Bearer ${gestorJwt}`, "X-Correlation-Id": corrId },
       });
-      expect(directOk.status()).toBe(200);
+      expect(directOk.status(), `${p.service} directo ${p.humanReadPath}: ${await directOk.text()}`).toBe(200);
 
       // 3. Directo sin JWT -> 401
       const directNoAuth = await request.get(`${providerBase}${p.humanReadPath}`, {
