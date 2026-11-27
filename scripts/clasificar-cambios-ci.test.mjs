@@ -13,7 +13,7 @@ test("un cambio mixto ejecuta todas las verificaciones", () => {
 });
 
 test("workflow, scripts, dependencias y pruebas nunca se clasifican como documentales", () => {
-  for (const ruta of [".github/workflows/frontend.yml", "scripts/build.mjs", "package.json", "tests/catalog.spec.ts", "playwright.config.ts"]) {
+  for (const ruta of [".github/workflows/frontend.yml", "scripts/build.mjs", "scripts/h5/security/README.md", ".github/workflows/frontend-codeql-h5.yml", "package-lock.json", "package.json", "tests/catalog.spec.ts", "playwright.config.ts"]) {
     assert.equal(clasificarCambios([doc(ruta)]), "verificaciones_completas", ruta);
   }
 });

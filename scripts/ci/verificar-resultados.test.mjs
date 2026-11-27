@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 const checker=fileURLToPath(new URL('./verificar-resultados.mjs',import.meta.url));
-const jobs=['revision_estilo','clasificar_cambios','comprobacion_tipos','unitarias_combos','unitarias_carga_masiva','unitarias_inventario','unitarias_precios','compilacion_demostracion','compilacion_api','verificacion_compilacion','pruebas_rapidas_interfaz','unitarias_taxonomy','politica_release','e2e_pricing','seguridad_dependencias'];
+const jobs=['revision_estilo','clasificar_cambios','comprobacion_tipos','unitarias_combos','unitarias_carga_masiva','unitarias_inventario','unitarias_precios','compilacion_demostracion','compilacion_api','verificacion_compilacion','pruebas_rapidas_interfaz','unitarias_taxonomy','politica_release','e2e_pricing','seguridad_dependencias','seguridad_h5'];
 const good=()=>Object.fromEntries([...jobs.map(j=>[j,{result:'success'}]),['pruebas_extremo_a_extremo',{result:'success'}]]);
 const run=(x)=>spawnSync(process.execPath,[checker,JSON.stringify(x)],{encoding:'utf8'});
 test('aprueba todos los resultados obligatorios observados',()=>assert.equal(run(good()).status,0));
