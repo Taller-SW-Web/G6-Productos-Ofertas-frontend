@@ -1046,6 +1046,7 @@ async function startLocalG5EvidenceServer({
   seedInventoryStoreLocation,
   seedCatalogBarcode,
   seedInventoryTransfer,
+  controlPricingProcess,
 }) {
   const g5CertDir = mkdtempSync(join(tmpdir(), "g6-e2e-g5-tls-"));
   const g5KeyPath = join(g5CertDir, "server.key");
@@ -1109,6 +1110,20 @@ async function startLocalG5EvidenceServer({
   );
 
   const seedServer = createServer(async (req, res) => {
+    // Lab-only loopback control: never exposed by a G6 provider or Gateway.
+    if (req.method === 'POST' && req.url === '/__test/pricing-process') {
+      try {
+        const { action } = await readJsonBody(req);
+        if (!['stop', 'start'].includes(action)) throw new Error('INVALID_ACTION');
+        const result = await controlPricingProcess(action);
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(result));
+      } catch (error) {
+        res.writeHead(500, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: error.message }));
+      }
+      return;
+    }
     const url = req.url ?? "/";
     if (req.method === "POST" && url === "/__test/g5-snapshots") {
       const body = await readJsonBody(req);
@@ -1507,6 +1522,9 @@ async function main() {
   let g5Evidence;
   let isolatedBus;
   const children = [];
+  let pricingProcess;
+  let spawnPricing;
+  let pricingReadinessUrl;
 
   const cleanup = async (vite) => {
     vite?.kill("SIGTERM");
@@ -1525,6 +1543,23 @@ async function main() {
     const taxonomyLogoDir = mkdtempSync(join(tmpdir(), "g6-e2e-taxonomy-logos-"));
     g5Evidence = await startLocalG5EvidenceServer({
       g7PublicKey: g7.publicKey,
+      controlPricingProcess: async (action) => {
+        if (action === 'stop') {
+          if (!pricingProcess || pricingProcess.exitCode !== null || pricingProcess.signalCode !== null)
+            throw new Error('PRICING_PROCESS_NOT_RUNNING');
+          const pid = pricingProcess.pid;
+          const exited = once(pricingProcess, 'exit');
+          if (!pricingProcess.kill('SIGKILL')) throw new Error('PRICING_PROCESS_KILL_FAILED');
+          await Promise.race([exited, delay(5000).then(() => { throw new Error('PRICING_PROCESS_DID_NOT_EXIT'); })]);
+          return { stopped: true, pid };
+        }
+        if (!spawnPricing || !pricingProcess || (pricingProcess.exitCode === null && pricingProcess.signalCode === null))
+          throw new Error('PRICING_PROCESS_NOT_STOPPED');
+        const previousPid = pricingProcess.pid;
+        pricingProcess = spawnPricing();
+        await waitForHttpReady(pricingReadinessUrl);
+        return { ready: true, previousPid, pid: pricingProcess.pid };
+      },
       seedInventoryStock: async (sku, onHand) => {
         const sql = `
           INSERT INTO inventory.stock_balance (sku_id, location_id, on_hand, reserved, blocked, stock_version)
@@ -1956,7 +1991,7 @@ async function main() {
     };
 
     const serviceLogs = new Map();
-    for (const svc of SERVICE_NAMES) {
+    const spawnService = (svc) => {
       const child = spawn(process.execPath, [`dist/apps/${svc}/main.js`], {
         cwd: backendRoot,
         env: perServiceEnv[svc],
@@ -1979,6 +2014,13 @@ async function main() {
       });
       serviceLogs.set(svc, () => buf);
       children.push(child);
+      return child;
+    };
+    spawnPricing = () => spawnService('pricing-svc');
+    pricingReadinessUrl = `${serviceUrls['pricing-svc']}/health/ready`;
+    for (const svc of SERVICE_NAMES) {
+      const child = spawnService(svc);
+      if (svc === 'pricing-svc') pricingProcess = child;
     }
 
     const gatewayPort = await reserveLocalPort();
