@@ -33,7 +33,7 @@ describe("Pricing reconciliation H4", () => {
   it("PRI-H4-01: los cinco canales conservan su identidad canónica y la lectura no exige un UUID de escritura", async () => {
     const observed: unknown[] = [];
     const setup = repository(async (_path, request) => {
-      const channelId = request.method === "GET" ? new URLSearchParams(_path.split("?")[1]).get("canal") : JSON.parse(request.body ?? "{}").channelId;
+      const channelId = request.method === "GET" ? new URLSearchParams(_path.split("?")[1]).get("canal") : JSON.parse(String(request.body ?? "{}")).channelId;
       observed.push({ method: request.method, channelId });
       const mappedId = channelId === null ? null : channels[channelId.toLowerCase() as keyof typeof channels] ?? channelId;
       return jsonResponse(200, price(mappedId));
@@ -53,7 +53,7 @@ describe("Pricing reconciliation H4", () => {
     const instance = repository(async (path, request) => {
       observed.push({ path, request });
       if (request.method === "GET") return jsonResponse(200, page([], 0));
-      const channel = JSON.parse(request.body ?? "{}") as { channelId: string | null };
+      const channel = JSON.parse(String(request.body ?? "{}")) as { channelId: string | null };
       return jsonResponse(201, {
         programacionId: `schedule-${observed.length}`,
         sku: target.sku,
@@ -75,7 +75,7 @@ describe("Pricing reconciliation H4", () => {
       await instance.instance.schedule(target.id, { ...draft, channel }, signal());
       const post = observed.filter(item => item.request.method === "POST").at(-1)!;
       expect(post.path).toBe(`/api/v1/precios/skus/${target.sku}/programaciones`);
-      expect(JSON.parse(post.request.body ?? "{}")).toEqual({ tipoPrecio: "REGULAR", importe: 49.9, moneda: "PEN", channelId, validFrom: "2026-11-10T14:00:00.000Z", validUntil: "2026-11-11T14:00:00.000Z", motivoCambio: "Ajuste H4" });
+      expect(JSON.parse(String(post.request.body ?? "{}"))).toEqual({ tipoPrecio: "REGULAR", importe: 49.9, moneda: "PEN", channelId, validFrom: "2026-11-10T14:00:00.000Z", validUntil: "2026-11-11T14:00:00.000Z", motivoCambio: "Ajuste H4" });
     }
     expect(observed.filter(item => item.request.method === "POST")).toHaveLength(5);
 
