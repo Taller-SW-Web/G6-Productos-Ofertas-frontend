@@ -79,6 +79,8 @@ export class PricingFailure extends Error {
       | "blocked_contract"
       | "configuration",
     message: string,
+    readonly status?: number,
+    readonly retryable = false,
   ) {
     super(message);
   }

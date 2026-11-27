@@ -8,6 +8,7 @@ import {
   type WriteTarget,
 } from "../services/pricingModels";
 import { localInstant } from "../services/pricingValidation";
+import { acceptedImportId, createPriceImportAdmission } from "./priceImportAdmission";
 import type {
   PriceChannel,
   ImportInput,
@@ -20,6 +21,7 @@ import type {
 import {
   mapBatchDto,
   mapEditablePriceDto,
+  mapPrevalidationDto,
   mapPriceDto,
   mapScheduleDto,
   mapSchedulePageDto,
@@ -32,7 +34,7 @@ export interface PricingHttpRequest {
   method: "GET" | "PATCH" | "POST";
   signal: AbortSignal;
   headers?: Readonly<Record<string, string>>;
-  body?: string;
+  body?: string | FormData;
 }
 
 // Castilla adapts the shared API client to this narrow transport boundary.
@@ -229,6 +231,7 @@ export function createHttpPricingRepository(
     request: PricingHttpRequest,
     write: boolean,
     absentCodes: readonly string[] = [],
+    expectedStatus = request.method === "POST" ? 201 : 200,
   ): Promise<Response | null> {
     request.signal.throwIfAborted();
     let response: Response;
@@ -242,11 +245,12 @@ export function createHttpPricingRepository(
         write
           ? "No se confirmó el resultado de Pricing. Consulta el estado antes de intentar otra vez."
           : "Pricing no respondió a la consulta.",
+        undefined,
+        !write,
       );
     }
     if (response.ok) {
-      const expected = request.method === "POST" ? 201 : 200;
-      if (response.status !== expected) {
+      if (response.status !== expectedStatus) {
         throw new PricingFailure(
           write ? "unknown" : "error",
           "Pricing no devolvió la confirmación HTTP prevista por el contrato.",
@@ -267,7 +271,7 @@ export function createHttpPricingRepository(
             ? code === "VIGENCIA_SUPERPUESTA"
               ? "overlap"
               : "conflict"
-            : write && (response.status >= 500 || response.status === 408)
+            : write && (response.status >= 500 || response.status === 408 || response.status === 429)
               ? "unknown"
               : "error";
     const message =
@@ -278,13 +282,26 @@ export function createHttpPricingRepository(
           : response.status === 409
             ? code === "VIGENCIA_SUPERPUESTA"
               ? "La vigencia se superpone con otra del mismo objetivo y canal."
-              : "El precio cambió desde la lectura. Conserva la propuesta y vuelve a consultar."
-            : write && (response.status >= 500 || response.status === 408)
+              : code === "IDEMPOTENCY_CONFLICT"
+                ? "La clave de importación corresponde a otro archivo o política."
+                : "El precio cambió desde la lectura. Conserva la propuesta y vuelve a consultar."
+            : kind === "unknown"
               ? "Pricing no confirmó el resultado. Consulta el estado antes de intentar otra vez."
-              : response.status === 400 || response.status === 422
-                ? "Pricing rechazó los datos enviados. Revisa el formulario."
-                : "Pricing no pudo completar la operación.";
-    throw new PricingFailure(kind, message);
+              : code === "ARCHIVO_EXCEDE_LIMITE"
+                ? "El archivo supera el tamaño o la cantidad de filas permitidos."
+                : code === "PLANTILLA_INCOMPATIBLE"
+                  ? "Las columnas no coinciden con la plantilla CSV de precios."
+                  : code === "ARCHIVO_INVALIDO"
+                    ? "Revisa que el archivo sea un CSV válido en UTF-8."
+                    : response.status === 400 || response.status === 422
+                      ? "Pricing rechazó los datos enviados. Revisa el formulario."
+                      : "Pricing no pudo completar la operación.";
+    throw new PricingFailure(
+      kind,
+      message,
+      response.status,
+      !write && [408, 429, 502, 503, 504].includes(response.status),
+    );
   }
 
   async function json(
@@ -292,8 +309,9 @@ export function createHttpPricingRepository(
     request: PricingHttpRequest,
     write: boolean,
     absentCodes: readonly string[] = [],
+    expectedStatus?: number,
   ): Promise<unknown | null> {
-    const response = await send(path, request, write, absentCodes);
+    const response = await send(path, request, write, absentCodes, expectedStatus);
     if (!response) return null;
     try {
       const body: unknown = await response.json();
@@ -751,13 +769,38 @@ export function createHttpPricingRepository(
       return { price, validityId: price.validityId };
     },
 
-    async prevalidate(input: ImportInput, signal) {
-      void input;
+    async prevalidate({ file }: ImportInput, signal) {
       signal.throwIfAborted();
-      throw blocked(
-        "La prevalidación real de importaciones permanece bloqueada por P-PRI-01. No se envió ni se simuló el análisis del archivo.",
+      if (dependencies.canManagePricing && !dependencies.canManagePricing())
+        throw new PricingFailure("forbidden", "Tu rol no permite prevalidar archivos de precios.");
+      const body = new FormData();
+      body.append("archivo", file);
+      const response = await json(
+        "/api/v1/precios/importaciones/prevalidar",
+        { method: "POST", signal, body },
+        false,
+        [],
+        200,
       );
+      return mapPrevalidationDto(response);
     },
+
+    importAdmission: createPriceImportAdmission(
+      () => dependencies.canManagePricing?.() ? dependencies.scopeId?.() ?? null : null,
+      async (input, key, signal) => {
+        const body = new FormData();
+        body.append("archivo", input.file);
+        body.append("allow_partial", String(input.allowPartial));
+        const response = await json(
+          "/api/v1/precios/importaciones",
+          { method: "POST", signal, body, headers: { "Idempotency-Key": key } },
+          true,
+          [],
+          202,
+        );
+        return acceptedImportId(response, input.allowPartial);
+      },
+    ),
 
     async readBatch(id, signal): Promise<BatchView | null> {
       const response = await json(

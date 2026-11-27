@@ -2,6 +2,7 @@ import {
   PricingFailure,
   type BatchView,
   type ImportRow,
+  type PrevalidationView,
   type ScheduleView,
 } from "../services/pricingModels";
 import type {
@@ -353,6 +354,60 @@ export function mapSchedulePageDto(
   };
 }
 
+function count(dto: Record<string, unknown>, key: string): number {
+  const value = dto[key];
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
+    return invalidResponse();
+  return value;
+}
+
+function mapImportRows(rows: unknown[]): ImportRow[] {
+  const rowIds = new Set<string>();
+  return rows.map((value) => {
+    const row = record(value);
+    const status = row.status;
+    if (
+      status !== "PENDING" &&
+      status !== "PROCESSING" &&
+      status !== "COMPLETED" &&
+      status !== "FAILED"
+    )
+      return invalidResponse();
+    const id = requiredString(row, "row_id");
+    if (rowIds.has(id)) return invalidResponse();
+    rowIds.add(id);
+    const { sku, code, detail } = row;
+    if (
+      (sku != null && typeof sku !== "string") ||
+      (code != null && typeof code !== "string") ||
+      (detail != null && typeof detail !== "string")
+    )
+      return invalidResponse();
+    return {
+      id,
+      sku: sku ?? null,
+      status,
+      code: code ?? null,
+      detail: detail ?? null,
+    };
+  });
+}
+
+export function mapPrevalidationDto(value: unknown): PrevalidationView {
+  const dto = record(value);
+  const total = count(dto, "total_rows");
+  if (typeof dto.valid !== "boolean" || !Array.isArray(dto.errors))
+    return invalidResponse();
+  const errors = mapImportRows(dto.errors);
+  if (
+    dto.valid !== (errors.length === 0) ||
+    errors.length > total ||
+    errors.some(({ status }) => status !== "FAILED")
+  )
+    return invalidResponse();
+  return { valid: dto.valid, total, errors };
+}
+
 export function mapBatchDto(value: unknown): BatchView {
   const dto = record(value);
   const status = dto.status;
@@ -364,19 +419,12 @@ export function mapBatchDto(value: unknown): BatchView {
     status !== "FAILED"
   )
     return invalidResponse();
-  const count = (key: string) => {
-    const value = dto[key];
-    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
-      return invalidResponse();
-    return value;
-  };
   const rows = dto.rows;
   if (rows !== undefined && !Array.isArray(rows)) return invalidResponse();
-  const total = count("total_rows");
-  const completed = count("completed_rows");
-  const failed = count("failed_rows");
+  const total = count(dto, "total_rows");
+  const completed = count(dto, "completed_rows");
+  const failed = count(dto, "failed_rows");
   if (completed > total || failed > total - completed) return invalidResponse();
-  const rowIds = new Set<string>();
   return {
     id: requiredString(dto, "batch_id"),
     status,
@@ -389,41 +437,6 @@ export function mapBatchDto(value: unknown): BatchView {
     failed,
     ...(rows === undefined
       ? {}
-      : {
-          rows: rows.map((value): ImportRow => {
-            const row = record(value);
-            const rowStatus = row.status;
-            if (
-              rowStatus !== "PENDING" &&
-              rowStatus !== "PROCESSING" &&
-              rowStatus !== "COMPLETED" &&
-              rowStatus !== "FAILED"
-            )
-              return invalidResponse();
-            const sku = row.sku;
-            const code = row.code;
-            const detail = row.detail;
-            if (
-              (sku !== undefined && sku !== null && typeof sku !== "string") ||
-              (code !== undefined &&
-                code !== null &&
-                typeof code !== "string") ||
-              (detail !== undefined &&
-                detail !== null &&
-                typeof detail !== "string")
-            )
-              return invalidResponse();
-            const id = requiredString(row, "row_id");
-            if (rowIds.has(id)) return invalidResponse();
-            rowIds.add(id);
-            return {
-              id,
-              sku: sku ?? null,
-              status: rowStatus,
-              code: code ?? null,
-              detail: detail ?? null,
-            };
-          }),
-        }),
+      : { rows: mapImportRows(rows) }),
   };
 }
