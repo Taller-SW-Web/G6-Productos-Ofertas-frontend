@@ -10,3 +10,5 @@ promotions-states.spec.ts
 promotions-visual.spec.ts
 taxonomy-mk010.spec.ts
 taxonomy.spec.ts
+admin-performance.spec.ts
+bulk-http.spec.ts
