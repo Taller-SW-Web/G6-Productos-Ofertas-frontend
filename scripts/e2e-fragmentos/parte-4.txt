@@ -10,3 +10,6 @@ promotions-history-ui.spec.ts
 promotions-session-ui.spec.ts
 transversal-integration.spec.ts
 variants.spec.ts
+h5/security-boundary.spec.ts
+catalog-http-real.spec.ts
+h4-demo-regresiones.spec.ts

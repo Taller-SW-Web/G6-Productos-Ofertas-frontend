@@ -11,3 +11,4 @@ promotions-session.spec.ts
 taxonomy-ui.spec.ts
 vera-integration.spec.ts
 visual-castilla.spec.ts
+auth-general.spec.ts

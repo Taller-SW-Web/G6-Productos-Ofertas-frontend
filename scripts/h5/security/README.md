@@ -32,3 +32,11 @@ En el [job E2E, parte 2](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-f
 La suite histórica amplia de Playwright tuvo ejecuciones de 59/62 y 61/62, y la suite de auth 37/38; los casos fallidos pasaron en repeticiones aisladas. Son resultados intermitentes pendientes de investigación, separados del resultado local 7/7 de `security-boundary.spec.ts`; la repetición aislada no convierte las ejecuciones amplias en PASS.
 
 Todas las pruebas de identidad, JWT, CORS y CSP locales son `L1_SYNTHETIC`: no validan grants G7 (`BLOCKED_G7`) ni las cabeceras reales de Vercel (`SERVER_HEADERS_NOT_VERIFIED`). Una cabecera observada en el proveedor sintético o Vite local no acredita el host desplegado.
+
+## Integración CI H5
+
+El escaneo histórico conserva el estado `HISTORICAL_SCAN_FAIL_REVIEWED`: el resultado bruto sigue en FAIL y el dictamen formal de Coordinación G6 / Auditoría G6 del 2026-11-25 clasifica las siete detecciones revisadas como fixtures sintéticas. No se configura ninguna allowlist ni se ocultan hallazgos. El escaneo del diff del PR se ejecuta de forma estricta y publica solo resultado redactado y SHA. Gitleaks 8.30.1 está fijado por SHA-256 del tarball Linux publicado.
+
+El job de dependencias existente conserva su política de auditoría; `sca-audit.mjs <reporte> <decision>` interpreta sus archivos ya producidos sin lanzar un tercer npm audit. Informe ausente, inconsistente o con error se trata como INCONCLUSIVE. Los análisis de identidad/cabeceras locales son L1_SYNTHETIC y no validan G7 ni headers de Vercel.
+
+`BLOCKED_GH_ADMIN`: la consulta del default setup de CodeQL devolvió HTTP 403; se requiere que un administrador compruebe su estado antes de activar o integrar otro workflow. No se declara CodeQL activo ni se instala uno duplicado sin esa comprobación. La integración con PR #79 y cabeceras reales quedan pendientes de coordinación.
