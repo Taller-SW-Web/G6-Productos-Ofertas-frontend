@@ -29,6 +29,7 @@ import { isGatewayTokenInvalid } from "../../shared/isGatewayTokenInvalid";
 
 export interface PromotionHttpOptions {
   gatewayOrigin: string;
+  /** @deprecated Compatibilidad inerte; sin efecto bajo G7 obligatorio. */
   publicReads?: boolean;
   getAccessToken(signal: AbortSignal): Promise<string | null>;
   refreshAccessToken?(
@@ -343,7 +344,7 @@ export function createHttpPromotionServices(
         redirect: "error",
         cache: "no-store",
         headers: {
-          ...(options.publicReads && method === "GET" ? {} : { Authorization: "Bearer " + accessToken }),
+          Authorization: "Bearer " + accessToken,
           "X-Correlation-Id": crypto.randomUUID(),
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         },
@@ -351,7 +352,7 @@ export function createHttpPromotionServices(
       });
     let response = await send(token);
     assertSession(true);
-    if (!(options.publicReads && method === "GET") && await isGatewayTokenInvalid(response)) {
+    if (await isGatewayTokenInvalid(response)) {
       assertSession(true);
       const refresh = options.refreshAccessToken;
       if (method === "GET" && refresh) {

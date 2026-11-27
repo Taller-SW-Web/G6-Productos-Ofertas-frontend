@@ -70,6 +70,8 @@ function renderEditor() {
       create: vi.fn(),
       update: vi.fn(),
       deactivate: vi.fn(),
+      getPendingCreate: vi.fn(async () => null),
+      recoverPendingCreate: vi.fn(),
     },
     catalog: {
       listProducts: vi.fn(

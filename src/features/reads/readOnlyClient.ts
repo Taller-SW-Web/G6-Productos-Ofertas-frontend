@@ -10,10 +10,8 @@ export interface ReadSession {
 export type ReadResult = { kind: "data"; value: unknown } | { kind: "file"; blob: Blob; filename: string };
 export class ReadFailure extends Error {}
 
-// These commercial reads allow an omitted channel for a verified human JWT.
-// Azure PUBLIC_READ_ONLY has no such principal; the user must choose the channel.
-export const requiresPublicReadChannel = (id: string) =>
-  ["listarProductos", "obtenerProducto", "consultarPrecios", "obtenerPrecioSku"].includes(id);
+/** @deprecated Compatibilidad inerte; bajo G7 obligatorio `canal` es opcional según OpenAPI. */
+export const requiresPublicReadChannel = (_id: string) => { void _id; return false; };
 
 const DATE_TIME_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(Z|([+-])(\d{2}):(\d{2}))$/;
@@ -106,12 +104,16 @@ async function limitedBody(response: Response): Promise<Uint8Array> {
   return result;
 }
 
-export function createReadOnlyClient(origin: string, session: ReadSession, fetcher: typeof fetch = fetch, options: { publicReadOnly?: boolean } = {}) {
+export function createReadOnlyClient(
+  origin: string,
+  session: ReadSession,
+  fetcher: typeof fetch = fetch,
+  _options: { /** @deprecated Compatibilidad inerte; sin efecto bajo G7. */ publicReadOnly?: boolean } = {},
+) {
+  void _options;
   const base = secureBase(origin, true);
   return {
     async read(id: string, values: Readonly<Record<string, string>>, cancellation: AbortSignal): Promise<ReadResult> {
-      if (options.publicReadOnly && requiresPublicReadChannel(id) && !values.canal?.trim())
-        throw new ReadFailure("Selecciona el canal para consultar los datos comerciales.");
       const path = buildReadPath(id, values);
       const signal = AbortSignal.any([cancellation, AbortSignal.timeout(65000)]);
       signal.throwIfAborted();
@@ -121,10 +123,10 @@ export function createReadOnlyClient(origin: string, session: ReadSession, fetch
       const correlation = crypto.randomUUID();
       const send = (bearer: string) => fetcher(base + path, {
         method: "GET", signal, credentials: "omit", redirect: "error", cache: "no-store",
-        headers: { Accept: "application/json, text/csv, application/pdf, application/octet-stream, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ...(options.publicReadOnly ? {} : { Authorization: `Bearer ${bearer}` }), "X-Correlation-Id": correlation },
+        headers: { Accept: "application/json, text/csv, application/pdf, application/octet-stream, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", Authorization: `Bearer ${bearer}`, "X-Correlation-Id": correlation },
       });
       let response = await send(token);
-      if (!options.publicReadOnly && await isGatewayTokenInvalid(response)) {
+      if (await isGatewayTokenInvalid(response)) {
         const renewed = await session.refreshAccessToken(token, signal);
         if (!renewed) {
           session.invalidateAccessToken(token);
@@ -136,7 +138,7 @@ export function createReadOnlyClient(origin: string, session: ReadSession, fetch
       if (!response.ok) {
         const messages: Record<number, string> = {
           400: "Revisa los filtros e identificadores de la consulta.",
-          401: options.publicReadOnly ? "Esta consulta no está habilitada en el modo de lectura actual del backend." : "Tu sesión no permite completar la consulta. Inicia sesión de nuevo.",
+          401: "Tu sesión no permite completar la consulta. Inicia sesión de nuevo.",
           403: "Tu cuenta no tiene permiso para esta consulta.",
           404: "No se encontró el registro o la consulta aún no está habilitada en el backend.",
         };

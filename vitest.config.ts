@@ -6,6 +6,8 @@ export default defineConfig({
       "src/features/combos/**/*.test.ts",
       "src/features/promotions/**/*.test.tsx",
       "src/features/auth/**/*.test.ts",
+      "src/features/auth/**/*.spec.ts",
+      "src/features/catalog/hooks/*.spec.tsx",
     ],
     environment: "node",
     pool: "forks",

@@ -4,7 +4,7 @@ if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("PLA
 export default defineConfig({
   testDir: "./tests",
   testMatch: "**/*.spec.ts",
-  testIgnore: ["**/bulk-http-real.spec.ts"],
+  testIgnore: ["**/bulk-http-real.spec.ts", "**/e2e-real/**"],
   fullyParallel: false,
   workers: process.env.CI ? 1 : 2,
   retries: 0,

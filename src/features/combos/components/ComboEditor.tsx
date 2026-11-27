@@ -7,6 +7,7 @@ import { compareComboPrice, formatMoney, toComparisonComponents, validateComposi
 import { RequestIdentity } from "../services/requestIdentity";
 import { diffComboDraft, draftFromCombo, isDraftDirty, keepDraftAfterVersionConflict } from "../services/drafts";
 import { ComboError, type Combo, type ComboDraft, type ProductDetail, type ProductSummary, type ProductSummaryPage, type SkuPrice } from "../types/combos";
+import type { PendingComboCreate } from "../types/combos";
 import { useCombosRuntime } from "../hooks/useCombosRuntime";
 import classes from "../combos.module.css";
 
@@ -53,6 +54,10 @@ export function ComboEditor({ existing }: { existing?: Combo }) {
   const [confirmReplaceDraft, setConfirmReplaceDraft] = useState(false);
   const [confirmKeepDraft, setConfirmKeepDraft] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [pendingCreate, setPendingCreate] = useState<PendingComboCreate | null>(null);
+  const [pendingReadError, setPendingReadError] = useState<string | null>(null);
+  const [pendingReadComplete, setPendingReadComplete] = useState(Boolean(existing));
+  const [recovering, setRecovering] = useState(false);
   const inFlight = useRef(false);
   const savingRef = useRef(false);
   const searchIdentity = useRef(new RequestIdentity());
@@ -60,6 +65,10 @@ export function ComboEditor({ existing }: { existing?: Combo }) {
   const priceIdentity = useRef(new RequestIdentity());
   const versionIdentity = useRef(new RequestIdentity());
   const versionController = useRef<AbortController | null>(null);
+  const nameInput = useRef<HTMLInputElement>(null);
+  const keepDraftButton = useRef<HTMLButtonElement>(null);
+  const replaceDraftButton = useRef<HTMLButtonElement>(null);
+  const focusTarget = useRef<HTMLElement | null>(null);
   const skuKey = draft.components.map((item) => item.sku).join("|");
   const searchTerm = debouncedSearchQuery.trim();
   const searchKey = JSON.stringify([searchQuery, debouncedSearchQuery, searchPage, searchRetry]);
@@ -82,12 +91,39 @@ export function ComboEditor({ existing }: { existing?: Combo }) {
   );
 
   useEffect(() => {
+    if (confirmKeepDraft || confirmReplaceDraft || blocker.state === "blocked") return;
+    const target = focusTarget.current;
+    focusTarget.current = null;
+    const frame = requestAnimationFrame(() => {
+      if (target?.isConnected) target.focus();
+      else nameInput.current?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [blocker.state, confirmKeepDraft, confirmReplaceDraft]);
+
+  useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       if (isDirtyRef.current && !savingRef.current) event.preventDefault();
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, []);
+
+  useEffect(() => {
+    if (existing) return;
+    let active = true;
+    void combos.getPendingCreate().then((pending) => {
+      if (!active) return;
+      setPendingCreate(pending);
+      setPendingReadError(null);
+      setPendingReadComplete(true);
+    }).catch((reason: unknown) => {
+      if (!active) return;
+      setPendingReadError(reason instanceof Error ? reason.message : "No se pudo verificar la creación anterior.");
+      setPendingReadComplete(false);
+    });
+    return () => { active = false; };
+  }, [combos, existing]);
 
   useEffect(() => {
     const requests = versionIdentity.current;
@@ -180,7 +216,7 @@ export function ComboEditor({ existing }: { existing?: Combo }) {
   const comparison = useMemo(() => compareComboPrice(comparisonComponents, draft.price, scenario === "pricing-unavailable" ? [] : prices, now()), [comparisonComponents, draft.price, prices, scenario, now]);
   const compositionErrors = validateComposition(draft);
   const nameError = draft.name.trim() ? null : "Ingresa el nombre del combo.";
-  const canSave = !submitting && !versionConflict && !nameError && compositionErrors.length === 0 && currentPrice.status === "success" && comparison.status === "ready" && comparison.valid;
+  const canSave = !submitting && !recovering && pendingReadComplete && !pendingCreate && !pendingReadError && !versionConflict && !nameError && compositionErrors.length === 0 && currentPrice.status === "success" && comparison.status === "ready" && comparison.valid;
   const pageProducts = currentSearch.status === "success" ? currentSearch.result.items : [];
   const productOptions = [...pageProducts, ...(selectedProduct && !pageProducts.some((item) => item.productId === selectedProduct.productId) ? [selectedProduct] : [])]
     .filter((product) => product.active)
@@ -255,6 +291,21 @@ export function ComboEditor({ existing }: { existing?: Combo }) {
     }
   }
 
+  async function recoverPreviousCreate() {
+    if (recovering || !pendingCreate || pendingReadError) return;
+    setRecovering(true);
+    setError(null);
+    try {
+      const recovered = await combos.recoverPendingCreate();
+      savingRef.current = true;
+      navigate(`/combos/${recovered.id}`, { replace: true });
+    } catch (reason) {
+      setError({ title: "No se pudo recuperar la creación anterior", message: reason instanceof Error ? reason.message : "El resultado sigue sin poder confirmarse. La intención se conserva; puedes volver a conciliarla." });
+      const latest = await combos.getPendingCreate().catch(() => pendingCreate);
+      setPendingCreate(latest);
+    } finally { setRecovering(false); }
+  }
+
   async function consultCurrentVersion() {
     if (!existing) return;
     versionController.current?.abort();
@@ -305,6 +356,12 @@ export function ComboEditor({ existing }: { existing?: Combo }) {
   }
 
   return <form onSubmit={submit} className={classes.editor}>
+    {pendingReadError && <FeedbackAlert semantic="error" title="Creación bloqueada por una intención previa">{pendingReadError}</FeedbackAlert>}
+    {!pendingReadComplete && !pendingReadError && <Text role="status">Verificando creaciones pendientes…</Text>}
+    {pendingCreate && <Alert color="yellow" title="Hay una creación anterior sin conciliar" role="alert">
+      <Text size="sm">Intención: <strong>{pendingCreate.name}</strong>. Componentes: {pendingCreate.componentSkus.join(", ")}. Clave de idempotencia: {pendingCreate.idempotencyKey}.{pendingCreate.comboId ? ` Combo confirmado: ${pendingCreate.comboId}. Se consultará su detalle sin enviar otro POST.` : " El resultado de la solicitud es incierto; se conservarán exactamente el cuerpo y la clave originales."}</Text>
+      <Button type="button" mt="sm" loading={recovering} disabled={recovering} onClick={() => void recoverPreviousCreate()}>Recuperar creación anterior</Button>
+    </Alert>}
     {error && <FeedbackAlert semantic="error" title={error.title} actions={error.title === "Hay cambios en el servidor" ? <Button type="button" variant="outline" onClick={() => void consultCurrentVersion()}>Consultar versión actual</Button> : undefined}>{error.message}</FeedbackAlert>}
     {versionReadError && <FeedbackAlert semantic="warning" title="No se pudo consultar la versión actual" actions={<Button type="button" variant="outline" onClick={() => void consultCurrentVersion()}>Reintentar</Button>}>{versionReadError}</FeedbackAlert>}
 
@@ -312,14 +369,14 @@ export function ComboEditor({ existing }: { existing?: Combo }) {
       {serverVersion ? <>
         <Table.ScrollContainer minWidth={560}><Table><Table.Thead><Table.Tr><Table.Th>Campo</Table.Th><Table.Th>Versión en servidor (v{serverVersion.version})</Table.Th><Table.Th>Tu borrador</Table.Th></Table.Tr></Table.Thead><Table.Tbody>{diffRows.map((row) => <Table.Tr key={row.field}><Table.Td><Text fw={row.changed ? 600 : 400}>{row.field}</Text></Table.Td><Table.Td><Text size="sm">{row.server}</Text></Table.Td><Table.Td><Text size="sm" c={row.changed ? "orange" : undefined}>{row.draft}</Text></Table.Td></Table.Tr>)}</Table.Tbody></Table></Table.ScrollContainer>
         <Group justify="flex-end" mt="md" gap="sm">
-          <Button type="button" variant="outline" onClick={() => setConfirmKeepDraft(true)}>Conservar borrador y reconciliar</Button>
-          <Button type="button" color="danger" onClick={() => setConfirmReplaceDraft(true)}>Cargar versión del servidor</Button>
+          <Button ref={keepDraftButton} type="button" variant="outline" onClick={() => { focusTarget.current = keepDraftButton.current; setConfirmKeepDraft(true); }}>Conservar borrador y reconciliar</Button>
+          <Button ref={replaceDraftButton} type="button" color="danger" onClick={() => { focusTarget.current = replaceDraftButton.current; setConfirmReplaceDraft(true); }}>Cargar versión del servidor</Button>
         </Group>
       </> : <Group justify="flex-end"><Button type="button" variant="outline" onClick={() => void consultCurrentVersion()}>Consultar versión vigente</Button></Group>}
     </SectionCard>}
 
     <SectionCard title="Datos generales" description="Define la identidad comercial de esta composición.">
-      <TextInput label="Nombre" value={draft.name} onChange={(event) => { const name = event.currentTarget.value; setDraft((current) => ({ ...current, name })); }} error={nameError} maxLength={120} required />
+      <TextInput ref={nameInput} label="Nombre" value={draft.name} onChange={(event) => { const name = event.currentTarget.value; setDraft((current) => ({ ...current, name })); }} error={nameError} maxLength={120} required />
       <Textarea label="Descripción" value={draft.description} onChange={(event) => { const description = event.currentTarget.value; setDraft((current) => ({ ...current, description })); }} minRows={3} maxLength={500} />
     </SectionCard>
 
@@ -357,13 +414,13 @@ export function ComboEditor({ existing }: { existing?: Combo }) {
       <Button type="submit" loading={submitting} disabled={!canSave}>{existing ? "Guardar cambios" : "Crear combo"}</Button>
     </Group>
 
-    <ConfirmDialog opened={confirmReplaceDraft} title="Cargar versión del servidor" confirmLabel="Descartar borrador y cargar" destructive onCancel={() => setConfirmReplaceDraft(false)} onConfirm={loadServerVersion}>
+    <ConfirmDialog opened={confirmReplaceDraft} title="Cargar versión del servidor" confirmLabel="Descartar borrador y cargar" destructive returnFocus={false} onCancel={() => { focusTarget.current = replaceDraftButton.current; setConfirmReplaceDraft(false); }} onConfirm={() => { focusTarget.current = nameInput.current; loadServerVersion(); }}>
       <Text>Se descartará tu borrador local y se reemplazarán el nombre, descripción, componentes, cantidades y precio por la versión {serverVersion?.version} del servidor. Esta acción no guarda cambios hasta que pulses Guardar.</Text>
     </ConfirmDialog>
-    <ConfirmDialog opened={confirmKeepDraft} title="Conservar borrador y reconciliar" confirmLabel="Conservar borrador" onCancel={() => setConfirmKeepDraft(false)} onConfirm={keepDraftAndReconcile}>
+    <ConfirmDialog opened={confirmKeepDraft} title="Conservar borrador y reconciliar" confirmLabel="Conservar borrador" returnFocus={false} onCancel={() => { focusTarget.current = keepDraftButton.current; setConfirmKeepDraft(false); }} onConfirm={() => { focusTarget.current = nameInput.current; keepDraftAndReconcile(); }}>
       <Text>Se conservarán tus valores locales y se adoptará la versión {serverVersion?.version} como versión esperada. Al guardar se revalidarán la elegibilidad, los precios y las reglas económicas; si el servidor vuelve a cambiar, verás el conflicto otra vez.</Text>
     </ConfirmDialog>
-    <ConfirmDialog opened={blocker.state === "blocked"} title="Descartar cambios sin guardar" confirmLabel="Descartar y salir" destructive onCancel={() => blocker.reset?.()} onConfirm={() => { isDirtyRef.current = false; savingRef.current = true; blocker.proceed?.(); }}>
+    <ConfirmDialog opened={blocker.state === "blocked"} title="Descartar cambios sin guardar" confirmLabel="Descartar y salir" destructive returnFocus={false} onCancel={() => { focusTarget.current = nameInput.current; blocker.reset?.(); }} onConfirm={() => { isDirtyRef.current = false; savingRef.current = true; blocker.proceed?.(); }}>
       <Text>Tienes cambios sin guardar en este combo. Si sales ahora se perderán.</Text>
     </ConfirmDialog>
   </form>;

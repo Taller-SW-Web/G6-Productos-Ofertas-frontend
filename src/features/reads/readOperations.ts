@@ -1,4 +1,4 @@
-// Generated from Docs aba8d1ca998cfcd2db1c4fa87654036a5a4c1ac1, OpenAPI 0.6.0-rc.3.
+// Verificado contra Docs OpenAPI 0.7.0-rc.3 (compatible con base 0.6.0-rc.3).
 // GET only. Internal operations and mutations are deliberately not registered.
 export interface ReadParameter {
   name: string; location: "path" | "query"; required: boolean;

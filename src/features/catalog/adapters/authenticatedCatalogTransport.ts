@@ -2,19 +2,26 @@ import type { G7Session } from "../../promotions/adapters/g7Session";
 import { isGatewayTokenInvalid } from "../../shared/isGatewayTokenInvalid";
 import { createCatalogFetchTransport, type CatalogHttpTransport } from "./catalogHttp";
 
-// Keep the public read demo on its existing transport. Administration uses G7.
-export function createAuthenticatedCatalogTransport(origin: string, session: G7Session, options: { publicReads?: boolean } = {}): CatalogHttpTransport {
+// Todas las solicitudes comerciales usan Bearer G7; publicReads es compatibilidad inerte.
+export function createAuthenticatedCatalogTransport(
+  origin: string,
+  session: G7Session,
+  _options: { /** @deprecated Compatibilidad inerte; sin efecto bajo G7. */ publicReads?: boolean } = {},
+): CatalogHttpTransport {
+  void _options; // Retained for source compatibility; G7 is always required.
   const transport = createCatalogFetchTransport(origin);
   return {
     async request(path, init) {
       const token = await session.getAccessToken(init.signal);
       if (!token) throw new Error("Inicia sesión para continuar.");
-      const publicRead = options.publicReads && init.method === "GET";
-      const send = (accessToken: string) => transport.request(path, { ...init, headers: publicRead
-        ? Object.fromEntries(Object.entries(init.headers).filter(([name]) => name.toLowerCase() !== "authorization"))
-        : { ...init.headers, Authorization: `Bearer ${accessToken}` } });
+      const send = (accessToken: string) => {
+        const headers = Object.fromEntries(Object.entries(init.headers)
+          .filter(([name]) => name.toLowerCase() !== "authorization"));
+        headers.Authorization = `Bearer ${accessToken}`;
+        return transport.request(path, { ...init, headers });
+      };
       const response = await send(token);
-      if (publicRead || !(await isGatewayTokenInvalid(response))) return response;
+      if (!(await isGatewayTokenInvalid(response))) return response;
       if (init.method === "GET") {
         const renewed = await session.refreshAccessToken(token, init.signal);
         if (renewed) {

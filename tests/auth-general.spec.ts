@@ -352,7 +352,7 @@ test("una sesión administrativa autentica lecturas de los seis módulos", async
   expect(calls.filter(call => call.path.endsWith("/login"))).toHaveLength(1);
 });
 
-test("la entrada de productos conserva el login y consulta el canal elegido sin JWT", async ({ page }) => {
+test("la entrada de productos conserva el login y consulta el canal elegido con JWT", async ({ page }) => {
   const adminReads: string[] = [];
   const publicReads: string[] = [];
   await page.route(`http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? 5173}/api/v1/**`, async route => {
@@ -378,7 +378,7 @@ test("la entrada de productos conserva el login y consulta el canal elegido sin 
     if (requestUrl.pathname === "/api/v1/productos") {
       expect(route.request().method()).toBe("GET");
       if (requestUrl.searchParams.has("canal")) {
-        expect(route.request().headers()).not.toHaveProperty("authorization");
+        expect(route.request().headers().authorization).toMatch(/^Bearer /);
         publicReads.push(route.request().url());
         await route.fulfill({
           status: 200,

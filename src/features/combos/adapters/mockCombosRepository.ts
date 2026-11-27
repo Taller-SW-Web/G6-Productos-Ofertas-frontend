@@ -93,6 +93,9 @@ export class MockCombosRepository implements CombosRepository {
     }
   }
 
+  async getPendingCreate() { return null; }
+  async recoverPendingCreate(): Promise<Combo> { throw new ComboError("unavailable", "No hay una creación HTTP pendiente en el adaptador de demostración."); }
+
   private persist(): boolean {
     let ok = true;
     if (this.persistEnabled) {
@@ -129,6 +132,12 @@ export class MockCombosRepository implements CombosRepository {
     const found = this.combos.find((item) => item.id === id) ?? null;
     if (!found) return null;
     return this.withCurrentAvailability(found, signal);
+  }
+
+  async readAvailability(id: string, _status: ComboStatus, signal?: AbortSignal): Promise<ComboAvailability> {
+    const combo = await this.getById(id, signal);
+    if (!combo) throw new ComboError("not_found", "No se encontró el combo.");
+    return combo.availability;
   }
 
   async create(payload: ComboPayload, scenario?: string): Promise<Combo> {

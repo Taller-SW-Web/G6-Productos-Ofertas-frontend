@@ -12,6 +12,7 @@ export interface ConfirmDialogProps {
   confirmDisabled?: boolean;
   error?: ReactNode;
   destructive?: boolean;
+  returnFocus?: boolean;
 }
 export function ConfirmDialog({
   opened,
@@ -24,10 +25,12 @@ export function ConfirmDialog({
   confirmDisabled = false,
   error,
   destructive = false,
+  returnFocus = true,
 }: ConfirmDialogProps) {
   return (
     <Modal
       opened={opened}
+      returnFocus={returnFocus}
       onClose={onCancel}
       title={title}
       closeOnClickOutside={!submitting}
