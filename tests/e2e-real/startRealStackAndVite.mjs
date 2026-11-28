@@ -1,6 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import { createVerify, generateKeyPairSync, randomUUID, sign } from "node:crypto";
 import {
+  chmodSync,
   existsSync,
   mkdtempSync,
   readFileSync,
@@ -215,6 +216,8 @@ async function startDisposablePostgresWithTls(backendRoot, docsRoot) {
   const containerName = `g6-e2e-stack-${randomUUID()}`;
   const password = randomUUID();
   const certDir = mkdtempSync(join(tmpdir(), "g6-e2e-pg-tls-"));
+  // PostgreSQL dentro del contenedor debe poder atravesar el directorio montado.
+  chmodSync(certDir, 0o755);
   const caCertPath = join(certDir, "server.crt");
 
   // 1. Generar certificado TLS con SAN IP:127.0.0.1 antes de arrancar PostgreSQL
