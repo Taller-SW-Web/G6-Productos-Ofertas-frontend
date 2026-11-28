@@ -15,5 +15,12 @@ test('la suite real exige todos los archivos, escenarios ejecutados y cero skips
     assert.equal(run({ ...report, suites: report.suites.slice(1) }).status, 1);
     const skipped = structuredClone(report); skipped.suites[0].specs[0].tests[0].results[0].status = 'skipped';
     assert.equal(run(skipped).status, 1);
+    const retry = structuredClone(report); retry.suites[0].specs[0].tests[0].results.unshift({status: 'failed'});
+    assert.equal(run(retry).status, 1);
+    const incomplete = structuredClone(report); incomplete.suites[0].specs[0].tests[0].status = 'unexpected';
+    assert.equal(run(incomplete).status, 1);
+    const emptySuite = structuredClone(report); emptySuite.suites[2].specs = []; emptySuite.suites[0].specs[0].tests.push({ status: 'expected', results: [{ status: 'passed' }] });
+    assert.equal(run(emptySuite).status, 1);
+    assert.equal(run({ ...report, stats: { expected: 17, unexpected: 0 } }).status, 1);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
