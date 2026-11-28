@@ -576,6 +576,9 @@ jobs:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
           ACTIONS_RUN_ID: ${{ github.run_id }}
         run: node scripts/ci/verificar-auditoria-dependencias.mjs
+      - name: Verificar informe SCA H5 sin repetir npm audit
+        if: always() && steps.dependency_audit.outcome != 'skipped'
+        run: node scripts/h5/security/sca-audit.mjs "$RUNNER_TEMP/dependency-audit-evidence/dependency-audit.json" "$RUNNER_TEMP/dependency-audit-evidence/dependency-audit-decision.json"
       - name: Conservar informes completos, decisión y SHA auditado
         if: always() && steps.dependency_audit.outcome != 'skipped'
         uses: actions/upload-artifact@v7.0.2
@@ -584,6 +587,79 @@ jobs:
           path: ${{ runner.temp }}/dependency-audit-evidence/
           if-no-files-found: error
           retention-days: 30
+
+  seguridad_secretos:
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
+      (github.event_name != 'workflow_dispatch' || !inputs.performance_harness)
+    uses: ./.github/workflows/gitleaks.yml
+
+  api_real_aislada:
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
+      (github.event_name != 'workflow_dispatch' || !inputs.performance_harness)
+    name: API real aislada con PostgreSQL 17
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Obtener frontend candidato
+        uses: actions/checkout@v7.0.1
+        with:
+          path: frontend
+      - name: Obtener backend candidato H5
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: Taller-SW-Web/G6-Productos-Ofertas-backend
+          ref: trabajo/castilla/h5-modernizacion-integral-ci
+          path: backend
+          persist-credentials: false
+      - name: Obtener contratos vigentes
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: Taller-SW-Web/G6-Productos-Ofertas-docs
+          ref: master
+          path: docs
+          persist-credentials: false
+      - name: Registrar revisiones efectivas
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'frontend=%s\nbackend=%s\ndocs=%s\n' "$(git rev-parse HEAD)" "$(git -C ../backend rev-parse HEAD)" "$(git -C ../docs rev-parse HEAD)" | tee "$RUNNER_TEMP/real-stack-revisions.txt"
+      - name: Preparar Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Instalar frontend y Chromium
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Compilar backend candidato
+        working-directory: backend
+        run: |
+          npm ci
+          npm run build:all
+      - name: Ejecutar flujos reales aislados
+        env:
+          VITE_DATA_MODE: api
+          VITE_G6_ADMIN_API_ENABLED: 'true'
+        run: npx playwright test --config playwright.real.config.ts
+      - name: Exigir escenarios reales ejecutados
+        run: node scripts/ci/verify-real-playwright.mjs test-results/real-stack-results.json
+      - name: Conservar evidencia real y revisiones
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: api-real-${{ github.sha }}
+          path: |
+            frontend/test-results/real-stack-results.json
+            frontend/test-results/**/*.zip
+            ${{ runner.temp }}/real-stack-revisions.txt
+          if-no-files-found: warn
 
   validacion_integral:
     # La protección real de master exige el contexto de GitHub Actions `validate`.
@@ -607,6 +683,8 @@ jobs:
       - politica_release
       - e2e_pricing
       - seguridad_dependencias
+      - seguridad_secretos
+      - api_real_aislada
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
