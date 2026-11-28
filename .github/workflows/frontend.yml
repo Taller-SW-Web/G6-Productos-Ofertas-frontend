@@ -43,7 +43,7 @@ jobs:
       clasificacion: ${{ steps.clasificacion.outputs.clasificacion }}
     steps:
       - name: Obtener código para comparar cambios
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
@@ -63,7 +63,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Obtener código
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@v7
       - name: Preparar Node.js
         uses: actions/setup-node@v7.1.0
         with:
@@ -98,7 +98,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Obtener código
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@v7
       - name: Preparar Node.js
         uses: actions/setup-node@v7.1.0
         with:
@@ -117,7 +117,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Obtener código
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@v7
       - name: Preparar Node.js
         uses: actions/setup-node@v7.1.0
         with:
@@ -136,7 +136,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Obtener código
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@v7
       - name: Preparar Node.js
         uses: actions/setup-node@v7.1.0
         with:
@@ -155,7 +155,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Obtener código
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@v7
       - name: Preparar Node.js
         uses: actions/setup-node@v7.1.0
         with:
@@ -174,7 +174,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Obtener código
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@v7
       - name: Preparar Node.js
         uses: actions/setup-node@v7.1.0
         with:
@@ -195,7 +195,7 @@ jobs:
       VITE_DATA_MODE: mock
     steps:
       - name: Obtener código
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@v7
       - name: Preparar Node.js
         uses: actions/setup-node@v7.1.0
         with:
@@ -206,7 +206,7 @@ jobs:
       - name: Compilar interfaz de demostración
         run: npm run build
       - name: Guardar compilación de demostración
-        uses: actions/upload-artifact@v7.0.2
+        uses: actions/upload-artifact@v7
         with:
           name: compilacion-demostracion
           path: dist/
@@ -224,7 +224,7 @@ jobs:
       VITE_G6_ADMIN_API_ENABLED: 'true'
     steps:
       - name: Obtener código
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@v7
       - name: Preparar Node.js
         uses: actions/setup-node@v7.1.0
         with:
@@ -265,7 +265,7 @@ jobs:
           node scripts/verify-production.mjs api
       - name: Conservar evidencia de la compilación API
         if: always()
-        uses: actions/upload-artifact@v7.0.2
+        uses: actions/upload-artifact@v7
         with:
           name: evidencia-compilacion-api
           path: |
@@ -285,7 +285,7 @@ jobs:
       VITE_DATA_MODE: mock
     steps:
       - name: Obtener código
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@v7
       - name: Preparar Node.js
         uses: actions/setup-node@v7.1.0
         with:
@@ -296,7 +296,7 @@ jobs:
       - name: Instalar Chromium para la vista previa
         run: npx playwright install --with-deps chromium
       - name: Descargar compilación de demostración
-        uses: actions/download-artifact@v7.0.0
+        uses: actions/download-artifact@v8.0.2
         with:
           name: compilacion-demostracion
           path: dist/
@@ -324,7 +324,7 @@ jobs:
           node scripts/vercel-smoke.mjs http://127.0.0.1:5174
       - name: Conservar evidencia de la compilación local
         if: always()
-        uses: actions/upload-artifact@v7.0.2
+        uses: actions/upload-artifact@v7
         with:
           name: evidencia-compilacion-local
           path: |
@@ -344,7 +344,7 @@ jobs:
       CI: 'true'
     steps:
       - name: Obtener código
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@v7
       - name: Preparar Node.js
         uses: actions/setup-node@v7.1.0
         with:
@@ -358,7 +358,7 @@ jobs:
         run: npx playwright test --grep '@smoke' --workers=1
       - name: Conservar resultados de pruebas rápidas
         if: always()
-        uses: actions/upload-artifact@v7.0.2
+        uses: actions/upload-artifact@v7
         with:
           name: resultados-pruebas-rapidas
           path: |
@@ -377,7 +377,7 @@ jobs:
       VITE_DATA_MODE: api
     steps:
       - name: Obtener el candidato optimizado
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -391,7 +391,7 @@ jobs:
       - name: Instalar Chromium una vez para ambas ejecuciones
         run: npx playwright install --with-deps chromium
       - name: Obtener versión base
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.baseline_ref || 'master' }}
           path: baseline
@@ -444,7 +444,7 @@ jobs:
           fi
       - name: Conservar mediciones comparables
         if: always()
-        uses: actions/upload-artifact@v7.0.2
+        uses: actions/upload-artifact@v7
         with:
           name: benchmark-admin-${{ inputs.baseline_ref || 'master' }}-vs-${{ github.sha }}
           path: |
@@ -470,7 +470,7 @@ jobs:
         parte: [1, 2, 3, 4]
     steps:
       - name: Obtener código
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@v7
       - name: Preparar Node.js
         uses: actions/setup-node@v7.1.0
         with:
@@ -484,7 +484,7 @@ jobs:
         run: node scripts/ejecutar-e2e-balanceado.mjs ${{ matrix.parte }} 4
       - name: Conservar resultados de extremo a extremo
         if: always()
-        uses: actions/upload-artifact@v7.0.2
+        uses: actions/upload-artifact@v7
         with:
           name: resultados-extremo-a-extremo-parte-${{ matrix.parte }}
           path: |
@@ -503,7 +503,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '22'
@@ -519,7 +519,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '22'
@@ -538,7 +538,7 @@ jobs:
       VITE_DATA_MODE: mock
       CI: 'true'
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '22'
@@ -548,7 +548,7 @@ jobs:
       - run: npm run test:e2e:pricing -- --reporter=line
       - name: Conservar evidencia E2E Pricing
         if: always()
-        uses: actions/upload-artifact@v7.0.2
+        uses: actions/upload-artifact@v7
         with:
           name: resultados-e2e-pricing-${{ github.sha }}
           path: |
@@ -566,7 +566,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '22'
@@ -585,7 +585,7 @@ jobs:
         run: node scripts/h5/security/sca-audit.mjs "$RUNNER_TEMP/dependency-audit-evidence/dependency-audit.json" "$RUNNER_TEMP/dependency-audit-evidence/dependency-audit-decision.json"
       - name: Conservar informes completos, decisión y SHA auditado
         if: always() && steps.dependency_audit.outcome != 'skipped'
-        uses: actions/upload-artifact@v7.0.2
+        uses: actions/upload-artifact@v7
         with:
           name: dependency-audit-${{ github.sha }}
           path: ${{ runner.temp }}/dependency-audit-evidence/
@@ -610,18 +610,18 @@ jobs:
         working-directory: frontend
     steps:
       - name: Obtener frontend candidato
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@v7
         with:
           path: frontend
       - name: Obtener backend candidato H5
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@v7
         with:
           repository: Taller-SW-Web/G6-Productos-Ofertas-backend
           ref: a5329ffc42d2002f07147dc59dc4527a82e59196
           path: backend
           persist-credentials: false
       - name: Obtener contratos vigentes
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@v7
         with:
           repository: Taller-SW-Web/G6-Productos-Ofertas-docs
           ref: 5f30802129ba4bbc0674dcc5878f10065f443118
@@ -659,7 +659,7 @@ jobs:
         run: node scripts/ci/verify-real-playwright.mjs test-results/real-stack-results.json
       - name: Conservar evidencia real y revisiones
         if: always()
-        uses: actions/upload-artifact@v7.0.2
+        uses: actions/upload-artifact@v7
         with:
           name: api-real-${{ github.sha }}
           path: |
@@ -696,7 +696,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Obtener el código evaluado
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@v7
       - name: Preparar Node.js para el verificador
         uses: actions/setup-node@v7.1.0
         with:

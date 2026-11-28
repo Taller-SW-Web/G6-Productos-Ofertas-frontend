@@ -33,7 +33,7 @@ jobs:
         with:
           name: "Vercel - g6-productos-ofertas: verificacion-automatizada-production"
       - name: Obtener código confiable de la rama principal
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@v7
         with:
           ref: refs/heads/master
           persist-credentials: false
