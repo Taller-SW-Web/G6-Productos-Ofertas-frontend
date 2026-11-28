@@ -1,3 +1,26 @@
+# Auditoría CI H5 — cierre técnico Frontend
+
+La Coordinación G6 / Marco Castilla comunicó la aprobación técnica de la modernización de CI. Para el cierre técnico `c18165468759f447b9a17c5f46f0fea85cd39732`, [workflow_dispatch 46118218651](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/46118218651) y [pull_request 46120571498](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/46120571498) finalizaron en **SUCCESS**. La suite `api_real_aislada` acreditó 16/16 escenarios en el entorno aislado de ese cierre. El nuevo commit documental y su pin requieren checks asociados a su propio SHA.
+
+El pin Backend es `a5329ffc42d2002f07147dc59dc4527a82e59196`; Docs se mantiene en `5f30802129ba4bbc0674dcc5878f10065f443118`. Los ocho skips del Playwright general, observados en la ejecución histórica identificada abajo, se clasifican en **un benchmark opcional** y **siete escenarios funcionales que constituyen deuda de certificación funcional**; no se declaran ejecutados.
+
+| Archivo y título | Motivo y clasificación |
+|---|---|
+| `admin-performance.spec.ts`: benchmark opt-in navegador: rutas administrativas contra API controlada | `G6_PERF_HARNESS=1` ausente; benchmark opcional fuera del shard normal. |
+| `catalog-http-real.spec.ts`: CAT real HTTP: Chromium carga Catalog, edita por UI, lee variantes y conserva evidencia de errores/reintento | Falta JWT local firmado del runner real; funcionalidad vigente que requiere su runner específico. |
+| `promotions-gateway.spec.ts`: MK005/006/007: React → Gateway → Promotions → PostgreSQL, persistence and visible failures | Requiere `gateway.isolated.smoke.mjs` y PostgreSQL/TLS real; funcionalidad vigente, runner específico pendiente. |
+| `promotions-session-gateway.spec.ts`: #78: login real del cliente, CRUD por Gateway/PG, 409, recarga y logout | Requiere runner Gateway/PG/TLS y G7 sintético; funcionalidad vigente, runner específico pendiente. |
+| `promotions-session-gateway.spec.ts`: #78: MFA no accede al Gateway antes de verificar el código | Misma dependencia; funcionalidad vigente, runner específico pendiente. |
+| `promotions-session-gateway.spec.ts`: #78: JWT expirado rechazado por Gateway renueva una vez y consulta PG | Misma dependencia; funcionalidad vigente, runner específico pendiente. |
+| `promotions-session-gateway.spec.ts`: #78: refresh revocado devuelve al login sin bucle de reintentos | Misma dependencia; funcionalidad vigente, runner específico pendiente. |
+| `promotions-session-gateway.spec.ts`: #78: usuario CLIENTE recibe 403 real y no puede administrar cupones | Misma dependencia; funcionalidad vigente, runner específico pendiente. |
+
+G7 y G5 son dobles sintéticos; no acreditan permisos ni servicios externos reales. Los escenarios con SDK simulado no acreditan conectividad, identidad ni RBAC de Azure. `verificacion-despliegue-vercel.yml` no tiene diferencias frente a la base comprobada.
+
+## Histórico de iteraciones
+
+Las referencias y resultados siguientes corresponden a las revisiones y fechas indicadas; no representan el estado actual.
+
 # Auditoría CI H5 — Frontend (en curso)
 
 Referencia de diagnóstico: `7937e0220f2220ce1b2ab7c7acd78d7499a3067a`;

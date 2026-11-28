@@ -617,7 +617,7 @@ jobs:
         uses: actions/checkout@v7.0.1
         with:
           repository: Taller-SW-Web/G6-Productos-Ofertas-backend
-          ref: 6dd66036baf675f8ee2197ab3cb9e9754a0d0886
+          ref: a5329ffc42d2002f07147dc59dc4527a82e59196
           path: backend
           persist-credentials: false
       - name: Obtener contratos vigentes
@@ -631,7 +631,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C ../backend rev-parse HEAD)" = '6dd66036baf675f8ee2197ab3cb9e9754a0d0886'
+          test "$(git -C ../backend rev-parse HEAD)" = 'a5329ffc42d2002f07147dc59dc4527a82e59196'
           test "$(git -C ../docs rev-parse HEAD)" = '5f30802129ba4bbc0674dcc5878f10065f443118'
           printf 'frontend=%s\nbackend=%s\ndocs=%s\n' "$(git rev-parse HEAD)" "$(git -C ../backend rev-parse HEAD)" "$(git -C ../docs rev-parse HEAD)" | tee "$RUNNER_TEMP/real-stack-revisions.txt"
           cat "$RUNNER_TEMP/real-stack-revisions.txt" >> "$GITHUB_STEP_SUMMARY"
