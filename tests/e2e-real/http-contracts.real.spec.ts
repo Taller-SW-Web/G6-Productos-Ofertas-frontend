@@ -1,3 +1,4 @@
+// Evidencia histórica L1: Frontend cf634b50d046dbd42035cfd5233021eef769da04; Actions 46106563240.
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import {
@@ -8,7 +9,7 @@ import {
   verifyGatewayAndServicesReady,
 } from "./realStackPreflight.ts";
 
-test.describe("Contratos HTTP, seguridad G7 y resiliencia React -> Gateway -> Backend (ESCRITA_NO_EJECUTADA)", () => {
+test.describe("Contratos HTTP, seguridad G7 y resiliencia React -> Gateway -> Backend (EJECUTADA_L1)", () => {
   test("UI inicia sesión con G7 local RS256 en memoria, envía Authorization Bearer y X-Correlation-Id sin tokens técnicos en bundle", async ({
     page,
   }) => {

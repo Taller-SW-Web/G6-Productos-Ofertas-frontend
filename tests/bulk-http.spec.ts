@@ -223,6 +223,7 @@ test("Bulk no reenvía ni concilia automáticamente tras recargar mientras falta
     await page.locator('input[type="file"]').setInputFiles({ name: "upload.csv", mimeType: "text/csv", buffer: Buffer.from(validBulkV2Csv) });
     await page.getByRole("button", { name: "Continuar a revisión" }).click();
     await page.getByRole("button", { name: "Confirmar importación" }).first().click();
+    await expect(page).toHaveURL(new RegExp(`${batchId}$`));
     await page.reload();
     await expect(page).toHaveURL(new RegExp(`${batchId}$`));
     expect(requests.filter((request) => request.method === "POST" && request.url === `${root}/importaciones`)).toHaveLength(1);

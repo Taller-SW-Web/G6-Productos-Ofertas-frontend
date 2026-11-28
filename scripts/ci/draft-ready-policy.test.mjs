@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-const wf=await readFile('.github/workflows/frontend.yml','utf8');
+const wf=(await readFile('.github/workflows/frontend.yml','utf8')).replace(/\r\n/g,'\n');
 const audit=await readFile('scripts/ci/verificar-auditoria-dependencias.mjs','utf8');
 const events='opened, reopened, synchronize, ready_for_review, converted_to_draft, edited';
 test('Frontend declara eventos Draft/Ready, push master y despacho manual',()=>{assert.ok(wf.includes(events));assert.match(wf,/push:[\s\S]*?branches: \[master\]/);assert.match(wf,/workflow_dispatch:/);});

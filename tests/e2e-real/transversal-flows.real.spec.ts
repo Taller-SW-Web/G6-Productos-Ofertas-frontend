@@ -1,3 +1,4 @@
+// Evidencia histórica L1: Frontend cf634b50d046dbd42035cfd5233021eef769da04; Actions 46106563240.
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -33,7 +34,7 @@ interface CatalogSkuContextDto {
   eligible: boolean;
 }
 
-test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Microservicios + N01 técnico (ESCRITA_NO_EJECUTADA)", () => {
+test.describe("Recorridos transversales encadenados Frontend <-> Gateway <-> Microservicios + N01 técnico (EJECUTADA_L1)", () => {
   test("causalidad real: Taxonomy -> Catalog -> Pricing/Inventory -> Audit -> Combos -> Coupons + N01 técnico separado", async ({
     page,
     request,

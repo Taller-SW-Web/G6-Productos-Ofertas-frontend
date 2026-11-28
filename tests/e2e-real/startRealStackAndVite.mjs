@@ -1,6 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import { createVerify, generateKeyPairSync, randomUUID, sign } from "node:crypto";
 import {
+  chmodSync,
   existsSync,
   mkdtempSync,
   readFileSync,
@@ -9,6 +10,7 @@ import {
 } from "node:fs";
 import { createServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
+import { tlsOwnerCommand } from "./tls-owner.mjs";
 import { createServer as createNetServer } from "node:net";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
@@ -215,6 +217,8 @@ async function startDisposablePostgresWithTls(backendRoot, docsRoot) {
   const containerName = `g6-e2e-stack-${randomUUID()}`;
   const password = randomUUID();
   const certDir = mkdtempSync(join(tmpdir(), "g6-e2e-pg-tls-"));
+  // PostgreSQL dentro del contenedor debe poder atravesar el directorio montado.
+  chmodSync(certDir, 0o755);
   const caCertPath = join(certDir, "server.crt");
 
   // 1. Generar certificado TLS con SAN IP:127.0.0.1 antes de arrancar PostgreSQL
@@ -1051,6 +1055,9 @@ async function startLocalG5EvidenceServer({
   const g5CertDir = mkdtempSync(join(tmpdir(), "g6-e2e-g5-tls-"));
   const g5KeyPath = join(g5CertDir, "server.key");
   const g5CertPath = join(g5CertDir, "server.crt");
+  const hostUid = process.getuid?.();
+  const hostGid = process.getgid?.();
+  const assignHostOwner = tlsOwnerCommand(process.platform, hostUid, hostGid);
 
   await exec(
     "docker",
@@ -1063,7 +1070,7 @@ async function startLocalG5EvidenceServer({
       `${g5CertDir}:/out`,
       POSTGRES_IMAGE,
       "-c",
-      'apk add --no-cache openssl >/dev/null && openssl req -x509 -newkey rsa:2048 -nodes -keyout /out/server.key -out /out/server.crt -days 1 -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1,DNS:localhost" && chmod 644 /out/server.crt && chmod 600 /out/server.key',
+      `apk add --no-cache openssl >/dev/null && openssl req -x509 -newkey rsa:2048 -nodes -keyout /out/server.key -out /out/server.crt -days 1 -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1,DNS:localhost" && chmod 644 /out/server.crt && chmod 600 /out/server.key${assignHostOwner}`,
     ],
     { timeout: 60_000 },
   );
