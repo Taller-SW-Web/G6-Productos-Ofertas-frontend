@@ -16,7 +16,6 @@ let expiry: number;
 let roles: string[];
 let demo: boolean;
 let fullName: string;
-let userId: string;
 let holdRefresh: boolean;
 let releaseRefresh: (() => void) | undefined;
 let calls: { path: string; body: Record<string, unknown> }[];
@@ -26,7 +25,7 @@ const dto = {
   usuario: { id: "11111111-1111-4111-8111-111111111111", nombreCompleto: "Gestora de prueba", correo: "isolated@example.test", roles: ["GESTOR_COMERCIAL"] },
 };
 test.beforeEach(async ({ context }) => {
-  forceJwe = false; adminApi = false; mfa = false; failure = ""; expiry = 900; calls = []; roles = ["GESTOR_COMERCIAL"]; demo = false; fullName = dto.usuario.nombreCompleto; userId = dto.usuario.id; holdRefresh = false; releaseRefresh = undefined;
+  forceJwe = false; adminApi = false; mfa = false; failure = ""; expiry = 900; calls = []; roles = ["GESTOR_COMERCIAL"]; demo = false; fullName = dto.usuario.nombreCompleto; dto.usuario.id = "11111111-1111-4111-8111-111111111111"; dto.refreshToken = "test-refresh"; holdRefresh = false; releaseRefresh = undefined;
   provider = createServer(async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? 5173}`);
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -43,7 +42,7 @@ test.beforeEach(async ({ context }) => {
     if (failure) { res.writeHead(failure === "UNAVAILABLE" ? 503 : failure === "OTP_EXPIRADO" ? 410 : 401).end(JSON.stringify({ code: failure, detail: "SENSITIVE_DETAIL" })); return; }
     if (path.endsWith("/login") && mfa) { res.end(JSON.stringify({ mfaRequerido: true, challengeToken: "isolated-challenge", expiraEn: 300 })); return; }
     if (path.endsWith("/solicitar")) { res.writeHead(202).end("{}"); return; }
-    res.end(JSON.stringify({ ...dto, ...(userId !== dto.usuario.id ? { refreshToken: `isolated-user-${userId}` } : {}), ...(forceJwe ? { accessToken: "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..fixture.iv.tag" } : {}), usuario: { ...dto.usuario, id: userId, nombreCompleto: fullName, roles }, expiresIn: expiry, ...(path.endsWith("/refresh") ? { refreshToken: `isolated-rotation-${calls.length}` } : {}) }));
+    res.end(JSON.stringify({ ...dto, ...(forceJwe ? { accessToken: "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..fixture.iv.tag" } : {}), usuario: { ...dto.usuario, nombreCompleto: fullName, roles }, expiresIn: expiry, ...(path.endsWith("/refresh") ? { refreshToken: `isolated-rotation-${calls.length}` } : {}) }));
   });
   provider.listen(0, "127.0.0.1");
   await once(provider, "listening");
@@ -113,7 +112,7 @@ for (const scenario of ["selected", "uncertain", "pending-late", "logout", "othe
     await expect(page.getByText("borrador-audit.csv", { exact: true })).toHaveCount(0);
     failure = "";
     expiry = 900;
-    if (scenario === "other-user") userId = "22222222-2222-4222-8222-222222222222";
+    if (scenario === "other-user") { dto.usuario.id = "22222222-2222-4222-8222-222222222222"; dto.refreshToken = "other-refresh"; }
     await login(page);
     await expect(page.getByRole("navigation", { name: "Navegación de la aplicación" })).toBeVisible();
     finishPending?.();
