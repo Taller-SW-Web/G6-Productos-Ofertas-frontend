@@ -317,6 +317,33 @@ export function createHttpCatalogRepository(
     // Variante does not publish the updated parent status. Do not derive it from a page.
   });
   return {
+    async getIdentity(id, signal) {
+      try {
+        const dto = await request(audience === "admin" ? `${adminPath}/${encoded(id)}` : productPath(id), "GET", undefined, signal);
+        const product = audience === "admin" ? adminSummary(dto) : commercialSummary(dto);
+        if (product.id !== id) return blockedCatalog("La identidad pertenece a otro producto.");
+        return product;
+      } catch (error) {
+        if (error instanceof CatalogError && error.kind === "not_found") return null;
+        throw error;
+      }
+    },
+    async listVariantIdentities(pid, q, signal) {
+      const page = q.page ?? 1, pageSize = q.pageSize ?? 100;
+      const params = new URLSearchParams({ pagina: String(page), tamanio: String(pageSize) });
+      if (q.status && q.status !== "all") params.set("estado", q.status);
+      const dto = object(await request(`${variantPath(pid)}?${params}`, "GET", undefined, signal));
+      const meta = object(dto.meta), total = integer(meta.total);
+      const items = array(dto.items).map(raw => {
+        const row = object(raw);
+        return { variantId: string(row.variant_id), productId: pid, sku: string(row.sku), status: choice(row.status, ["BORRADOR", "ACTIVA", "INACTIVA"] as const) };
+      });
+      if (integer(meta.pagina, 1) !== page || integer(meta.tamanio, 1) !== pageSize ||
+        items.length !== Math.min(pageSize, Math.max(0, total - (page - 1) * pageSize)) ||
+        new Set(items.map(row => row.variantId)).size !== items.length)
+        return blockedCatalog("Catálogo devolvió una selección de variantes inconsistente.");
+      return { items, page, pageSize, total };
+    },
     async list(q, _scenario, signal) {
       const categoryId =
         q.categoryId && q.categoryId !== "all" ? q.categoryId : undefined;

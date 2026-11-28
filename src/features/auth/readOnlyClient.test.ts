@@ -18,6 +18,9 @@ describe("consultas contractuales de lectura", () => {
   it("registra las 58 lecturas externas de los ocho módulos sin el contexto SKU privado", () => {
     expect(readOperations).toHaveLength(58);
     expect(new Set(readOperations.map(item => item.module)).size).toBe(8);
+    for (const operation of readOperations) {
+      expect(new TextEncoder().encode(operation.mediaTypes.join(", ")).length, operation.id).toBeLessThanOrEqual(128);
+    }
     expect(readOperations.some(item => item.id === "obtenerContextoSku")).toBe(false);
     expect(() => buildReadPath("crearProducto", {})).toThrow("no está disponible");
   });
@@ -53,7 +56,7 @@ describe("consultas contractuales de lectura", () => {
     expect(await client.read("listarProductos", { pagina: "1" }, signal())).toEqual({ kind: "data", value: { items: [] } });
     expect(fetcher).toHaveBeenCalledWith(origin + "/api/v1/productos?pagina=1", expect.objectContaining({
       method: "GET", credentials: "omit", redirect: "error", cache: "no-store",
-      headers: expect.objectContaining({ Authorization: "Bearer test-access" }),
+      headers: expect.objectContaining({ Accept: "application/json", Authorization: "Bearer test-access" }),
     }));
   });
   it("sin sesión no envía solicitudes al backend", async () => {
@@ -77,12 +80,12 @@ describe("consultas contractuales de lectura", () => {
     await client.read("listarProductos", { canal: "MARKETPLACE" }, signal());
     expect(fetcher).toHaveBeenCalledWith(origin + "/api/v1/productos?canal=MARKETPLACE", expect.objectContaining({ method: "GET" }));
   });
-  it("la opción pública no evita renovar ni invalidar una sesión rechazada por G7", async () => {
+  it("la opción pública renueva y conserva la identidad que G7 confirmó ante un rechazo downstream", async () => {
     const { session, fetcher } = setup([Response.json({ code: "TOKEN_INVALIDO" }, { status: 401 }), Response.json({ code: "TOKEN_INVALIDO" }, { status: 401 })]);
     const client = createReadOnlyClient(origin, session, fetcher, { publicReadOnly: true });
-    await expect(client.read("listarProductos", { canal: "MARKETPLACE" }, signal())).rejects.toThrow("Inicia sesión");
+    await expect(client.read("listarProductos", { canal: "MARKETPLACE" }, signal())).rejects.toThrow("El servicio rechazó el acceso");
     expect(session.refreshAccessToken).toHaveBeenCalledTimes(1);
-    expect(session.invalidateAccessToken).toHaveBeenCalledWith("test-renewed");
+    expect(session.invalidateAccessToken).not.toHaveBeenCalled();
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
   it("renueva una sola vez un GET rechazado con TOKEN_INVALIDO", async () => {
@@ -100,7 +103,7 @@ describe("consultas contractuales de lectura", () => {
   });
   it("un fallo de red o 503 no fabrica una colección vacía", async () => {
     const { client } = setup([Response.json({}, { status: 503 })]);
-    await expect(client.read("listarProductos", {}, signal())).rejects.toThrow("HTTP 503");
+    await expect(client.read("listarProductos", {}, signal())).rejects.toThrow("no está disponible temporalmente");
   });
   it("una consulta cancelada no llega a la red", async () => {
     const { fetcher, client } = setup(); const controller = new AbortController(); controller.abort();
@@ -118,13 +121,14 @@ describe("consultas contractuales de lectura", () => {
     const { client: csvOnJsonClient } = setup([new Response("id,nombre\n1,test\n", { headers: { "content-type": "text/csv; charset=utf-8" } })]);
     await expect(csvOnJsonClient.read("listarProductos", { canal: "MARKETPLACE" }, signal())).rejects.toThrow("formato esperado");
 
-    const { client: validCsvClient } = setup([new Response("fila,error\n2,duplicado\n", { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="errores.csv"' } })]);
+    const { client: validCsvClient, fetcher: csvFetcher } = setup([new Response("fila,error\n2,duplicado\n", { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="errores.csv"' } })]);
     const fileResult = await validCsvClient.read("descargarReporteImportacionPrecios", { batchId: "batch-1" }, signal());
+    expect(new Headers(csvFetcher.mock.calls[0]?.[1]?.headers).get("Accept")).toBe("text/csv");
     expect(fileResult.kind).toBe("file");
     if (fileResult.kind === "file") expect(fileResult.filename).toBe("errores.csv");
   });
   it("en Vercel utiliza el proxy al mismo origen y mantiene el destino explícito fuera de Vercel", () => {
-    const azure = "https://api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io";
+    const azure = "https://apim-g6-productos-chile.azure-api.net";
     expect(resolveGatewayOrigin(azure, { hostname: "fork.vercel.app", origin }, true)).toBe(origin);
     expect(resolveGatewayOrigin(azure, { hostname: "localhost", origin }, false)).toBe(azure);
     expect(resolveGatewayOrigin("https://otro.example.test", { hostname: "fork.vercel.app", origin }, true)).toBe("https://otro.example.test");

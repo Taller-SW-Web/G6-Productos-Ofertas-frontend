@@ -16,6 +16,7 @@ import { useProductTypeList } from "../hooks/useProductTypeList";
 import { estadoSemantic } from "../services/estadoSemantic";
 import type { ProductTypeListItem } from "../types";
 import { useMockStateRevision } from "../../shared/useMockStateRevision";
+import { ProductTypeAttributeCount } from "../components/ProductTypeAttributeCount";
 
 export function ProductTypeListPage() {
   const navigate = useNavigate();
@@ -67,12 +68,9 @@ export function ProductTypeListPage() {
       header: "Características",
       width: 160,
       render: (item) => (
-        <Text size="sm">
-          {item.caracteristicasAsignadas === null ||
-          item.limiteCaracteristicas === null
-            ? "No disponible"
-            : `${item.caracteristicasAsignadas} de ${item.limiteCaracteristicas}`}
-        </Text>
+        item.caracteristicasAsignadas === null
+          ? <ProductTypeAttributeCount key={`${item.tipoProductoId}:${item.schemaVersion}:${revision}`} id={item.tipoProductoId} />
+          : <Text size="sm">{item.limiteCaracteristicas === null ? `${item.caracteristicasAsignadas}` : `${item.caracteristicasAsignadas} de ${item.limiteCaracteristicas}`}</Text>
       ),
     },
     {

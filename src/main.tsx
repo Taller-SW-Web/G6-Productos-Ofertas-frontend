@@ -44,15 +44,18 @@ function start() {
   if (starting) return;
   starting = true;
   void import("./startApplication").then(module => module.startApplication(root, mode, session, gatewayOrigin, securityApiBase, adminApiEnabled)).catch(() => {
-    root.render(<p role="alert">No se pudo iniciar la aplicación.</p>);
+    root.render(<MantineProvider theme={theme} cssVariablesResolver={cssVariablesResolver}><div role="alert"><p>No se pudo cargar la aplicación. Puede haber una nueva versión disponible.</p><button onClick={() => location.reload()}>Recargar aplicación</button></div></MantineProvider>);
   });
 }
-// A new JavaScript realm discards every provider, pending edit and module cache.
-// Only mock domain data persists, under its identity namespace. No credential is
-// put in storage, URLs or history. Logout revocation uses keepalive in G7Session.
+// Providers are rebuilt only after G7 confirms restoration; browser storage is
+// never trusted for roles. Logout revocation uses keepalive in G7Session.
 session?.subscribe(() => {
   const user = session.snapshot().user;
   if (identity && (user?.id !== identity || !canAdminister(user))) {
+    // Expiration closes protected routes through RequireSession while keeping
+    // in-memory drafts for reauthentication by this same identity. Explicit
+    // logout or a different authenticated identity discards the whole realm.
+    if (!user && session.snapshot().noticeSemantic !== "info") return;
     try { sessionStorage.setItem("g6:session-notice", session.snapshot().noticeSemantic === "info" ? "logout" : "expired"); } catch { /* Optional feedback only. */ }
     history.replaceState(null, "", "/login");
     location.reload();
@@ -61,12 +64,18 @@ session?.subscribe(() => {
   if (user && canAdminister(user) && !identity) {
     identity = user.id;
     setMockIdentity(user.id);
-    history.replaceState(null, "", loginDestination(history.state?.usr?.from));
+    const from = location.pathname === "/login" ? history.state?.usr?.from : location.pathname + location.search + location.hash;
+    history.replaceState(null, "", loginDestination(from));
     start();
   }
 });
-if (bypass) start();
-else {
+async function bootstrap() {
+  if (bypass) { start(); return; }
+  if (!publicDemo && session) {
+    root.render(<p role="status">Restaurando sesión…</p>);
+    await session.restore();
+    if (identity) return;
+  }
   if (!publicDemo && location.pathname !== "/login") {
     const from = location.pathname + location.search + location.hash;
     history.replaceState({ usr: { from }, key: "login", idx: 0 }, "", "/login");
@@ -79,3 +88,4 @@ else {
     </Routes></BrowserRouter></AuthSessionContext.Provider>
   </MantineProvider></StrictMode>);
 }
+void bootstrap();

@@ -194,11 +194,16 @@ describe("Composition Root & Regresiones de Inventario", () => {
     });
 
     it("bloquea /inventario/traslados en modo API mostrando mensaje de limitación y enlace a Consultas", () => {
-      renderWithGate("/inventario/traslados", "api", true);
+      renderWithGate("/inventario/traslados", "api", false);
       expect(screen.queryByTestId("target-content")).toBeNull();
       expect(screen.getByText(/Función no disponible/i)).toBeTruthy();
       const link = screen.getByRole("link", { name: /Abrir en Consultas de los módulos/i });
       expect(link.getAttribute("href")).toBe("/consultas?operacion=listarTrasladosInventario");
+    });
+
+    it("permite consultar traslados con contrato habilitado y conserva autorización de capacidades en el servidor", () => {
+      renderWithGate("/inventario/traslados", "api", true);
+      expect(screen.queryByTestId("target-content")).toBeTruthy();
     });
 
     it("habilita saldos físicos cuando se declara disponible el contrato administrativo", () => {

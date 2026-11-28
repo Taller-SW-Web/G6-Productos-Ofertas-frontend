@@ -1,13 +1,14 @@
 import type { CatalogRepository, VariantDetailView } from "../../catalog/services/catalogRepository";
+type VariantIdentity = Pick<VariantDetailView, "variantId" | "productId" | "sku" | "status">;
 
 export const INVENTORY_VARIANT_READ_CONCURRENCY = 4;
 
 export async function listVariantsByProduct(
-  catalog: Pick<CatalogRepository, "listVariants">,
+  catalog: Pick<CatalogRepository, "listVariants" | "listVariantIdentities">,
   products: readonly { id: string }[],
   pageSize: number,
   signal?: AbortSignal,
-): Promise<Map<string, VariantDetailView[]>> {
+): Promise<Map<string, VariantIdentity[]>> {
   if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100) {
     throw new RangeError("El tamaño de página de variantes debe estar entre 1 y 100.");
   }
@@ -20,17 +21,19 @@ export async function listVariantsByProduct(
   const abortFromCaller = () => controller.abort(signal?.reason);
   signal?.addEventListener("abort", abortFromCaller, { once: true });
 
-  const variantsByIndex: VariantDetailView[][] = Array.from({ length: products.length }, () => []);
+  const variantsByIndex: VariantIdentity[][] = Array.from({ length: products.length }, () => []);
   let nextIndex = 0;
 
-  const loadProduct = async (productId: string): Promise<VariantDetailView[]> => {
-    const items: VariantDetailView[] = [];
+  const loadProduct = async (productId: string): Promise<VariantIdentity[]> => {
+    const items: VariantIdentity[] = [];
     let page = 1;
     let total: number | undefined;
 
     for (;;) {
       controller.signal.throwIfAborted();
-      const result = await catalog.listVariants(
+      const result = catalog.listVariantIdentities ? await catalog.listVariantIdentities(
+        productId, { page, pageSize, status: "all" }, controller.signal,
+      ) : await catalog.listVariants(
         productId,
         { page, pageSize, status: "all" },
         undefined,

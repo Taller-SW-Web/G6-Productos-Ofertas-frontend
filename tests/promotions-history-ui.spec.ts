@@ -147,9 +147,12 @@ test("HTTP historical lookup failure preserves original associations and propose
   state.inactive = true; state.fail = true;
   await page.goto("/promociones/parent/editar/alcance");
   await expect(page.getByText("Catálogo no disponible", { exact: true })).toBeVisible();
-  await expect(page.getByRole("checkbox", { name: "Conservar producto: simple", exact: true })).toBeChecked();
-  await expect(page.getByRole("checkbox", { name: "Conservar SKU: SKU-L", exact: true })).toBeChecked();
+  await expect(page.getByText(/no se consideran inexistentes/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Confirmar alcance", exact: true })).toBeDisabled();
+  state.fail = false;
+  await page.getByRole("button", { name: "Volver a consultar Catálogo", exact: true }).click();
+  await expect(page.getByRole("checkbox", { name: `Conservar producto: ${simple.name}`, exact: true })).toBeChecked();
+  await expect(page.getByRole("checkbox", { name: "Conservar SKU: SKU-L", exact: true })).toBeChecked();
   await page.getByRole("link", { name: "Cancelar selección", exact: true }).click();
   await expect(page.getByRole("region", { name: "Canales y alcance" })).toContainText("SKU-L");
   await page.getByLabel("Nombre de la promoción", { exact: true }).fill("Borrador conservado");

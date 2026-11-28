@@ -128,6 +128,7 @@ export function createHttpPricingRepository(
   const uncertainUpdates = new Map<string, UpdateConfirmation>();
   const uncertainSchedules = new Set<string>();
   const pendingWrites = new Set<string>();
+  let catalogCache: { owner: string | null | undefined; at: number; targets: PriceTarget[] } | undefined;
   const markerPrefix = "g6:pricing:pending:v1:";
   const markerKey = (key: string, operation: "update" | "schedule") =>
     markerPrefix + operation + ":" + encodeURIComponent(key);
@@ -177,17 +178,24 @@ export function createHttpPricingRepository(
     return marker.state !== "absent";
   }
 
-  async function catalogTargets(signal: AbortSignal): Promise<PriceTarget[]> {
+  async function catalogTargets(signal: AbortSignal, fresh = false): Promise<PriceTarget[]> {
     signal.throwIfAborted();
+    const owner = dependencies.scopeId?.();
+    if (!fresh && catalogCache && catalogCache.owner === owner && Date.now() - catalogCache.at < 30_000)
+      return catalogCache.targets;
     if (!dependencies.listCatalogTargets) {
       throw blocked(
         "La selección de Pricing requiere objetivos y elegibilidad publicados por el provider de Catálogo. Esa integración aún no está configurada.",
       );
     }
     try {
-      return validatePriceTargets(
+      const targets = validatePriceTargets(
         await dependencies.listCatalogTargets(signal),
       );
+      signal.throwIfAborted();
+      if (dependencies.scopeId?.() !== owner) throw new PricingFailure("error", "La sesión cambió durante la consulta.");
+      catalogCache = { owner, at: Date.now(), targets };
+      return targets;
     } catch (error) {
       if (signal.aborted || isAbort(error) || error instanceof PricingFailure)
         throw error;
@@ -201,8 +209,9 @@ export function createHttpPricingRepository(
   async function targetById(
     targetId: string,
     signal: AbortSignal,
+    fresh = true,
   ): Promise<PriceTarget> {
-    const targets = await catalogTargets(signal);
+    const targets = await catalogTargets(signal, fresh);
     const target = targets.find((item) => item.id === targetId);
     if (!target) {
       throw new PricingFailure(
@@ -366,12 +375,12 @@ export function createHttpPricingRepository(
 
   return {
     async listTargets(signal) {
-      return catalogTargets(signal);
+      return catalogTargets(signal, true);
     },
 
     async read(query: PriceQuery, signal) {
       const owner = dependencies.scopeId?.();
-      const target = await targetById(query.targetId, signal);
+      const target = await targetById(query.targetId, signal, false);
       const price = await readTarget(target, query.channel, signal);
       if (dependencies.scopeId?.() !== owner) throw new PricingFailure("unknown", "La sesión cambió durante la lectura de Pricing.");
       return price ? { price, breakdown: [] } : null;

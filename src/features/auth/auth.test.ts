@@ -35,7 +35,7 @@ describe("habilitación administrativa explícita para un backend compatible", (
     expect(supportsAdministrativeContracts(true, gateway)).toBe(true);
   });
   it("conserva el proxy fijo de Vercel sin alterar su destino", () => {
-    const proxy = resolveGatewayOrigin(azure, location, true);
+    const proxy = resolveGatewayOrigin("https://apim-g6-productos-chile.azure-api.net", location, true);
     expect(proxy).toBe(location.origin);
     expect(supportsAdministrativeContracts(false, proxy)).toBe(false);
     expect(supportsAdministrativeContracts(true, proxy)).toBe(true);
@@ -55,7 +55,7 @@ describe.each(["Catálogo", "Promociones"])("%s después de renovar", feature =>
     { name: "401 desconocido", status: 401, body: { code: "DESCONOCIDO" }, retainsSession: true },
     { name: "401 ilegible", status: 401, body: "<html>", retainsSession: true },
     { name: "403", status: 403, body: { code: "SCOPE_INSUFICIENTE" }, retainsSession: true },
-    { name: "401 TOKEN_INVALIDO", status: 401, body: { code: "TOKEN_INVALIDO" }, retainsSession: false },
+    { name: "401 TOKEN_INVALIDO pese a refresh válido de G7", status: 401, body: { code: "TOKEN_INVALIDO" }, retainsSession: true },
   ])("A03/A05 clasifica el segundo $name", async ({ status, body, retainsSession }) => {
     const authorization: (string | null)[] = [];
     let refreshes = 0;
@@ -133,7 +133,7 @@ describe("Catálogo consume la sesión existente sin repetir escrituras", () => 
     const response = await transport.request("/api/v1/productos", { method, signal: new AbortController().signal, headers: {} });
     expect(reads).toBe(method === "GET" ? 2 : 1);
     expect(response.status).toBe(method === "GET" ? 200 : 401);
-    expect(session.snapshot().user !== null).toBe(method === "GET");
+    expect(session.snapshot().user).not.toBeNull();
     const requests = fetcher.mock.calls.filter(([url]) => String(url).includes("gateway"));
     expect(requests[0]?.[1]?.headers).toMatchObject({ Authorization: `Bearer ${dto().accessToken}` });
   });

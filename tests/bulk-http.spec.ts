@@ -132,7 +132,7 @@ test("Bulk API contra servidor HTTP aislado simula rutas, upload válido, errore
     expect(requests.some((request) => request.url === `${root}/exportaciones/${exportId}/archivo`)).toBe(false);
 
     await page.goto(`/tests/harness/bulk-http.html?gateway=${encodeURIComponent(gateway)}#/carga-masiva/importaciones/unauthorized`);
-    await expect(page.getByText(/sesión expiró o no es válida/i)).toBeVisible();
+    await expect(page.getByText(/servicio rechazó el acceso a esta operación/i)).toBeVisible();
     await page.goto(`/tests/harness/bulk-http.html?gateway=${encodeURIComponent(gateway)}#/carga-masiva/importaciones/forbidden`);
     await expect(page.getByText(/no tiene permiso/i)).toBeVisible();
     await page.goto(`/tests/harness/bulk-http.html?gateway=${encodeURIComponent(gateway)}#/carga-masiva/importaciones/missing`);

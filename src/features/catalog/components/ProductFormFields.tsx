@@ -253,7 +253,6 @@ export function ProductFormFields({
                 label="Peso (kg)"
                 min={0.01}
                 step={0.1}
-                decimalScale={2}
                 placeholder="0.00"
                 value={formData.pesoKg ?? ""}
                 onChange={(val) =>

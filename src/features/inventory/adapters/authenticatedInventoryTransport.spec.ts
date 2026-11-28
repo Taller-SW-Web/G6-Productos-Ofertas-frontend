@@ -93,8 +93,8 @@ describe("authenticatedInventoryTransport", () => {
       body: JSON.stringify({ umbral_minimo: 10 }),
     });
     expect(res.status).toBe(401);
-    expect(session.refreshAccessToken).not.toHaveBeenCalled();
-    expect(session.invalidateAccessToken).toHaveBeenCalledWith("initial-token");
+    expect(session.refreshAccessToken).toHaveBeenCalledTimes(1);
+    expect(session.invalidateAccessToken).not.toHaveBeenCalled();
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 });

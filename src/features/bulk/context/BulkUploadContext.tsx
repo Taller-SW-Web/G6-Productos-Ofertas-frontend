@@ -3,6 +3,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useRef,
   useState,
   useContext as useReactContext,
@@ -69,6 +70,11 @@ function findUncertainAdmission(owner: string): PendingAdmissionIntent | null {
 }
 
 export function BulkUploadProvider({ children }: { children: ReactNode }) {
+  const existing = useContext(BulkUploadContext);
+  return existing ? children : <BulkUploadState>{children}</BulkUploadState>;
+}
+
+function BulkUploadState({ children }: { children: ReactNode }) {
   const { session, view: sessionView } = useAuthSession();
   const dataMode = useReactContext(DataModeContext);
   const [initialRecovery] = useState(() => {
@@ -102,6 +108,19 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
   if (validationCoordinatorRef.current == null) {
     validationCoordinatorRef.current = new LatestTaskCoordinator();
   }
+
+  useEffect(() => session?.subscribe(() => {
+    const coordinator = admissionCoordinatorRef.current;
+    const intent = selectedIntent.current;
+    if (session.snapshot().user || coordinator?.status !== "pending" || !intent || !selectedFileRef.current) return;
+    // An admission already sent may have persisted. Authentication loss must
+    // preserve its original identity and invalidate late presentation callbacks.
+    coordinator.select(selectedFileRef.current, { correlationId: intent.correlationId, status: "uncertain" });
+    setAdmissionStatus("uncertain");
+    setPendingAdmission(intent);
+    setPendingCorrelationId(intent.correlationId);
+    setSubmissionError({ category: "unknown", message: "La sesión terminó durante la admisión. Se conserva su correlación; no se enviará otro POST." });
+  }), [session]);
 
   const setSelectedFile = useCallback(async (file: File | null) => {
     const generation = ++selectionGenerationRef.current;
@@ -187,7 +206,7 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
     const task = coordinator.start();
 
     try {
-      const result = await checkLocalFile(file, task.signal);
+      const result = await checkLocalFile(file, task.signal, dataMode === "api" ? 2 : undefined);
       // Only commit result if this is still the active validation
       if (task.isCurrent() && generation === selectionGenerationRef.current && selectedFileRef.current === file && (!owner || session?.snapshot().user?.id === owner)) {
         setFileCheck(result);
@@ -199,7 +218,7 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
         setChecking(false);
       }
     }
-  }, [session]);
+  }, [session, dataMode]);
 
   const clearSelection = useCallback(() => {
     selectionGenerationRef.current++;
@@ -259,6 +278,7 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
     batchId?: string,
   ) => {
     const coordinator = admissionCoordinatorRef.current;
+    if (!coordinator || !task.isCurrent()) return false;
     const intent = admissionOwnerByCorrelation.current.get(task.correlationId);
     if (intent && (task.correlationId !== intent.correlationId || task.owner !== intent.owner || task.contentHash !== intent.contentHash || session?.snapshot().user?.id !== intent.owner)) {
       coordinator?.finish(task, status);

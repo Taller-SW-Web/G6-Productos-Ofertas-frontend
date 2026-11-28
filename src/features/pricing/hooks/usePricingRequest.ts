@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useContext, useEffect, useEffectEvent, useRef, useState, useSyncExternalStore } from "react";
 import { PricingFailure } from "../services/pricingModels";
 import { PromotionSessionContext } from "../../../app/config/PromotionSessionContext";
 
@@ -22,6 +22,7 @@ export function usePricingRead<T>(
   );
   const scopedIdentity = `${userId}:${identity}`;
   const scopedRequestKey = `${userId}:${requestKey}`;
+  const readCurrent = useEffectEvent(read);
   const [response, setResponse] = useState<{
     key: string;
     state: RequestState<T>;
@@ -35,7 +36,13 @@ export function usePricingRead<T>(
   useEffect(() => {
     if (!enabled) return;
     const controller = new AbortController();
-    void read(controller.signal).then(
+    const bounded = AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]);
+    let stop = () => undefined as void;
+    const deadline = new Promise<never>((_resolve, reject) => {
+      stop = () => reject(new Error("La consulta excedió el tiempo permitido. Vuelve a consultar."));
+      bounded.addEventListener("abort", stop, { once: true });
+    });
+    void Promise.race([Promise.resolve().then(() => readCurrent(bounded)), deadline]).then(
       (result) => {
         if (controller.signal.aborted) return;
         readCache.set(scopedIdentity, result);
@@ -55,9 +62,9 @@ export function usePricingRead<T>(
             },
           });
       },
-    );
-    return () => controller.abort();
-  }, [enabled, read, scopedRequestKey, scopedIdentity]);
+    ).finally(() => bounded.removeEventListener("abort", stop));
+    return () => { controller.abort(); bounded.removeEventListener("abort", stop); };
+  }, [enabled, scopedRequestKey, scopedIdentity]);
   return {
     state:
       response?.key === scopedRequestKey

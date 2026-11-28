@@ -37,7 +37,7 @@ export function AuditTable({
       width: 180,
       render: (entry) => dateLabel(entry.at),
     },
-    { key: "sku", header: "SKU", width: 120, render: (entry) => entry.sku ?? "Producto · sin SKU" },
+    { key: "sku", header: "Producto / SKU", width: 180, render: (entry) => <Stack gap="xs"><Text size="sm">{entry.productName ?? "Referencia comercial no disponible"}</Text><Text size="xs">{entry.sku ?? `Producto: ${entry.productId}`}</Text></Stack> },
     {
       key: "operation",
       header: "Operación y tipo",

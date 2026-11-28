@@ -146,6 +146,9 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
                 {entries.map((attr, idx) => {
                   const schema = available.find(s => s.caracteristicaId === attr.caracteristicaId);
                   const error = errors[`${identity ? "id" : "non"}_attr_${idx}_valor`];
+                  const selectedLabel = schema?.opciones?.find(option => option.id === attr.valor || option.valor === attr.valor)?.valor;
+                  const readOnlyValue = selectedLabel ?? (attr.tipo === "LISTA" && /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(attr.valor)
+                    ? "Valor comercial no disponible" : attr.valor);
                   return <Paper key={attr.key} p="sm" withBorder>
                     <Group align="flex-start" wrap="nowrap">
                       <Select label="Característica (Taxonomía)" value={attr.caracteristicaId}
@@ -155,7 +158,7 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
                         disabled={locked || Boolean(attr.obligatorio) || schemaLoading || Boolean(schemaError)}
                         onChange={value => { if (value) update(idx, "caracteristicaId", value); }}
                         style={{ flex: 1 }} />
-                      {locked ? <Text pt="lg">{attr.nombre}: {attr.valor}</Text> :
+                      {locked ? <Text pt="lg">{schema?.nombre ?? attr.nombre}: {readOnlyValue}</Text> :
                         schema?.tipo === "LISTA" ?
                           <Select label={attr.nombre} required={schema.obligatorio}
                             data={(schema.opciones ?? []).map(o => ({ value: o.id, label: o.valor }))}
@@ -216,7 +219,6 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
                   placeholder="0.00"
                   clampBehavior="none"
                   step={0.05}
-                  decimalScale={2}
                   value={formData.pesoKg ?? ""}
                   onChange={(val) =>
                     updateField("pesoKg", parseNumericValue(val))
@@ -230,7 +232,6 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
                   placeholder="0.0"
                   clampBehavior="none"
                   step={1}
-                  decimalScale={1}
                   value={formData.largoCm ?? ""}
                   onChange={(val) =>
                     updateField("largoCm", parseNumericValue(val))
@@ -244,7 +245,6 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
                   placeholder="0.0"
                   clampBehavior="none"
                   step={1}
-                  decimalScale={1}
                   value={formData.anchoCm ?? ""}
                   onChange={(val) =>
                     updateField("anchoCm", parseNumericValue(val))
@@ -258,7 +258,6 @@ export function VariantFormFields({ form, parentProduct }: VariantFormFieldsProp
                   placeholder="0.0"
                   clampBehavior="none"
                   step={1}
-                  decimalScale={1}
                   value={formData.altoCm ?? ""}
                   onChange={(val) =>
                     updateField("altoCm", parseNumericValue(val))

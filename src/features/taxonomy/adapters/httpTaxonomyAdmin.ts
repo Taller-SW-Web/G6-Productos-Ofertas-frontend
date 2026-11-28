@@ -216,7 +216,11 @@ export function createHttpSeoRepository(transport: TaxonomyGatewayTransport): Se
           if (index >= categories.length) return;
           const category = categories[index];
           if (!category) continue;
-          try { results[index] = { status: "fulfilled", value: map(await get(`/api/v1/categorias/${encodeURIComponent(str(category.categoriaId))}/seo`, signal), str(category.nombre)) }; }
+          try {
+            const estado = category.estado;
+            if (estado !== "ACTIVA" && estado !== "INACTIVA" && estado !== "PENDING_DEACTIVATION") throw invalid();
+            results[index] = { status: "fulfilled", value: { ...map(await get(`/api/v1/categorias/${encodeURIComponent(str(category.categoriaId))}/seo`, signal), str(category.nombre)), estado } };
+          }
           catch (reason) {
             if (signal?.aborted || httpStatus(reason) === 401 || httpStatus(reason) === 403) throw reason;
             results[index] = httpStatus(reason) === 404 ? { status: "fulfilled", value: null } : { status: "rejected", reason };

@@ -1,5 +1,7 @@
 // G7 ADR-009 / develop@44f7d29: external G6 consumers request RS256 JWS.
-// G7 SPEC-06 / H-11: memory only, one refresh in flight,
+import type { SessionPersistence } from "./sessionPersistence";
+// G7 SPEC-06 / H-11: one refresh in flight. Temporary G6 persistence exception
+// is explicitly authorized in the functional audit task; see docs/auditoria-funcional.
 // rotation without automatic retries after an unknown result. No service token.
 export interface SessionUser {
   id: string;
@@ -14,6 +16,7 @@ export interface SessionView {
   busy: boolean;
   notice: string;
   noticeSemantic?: "error" | "info" | "success";
+  restoration?: "restoring" | "authenticated" | "expired" | "invalid";
 }
 interface Tokens {
   accessToken: string;
@@ -122,6 +125,7 @@ export class G7Session {
     base: string,
     private readonly clock: () => number = Date.now,
     initialNotice?: "expired" | "logout",
+    private readonly persistence?: SessionPersistence,
   ) {
     this.#base = secureBase(base);
     if (initialNotice) this.#view = { ...this.#view,
@@ -145,7 +149,8 @@ export class G7Session {
     this.#tokens = null;
     this.#challenge = null;
     this.#refresh = null;
-    this.#publish({ user: null, mfa: false, busy: false, notice, noticeSemantic, expiresAt: null });
+    this.persistence?.clear();
+    this.#publish({ user: null, mfa: false, busy: false, notice, noticeSemantic, expiresAt: null, restoration: "expired" });
   }
   async #post(path: string, body: unknown, expected = 200): Promise<unknown> {
     const response = await fetch(this.#base + path, {
@@ -195,7 +200,36 @@ export class G7Session {
       expiresAt: this.clock() + positive(dto.expiresIn) * 1000,
     };
     this.#challenge = null;
-    this.#publish({ user, mfa: false, notice: "", expiresAt: this.#tokens.expiresAt });
+    this.persistence?.save(refreshToken, user.id);
+    this.#publish({ user, mfa: false, notice: "", expiresAt: this.#tokens.expiresAt, restoration: "authenticated" });
+  }
+  #restoring: Promise<void> | null = null;
+  restore(): Promise<void> {
+    if (this.#restoring) return this.#restoring;
+    if (this.#tokens) return Promise.resolve();
+    const saved = this.persistence?.read();
+    if (!saved) return Promise.resolve();
+    const generation = this.#generation;
+    this.#publish({ restoration: "restoring", busy: true });
+    // Delete before dispatch: timeout, reload or a lost response must never
+    // restore a refresh token that G7 may already have consumed.
+    this.persistence?.clear();
+    this.#restoring = (async () => {
+      try {
+        await this.persistence?.consume(saved.refreshToken);
+        if (generation !== this.#generation) return;
+        const dto = object(await this.#post("/auth/refresh", { refreshToken: saved.refreshToken, formatoAcceso: "JWS" }));
+        if (generation !== this.#generation) return;
+        if (object(dto.usuario).id !== saved.userId || dto.refreshToken === saved.refreshToken)
+          throw new SessionFailure("INVALID_RESPONSE");
+        this.#accept(dto);
+      } catch {
+        if (generation === this.#generation) this.#clear(messages.REFRESCO_INVALIDO);
+      } finally {
+        if (generation === this.#generation) this.#publish({ busy: false });
+      }
+    })();
+    return this.#restoring;
   }
   async #action(work: () => Promise<void>) {
     if (this.#view.busy) return;
@@ -282,6 +316,9 @@ export class G7Session {
       generation = this.#generation;
     const work = (async () => {
       try {
+        this.persistence?.clear();
+        await this.persistence?.consume(token);
+        if (generation !== this.#generation) return null;
         const dto = await this.#post("/auth/refresh", { refreshToken: token, formatoAcceso: "JWS" });
         if (generation !== this.#generation) return null;
         const rotated = object(dto);

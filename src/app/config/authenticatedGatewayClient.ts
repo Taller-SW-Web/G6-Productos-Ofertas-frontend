@@ -63,7 +63,7 @@ export function createAuthenticatedGatewayClient(
       cache: "no-store",
       headers: {
         Accept: "application/json",
-        ...request.headers,
+        ...Object.fromEntries(Object.entries(request.headers ?? {}).filter(([name]) => name.toLowerCase() !== "authorization")),
         Authorization: `Bearer ${token}`,
         "X-Correlation-Id": request.headers?.["X-Correlation-Id"] ?? correlationId,
       },
@@ -109,11 +109,13 @@ export function createAuthenticatedGatewayClient(
         assertSession();
         const retried = await send(path, request, refreshed, signal, correlationId);
         assertSession();
-        if (await isGatewayTokenInvalid(retried)) session.invalidateAccessToken(refreshed);
+        // A token freshly confirmed by G7 can still be rejected by one service
+        // (e.g. incompatible audience policy). Keep identity and report denial.
         return retried;
       }
-      // A contractual rejection ends the session without replaying the write.
-      session.invalidateAccessToken(token);
+      // Recover identity for the next user action, never replay this write.
+      const refreshed = await session.refreshAccessToken(token, signal);
+      if (!refreshed) session.invalidateAccessToken(token);
       return response;
     },
   };

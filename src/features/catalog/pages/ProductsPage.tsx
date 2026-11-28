@@ -1,4 +1,5 @@
-import { useContext, useState } from "react";
+import { useContext, useEffect, useEffectEvent, useRef, useState } from "react";
+import { useDebouncedValue } from "@mantine/hooks";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { ActionIcon, Avatar, Button, Group, Stack, Text } from "@mantine/core";
 import { IconEye, IconPlus } from "@tabler/icons-react";
@@ -24,6 +25,17 @@ import { DataModeContext } from "../../../app/config/DataModeContext";
 export function ProductsPage() {
   const mode = useContext(DataModeContext) ?? "mock";
   const [params, setParams] = useSearchParams();
+  const urlSearch = params.get("q") ?? "";
+  const [searchText, setSearchText] = useState(urlSearch);
+  const [debouncedSearch] = useDebouncedValue(searchText, 250);
+  const committedSearch = useRef(urlSearch);
+  const externalSearch = useRef(false);
+  useEffect(() => {
+    if (urlSearch === committedSearch.current) return;
+    committedSearch.current = urlSearch;
+    externalSearch.current = true;
+    setSearchText(urlSearch);
+  }, [urlSearch]);
   const location = useLocation();
   const [revision, setRevision] = useState(0);
   const mockRevision = useMockStateRevision([
@@ -55,8 +67,8 @@ export function ProductsPage() {
     setParams((current) => {
       const next = new URLSearchParams(current);
       if (patch.q !== undefined) {
-        if (!patch.q.trim()) next.delete("q");
-        else next.set("q", patch.q.trim());
+        if (!patch.q) next.delete("q");
+        else next.set("q", patch.q);
       }
       if (patch.categoryId !== undefined) {
         if (patch.categoryId === "all") next.delete("categoriaId");
@@ -83,6 +95,7 @@ export function ProductsPage() {
   };
 
   const clearFilters = () => {
+    setSearchText("");
     setParams((current) => {
       const next = new URLSearchParams(current);
       next.delete("q");
@@ -94,6 +107,15 @@ export function ProductsPage() {
       return next;
     });
   };
+
+  const commitSearch = useEffectEvent((value: string) => updateQuery({ q: value, page: 1 }));
+  useEffect(() => {
+    if (externalSearch.current) { externalSearch.current = false; return; }
+    const normalized = debouncedSearch.trim();
+    if (debouncedSearch !== searchText || normalized === committedSearch.current) return;
+    committedSearch.current = normalized;
+    commitSearch(normalized);
+  }, [debouncedSearch, searchText]);
 
   const handleRetry = () => {
     setParams(
@@ -233,7 +255,7 @@ export function ProductsPage() {
         <PageHeader
           title="Gestión de productos"
           breadcrumbs={[
-            { label: "Inicio", to: "/precios" },
+            { label: "Inicio", to: "/productos" },
             { label: "Catálogo", to: "/productos" },
             { label: "Productos" },
           ]}
@@ -259,7 +281,7 @@ export function ProductsPage() {
         title="Gestión de productos"
         description="Administra productos simples y productos con variantes. Consulta el estado de catálogo y las preparaciones antes de publicar."
         breadcrumbs={[
-          { label: "Inicio", to: "/precios" },
+          { label: "Inicio", to: "/productos" },
           { label: "Catálogo", to: "/productos" },
           { label: "Productos" },
         ]}
@@ -290,12 +312,15 @@ export function ProductsPage() {
         categoriesUnavailable={Boolean(taxonomy.error)}
         typesUnavailable={taxonomy.typesUnavailable}
         mode={mode}
-        query={query}
+        query={{ ...query, q: searchText }}
         categories={taxonomy.categories}
         productTypes={taxonomy.productTypes}
         total={state.data?.total || 0}
         shownCount={state.data?.items.length || 0}
-        onChange={updateQuery}
+        onChange={patch => {
+          if (patch.q !== undefined) setSearchText(patch.q);
+          else updateQuery(patch);
+        }}
         onClear={clearFilters}
       />
 

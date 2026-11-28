@@ -31,7 +31,7 @@ describe("transporte autenticado de Taxonomía", () => {
     const auth = { ...session(), invalidateAccessToken };
     await expect(createAuthenticatedTaxonomyGateway("https://gateway.example", auth, fetcher).request("/api/v1/tipos-producto", new AbortController().signal)).rejects.toBeInstanceOf(TaxonomyGatewayError);
     expect(fetcher).toHaveBeenCalledTimes(2);
-    expect(invalidateAccessToken).toHaveBeenCalledExactlyOnceWith("new-token");
+    expect(invalidateAccessToken).not.toHaveBeenCalled();
   });
   it("falla cerrado cuando no existe sesión", async () => {
     const fetcher = vi.fn();

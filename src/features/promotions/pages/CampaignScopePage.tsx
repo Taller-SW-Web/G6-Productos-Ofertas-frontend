@@ -12,7 +12,7 @@ import { CampaignScope } from "../components/CampaignScope";
 import { PromotionDataNotice } from "../components/PromotionDataNotice";
 import type { CampaignEditorContext } from "./CampaignEditorLayout";
 export function CampaignScopePage() {
-  const { form, products, catalogError, catalogLoading, root, suffix } =
+  const { form, products, catalogError, catalogLoading, root, suffix, retryCatalog } =
     useOutletContext<CampaignEditorContext>();
   const [selection, setSelection] = useState(() => ({
     productIds: [...form.draft.productIds],
@@ -58,11 +58,11 @@ export function CampaignScopePage() {
         />
         {catalogLoading && <Text role="status">Consultando catálogo…</Text>}
         {catalogError && (
-          <FeedbackAlert semantic="error" title="Catálogo no disponible">
+          <FeedbackAlert semantic="error" title="Catálogo no disponible" actions={<Button variant="outline" onClick={retryCatalog}>Volver a consultar Catálogo</Button>}>
             {catalogError} La selección anterior se conserva.
           </FeedbackAlert>
         )}
-        {!!(historicalProducts.length || historicalSkus.length) && (
+        {!catalogError && !catalogLoading && !!(historicalProducts.length || historicalSkus.length) && (
           <SectionCard title="Asociaciones históricas">
             <Text size="sm">
               Estas asociaciones se conservan. Puedes quitarlas explícitamente;
@@ -124,6 +124,7 @@ export function CampaignScopePage() {
           </SectionCard>
         ))}
         <SectionCard title="Alcance seleccionado">
+          {catalogError && <Text size="sm">No se ha podido verificar la vigencia de estas referencias; no se consideran inexistentes.</Text>}
           <CampaignScope configuration={selection} products={products} />
         </SectionCard>
         {error && (

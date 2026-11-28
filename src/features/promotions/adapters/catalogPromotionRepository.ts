@@ -30,7 +30,9 @@ export function createCatalogPromotionRepository({
           const skus: CatalogProductChoice["skus"] = [];
           if (product.hasVariants) {
             for (let variantPage = 1; ; variantPage++) {
-              const variants = await catalog.listVariants(
+              const variants = catalog.listVariantIdentities ? await catalog.listVariantIdentities(
+                product.id, { status: retaining ? "all" : "ACTIVA", page: variantPage, pageSize: 100 }, signal,
+              ) : await catalog.listVariants(
                 product.id,
                 { status: retaining ? "all" : "ACTIVA", page: variantPage, pageSize: 100 },
                 undefined,
@@ -43,7 +45,7 @@ export function createCatalogPromotionRepository({
                   .map((row) => ({
                     sku: row.sku,
                     label:
-                      row.identifyingAttributes
+                      ("identifyingAttributes" in row ? row.identifyingAttributes as import("../../catalog/services/catalogRepository").ProductAttributeValue[] : [])
                         .map((attribute) => `${attribute.nombre}: ${attribute.valor}`)
                         .join(" · ") || row.sku,
                     active: active && row.status === "ACTIVA",

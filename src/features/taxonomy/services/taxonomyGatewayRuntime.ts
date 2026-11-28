@@ -35,7 +35,10 @@ export class TaxonomyGatewayError extends Error {
     readonly status: number,
     readonly code?: string,
   ) {
-    super(`No se pudieron cargar los tipos de producto (HTTP ${status}).`);
+    super(status === 401 ? "El servicio rechazó el acceso a Taxonomía. Puedes volver a consultar."
+      : status === 403 ? "Tu rol no permite esta operación de Taxonomía."
+      : status === 429 ? "Hay muchas consultas de Taxonomía. Espera antes de volver a consultar."
+      : "Taxonomía no está disponible temporalmente. Vuelve a consultar más tarde.");
     this.name = "TaxonomyGatewayError";
   }
 }
@@ -78,7 +81,7 @@ export function createAuthenticatedTaxonomyGateway(
         }
         response = await send(renewed);
         signal.throwIfAborted();
-        if (await isGatewayTokenInvalid(response)) session.invalidateAccessToken(renewed);
+        // G7 confirmed the identity; report a downstream denial locally.
       }
       if (!response.ok) throw new TaxonomyGatewayError(response.status);
       return response;

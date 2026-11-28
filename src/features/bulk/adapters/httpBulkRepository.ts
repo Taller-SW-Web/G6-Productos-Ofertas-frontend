@@ -243,27 +243,26 @@ export function createHttpBulkRepository(transport: BulkHttpTransport, session: 
       throw new BulkRepositoryError("No se pudo conectar con Gateway. Revisa la conexión e inténtalo de nuevo.", "communication");
     }
     if (await isGatewayTokenInvalid(response)) {
-      if (method === "POST") session.invalidateAccessToken(token);
-      else {
-        const renewed = await session.refreshAccessToken(token, bounded).catch(() => null);
-        if (renewed && !/[\r\n]/.test(renewed)) {
+      const renewed = await session.refreshAccessToken(token, bounded).catch(() => null);
+      if (renewed && !/[\r\n]/.test(renewed)) {
+        if (method === "GET") {
           response = await request(renewed).catch(() => { throw new BulkRepositoryError("No se pudo conectar con Gateway.", "communication"); });
-          if (await isGatewayTokenInvalid(response)) session.invalidateAccessToken(renewed);
-        } else session.invalidateAccessToken(token);
-      }
+        }
+      } else session.invalidateAccessToken(token);
     }
     if (expectedOwner && session.snapshot?.().user?.id !== expectedOwner) throw new BulkRepositoryError("La sesión cambió mientras se procesaba la admisión. Se conserva la intención original sin atribuir la respuesta a otra identidad.", "unknown");
     if (!response.ok) {
       const problem = await response.clone().json().catch(() => null) as { code?: unknown } | null;
       const code = typeof problem?.code === "string" ? problem.code : "ERROR_HTTP";
       const statusMessage: Record<number, string> = {
-        401: "La sesión expiró o no es válida. Inicia sesión de nuevo.",
-        403: "Tu sesión no tiene permiso para esta operación (SCOPE_INSUFICIENTE).",
+        401: "El servicio rechazó el acceso a esta operación. Conserva el contexto y consulta su estado antes de repetirla.",
+        403: "Tu cuenta no tiene permiso para esta operación.",
         404: "El recurso solicitado no existe o la operación aún no está disponible en el backend.",
         409: "El lote cambió o tiene un conflicto; actualiza su estado antes de volver a intentarlo.",
+        429: "Se alcanzó el límite de solicitudes. Espera antes de volver a consultar.",
         503: "El servicio de carga masiva no está disponible temporalmente.",
       };
-      throw new BulkRepositoryError(`HTTP ${response.status}. ${statusMessage[response.status] ?? "La solicitud falló."} Código: ${code}.`, response.status === 401 || response.status === 403 ? "configuration" : (response.status >= 500 || response.status === 408) && method === "POST" ? "unknown" : response.status >= 500 ? "communication" : "rejected", response.status, code);
+      throw new BulkRepositoryError(statusMessage[response.status] ?? "No se pudo completar la solicitud.", response.status === 401 || response.status === 403 ? "configuration" : (response.status >= 500 || response.status === 408) && method === "POST" ? "unknown" : response.status >= 500 ? "communication" : "rejected", response.status, code);
     }
     return response;
   }

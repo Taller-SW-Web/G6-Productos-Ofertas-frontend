@@ -20,6 +20,7 @@ export interface AuditEntry {
   sku: string | null;
   targetType?: "SKU" | "PRODUCTO";
   productId: string;
+  productName?: string | null;
   priceType: "REGULAR" | "OFERTA";
   before: string | null;
   after: string | null;

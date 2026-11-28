@@ -48,6 +48,7 @@ export function ComboEditor({ existing }: { existing?: Combo }) {
   const [priceState, setPriceState] = useState<PriceState>({ key: "", status: "success", prices: emptyPrices });
   const [priceRetry, setPriceRetry] = useState(0);
   const [error, setError] = useState<{ title: string; message: string } | null>(null);
+  const [componentError, setComponentError] = useState<string | null>(null);
   const [serverVersion, setServerVersion] = useState<Combo | null>(null);
   const [versionConflict, setVersionConflict] = useState(false);
   const [versionReadError, setVersionReadError] = useState<string | null>(null);
@@ -241,9 +242,10 @@ export function ComboEditor({ existing }: { existing?: Combo }) {
       : selectedProduct.baseSku;
     if (!sku) return;
     if (draft.components.some((item) => item.sku === sku)) {
-      setError({ title: "SKU ya agregado", message: "Cada SKU debe aparecer una sola vez en el combo." });
+      setComponentError("Este SKU ya está incluido. Cada SKU debe aparecer una sola vez en el combo.");
       return;
     }
+    setComponentError(null);
     setDraft((current) => ({ ...current, components: [...current.components, { sku, productName: selectedProduct.name, quantity: 1 }] }));
     setSelectedProduct(null);
     setSelectedVariantSku(null);
@@ -387,6 +389,7 @@ export function ComboEditor({ existing }: { existing?: Combo }) {
         <Select className={classes.productSelect} label="Producto" placeholder="Busca producto activo" searchable data={productOptions} value={selectedProduct?.productId ?? null} searchValue={searchQuery} onSearchChange={(value) => { setSearchPage(1); setSearchQuery(value); }} onChange={selectProduct} nothingFoundMessage={currentSearch.status === "loading" ? "Buscando productos…" : "No hay productos con ese término en esta página."} />
         {selectedProduct?.hasVariants && <Select className={classes.productSelect} label="Variante / SKU" placeholder={currentDetail.status === "loading" ? "Consultando variantes…" : "Elige una variante"} data={variantOptions} value={selectedVariantSku} onChange={setSelectedVariantSku} disabled={currentDetail.status !== "success"} />}
         <Button type="button" variant="outline" disabled={!selectedProduct || (selectedProduct.hasVariants && (currentDetail.status !== "success" || !selectedVariantSku))} onClick={addSelectedSku}>Agregar componente</Button>
+        {componentError && <FeedbackAlert semantic="error" title="SKU ya agregado">{componentError}</FeedbackAlert>}
       </Group>
       {currentSearch.status === "success" && currentSearch.result.total > PRODUCT_PAGE_SIZE && <Group justify="space-between" mt="sm"><Text size="sm" c="dimmed">{currentSearch.result.total} productos activos · página {searchPage} de {Math.ceil(currentSearch.result.total / PRODUCT_PAGE_SIZE)}</Text><Pagination value={searchPage} total={Math.ceil(currentSearch.result.total / PRODUCT_PAGE_SIZE)} onChange={setSearchPage} size="sm" /></Group>}
       {currentDetail.status === "error" && <FeedbackAlert semantic="error" title="No se pudieron consultar las variantes" actions={<Button type="button" variant="outline" onClick={() => setDetailRetry((value) => value + 1)}>Reintentar variantes</Button>}>{currentDetail.message} Los componentes que ya agregaste siguen en el borrador.</FeedbackAlert>}

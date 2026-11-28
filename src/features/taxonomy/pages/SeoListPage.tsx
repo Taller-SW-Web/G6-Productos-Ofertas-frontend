@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ActionIcon, Box, Button, Stack, Text } from "@mantine/core";
+import { ActionIcon, Box, Button, Select, Stack, Text } from "@mantine/core";
 import { IconPlus, IconSettings } from "@tabler/icons-react";
 import {
   EntityTable,
@@ -18,19 +18,21 @@ export function SeoListPage() {
   const navigate = useNavigate();
   const [revision, setRevision] = useState(0);
   const [busqueda, setBusqueda] = useState("");
+  const [estado, setEstado] = useState<string | null>("ACTIVA");
   const { state } = useSeoList(revision);
 
   const resultado = state.status === "success" ? state.result : undefined;
   const items = useMemo(() => resultado?.items ?? [], [resultado]);
   const termino = busqueda.trim().toLocaleLowerCase("es");
   const filas = useMemo(
-    () => items.filter((x) => termino === "" || x.nombre.toLocaleLowerCase("es").includes(termino) || x.slug.toLocaleLowerCase("es").includes(termino)),
-    [items, termino],
+    () => items.filter((x) => (!x.estado || estado === "todos" || x.estado === estado) && (termino === "" || x.nombre.toLocaleLowerCase("es").includes(termino) || x.slug.toLocaleLowerCase("es").includes(termino))),
+    [items, termino, estado],
   );
 
   const columnas: TableColumn<SeoCategory>[] = [
     { key: "nombre", header: "Categoría", render: (i) => <Text size="sm" fw={600}>{i.nombre}</Text> },
     { key: "slug", header: "Slug", render: (i) => <Text size="sm">/{i.slug}</Text> },
+    { key: "estado", header: "Estado de categoría", render: (i) => <Text size="sm">{i.estado === "ACTIVA" ? "Activa" : i.estado === "INACTIVA" ? "Inactiva" : i.estado === "PENDING_DEACTIVATION" ? "Baja en evaluación" : "No informado"}</Text> },
     { key: "metaTitulo", header: "Meta-título", render: (i) => <Text size="sm" truncate>{i.metaTitulo || "—"}</Text> },
     { key: "metaDesc", header: "Meta-descripción", render: (i) => <Text size="sm" truncate>{i.metaDescripcion || "—"}</Text> },
     {
@@ -74,6 +76,7 @@ export function SeoListPage() {
       <PageHeader title="SEO y metadatos" description="Gestiona slug y metadatos SEO de categorías." breadcrumbs={[{ label: "Taxonomía" }, { label: "SEO" }]} actions={<Button leftSection={<IconPlus size={16} stroke={2} aria-hidden="true" />} disabled>Nueva configuración</Button>} />
       <Stack gap="lg">
         <FilterBar summary={`${filas.length} elementos visibles`}>
+          <Select label="Estado de categoría" value={estado} onChange={setEstado} allowDeselect={false} data={[{ value: "ACTIVA", label: "Activas" }, { value: "INACTIVA", label: "Inactivas" }, { value: "todos", label: "Todas" }]} />
           <Box w={320}>
             <SearchField label="Buscar" value={busqueda} onChange={setBusqueda} placeholder="Categoría o slug" />
           </Box>

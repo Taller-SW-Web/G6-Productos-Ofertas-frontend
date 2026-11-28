@@ -117,7 +117,7 @@ export function ProductPreparationPage() {
         <PageHeader
           title="Producto no encontrado"
           breadcrumbs={[
-            { label: "Inicio", to: "/precios" },
+            { label: "Inicio", to: "/productos" },
             { label: "Catálogo", to: "/productos" },
             { label: "Productos", to: "/productos" },
             { label: "No encontrado" },
@@ -159,7 +159,7 @@ export function ProductPreparationPage() {
         title="Preparación del producto"
         description="Verifica el estado de inicialización independiente en Pricing e Inventario. El producto permanece en borrador hasta que confirmes su activación."
         breadcrumbs={[
-          { label: "Inicio", to: "/precios" },
+          { label: "Inicio", to: "/productos" },
           { label: "Catálogo", to: "/productos" },
           { label: "Productos", to: "/productos" },
           { label: p.name, to: `/productos/${p.id}` },

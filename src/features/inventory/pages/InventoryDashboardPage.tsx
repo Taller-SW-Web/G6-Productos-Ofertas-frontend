@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useContext, useMemo, useState } from "react";
+import { DataModeContext } from "../../../app/config/DataModeContext";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   ActionIcon,
@@ -38,6 +39,7 @@ import type {
 } from "../services/inventoryTypes";
 
 export function InventoryDashboardPage() {
+  const mode = useContext(DataModeContext);
   const [params, setParams] = useSearchParams();
 
   const filters: DashboardFiltersQuery = useMemo(
@@ -331,7 +333,7 @@ export function InventoryDashboardPage() {
         <div>
           <Group justify="space-between" align="baseline" mb="sm">
             <Title order={2} size="h3">
-              Resumen de indicadores clave
+              {mode === "api" ? "Indicadores globales de inventario" : "Resumen de indicadores clave"}
             </Title>
             {generatedAt && (
               <Text size="xs" c="dimmed">
@@ -339,6 +341,11 @@ export function InventoryDashboardPage() {
               </Text>
             )}
           </Group>
+          <Text size="sm" mb="sm">
+            {mode === "api"
+              ? "Estos indicadores globales solo admiten el filtro de ubicación. La búsqueda por SKU, categoría, marca y estado se aplica a la tabla inferior."
+              : "La búsqueda por SKU y estado se aplica a la tabla inferior; los indicadores admiten categoría, marca y ubicación."}
+          </Text>
           <DashboardKpiGrid
             kpis={kpis}
             loading={loading}

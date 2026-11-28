@@ -24,8 +24,8 @@ const dto = {
   refreshToken: "isolated-contract-refresh", tokenType: "Bearer", expiresIn: 900,
   usuario: { id: "11111111-1111-4111-8111-111111111111", nombreCompleto: "Gestora de prueba", correo: "isolated@example.test", roles: ["GESTOR_COMERCIAL"] },
 };
-test.beforeEach(async ({ page }) => {
-  forceJwe = false; adminApi = false; mfa = false; failure = ""; expiry = 900; calls = []; roles = ["GESTOR_COMERCIAL"]; demo = false; fullName = dto.usuario.nombreCompleto; holdRefresh = false; releaseRefresh = undefined;
+test.beforeEach(async ({ context }) => {
+  forceJwe = false; adminApi = false; mfa = false; failure = ""; expiry = 900; calls = []; roles = ["GESTOR_COMERCIAL"]; demo = false; fullName = dto.usuario.nombreCompleto; dto.usuario.id = "11111111-1111-4111-8111-111111111111"; dto.refreshToken = "test-refresh"; holdRefresh = false; releaseRefresh = undefined;
   provider = createServer(async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? 5173}`);
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -49,7 +49,7 @@ test.beforeEach(async ({ page }) => {
   const address = provider.address();
   if (!address || typeof address === "string") throw new Error("NO_PORT");
   base = `http://127.0.0.1:${address.port}/api/v1`;
-  await page.route("**/src/main.tsx*", async route => {
+  await context.route("**/src/main.tsx*", async route => {
     const response = await route.fetch();
     let body = await response.text();
     for (const [key, value] of [["VITE_G6_READ_DEMO", demo ? "true" : "false"], ["VITE_G6_ADMIN_API_ENABLED", String(adminApi)], ["VITE_DATA_MODE", "api"], ["VITE_GATEWAY_ORIGIN", `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? 5173}`], ["VITE_G7_API_BASE", base]]) {
@@ -58,8 +58,11 @@ test.beforeEach(async ({ page }) => {
     await route.fulfill({ response, body });
   });
 });
-test.afterEach(async () => {
+test.afterEach(async ({ context }) => {
   releaseRefresh?.();
+  // Logout reloads main.tsx. Drain its configuration route before Playwright
+  // disposes the request context and the isolated G7 provider.
+  await context.unrouteAll({ behavior: "wait" });
   provider.closeAllConnections();
   await new Promise<void>(resolve => provider.close(() => resolve()));
 });
@@ -68,6 +71,83 @@ async function login(page: Page) {
   await page.getByRole("textbox", { name: "Contraseña", exact: true }).fill("isolated-password");
   await page.getByRole("button", { name: "Ingresar al panel", exact: true }).click();
 }
+
+for (const scenario of ["selected", "uncertain", "pending-late", "logout", "other-user"] as const) {
+  test(`auditoría F12: borrador Bulk tras autenticación ${scenario}`, async ({ page }) => {
+    expiry = 120;
+    await page.clock.install({ time: new Date("2026-11-28T12:00:00Z") });
+    let posts = 0;
+    let finishPending: (() => void) | undefined;
+    await page.route(`http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? 5173}/api/v1/carga-masiva/**`, async route => {
+      if (route.request().method() === "POST") posts++;
+      if (scenario === "pending-late" && route.request().method() === "POST") await new Promise<void>(resolve => { finishPending = resolve; });
+      return route.fulfill({ status: 503, contentType: "application/problem+json", body: JSON.stringify({ status: 503, code: "SERVICE_UNAVAILABLE" }) });
+    });
+    await page.goto("/carga-masiva");
+    await login(page);
+    const headers = "operacion,producto_id,catalog_version,sku_base,sku_variante,nombre,descripcion,categoria_id,marca_id,tipo_producto_id,tiene_variantes,precio_regular,atributos_producto,atributos_variante,imagen_url,stock_inicial";
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "borrador-audit.csv", mimeType: "text/csv",
+      buffer: Buffer.from(`${headers}\nALTA,,,SKU-AUDIT,,Borrador,,,,,false,10,,,,0\n`),
+    });
+    await page.getByRole("button", { name: "Continuar a revisión", exact: true }).click();
+    await expect(page.getByText("borrador-audit.csv", { exact: true })).toBeVisible();
+    // Going back to selection and review does not change the selected File.
+    await page.getByRole("link", { name: "Volver", exact: true }).click();
+    await page.getByRole("button", { name: "Continuar a revisión", exact: true }).click();
+    if (scenario === "uncertain" || scenario === "pending-late") {
+      await page.getByRole("button", { name: "Confirmar importación", exact: true }).first().click();
+      await expect.poll(() => posts).toBe(1);
+      await expect(page.getByRole("button", { name: "Confirmar importación", exact: true }).first()).toBeDisabled();
+    }
+    const intentBefore = await page.evaluate(() => Object.entries(sessionStorage).filter(([key]) => key.startsWith("g6:bulk:admission:v1:")));
+    if (scenario === "logout") {
+      await page.getByRole("button", { name: "Cerrar sesión", exact: true }).click();
+    } else {
+      failure = "REFRESCO_INVALIDO";
+      await page.clock.fastForward(120001);
+    }
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByRole("navigation")).toHaveCount(0);
+    await expect(page.getByText("borrador-audit.csv", { exact: true })).toHaveCount(0);
+    failure = "";
+    expiry = 900;
+    if (scenario === "other-user") { dto.usuario.id = "22222222-2222-4222-8222-222222222222"; dto.refreshToken = "other-refresh"; }
+    await login(page);
+    await expect(page.getByRole("navigation", { name: "Navegación de la aplicación" })).toBeVisible();
+    finishPending?.();
+    if (scenario === "logout" || scenario === "other-user") {
+      await page.evaluate(() => { history.pushState({}, "", "/carga-masiva/revisar"); dispatchEvent(new PopStateEvent("popstate")); });
+      await expect(page.getByText("Ningún archivo seleccionado", { exact: true })).toBeVisible();
+    } else {
+      await expect(page).toHaveURL(/\/carga-masiva\/revisar$/);
+      await expect(page.getByText("borrador-audit.csv", { exact: true })).toBeVisible();
+      const confirm = page.getByRole("button", { name: "Confirmar importación", exact: true }).first();
+      if (scenario === "uncertain" || scenario === "pending-late") {
+        await expect(confirm).toBeDisabled();
+        expect(await page.evaluate(() => Object.entries(sessionStorage).filter(([key]) => key.startsWith("g6:bulk:admission:v1:")))).toEqual(intentBefore);
+      } else await expect(confirm).toBeEnabled();
+    }
+    expect(posts).toBe(scenario === "uncertain" || scenario === "pending-late" ? 1 : 0);
+  });
+}
+
+for (const path of ["/inventario", "/precios", "/carga-masiva"]) test(`auditoría: reload de ${path} restaura mediante G7 antes de proteger la ruta`, async ({ page, context }) => {
+  await page.goto(path);
+  await login(page);
+  await expect(page.getByRole("navigation", { name: "Navegación de la aplicación" })).toBeVisible();
+  await page.reload();
+  await expect(page).toHaveURL(new RegExp(`${path}$`));
+  await expect(page.getByRole("navigation", { name: "Navegación de la aplicación" })).toBeVisible();
+  expect(calls.filter(call => call.path.endsWith("/refresh"))).toHaveLength(1);
+  const stored = await page.evaluate(() => JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage } }));
+  expect(stored).not.toMatch(/eyJ|GESTOR_COMERCIAL|challengeToken|contrasena/);
+  const other = await context.newPage();
+  await other.goto(path);
+  await expect(other).toHaveURL(/\/login$/);
+  await expect(other.getByRole("navigation")).toHaveCount(0);
+  await other.close();
+});
 
 async function draftBeforeRefresh(page: Page) {
   const writes: string[] = [];
@@ -344,10 +424,11 @@ test("una sesión administrativa autentica lecturas de los seis módulos", async
   expect(stockPages).toEqual([1, 2]);
   await page.getByRole("button", { name: "Cerrar detalle", exact: true }).click();
   await navigation.getByRole("link", { name: "Traslados de stock", exact: true }).click();
-  await expect(page.getByText("Función no disponible", { exact: true })).toBeVisible();
-  expect(reads.some(read => read.path.startsWith("/api/v1/inventario/traslados"))).toBe(false);
+  await expect(page.getByRole("alert")).toContainText("Tu rol no permite esta operación de inventario.");
+  expect(reads.some(read => read.path.startsWith("/api/v1/inventario/traslados"))).toBe(true);
+  await expect(page.getByText("Sesión de Gestora de prueba", { exact: true })).toBeVisible();
   for (const read of reads) {
-    expect(read, read.path).toMatchObject({ method: "GET", authorization: `Bearer ${dto.accessToken}` });
+    expect(read, read.path).toMatchObject({ method: read.path === "/api/v1/productos/administracion/skus/resolver" ? "POST" : "GET", authorization: `Bearer ${dto.accessToken}` });
   }
   expect(calls.filter(call => call.path.endsWith("/login"))).toHaveLength(1);
 });
@@ -546,6 +627,7 @@ test("login conserva destino interno; logout sin red, atrás y recarga no recupe
   await expect(page.getByRole("navigation")).toHaveCount(0);
   await login(page);
   await expect(page.getByRole("navigation", { name: "Navegación de la aplicación" })).toBeVisible();
+  failure = "REFRESCO_INVALIDO";
   await page.reload();
   await expect(page).toHaveURL(/\/login$/);
   expect(await page.evaluate(() => JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage }, cookie: document.cookie }))).not.toMatch(/isolated|eyJ|refreshToken|challengeToken/);
