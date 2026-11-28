@@ -24,7 +24,7 @@ Los prerrequisitos no aplican al shard mock: el caso Catalog requiere JWT firmad
 
 El workflow fija los SHA de Backend y Docs y exige que coincidan antes de registrar evidencia. El SHA de Backend debe actualizarse si cambia el PR #310. La corrección de propietario TLS pasó en CI Linux. El validador Playwright falla ante reintentos, resultados incompletos, skips y conteos inconsistentes.
 
-El pin de Backend publicado para esta revisión es `7d0f04b09b34632751695bc14e6dc5c79c42e632`; Docs permanece en `5f30802129ba4bbc0674dcc5878f10065f443118`.
+El pin de Backend publicado para esta revisión es `6dd66036baf675f8ee2197ab3cb9e9754a0d0886`; Docs permanece en `5f30802129ba4bbc0674dcc5878f10065f443118`.
 
 Evidencia: [Actions 46107757410](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/46107757410), Frontend `b787e9711c3a5a8f72dc0f5a872daa39fa853e7e`, Backend `24dd02c872d444af69f86006c2a86f9aa1178246` y Docs `5f30802129ba4bbc0674dcc5878f10065f443118`: CI SUCCESS; API real aislada ejecutó 16/16 escenarios, sin omisiones. G7 y G5 son fixtures sintéticas; no certifica grants ni servicios externos. Los cambios locales posteriores requieren CI nuevo.
 
