@@ -115,6 +115,9 @@ export function createReadOnlyClient(
   return {
     async read(id: string, values: Readonly<Record<string, string>>, cancellation: AbortSignal): Promise<ReadResult> {
       const path = buildReadPath(id, values);
+      const operation = readOperations.find(item => item.id === id)!;
+      // Keep Accept within the CORS safelist for these contractual media types.
+      const accept = operation.mediaTypes.join(", ");
       const signal = AbortSignal.any([cancellation, AbortSignal.timeout(65000)]);
       signal.throwIfAborted();
       const token = await session.getAccessToken(signal);
@@ -123,7 +126,7 @@ export function createReadOnlyClient(
       const correlation = crypto.randomUUID();
       const send = (bearer: string) => fetcher(base + path, {
         method: "GET", signal, credentials: "omit", redirect: "error", cache: "no-store",
-        headers: { Accept: "application/json, text/csv, application/pdf, application/octet-stream, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", Authorization: `Bearer ${bearer}`, "X-Correlation-Id": correlation },
+        headers: { Accept: accept, Authorization: `Bearer ${bearer}`, "X-Correlation-Id": correlation },
       });
       let response = await send(token);
       if (await isGatewayTokenInvalid(response)) {
@@ -146,7 +149,6 @@ export function createReadOnlyClient(
       }
       const bytes = await limitedBody(response);
       const mediaType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ?? "";
-      const operation = readOperations.find(item => item.id === id)!;
       if (!operation.mediaTypes.includes(mediaType) || mediaType === "text/html")
         throw new ReadFailure("El backend no entregó el formato esperado para esta consulta.");
       if (mediaType === "application/json") {

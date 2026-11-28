@@ -18,6 +18,9 @@ describe("consultas contractuales de lectura", () => {
   it("registra las 58 lecturas externas de los ocho módulos sin el contexto SKU privado", () => {
     expect(readOperations).toHaveLength(58);
     expect(new Set(readOperations.map(item => item.module)).size).toBe(8);
+    for (const operation of readOperations) {
+      expect(new TextEncoder().encode(operation.mediaTypes.join(", ")).length, operation.id).toBeLessThanOrEqual(128);
+    }
     expect(readOperations.some(item => item.id === "obtenerContextoSku")).toBe(false);
     expect(() => buildReadPath("crearProducto", {})).toThrow("no está disponible");
   });
@@ -53,7 +56,7 @@ describe("consultas contractuales de lectura", () => {
     expect(await client.read("listarProductos", { pagina: "1" }, signal())).toEqual({ kind: "data", value: { items: [] } });
     expect(fetcher).toHaveBeenCalledWith(origin + "/api/v1/productos?pagina=1", expect.objectContaining({
       method: "GET", credentials: "omit", redirect: "error", cache: "no-store",
-      headers: expect.objectContaining({ Authorization: "Bearer test-access" }),
+      headers: expect.objectContaining({ Accept: "application/json", Authorization: "Bearer test-access" }),
     }));
   });
   it("sin sesión no envía solicitudes al backend", async () => {
@@ -118,8 +121,9 @@ describe("consultas contractuales de lectura", () => {
     const { client: csvOnJsonClient } = setup([new Response("id,nombre\n1,test\n", { headers: { "content-type": "text/csv; charset=utf-8" } })]);
     await expect(csvOnJsonClient.read("listarProductos", { canal: "MARKETPLACE" }, signal())).rejects.toThrow("formato esperado");
 
-    const { client: validCsvClient } = setup([new Response("fila,error\n2,duplicado\n", { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="errores.csv"' } })]);
+    const { client: validCsvClient, fetcher: csvFetcher } = setup([new Response("fila,error\n2,duplicado\n", { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="errores.csv"' } })]);
     const fileResult = await validCsvClient.read("descargarReporteImportacionPrecios", { batchId: "batch-1" }, signal());
+    expect(new Headers(csvFetcher.mock.calls[0]?.[1]?.headers).get("Accept")).toBe("text/csv");
     expect(fileResult.kind).toBe("file");
     if (fileResult.kind === "file") expect(fileResult.filename).toBe("errores.csv");
   });
