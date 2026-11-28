@@ -217,6 +217,7 @@ jobs:
     timeout-minutes: 20
     env:
       VITE_DATA_MODE: api
+      VITE_G6_ADMIN_API_ENABLED: 'true'
     steps:
       - name: Obtener código
         uses: actions/checkout@v7.0.1
@@ -235,6 +236,8 @@ jobs:
         run: npm run test:production:auth
       - name: Compilar interfaz para integración con API
         run: npm run build
+      - name: Rechazar secretos en el bundle administrativo
+        run: node scripts/h5/security/bundle-check.mjs dist
       - name: Verificar compilación API sin retorno a datos de demostración
         shell: bash
         run: |
