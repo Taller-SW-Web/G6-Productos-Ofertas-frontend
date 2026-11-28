@@ -7,7 +7,9 @@ El run terminó en FAIL, incluido `validate`. Los shards E2E generales informaro
 
 En la copia local se fijan los SHA de Backend y Docs y se exige que coincidan antes de registrar evidencia. El SHA de Backend debe actualizarse si cambia el PR #310. La corrección local de propietario TLS requiere ejecución Linux y CI sobre un HEAD publicado. El validador Playwright falla ante reintentos, resultados incompletos, skips y conteos inconsistentes.
 
-El pin de Backend para el siguiente CI es `24dd02c872d444af69f86006c2a86f9aa1178246`; Docs permanece en `5f30802129ba4bbc0674dcc5878f10065f443118`. Aún no hay resultado de API real para esa combinación de SHA.
+El pin de Backend es `24dd02c872d444af69f86006c2a86f9aa1178246`; Docs permanece en `5f30802129ba4bbc0674dcc5878f10065f443118`.
+
+Evidencia posterior: [Actions 46106563240](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/actions/runs/46106563240), Frontend `cf634b50d046dbd42035cfd5233021eef769da04`, Backend `24dd02c872d444af69f86006c2a86f9aa1178246` y Docs `5f30802129ba4bbc0674dcc5878f10065f443118`: API real aislada ejecutó 16/16 escenarios, sin omisiones. G7 y G5 son fixtures sintéticas; no certifica grants ni servicios externos. Las etiquetas se actualizan posteriormente y requieren CI de su nuevo HEAD.
 
 En la copia local con cambios sin commit: `npm test` PASS (Combos 239, Bulk 98, Inventory 132 + 8, Pricing 166, Taxonomy 111 y política release 35: 789 pruebas), y lint, typecheck y 75 pruebas focalizadas PASS. La ejecución local usó Node 24, mientras el proyecto exige Node 22; no reemplaza CI del HEAD publicado.
 

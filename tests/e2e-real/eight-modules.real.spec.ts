@@ -1,3 +1,4 @@
+// Evidencia histórica L1: Frontend cf634b50d046dbd42035cfd5233021eef769da04; Actions 46106563240.
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -12,7 +13,7 @@ import {
   verifyGatewayAndServicesReady,
 } from "./realStackPreflight.ts";
 
-test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Microservicios -> PostgreSQL (ESCRITA_NO_EJECUTADA)", () => {
+test.describe("Recorridos E2E reales por los 8 módulos React -> Gateway -> Microservicios -> PostgreSQL (EJECUTADA_L1)", () => {
   test.beforeEach(async ({ page }) => {
     const env = assertRealStackPreflight();
     await verifyGatewayAndServicesReady(env.gatewayUrl);
