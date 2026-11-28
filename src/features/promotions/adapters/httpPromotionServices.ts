@@ -336,6 +336,7 @@ export function createHttpPromotionServices(
     assertSession(false);
     bounded.throwIfAborted();
     if (!token || /[\r\n]/.test(token)) throw new HttpFailure(401);
+    const correlationId = crypto.randomUUID();
     const send = (accessToken: string) =>
       fetch(origin + "/api/v1" + path, {
         method,
@@ -345,7 +346,7 @@ export function createHttpPromotionServices(
         cache: "no-store",
         headers: {
           Authorization: "Bearer " + accessToken,
-          "X-Correlation-Id": crypto.randomUUID(),
+          "X-Correlation-Id": correlationId,
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -355,14 +356,15 @@ export function createHttpPromotionServices(
     if (await isGatewayTokenInvalid(response)) {
       assertSession(true);
       const refresh = options.refreshAccessToken;
-      if (method === "GET" && refresh) {
+      if (refresh) {
         const renewed = await sessionToken(() => refresh(token, bounded));
         assertSession(true);
         bounded.throwIfAborted();
         if (renewed && !/[\r\n]/.test(renewed)) {
-          response = await send(renewed);
-          assertSession(true);
-          if (await isGatewayTokenInvalid(response)) options.invalidateAccessToken?.(renewed);
+          if (method === "GET") {
+            response = await send(renewed);
+            assertSession(true);
+          }
         } else options.invalidateAccessToken?.(token);
       } else {
         options.invalidateAccessToken?.(token);
@@ -387,7 +389,7 @@ export function createHttpPromotionServices(
       throw new CouponReadError(
         status === 401 ? "session" : status === 403 ? "forbidden" : "unavailable",
         status === 401
-          ? "Tu sesión no está disponible. Vuelve a identificarte."
+          ? "El servicio rechazó el acceso a esta consulta. Puedes volver a intentar."
           : status === 403
             ? "No tienes permiso para consultar estos datos."
             : "No se pudo consultar la información. Conservamos el contexto; vuelve a consultar.",

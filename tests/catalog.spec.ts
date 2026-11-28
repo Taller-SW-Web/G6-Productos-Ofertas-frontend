@@ -10,6 +10,15 @@ async function noPageOverflow(page: Page) {
 }
 
 test.describe("MK-003 Gestión de productos (CRUD principal)", () => {
+  test("conserva los espacios al escribir una búsqueda de varias palabras", async ({ page }) => {
+    await page.goto("/productos");
+    const search = page.getByPlaceholder("Buscar por nombre, SKU base o descripción...");
+    await search.pressSequentially("Camiseta ");
+    await expect(search).toHaveValue("Camiseta ");
+    await search.pressSequentially("Running");
+    await expect(search).toHaveValue("Camiseta Running");
+    await expect(page.getByText("Camiseta Running Endurance", { exact: true })).toBeVisible();
+  });
   test("@smoke S01: listado, búsqueda, filtros combinados y conservación de contexto", async ({
     page,
   }) => {

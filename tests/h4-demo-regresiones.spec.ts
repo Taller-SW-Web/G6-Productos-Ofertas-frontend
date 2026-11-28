@@ -245,7 +245,7 @@ test("E2E-07: Bulk incierto conserva la intención y bloquea conciliación no so
   expect(JSON.parse(afterRecovery!)).toMatchObject({ owner: "g7-h4-owner-a", state: "uncertain" });
   expect(await page.evaluate(() => Object.keys(sessionStorage).some(key => key.startsWith("g6:bulk:import-pending:")))).toBe(true);
   await openBulkHarness(page);
-  await page.locator('input[type="file"]').setInputFiles({ name: "otro.csv", mimeType: "text/csv", buffer: Buffer.from("sku,nombre\nSKU-OTHER,Otro producto\n") });
+  await page.locator('input[type="file"]').setInputFiles({ name: "otro.csv", mimeType: "text/csv", buffer: Buffer.from(csv.replaceAll("SKU-H4-E2E", "SKU-OTHER")) });
   await page.getByRole("button", { name: "Continuar a revisión", exact: true }).click();
   await expect(page.getByRole("button", { name: "Confirmar importación", exact: true }).first()).toBeDisabled();
   expect(state.posts()).toBe(1);

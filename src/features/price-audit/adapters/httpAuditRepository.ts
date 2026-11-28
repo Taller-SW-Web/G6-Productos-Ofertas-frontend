@@ -148,7 +148,27 @@ function failure(status: number): AuditFailure {
   return new AuditFailure("unknown", `No se pudo completar la operación de auditoría (HTTP ${status}).`);
 }
 
-export function createHttpAuditRepository(client: AuthenticatedGatewayClient): AuditRepository {
+export function createHttpAuditRepository(client: AuthenticatedGatewayClient, resolveProductName?: (id: string, signal: AbortSignal) => Promise<string | null>): AuditRepository {
+  const names = new Map<string, { name: string | null; at: number }>();
+  async function decorate(entries: AuditEntry[], signal: AbortSignal): Promise<AuditEntry[]> {
+    if (!resolveProductName) return entries;
+    const ids = [...new Set(entries.map(entry => entry.productId))];
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(4, ids.length) }, async () => {
+      for (;;) {
+        const id = ids[next++];
+        if (!id) return;
+        const cached = names.get(id);
+        if (cached && Date.now() - cached.at < 30_000) continue;
+        try { names.set(id, { name: await resolveProductName(id, signal), at: Date.now() }); }
+        catch (error) { if (signal.aborted) throw error; }
+      }
+    }));
+    return entries.map(entry => {
+      const cached = names.get(entry.productId);
+      return { ...entry, productName: cached && Date.now() - cached.at < 30_000 ? cached.name : null };
+    });
+  }
   async function json(path: string, init: { method: "GET" | "POST"; signal: AbortSignal; body?: string }): Promise<unknown> {
     let response: Response;
     try {
@@ -183,7 +203,7 @@ export function createHttpAuditRepository(client: AuthenticatedGatewayClient): A
       const page = meta.pagina, size = meta.tamanio, total = meta.total, pages = meta.totalPaginas;
       if (![page, size, total, pages].every(Number.isSafeInteger) || page !== query.page || size !== query.size || Number(total) < 0 || Number(pages) < 0)
         throw new AuditFailure("unknown", "La paginación de Auditoría no coincide con la solicitud.");
-      return { items: dto.items.map(mapEntry), page: Number(page), size: Number(size), total: Number(total), pages: Number(pages) } satisfies AuditPage;
+      return { items: await decorate(dto.items.map(mapEntry), signal), page: Number(page), size: Number(size), total: Number(total), pages: Number(pages) } satisfies AuditPage;
     },
     async detail(id, signal) {
       if (!id.trim()) throw new AuditFailure("unknown", "El identificador de auditoría no es válido.");
@@ -191,7 +211,7 @@ export function createHttpAuditRepository(client: AuthenticatedGatewayClient): A
       try {
         const entry = mapEntry(await json(`/api/v1/auditoria-precios/administracion/${encoded}`, { method: "GET", signal }));
         if (entry.id !== id) throw new AuditFailure("unknown", "La auditoría recibida pertenece a otro registro.");
-        return entry;
+        return (await decorate([entry], signal))[0]!;
       }
       catch (error) {
         if (error instanceof AuditFailure && error.kind === "unknown" && error.message.includes("HTTP 404")) return null;

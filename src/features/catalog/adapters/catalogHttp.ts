@@ -86,6 +86,7 @@ const kinds: Record<string, CatalogError["kind"]> = {
   CAMBIO_ESTRUCTURAL_NO_PERMITIDO: "conflict",
 };
 export function createCatalogHttp(transport: CatalogHttpTransport) {
+  const cooldowns = new Map<string, { until: number; response: Response }>();
   return async function request(
     path: string,
     method: "GET" | "POST" | "POST_READ" | "PATCH" = "GET",
@@ -100,7 +101,15 @@ export function createCatalogHttp(transport: CatalogHttpTransport) {
       : AbortSignal.timeout(15000);
     let response: Response;
     try {
-      response = await transport.request("/api/v1" + path, {
+      combined.throwIfAborted();
+      const key = `${method}:${path}:${JSON.stringify(body) ?? ""}`;
+      for (const [entry, value] of cooldowns) if (value.until <= Date.now()) cooldowns.delete(entry);
+      const cached = !isCommercialWrite ? cooldowns.get(key) : undefined;
+      if (cached) {
+        const headers = new Headers(cached.response.headers);
+        headers.set("Retry-After", String(Math.ceil((cached.until - Date.now()) / 1000)));
+        response = new Response(cached.response.clone().body, { status: 429, headers });
+      } else response = await transport.request("/api/v1" + path, {
         method,
         signal: combined,
         headers: {
@@ -110,6 +119,13 @@ export function createCatalogHttp(transport: CatalogHttpTransport) {
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
+      if (!cached && !isCommercialWrite && response.status === 429) {
+        const wait = retryAfterMilliseconds(response.headers.get("Retry-After"));
+        if (wait !== undefined && wait > 0) {
+          if (cooldowns.size >= 128) cooldowns.delete(cooldowns.keys().next().value!);
+          cooldowns.set(key, { until: Date.now() + wait, response: response.clone() });
+        }
+      }
     } catch (error) {
       if (signal?.aborted && !isCommercialWrite) throw error;
       throw new CatalogError(
@@ -138,7 +154,7 @@ export function createCatalogHttp(transport: CatalogHttpTransport) {
       ) {
         throw new CatalogError(
           "write_unknown",
-          `No se confirmó la escritura (${response.status}, ${code}). Consulte antes de repetirla. Referencia: ${ref}.`,
+          `No se confirmó la escritura. Consulta el resultado antes de repetirla. Referencia: ${ref}.`,
           { code, status: String(response.status), correlationId: ref },
         );
       }
@@ -152,13 +168,23 @@ export function createCatalogHttp(transport: CatalogHttpTransport) {
                 ? "not_found"
                 : response.status === 409
                   ? "conflict"
-                  : response.status >= 500
+                  : response.status === 429 || response.status >= 500
                     ? "server"
                     : "validation"));
+      const retryAfterMs = retryAfterMilliseconds(response.headers.get("Retry-After"));
+      const waitSeconds = retryAfterMs === undefined ? undefined : Math.ceil(retryAfterMs / 1000);
+      const messages: Record<number, string> = {
+        400: "Revisa los datos ingresados antes de continuar.",
+        401: "El servicio rechazó el acceso a Catálogo. Puedes volver a consultar.",
+        403: "Tu rol no permite esta operación de Catálogo.",
+        404: "No se encontró la referencia solicitada en Catálogo.",
+        409: "Hay un conflicto con los datos actuales. Conserva la propuesta y revisa la información vigente.",
+        429: `Catálogo está recibiendo muchas consultas. ${waitSeconds === undefined ? "Espera antes de volver a consultar." : `Espera ${waitSeconds} ${waitSeconds === 1 ? "segundo" : "segundos"} antes de volver a consultar.`}`,
+      };
       throw new CatalogError(
         kind,
-        `No se pudo completar la operación (${response.status}, ${code}). Referencia: ${ref}.`,
-        { code, status: String(response.status), correlationId: ref },
+        `${kind === "duplicate_sku" ? "Ese SKU ya está registrado. Usa un SKU único." : kind === "duplicate_combination" ? "Ya existe una variante con esta combinación de atributos." : messages[response.status] ?? "Catálogo no está disponible temporalmente. Vuelve a consultar más tarde."} Referencia: ${ref}.`,
+        { code, status: String(response.status), correlationId: ref, ...(retryAfterMs === undefined ? {} : { retryAfterMs: String(retryAfterMs) }) },
       );
     }
     if (

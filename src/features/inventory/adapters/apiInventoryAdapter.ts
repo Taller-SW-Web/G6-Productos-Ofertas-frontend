@@ -87,6 +87,7 @@ export interface HttpInventoryRepositoryDependencies {
   currentUserScope?: () => string | null;
   physicalStockEnabled?: boolean;
   listCatalogSkus?: (signal?: AbortSignal) => Promise<InventoryCatalogSku[]>;
+  resolveCatalogSkus?: (skus: readonly string[], signal?: AbortSignal) => Promise<InventoryCatalogSku[]>;
   getCategories?: () => Promise<{ id: string; name: string; active: boolean }[]>;
   getBrands?: () => Promise<{ id: string; name: string; active: boolean }[]>;
   // Aporta código legible, nombre de producto y nombres de ubicación desde su
@@ -719,6 +720,27 @@ export function createHttpInventoryRepository(
     return { items, total, pages };
   }
 
+  async function decorateStock(items: StockItem[], signal?: AbortSignal): Promise<StockItem[]> {
+    if (!items.length || (!dependencies.resolveCatalogSkus && !dependencies.listCatalogSkus)) return items;
+    const owner = currentUserScope();
+    try {
+      const metadata = new Map((await (dependencies.resolveCatalogSkus
+        ? dependencies.resolveCatalogSkus(items.map(item => item.sku), signal)
+        : dependencies.listCatalogSkus!(signal))).map(item => [item.sku, item]));
+      if (currentUserScope() !== owner) throw new InventoryError("NO_AUTENTICADO", "La sesión cambió durante la consulta de Catálogo.");
+      return items.map(item => {
+        const commercial = metadata.get(item.sku);
+        return commercial ? { ...item, productName: commercial.productName, categoryName: commercial.categoryName, brandName: commercial.brandName } :
+          { ...item, categoryName: "Referencia no encontrada en Catálogo", brandName: "Sin referencia comercial" };
+      });
+    } catch (error) {
+      if (signal?.aborted || currentUserScope() !== owner) throw error;
+      return items.map(item => ({ ...item, categoryName: "Catálogo temporalmente no disponible", brandName: "Identidad sin verificar" }));
+    }
+  }
+
+  let locationLoad: { owner: string | null; at: number; promise: Promise<InventoryLocationOption[]> } | undefined;
+
   return {
     getThresholdWriteScope: () => currentUserScope() ?? "session-unavailable",
     getThresholds(): Promise<ThresholdConfig> {
@@ -994,7 +1016,10 @@ export function createHttpInventoryRepository(
       return presentConfirmed(owner, frozenPayload, traslado);
     },
 
-    getStockPage: readPhysicalStockPage,
+    async getStockPage(filters, page, size, signal) {
+      const result = await readPhysicalStockPage(filters, page, size, signal);
+      return { ...result, items: await decorateStock(result.items, signal) };
+    },
 
     async getStockItems(filters?: StockFiltersQuery, signal?: AbortSignal): Promise<StockItem[]> {
       const category = contractFilterValue(filters?.category);
@@ -1016,8 +1041,10 @@ export function createHttpInventoryRepository(
         }
       }
       if (category || brand) {
-        if (!dependencies.listCatalogSkus) throw blocked("getStockItems", "Los filtros de categoría y marca necesitan metadatos de Catálogo.");
-        const catalog = new Map((await dependencies.listCatalogSkus(signal)).map(item => [item.sku, item]));
+        if (!dependencies.resolveCatalogSkus && !dependencies.listCatalogSkus) throw blocked("getStockItems", "Los filtros de categoría y marca necesitan metadatos de Catálogo.");
+        const catalog = new Map((await (dependencies.resolveCatalogSkus
+          ? dependencies.resolveCatalogSkus(output.map(item => item.sku), signal)
+          : dependencies.listCatalogSkus!(signal))).map(item => [item.sku, item]));
         return output.flatMap(item => {
           const metadata = catalog.get(item.sku);
           return metadata && (!category || category === metadata.categoryId) && (!brand || brand === metadata.brandId)
@@ -1025,7 +1052,7 @@ export function createHttpInventoryRepository(
             : [];
         });
       }
-      return output;
+      return decorateStock(output, signal);
     },
 
     async getStockDetail(sku: string, locationId: string): Promise<StockItem | null> {
@@ -1048,7 +1075,7 @@ export function createHttpInventoryRepository(
     ): Promise<InventoryAlert[]> {
       const category = contractFilterValue(filters?.category);
       const brand = contractFilterValue(filters?.brand);
-      if ((category || brand) && !dependencies.listCatalogSkus) {
+      if ((category || brand) && !dependencies.resolveCatalogSkus && !dependencies.listCatalogSkus) {
         throw blocked(
           "getDashboardAlerts",
           "Los filtros de categoría y marca necesitan metadatos de Catálogo.",
@@ -1151,7 +1178,9 @@ export function createHttpInventoryRepository(
 
       if (category || brand) {
         const catalog = new Map(
-          (await dependencies.listCatalogSkus!()).map((item) => [item.sku, item]),
+          (await (dependencies.resolveCatalogSkus
+            ? dependencies.resolveCatalogSkus(output.flatMap(item => item.sku ? [item.sku] : []))
+            : dependencies.listCatalogSkus!())).map((item) => [item.sku, item]),
         );
         return output.filter((alert) => {
           const metadata = alert.sku ? catalog.get(alert.sku) : undefined;
@@ -1173,9 +1202,13 @@ export function createHttpInventoryRepository(
       // `porUbicacion` de obtenerDashboardInventario es la fuente autoritativa
       // de saldos por ubicación. No publica nombre de ubicación ni unidades
       // bloqueadas: esos campos se exponen como `null`, nunca como cero.
-      return readDashboard(filters).then(
-        toLocationDistributionList,
-      );
+      const distribution = toLocationDistributionList(await readDashboard(filters));
+      try {
+        const locations = new Map((await this.getLocations()).map(item => [item.id, item.name]));
+        return distribution.map(item => ({ ...item, locationName: locations.get(item.locationId) ?? null }));
+      } catch {
+        return distribution;
+      }
     },
 
     async getCategories() { if (!dependencies.getCategories) throw blocked("getCategories", "Catálogo no proporcionó categorías administrativas"); return dependencies.getCategories(); },
@@ -1183,6 +1216,10 @@ export function createHttpInventoryRepository(
     async getBrands() { if (!dependencies.getBrands) throw blocked("getBrands", "Catálogo no proporcionó marcas administrativas"); return dependencies.getBrands(); },
 
     async getLocations(): Promise<InventoryLocationOption[]> {
+      const owner = currentUserScope();
+      if (locationLoad && locationLoad.owner === owner && Date.now() - locationLoad.at < 30_000)
+        return locationLoad.promise;
+      const promise = (async () => {
       const output: InventoryLocationOption[] = [];
       const seenIds = new Set<string>();
       let total: number | undefined;
@@ -1259,7 +1296,12 @@ export function createHttpInventoryRepository(
         if (pageTotal === 0) break;
       }
 
+      if (currentUserScope() !== owner) throw new InventoryError("NO_AUTENTICADO", "La sesión cambió durante la consulta de ubicaciones.");
       return output;
+      })();
+      locationLoad = { owner, at: Date.now(), promise };
+      try { return await promise; }
+      catch (error) { if (locationLoad?.promise === promise) locationLoad = undefined; throw error; }
     },
   };
 }

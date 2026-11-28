@@ -286,6 +286,13 @@ export interface VariantMutationResult {
 }
 
 export interface CatalogRepository {
+  getIdentity?(productId: string, signal?: AbortSignal): Promise<ProductView | null>;
+  /** Presentation-only selection from the existing paginated variants DTO. */
+  listVariantIdentities?(
+    productId: string,
+    query: VariantQuery,
+    signal?: AbortSignal,
+  ): Promise<Omit<VariantPageResult, "items"> & { items: Pick<VariantDetailView, "variantId" | "productId" | "sku" | "status">[] }>;
   /** Local mock stores can signal mutations so consumers invalidate derived caches. */
   subscribe?(listener: () => void): () => void;
   list(

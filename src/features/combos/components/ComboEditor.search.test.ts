@@ -38,6 +38,22 @@ globalThis.ResizeObserver = ResizeObserverStub;
 
 afterEach(cleanup);
 
+it("COM-01 informa el duplicado junto a Agregar componente y no crea otra fila", async () => {
+  renderEditor();
+  await screen.findByText(/página 1 de 2/);
+  const input = await screen.findByRole("combobox", { name: "Producto" });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    fireEvent.click(input);
+    fireEvent.click(await screen.findByText("Producto página uno", { selector: "span" }));
+    fireEvent.click(screen.getByRole("button", { name: "Agregar componente" }));
+  }
+  expect(await screen.findByText("SKU ya agregado")).toBeTruthy();
+  const controls = screen.getByRole("button", { name: "Agregar componente" }).closest(".mantine-Group-root");
+  expect(controls).not.toBeNull();
+  expect(controls?.textContent).toContain("Este SKU ya está incluido");
+  expect(screen.getAllByRole("row").filter(row => row.textContent?.includes("SKU-1"))).toHaveLength(1);
+});
+
 function renderEditor() {
   const products = new Map([
     [

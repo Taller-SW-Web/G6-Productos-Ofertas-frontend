@@ -187,7 +187,7 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
     const task = coordinator.start();
 
     try {
-      const result = await checkLocalFile(file, task.signal);
+      const result = await checkLocalFile(file, task.signal, dataMode === "api" ? 2 : undefined);
       // Only commit result if this is still the active validation
       if (task.isCurrent() && generation === selectionGenerationRef.current && selectedFileRef.current === file && (!owner || session?.snapshot().user?.id === owner)) {
         setFileCheck(result);
@@ -199,7 +199,7 @@ export function BulkUploadProvider({ children }: { children: ReactNode }) {
         setChecking(false);
       }
     }
-  }, [session]);
+  }, [session, dataMode]);
 
   const clearSelection = useCallback(() => {
     selectionGenerationRef.current++;

@@ -33,7 +33,7 @@ describe("lecturas con G7 y opciones públicas heredadas inertes", () => {
     }
     expect(publicReadEntries["/productos"]).toBe("listarProductos");
   });
-  it.each(["Catálogo", "Taxonomía", "Promociones", "Bulk"])("%s exige Bearer, renueva una vez e invalida tras otro 401 aunque publicReads sea true", async feature => {
+  it.each(["Catálogo", "Taxonomía", "Promociones", "Bulk"])("%s exige Bearer y conserva identidad confirmada por G7 ante rechazo de un servicio", async feature => {
     const { session, fetcher } = setup();
     if (feature === "Catálogo") {
       const response = await createAuthenticatedCatalogTransport(origin, session, { publicReads: true })
@@ -56,7 +56,7 @@ describe("lecturas con G7 y opciones públicas heredadas inertes", () => {
     expect(new Headers(fetcher.mock.calls[1]?.[1]?.headers).get("Authorization")).toBe("Bearer test-renewed");
     expect(fetcher.mock.calls[0]?.[1]?.method).toBe("GET");
     expect(session.refreshAccessToken).toHaveBeenCalledTimes(1);
-    expect(session.invalidateAccessToken).toHaveBeenCalledWith("test-renewed");
+    expect(session.invalidateAccessToken).not.toHaveBeenCalled();
   });
 
   it("Catálogo conserva el JWT de escritura y no repite un POST", async () => {
@@ -66,7 +66,7 @@ describe("lecturas con G7 y opciones públicas heredadas inertes", () => {
     expect(response.status).toBe(401);
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(new Headers(fetcher.mock.calls[0]?.[1]?.headers).get("Authorization")).toBe("Bearer test-access");
-    expect(session.refreshAccessToken).not.toHaveBeenCalled();
+    expect(session.refreshAccessToken).toHaveBeenCalledTimes(1);
   });
 
   it("Bulk conserva el JWT de escritura y no repite un POST", async () => {
@@ -79,7 +79,7 @@ describe("lecturas con G7 y opciones públicas heredadas inertes", () => {
       .rejects.toMatchObject({ status: 401 });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(new Headers(fetcher.mock.calls[0]?.[1]?.headers).get("Authorization")).toBe("Bearer test-access");
-    expect(session.refreshAccessToken).not.toHaveBeenCalled();
+    expect(session.refreshAccessToken).toHaveBeenCalledTimes(1);
   });
 
   it("sin sesión de entrada Catálogo no envía el GET aunque publicReads sea true", async () => {

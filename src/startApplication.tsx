@@ -30,6 +30,7 @@ import { GatewayOriginContext } from "./app/config/GatewayOriginContext";
 import { AdminApiContext } from "./app/config/AdminApiContext";
 import { createAuthenticatedInventoryTransport } from "./features/inventory/adapters/authenticatedInventoryTransport";
 import { listVariantsByProduct } from "./features/inventory/adapters/catalogSkuSnapshot";
+import { createInventoryCatalogResolver } from "./features/inventory/adapters/catalogMetadataResolver";
 
 export async function startApplication(root: Root, mode: "mock" | "api", session: G7Session | null, gatewayOrigin?: string, securityApiBase?: string, adminApiEnabled = false) {
   let gateway: string | undefined;
@@ -103,7 +104,8 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
     }),
     createAuditRuntime(mode, {
       ...(adminApi && gatewayClient
-        ? { api: async () => createHttpAuditRepository(gatewayClient) }
+        ? { api: async () => createHttpAuditRepository(gatewayClient, async (id, signal) =>
+          (await catalogServices.catalog.getIdentity?.(id, signal))?.name ?? null) }
         : {}),
     }),
   ]);
@@ -181,20 +183,26 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
         }),
     });
     const inventoryTransport = createAuthenticatedInventoryTransport(gateway, session);
-    configureInventoryApi(() =>
-      createHttpInventoryRepository({
+    const resolveInventoryCatalogSkus = adminApi ? createInventoryCatalogResolver(catalogServices, scopeId) : undefined;
+    configureInventoryApi(() => {
+      const inventoryRepository: import("./features/inventory/adapters/apiInventoryAdapter").HttpInventoryRepository = createHttpInventoryRepository({
         transport: inventoryTransport,
         currentUserScope: scopeId,
         physicalStockEnabled: adminApi,
         listCatalogSkus: listInventoryCatalogSkus,
+        resolveCatalogSkus: resolveInventoryCatalogSkus,
         getCategories: async () => (await catalogServices.taxonomy.getCategories()).map(item => ({ id: item.id, name: item.nombre, active: item.activo })),
         getBrands: async () => (await catalogServices.taxonomy.getBrands()).map(item => ({ id: item.id, name: item.nombre, active: item.activo })),
         resolveTransferPresentation: async dto => {
-          const productName = (await listInventoryCatalogSkus()).find(item => item.sku === dto.sku)?.productName ?? `SKU ${dto.sku} (nombre no disponible en Catálogo)`;
-          return { transferCode: `ID ${dto.traslado_id}`, productName, sourceLocationName: `ID ${dto.source_location_id}`, targetLocationName: `ID ${dto.target_location_id}` };
+          const [skus, locations] = await Promise.all([listInventoryCatalogSkus(), inventoryRepository.getLocations()]);
+          const productName = skus.find(item => item.sku === dto.sku)?.productName ?? `SKU ${dto.sku} (nombre no disponible en Catálogo)`;
+          return { transferCode: `ID ${dto.traslado_id}`, productName,
+            sourceLocationName: locations.find(item => item.id === dto.source_location_id)?.name ?? `Ubicación ${dto.source_location_id} (nombre no disponible)`,
+            targetLocationName: locations.find(item => item.id === dto.target_location_id)?.name ?? `Ubicación ${dto.target_location_id} (nombre no disponible)` };
         },
-      }),
-    );
+      });
+      return inventoryRepository;
+    });
   } else {
     configureInventoryApi(null);
   }

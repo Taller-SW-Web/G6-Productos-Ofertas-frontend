@@ -62,7 +62,7 @@ export function ProductCreatePage() {
         title="Crear producto"
         description="Ingresa los datos mínimos para guardar el producto en BORRADOR. La preparación de precio e inventario se inicia automáticamente al guardar."
         breadcrumbs={[
-          { label: "Inicio", to: "/precios" },
+          { label: "Inicio", to: "/productos" },
           { label: "Catálogo", to: "/productos" },
           { label: "Productos", to: "/productos" },
           { label: "Crear producto" },

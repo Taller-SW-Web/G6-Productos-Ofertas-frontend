@@ -153,6 +153,10 @@ export function originLabel(origin: string | null) {
   };
   return Object.hasOwn(labels, origin) ? labels[origin]! : origin;
 }
+export function reasonLabel(reason: string) {
+  const labels: Record<string, string> = { ALTA_PRODUCTO: "Precio inicial de producto" };
+  return labels[reason] ?? reason;
+}
 export function dateLabel(instant: string) {
   if (!isValidAuditInstant(instant)) return "Fecha no válida";
   return `${new Intl.DateTimeFormat("es-PE", { timeZone: "America/Bogota", dateStyle: "short", timeStyle: "medium" }).format(new Date(instant))} · UTC−5`;

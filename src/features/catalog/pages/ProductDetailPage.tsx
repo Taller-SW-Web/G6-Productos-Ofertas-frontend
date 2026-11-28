@@ -89,7 +89,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
         <PageHeader
           title="Producto no encontrado"
           breadcrumbs={[
-            { label: "Inicio", to: "/precios" },
+            { label: "Inicio", to: "/productos" },
             { label: "Catálogo", to: "/productos" },
             { label: "Productos", to: `/productos${location.search}` },
             { label: "No encontrado" },
@@ -129,7 +129,7 @@ export function ProductDetailPage({ initialDialog }: ProductDetailPageProps) {
         title={p.name}
         description={`SKU Base: ${p.skuBase ?? "Sin SKU base"} · Modelo: ${p.hasVariants ? "Con variantes" : "Simple"}`}
         breadcrumbs={[
-          { label: "Inicio", to: "/precios" },
+          { label: "Inicio", to: "/productos" },
           { label: "Catálogo", to: "/productos" },
           { label: "Productos", to: `/productos${location.search}` },
           { label: p.name },

@@ -3,8 +3,6 @@ import { pathToFileURL } from "node:url";
 
 const defaults = {
   VITE_DATA_MODE: "api",
-  VITE_GATEWAY_ORIGIN: "https://api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io",
-  VITE_G7_API_BASE: "https://g7-auth-service.onrender.com/api/v1",
   VITE_G6_READ_DEMO: "false",
   VITE_G6_ADMIN_API_ENABLED: "false",
 };
@@ -12,6 +10,14 @@ const defaults = {
 export function vercelBuildEnvironment(environment) {
   const configured = { ...environment };
   for (const [name, value] of Object.entries(defaults)) configured[name] ??= value;
+  if (configured.VITE_DATA_MODE === "api") {
+    for (const name of ["VITE_GATEWAY_ORIGIN", "VITE_G7_API_BASE"]) {
+      if (!configured[name]?.trim()) throw new Error(`Configura explícitamente ${name} antes de compilar en modo API.`);
+    }
+    const gateway = new URL(configured.VITE_GATEWAY_ORIGIN);
+    if (gateway.hostname.endsWith("azurecontainerapps.io"))
+      throw new Error("Configura APIM como ingreso G6; no se permite omitirlo mediante ACA.");
+  }
   return configured;
 }
 

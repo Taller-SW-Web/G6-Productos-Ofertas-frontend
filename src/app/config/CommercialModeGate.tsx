@@ -20,8 +20,10 @@ export function CommercialModeGate({ children }: { children: ReactNode }) {
 
   const route = pathname.replace(/\/+$/, "");
   const transfers = route === "/inventario/traslados" || route.startsWith("/inventario/traslados/");
-  const pendingModule = transfers || (!adminApi &&
-    (route === "/inventario" || route === "/combos" || route.startsWith("/combos/")));
+  // The compatibility opt-in exposes implemented routes. Inventory still
+  // verifies independent local read/receive capabilities on every request.
+  const pendingModule = !adminApi &&
+    (transfers || route === "/inventario" || route === "/combos" || route.startsWith("/combos/"));
 
   if (mode === "api" && (pendingModule || (mockOnly && !api))) {
     const entry = consultaEntries[pathname];

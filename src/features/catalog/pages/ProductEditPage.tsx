@@ -40,7 +40,7 @@ export function ProductEditPage() {
         <PageHeader
           title="Producto no encontrado"
           breadcrumbs={[
-            { label: "Inicio", to: "/precios" },
+            { label: "Inicio", to: "/productos" },
             { label: "Catálogo", to: "/productos" },
             { label: "Productos", to: "/productos" },
             { label: "No encontrado" },
@@ -122,7 +122,7 @@ function ProductEditFormContent({
         title={`Editar: ${product.name}`}
         description="Modifica los campos descriptivos y características autorizadas. El SKU base y modelo de venta permanecen inmutables."
         breadcrumbs={[
-          { label: "Inicio", to: "/precios" },
+          { label: "Inicio", to: "/productos" },
           { label: "Catálogo", to: "/productos" },
           { label: "Productos", to: "/productos" },
           { label: product.name, to: `/productos/${product.id}` },

@@ -5,6 +5,8 @@ const ZIP_MAX_EOCD_SIZE = 22 + 65_535;
 // Local parser safety bounds, not contractual upload limits.
 const MAX_HEADER_CHARACTERS = 256 * 1024;
 const MAX_HEADER_COLUMNS = 4096;
+// OpenAPI Bulk plantilla v2; the backend remains authoritative for row values.
+export const BULK_TEMPLATE_V2_HEADERS = ["operacion", "producto_id", "catalog_version", "sku_base", "sku_variante", "nombre", "descripcion", "categoria_id", "marca_id", "tipo_producto_id", "tiene_variantes", "precio_regular", "atributos_producto", "atributos_variante", "imagen_url", "stock_inicial"] as const;
 
 interface CsvFileSummary {
   headers: string[];
@@ -13,7 +15,7 @@ interface CsvFileSummary {
   error?: string;
 }
 
-function createCsvSummaryScanner() {
+function createCsvSummaryScanner(exactHeaders = false) {
   let insideQuotes = false;
   let pendingQuote = false;
   let fieldStarted = false;
@@ -44,7 +46,7 @@ function createCsvSummaryScanner() {
       if (headerFields.length >= MAX_HEADER_COLUMNS) {
         error = "El encabezado supera el límite de inspección local (4096 columnas); reduzca la cantidad de columnas para revisar el archivo.";
       } else {
-        headerFields.push(currentField.trim().toLowerCase());
+        headerFields.push(exactHeaders ? currentField : currentField.trim().toLowerCase());
       }
     }
     currentField = "";
@@ -180,8 +182,9 @@ function createCsvSummaryScanner() {
 async function inspectCsvFile(
   file: File,
   signal?: AbortSignal,
+  exactHeaders = false,
 ): Promise<CsvFileSummary> {
-  const scanner = createCsvSummaryScanner();
+  const scanner = createCsvSummaryScanner(exactHeaders);
   const decoder = new TextDecoder("utf-8", { fatal: true });
   const reader = file.stream().getReader();
   const cancelRead = () => void reader.cancel();
@@ -290,6 +293,7 @@ function invalidFile(
 export async function checkLocalFile(
   file: File,
   signal?: AbortSignal,
+  templateVersion?: 2,
 ): Promise<LocalFileCheckResult> {
   signal?.throwIfAborted();
   const fileName = file.name.trim();
@@ -417,7 +421,7 @@ export async function checkLocalFile(
   }
 
   try {
-    const summary = await inspectCsvFile(file, signal);
+    const summary = await inspectCsvFile(file, signal, templateVersion === 2);
     if (summary.error) {
       return {
         ...invalidFile("CSV", fileName, fileSize, summary.error),
@@ -451,6 +455,11 @@ export async function checkLocalFile(
         detectedRows: 0,
         detectedColumns: summary.headers,
       };
+    }
+    if (templateVersion === 2 && (summary.headers.length !== BULK_TEMPLATE_V2_HEADERS.length ||
+      BULK_TEMPLATE_V2_HEADERS.some((header, index) => summary.headers[index] !== header))) {
+      return { ...invalidFile("CSV", fileName, fileSize, "El encabezado no corresponde a la plantilla v2. Descarga la plantilla vigente y conserva sus columnas y orden."),
+        detectedRows: summary.dataRows, detectedColumns: summary.headers };
     }
     return {
       valid: true,

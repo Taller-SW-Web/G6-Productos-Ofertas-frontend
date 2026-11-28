@@ -11,14 +11,17 @@
     },
     {
       "source": "/api/v1/:path*",
-      "destination": "https://api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io/api/v1/:path*"
+      "destination": "https://apim-g6-productos-chile.azure-api.net/api/v1/:path*"
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!assets(?:/|$)|api(?:/|$)|g7(?:/|$)|.*\\.[^/]+$).*)",
       "destination": "/index.html"
     }
   ],
   "headers": [
+    { "source": "/index.html", "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }] },
+    { "source": "/((?!assets(?:/|$)|api(?:/|$)|g7(?:/|$)).*)", "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }] },
+    { "source": "/assets/:path*", "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }] },
     { "source": "/api/v1/:path*", "headers": [{ "key": "Cache-Control", "value": "private, no-store" }] },
     { "source": "/g7/api/v1/:path*", "headers": [{ "key": "Cache-Control", "value": "private, no-store" }] }
   ],

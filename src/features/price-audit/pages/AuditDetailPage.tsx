@@ -15,6 +15,7 @@ import {
   operationLabel,
   originLabel,
   previousValue,
+  reasonLabel,
   typeLabel,
   variation,
 } from "../services/auditPresentation";
@@ -119,6 +120,7 @@ export function AuditDetailPage() {
               {field("SKU", state.result.sku ?? "No aplica al producto")}
               {field("Asiento", displayAuditId(state.result.id))}
               {field("Producto", state.result.productId)}
+              {field("Nombre actual en Catálogo", state.result.productName ?? "Referencia comercial no disponible")}
               {field("Fecha y hora", dateLabel(state.result.at))}
             </SectionCard>
             <SectionCard
@@ -132,11 +134,12 @@ export function AuditDetailPage() {
               {field("Variación", variation(state.result))}
             </SectionCard>
             <SectionCard title="Motivo y origen">
-              {field("Motivo", state.result.reason)}
+              {field("Motivo", reasonLabel(state.result.reason))}
               {field("Origen", originLabel(state.result.origin))}
               {field("Lote", state.result.batchId ?? "Sin lote")}
             </SectionCard>
             <SectionCard title="Actor y datos informados">
+              {!state.result.actorId && <Text size="sm">El evento no informa un actor. La ausencia de usuario no identifica automáticamente una operación del sistema.</Text>}
               {field(
                 "Usuario",
                 state.result.actorId === "demo-pricing"

@@ -115,6 +115,9 @@ export function createReadOnlyClient(
   return {
     async read(id: string, values: Readonly<Record<string, string>>, cancellation: AbortSignal): Promise<ReadResult> {
       const path = buildReadPath(id, values);
+      const operation = readOperations.find(item => item.id === id)!;
+      // Keep Accept within the CORS safelist for these contractual media types.
+      const accept = operation.mediaTypes.join(", ");
       const signal = AbortSignal.any([cancellation, AbortSignal.timeout(65000)]);
       signal.throwIfAborted();
       const token = await session.getAccessToken(signal);
@@ -123,7 +126,7 @@ export function createReadOnlyClient(
       const correlation = crypto.randomUUID();
       const send = (bearer: string) => fetcher(base + path, {
         method: "GET", signal, credentials: "omit", redirect: "error", cache: "no-store",
-        headers: { Accept: "application/json, text/csv, application/pdf, application/octet-stream, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", Authorization: `Bearer ${bearer}`, "X-Correlation-Id": correlation },
+        headers: { Accept: accept, Authorization: `Bearer ${bearer}`, "X-Correlation-Id": correlation },
       });
       let response = await send(token);
       if (await isGatewayTokenInvalid(response)) {
@@ -133,20 +136,21 @@ export function createReadOnlyClient(
           throw new ReadFailure("Tu sesión terminó. Inicia sesión de nuevo.");
         }
         response = await send(renewed);
-        if (await isGatewayTokenInvalid(response)) session.invalidateAccessToken(renewed);
+        // G7 accepted the refresh; a downstream denial is local to this read.
       }
       if (!response.ok) {
         const messages: Record<number, string> = {
           400: "Revisa los filtros e identificadores de la consulta.",
-          401: "Tu sesión no permite completar la consulta. Inicia sesión de nuevo.",
+          401: "El servicio rechazó el acceso a esta consulta. Puedes volver a intentar.",
           403: "Tu cuenta no tiene permiso para esta consulta.",
           404: "No se encontró el registro o la consulta aún no está habilitada en el backend.",
+          429: "Hay muchas consultas. Espera antes de volver a consultar.",
+          503: "El servicio de consulta no está disponible temporalmente. Vuelve a intentar más tarde.",
         };
-        throw new ReadFailure(messages[response.status] ?? `No se pudo consultar el backend (HTTP ${response.status}). Reintenta más tarde.`);
+        throw new ReadFailure(messages[response.status] ?? "No se pudo completar la consulta. Reintenta más tarde.");
       }
       const bytes = await limitedBody(response);
       const mediaType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ?? "";
-      const operation = readOperations.find(item => item.id === id)!;
       if (!operation.mediaTypes.includes(mediaType) || mediaType === "text/html")
         throw new ReadFailure("El backend no entregó el formato esperado para esta consulta.");
       if (mediaType === "application/json") {

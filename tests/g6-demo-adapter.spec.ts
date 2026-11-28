@@ -10,7 +10,7 @@ test("Deploy: proxies limitados a Azure/G7, comando corto y la demo apagada no o
   const external = config.rewrites.filter((rule: { destination: string }) => rule.destination.startsWith("https://"));
   expect(external).toHaveLength(2);
   const destinations = new Map([
-    ["/api/v1/:path*", "https://api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io/api/v1/:path*"],
+    ["/api/v1/:path*", "https://apim-g6-productos-chile.azure-api.net/api/v1/:path*"],
     ["/g7/api/v1/:path*", "https://g7-auth-service.onrender.com/api/v1/:path*"],
   ]);
   for (const rule of external) {
@@ -19,7 +19,9 @@ test("Deploy: proxies limitados a Azure/G7, comando corto y la demo apagada no o
     const policy = config.headers.find((item: { source: string }) => item.source === rule.source);
     expect(policy.headers).toContainEqual({ key: "Cache-Control", value: "private, no-store" });
   }
-  expect(config.rewrites.at(-1)).toEqual({ source: "/(.*)", destination: "/index.html" });
+  const navigation = new RegExp(`^${config.rewrites.at(-1).source}$`);
+  expect(navigation.test("/inventario/umbrales")).toBe(true);
+  expect(navigation.test("/assets/missing.js")).toBe(false);
   expect(config.buildCommand).toBe("node scripts/build-vercel.mjs");
   expect(config.buildCommand.length).toBeLessThanOrEqual(256);
   await page.goto("/demo/g6/productos");

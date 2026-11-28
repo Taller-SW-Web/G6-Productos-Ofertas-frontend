@@ -1,6 +1,6 @@
 import { secureBase } from "../../features/promotions/adapters/g7Session";
 
-const azureGateway = "https://api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io";
+const apimGateway = "https://apim-g6-productos-chile.azure-api.net";
 
 // Deployment opt-in after verifying Backend #222 contracts at this origin.
 // The flag defaults to false; it is not capability discovery or authorization.
@@ -25,7 +25,7 @@ export function resolveGatewayOrigin(
   let origin: string;
   try { origin = secureBase(configured, true); }
   catch { return undefined; }
-  return production && location.hostname.endsWith(".vercel.app") && origin === azureGateway
+  return production && location.hostname.endsWith(".vercel.app") && origin === apimGateway
     ? location.origin
     : origin;
 }

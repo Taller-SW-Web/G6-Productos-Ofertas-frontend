@@ -25,7 +25,7 @@ test("UI API 1440: POST contractual, error 409 visible, datos conservados y sin 
   await page.getByLabel("SKU Base").fill("000-SKU");
   await page.getByLabel("Precio base inicial (S/.)").fill("20");
   await page.getByRole("button", { name: "Guardar borrador", exact: true }).click();
-  await expect(page.getByText(/409, SKU_DUPLICADO/)).toBeVisible();
+  await expect(page.getByText(/Ese SKU ya está registrado/)).toBeVisible();
   await expect(page.getByLabel("Nombre del producto")).toHaveValue("Producto HTTP");
   await expect(page.getByLabel("SKU Base")).toHaveValue("000-SKU");
   expect(posts).toBe(1);
@@ -40,7 +40,9 @@ for (const status of [401, 403, 503]) {
     await page.route("https://gateway.test/api/v1/**", route => route.fulfill({ status, contentType: "application/problem+json", headers: { "Access-Control-Allow-Origin": "*" }, body: JSON.stringify({ code: status === 401 ? "TOKEN_INVALIDO" : status === 403 ? "SCOPE_INSUFICIENTE" : "SERVICIO_NO_DISPONIBLE" }) }));
     await page.goto("/tests/harness/catalog-http.html?path=/productos");
     await expect(page.getByRole("heading", { name: "Gestión de productos" })).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText(new RegExp(`${status},`)).first()).toBeVisible();
+    await expect(page.getByText(status === 401 ? /El servicio rechazó el acceso a Catálogo/
+      : status === 403 ? /Tu rol no permite esta operación de Catálogo/
+      : /Catálogo no está disponible temporalmente/).first()).toBeVisible();
     await expect(page.getByText("Camiseta Running Endurance", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("row").filter({ hasText: "CAM-RUN" })).toHaveCount(0);
   });
@@ -131,7 +133,7 @@ test("UI API: un 403 de categorías no bloquea los productos y un 403 filtrado p
 
   await page.goto("/tests/harness/catalog-http.html?path=%2Fproductos%3FcategoriaId%3Dcat-api");
   await expect(page.getByText("Acceso denegado", { exact: true })).toBeVisible();
-  await expect(page.getByText(`No se pudo completar la operación (403, SCOPE_INSUFICIENTE). Referencia: ${reference}.`)).toBeVisible();
+  await expect(page.getByText(`Tu rol no permite esta operación de Catálogo. Referencia: ${reference}.`)).toBeVisible();
   await page.getByRole("button", { name: "Limpiar filtros" }).click();
   await expect(page).toHaveURL(/\/productos$/);
   await expect(page.getByRole("link", { name: "Ver detalle de Producto administrativo QA" })).toBeVisible();

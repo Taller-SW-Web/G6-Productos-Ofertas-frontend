@@ -340,6 +340,7 @@ export interface SlugPropuesta {
 }
 
 export interface SeoCategory {
+  estado?: "ACTIVA" | "INACTIVA" | "PENDING_DEACTIVATION";
   id: string;
   nombre: string;
   slug: string;

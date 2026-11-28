@@ -10,16 +10,16 @@ test("H74-01: buildCommand usa el script y respeta el limite de 256 caracteres",
 });
 
 test("el build aplica los valores por defecto solo si no estan definidos", () => {
-  const original = { PATH: "existing-path", VITE_DATA_MODE: undefined };
+  const original = { PATH: "existing-path", VITE_DATA_MODE: undefined, VITE_GATEWAY_ORIGIN: "https://apim-g6-productos-chile.azure-api.net", VITE_G7_API_BASE: "https://g7.example.test/api/v1" };
   assert.deepEqual(vercelBuildEnvironment(original), {
     PATH: "existing-path",
     VITE_DATA_MODE: "api",
-    VITE_GATEWAY_ORIGIN: "https://api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io",
-    VITE_G7_API_BASE: "https://g7-auth-service.onrender.com/api/v1",
+    VITE_GATEWAY_ORIGIN: "https://apim-g6-productos-chile.azure-api.net",
+    VITE_G7_API_BASE: "https://g7.example.test/api/v1",
     VITE_G6_READ_DEMO: "false",
     VITE_G6_ADMIN_API_ENABLED: "false",
   });
-  assert.deepEqual(original, { PATH: "existing-path", VITE_DATA_MODE: undefined });
+  assert.equal(original.VITE_DATA_MODE, undefined);
 });
 
 test("el entorno configurado tiene prioridad y llega intacto al build existente", () => {
@@ -51,6 +51,19 @@ test("un valor vacio definido no se sustituye silenciosamente por un default", (
 });
 
 test("el wrapper propaga fallos del build y termina en error si no hay estado", () => {
-  assert.equal(buildVercel({}, () => ({ status: 7 })), 7);
-  assert.equal(buildVercel({}, () => ({ status: null, signal: "SIGTERM" })), 1);
+  assert.equal(buildVercel({ VITE_DATA_MODE: "mock" }, () => ({ status: 7 })), 7);
+  assert.equal(buildVercel({ VITE_DATA_MODE: "mock" }, () => ({ status: null, signal: "SIGTERM" })), 1);
+});
+
+test("API sin configuración explícita o con bypass ACA falla antes del build", () => {
+  assert.throws(() => vercelBuildEnvironment({}), /VITE_GATEWAY_ORIGIN/);
+  assert.throws(() => vercelBuildEnvironment({ VITE_GATEWAY_ORIGIN: "https://apim.example.test" }), /VITE_G7_API_BASE/);
+  assert.throws(() => vercelBuildEnvironment({ VITE_GATEWAY_ORIGIN: "https://gateway.example.azurecontainerapps.io", VITE_G7_API_BASE: "https://g7.example.test/api/v1" }), /APIM/);
+});
+
+test("SPA conserva rutas profundas y excluye assets y rutas API ausentes", async () => {
+  const config = JSON.parse(await readFile(new URL("../vercel.json", import.meta.url), "utf8"));
+  const navigation = new RegExp(`^${config.rewrites.at(-1).source}$`);
+  for (const path of ["/inventario/umbrales", "/precios", "/productos/abc/editar"]) assert.ok(navigation.test(path), path);
+  for (const path of ["/assets/Missing.js", "/assets", "/favicon.ico", "/api/v1/unknown", "/g7/api/v1/unknown"]) assert.ok(!navigation.test(path), path);
 });

@@ -1,5 +1,5 @@
 import { usePromotionServices } from "../hooks/usePromotionServices";
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import {
   Link,
   Navigate,
@@ -33,6 +33,7 @@ export interface CampaignEditorContext {
   products: CatalogProductChoice[];
   catalogLoading: boolean;
   catalogError: string | undefined;
+  retryCatalog: () => void;
 }
 export function CampaignEditorLayout() {
   const { promotionId } = useParams();
@@ -80,6 +81,7 @@ export function CampaignEditorLayout() {
   );
 }
 function CampaignEditorProvider({ initial }: { initial: CampaignView | null }) {
+  const [catalogRetry, setCatalogRetry] = useState(0);
   const [params] = useSearchParams();
   const { services, confirmedServices, clearTransientParams, revision } =
     usePromotionServices();
@@ -107,7 +109,7 @@ function CampaignEditorProvider({ initial }: { initial: CampaignView | null }) {
       : undefined),
     [services, initial],
   );
-  const catalog = useAdministrationRead(`catalog:${revision}:${initial?.id ?? "new"}`, readProducts);
+  const catalog = useAdministrationRead(`catalog:${revision}:${initial?.id ?? "new"}:${catalogRetry}`, readProducts);
   if (form.confirmed) {
     const next = clearTransientParams(params);
     return (
@@ -126,6 +128,7 @@ function CampaignEditorProvider({ initial }: { initial: CampaignView | null }) {
     products: catalog.status === "success" ? catalog.result : [],
     catalogLoading: catalog.status === "loading",
     catalogError: catalog.status === "error" ? catalog.message : undefined,
+    retryCatalog: () => setCatalogRetry(value => value + 1),
   };
   return (
     <>

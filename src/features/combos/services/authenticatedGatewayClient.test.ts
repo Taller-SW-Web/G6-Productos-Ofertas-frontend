@@ -81,7 +81,7 @@ describe("AuthenticatedGatewayClient para consulta POST de SKU", () => {
     const { client, refreshAccessToken } = setup({ fetcher });
     await expect(client.request(resolver, { method, body: "{}" })).resolves.toMatchObject({ status: 401 });
     expect(fetcher).toHaveBeenCalledTimes(1);
-    expect(refreshAccessToken).not.toHaveBeenCalled();
+    expect(refreshAccessToken).toHaveBeenCalledTimes(1);
   });
 
   it("rechaza POST_READ en cualquier ruta distinta sin llamar al Gateway", async () => {

@@ -119,6 +119,8 @@ test("MK-006 S02/S04: validate discount/channels and preserve draft and typed sc
   await expect(
     page.getByLabel("Nombre de la promoción", { exact: true }),
   ).toHaveValue("Promoción de prueba");
+  await expect(page.getByLabel("Fecha y hora de inicio", { exact: true })).toHaveValue("2026-10-01T00:00");
+  await expect(page.getByLabel("Fecha y hora de fin", { exact: true })).toHaveValue("2026-11-01T00:00");
   await page
     .getByRole("link", { name: "Seleccionar alcance", exact: true })
     .click();

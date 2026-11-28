@@ -23,7 +23,7 @@ import { getDownloadFailureMessage, getUnavailableDownloadMessage } from "../src
 import { AdmissionCoordinator, LatestTaskCoordinator, runSingleFlight } from "../src/features/bulk/utils/asyncGuards";
 import { getBulkResumeIntent, getOrCreateBulkResumeRequest, hasAcceptedBulkResumeForBatch, markBulkResumeAccepted } from "../src/features/bulk/utils/bulkResumeIntent";
 import { reconcileBulkAdmission } from "../src/features/bulk/services/bulkAdmissionRecovery";
-import { checkLocalFile, parseCsvSafely } from "../src/features/bulk/utils/localFileCheck";
+import { BULK_TEMPLATE_V2_HEADERS, checkLocalFile, parseCsvSafely } from "../src/features/bulk/utils/localFileCheck";
 import { getGenuineMinimalXlsxArrayBuffer } from "./fixtures/genuineXlsxFixture";
 import { MOCK_CSV_SAMPLE_DATA, mockBatches, mockExports } from "../src/features/bulk/mocks/bulkFixtures";
 import { parseCsvRecords } from "../src/features/bulk/adapters/mockBulkRepository";
@@ -281,23 +281,22 @@ describe("adaptador HTTP de Bulk", () => {
     await expect(createHttpBulkRepository({ request }, { ...testSession, invalidateAccessToken, refreshAccessToken }).createExport("CSV")).rejects.toMatchObject({ status });
     expect(request).toHaveBeenCalledTimes(1); expect(refreshAccessToken).not.toHaveBeenCalled(); expect(invalidateAccessToken).not.toHaveBeenCalled();
   });
-  it.each(["TOKEN_INVALIDO", "DESCONOCIDO", "ilegible"])("R4-03 segundo GET 401 %s solo invalida si es contractual", async code => {
+  it.each(["TOKEN_INVALIDO", "DESCONOCIDO", "ilegible"])("segundo GET 401 %s conserva identidad renovada por G7", async code => {
     const invalidateAccessToken = vi.fn(), refreshAccessToken = vi.fn().mockResolvedValue("new-token");
     const request = vi.fn()
       .mockResolvedValueOnce(Response.json({ code: "TOKEN_INVALIDO" }, { status: 401 }))
       .mockResolvedValueOnce(new Response(code === "ilegible" ? code : JSON.stringify({ code }), { status: 401 }));
     await expect(createHttpBulkRepository({ request }, { ...testSession, invalidateAccessToken, refreshAccessToken }).getImport("batch")).rejects.toMatchObject({ status: 401 });
     expect(request).toHaveBeenCalledTimes(2); expect(refreshAccessToken).toHaveBeenCalledTimes(1);
-    if (code === "TOKEN_INVALIDO") expect(invalidateAccessToken).toHaveBeenCalledExactlyOnceWith("new-token");
-    else expect(invalidateAccessToken).not.toHaveBeenCalled();
+    expect(invalidateAccessToken).not.toHaveBeenCalled();
   });
-  it("R4-03 POST TOKEN_INVALIDO invalida sin renovar ni repetir escritura", async () => {
-    const invalidateAccessToken = vi.fn(), refreshAccessToken = vi.fn();
+  it("POST TOKEN_INVALIDO recupera identidad para la siguiente acción sin repetir escritura", async () => {
+    const invalidateAccessToken = vi.fn(), refreshAccessToken = vi.fn().mockResolvedValue("new-token");
     const request = vi.fn().mockImplementation(async () => Response.json({ code: "TOKEN_INVALIDO" }, { status: 401 }));
     const repo = createHttpBulkRepository({ request }, { ...testSession, invalidateAccessToken, refreshAccessToken });
     await expect(repo.createExport("CSV")).rejects.toMatchObject({ status: 401 });
-    expect(request).toHaveBeenCalledTimes(1); expect(refreshAccessToken).not.toHaveBeenCalled();
-    expect(invalidateAccessToken).toHaveBeenCalledExactlyOnceWith("header.payload.signature");
+    expect(request).toHaveBeenCalledTimes(1); expect(refreshAccessToken).toHaveBeenCalledTimes(1);
+    expect(invalidateAccessToken).not.toHaveBeenCalled();
   });
   it("usa rutas del contrato, bearer y multipart sin fabricar Content-Type", async () => {
     const calls: Array<{ path: string; init: Parameters<BulkHttpTransport["request"]>[1] }> = [];
@@ -599,7 +598,7 @@ describe("adaptador HTTP de Bulk", () => {
     const transport: BulkHttpTransport = { request: async () => new Response(JSON.stringify({ status, code: "ERROR_HTTP" }), { status, headers: { "content-type": "application/problem+json" } }) };
     const repository = createHttpBulkRepository(transport, testSession);
     try {
-      await expect(repository.createExport("CSV")).rejects.toThrow(`HTTP ${status}`);
+      await expect(repository.createExport("CSV")).rejects.toMatchObject({ status });
     } finally {
       if (originalStorage) Object.defineProperty(globalThis, "sessionStorage", originalStorage);
       else Reflect.deleteProperty(globalThis, "sessionStorage");
@@ -932,6 +931,16 @@ describe("Bulk mock repository and global data mode", () => {
 });
 
 describe("Bulk local file checks", () => {
+  it("exige cabeceras v2 exactas antes de admitir CSV en API y conserva el scanner legacy de fixtures", async () => {
+    const row = BULK_TEMPLATE_V2_HEADERS.map(() => "x").join(",");
+    const headers = BULK_TEMPLATE_V2_HEADERS.join(",");
+    expect((await checkLocalFile(new File([`${headers}\r\n${row}\r\n`], "TEST_G6_AUDIT.csv"), undefined, 2)).valid).toBe(true);
+    for (const invalid of ["COLUMNA_INVALIDA\r\nx\r\n", `${headers.toUpperCase()}\r\n${row}\r\n`, `${[...BULK_TEMPLATE_V2_HEADERS].reverse().join(",")}\r\n${row}\r\n`]) {
+      const result = await checkLocalFile(new File([invalid], "TEST_G6_AUDIT.csv"), undefined, 2);
+      expect(result.valid).toBe(false);
+      expect(result.errors.join(" ")).toContain("plantilla v2");
+    }
+  });
   it("streams CSV structure and detects headers, rows, BOM, quoted commas, and line breaks", async () => {
     const file = new File(
       ["\uFEFFsku,nombre,detalle\r\nSKU-1,Producto 1,\"texto,\ncon salto\"\r\nSKU-2,Producto 2,ok\r\n"],

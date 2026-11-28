@@ -321,7 +321,7 @@ test("G7: origen HTTPS configurable; no acepta credenciales, query o HTTP remoto
     "https://example.test/api/v1",
   );
 });
-test("Gateway: TOKEN_INVALIDO permite un solo reintento GET; un segundo 401 invalida la sesión", async () => {
+test("Gateway: TOKEN_INVALIDO permite un solo reintento GET y conserva identidad confirmada por G7", async () => {
   await fixture(async (origin, calls, set) => {
     let refreshes = 0,
       invalidated = "";
@@ -345,7 +345,7 @@ test("Gateway: TOKEN_INVALIDO permite un solo reintento GET; un segundo 401 inva
     });
     expect(refreshes).toBe(1);
     expect(calls).toHaveLength(2);
-    expect(invalidated).toBe(dto(2).accessToken);
+    expect(invalidated).toBe("");
     expect(calls.map((r) => r.auth)).toEqual([
       `Bearer ${dto().accessToken}`,
       `Bearer ${dto(2).accessToken}`,
@@ -404,8 +404,8 @@ test("Gateway: no reenvía una escritura rechazada ni reusa la sesión invalidad
     await expect(
       api.coupons.changeStatus("id", "inactive", signal()),
     ).rejects.toMatchObject({ kind: "access" });
-    expect(refreshed).toBe(false);
-    expect(invalidated).toBe(true);
+    expect(refreshed).toBe(true);
+    expect(invalidated).toBe(false);
     expect(calls).toHaveLength(1);
     });
   } finally {
@@ -441,8 +441,8 @@ test("SEC-H4-02: POST 401 invalida la sesión y no reenvía la mutación", async
   const response = await client.request("/api/v1/promociones", { method: "POST", body: "{}", signal: new AbortController().signal });
   expect(response.status).toBe(401);
   expect(fetcher.mock.calls).toHaveLength(1);
-  expect(refresh.mock.calls).toHaveLength(0);
-  expect(invalidate.mock.calls).toHaveLength(1);
+  expect(refresh.mock.calls).toHaveLength(1);
+  expect(invalidate.mock.calls).toHaveLength(0);
 });
 
 test("SEC-H4-03: rutas con prefijo ajeno o segmento peligroso no llegan a fetch", async () => {
