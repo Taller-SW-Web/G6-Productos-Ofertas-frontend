@@ -16,6 +16,7 @@ let expiry: number;
 let roles: string[];
 let demo: boolean;
 let fullName: string;
+let userId: string;
 let holdRefresh: boolean;
 let releaseRefresh: (() => void) | undefined;
 let calls: { path: string; body: Record<string, unknown> }[];
@@ -25,7 +26,7 @@ const dto = {
   usuario: { id: "11111111-1111-4111-8111-111111111111", nombreCompleto: "Gestora de prueba", correo: "isolated@example.test", roles: ["GESTOR_COMERCIAL"] },
 };
 test.beforeEach(async ({ context }) => {
-  forceJwe = false; adminApi = false; mfa = false; failure = ""; expiry = 900; calls = []; roles = ["GESTOR_COMERCIAL"]; demo = false; fullName = dto.usuario.nombreCompleto; holdRefresh = false; releaseRefresh = undefined;
+  forceJwe = false; adminApi = false; mfa = false; failure = ""; expiry = 900; calls = []; roles = ["GESTOR_COMERCIAL"]; demo = false; fullName = dto.usuario.nombreCompleto; userId = dto.usuario.id; holdRefresh = false; releaseRefresh = undefined;
   provider = createServer(async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? 5173}`);
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -42,7 +43,7 @@ test.beforeEach(async ({ context }) => {
     if (failure) { res.writeHead(failure === "UNAVAILABLE" ? 503 : failure === "OTP_EXPIRADO" ? 410 : 401).end(JSON.stringify({ code: failure, detail: "SENSITIVE_DETAIL" })); return; }
     if (path.endsWith("/login") && mfa) { res.end(JSON.stringify({ mfaRequerido: true, challengeToken: "isolated-challenge", expiraEn: 300 })); return; }
     if (path.endsWith("/solicitar")) { res.writeHead(202).end("{}"); return; }
-    res.end(JSON.stringify({ ...dto, ...(forceJwe ? { accessToken: "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..fixture.iv.tag" } : {}), usuario: { ...dto.usuario, nombreCompleto: fullName, roles }, expiresIn: expiry, ...(path.endsWith("/refresh") ? { refreshToken: `isolated-rotation-${calls.length}` } : {}) }));
+    res.end(JSON.stringify({ ...dto, ...(userId !== dto.usuario.id ? { refreshToken: `isolated-user-${userId}` } : {}), ...(forceJwe ? { accessToken: "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..fixture.iv.tag" } : {}), usuario: { ...dto.usuario, id: userId, nombreCompleto: fullName, roles }, expiresIn: expiry, ...(path.endsWith("/refresh") ? { refreshToken: `isolated-rotation-${calls.length}` } : {}) }));
   });
   provider.listen(0, "127.0.0.1");
   await once(provider, "listening");
@@ -58,8 +59,11 @@ test.beforeEach(async ({ context }) => {
     await route.fulfill({ response, body });
   });
 });
-test.afterEach(async () => {
+test.afterEach(async ({ context }) => {
   releaseRefresh?.();
+  // Logout reloads main.tsx. Drain its configuration route before Playwright
+  // disposes the request context and the isolated G7 provider.
+  await context.unrouteAll({ behavior: "wait" });
   provider.closeAllConnections();
   await new Promise<void>(resolve => provider.close(() => resolve()));
 });
@@ -67,6 +71,66 @@ async function login(page: Page) {
   await page.getByRole("textbox", { name: "Correo electrónico", exact: true }).fill("isolated@example.test");
   await page.getByRole("textbox", { name: "Contraseña", exact: true }).fill("isolated-password");
   await page.getByRole("button", { name: "Ingresar al panel", exact: true }).click();
+}
+
+for (const scenario of ["selected", "uncertain", "pending-late", "logout", "other-user"] as const) {
+  test(`auditoría F12: borrador Bulk tras autenticación ${scenario}`, async ({ page }) => {
+    expiry = 120;
+    await page.clock.install({ time: new Date("2026-11-28T12:00:00Z") });
+    let posts = 0;
+    let finishPending: (() => void) | undefined;
+    await page.route(`http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? 5173}/api/v1/carga-masiva/**`, async route => {
+      if (route.request().method() === "POST") posts++;
+      if (scenario === "pending-late" && route.request().method() === "POST") await new Promise<void>(resolve => { finishPending = resolve; });
+      return route.fulfill({ status: 503, contentType: "application/problem+json", body: JSON.stringify({ status: 503, code: "SERVICE_UNAVAILABLE" }) });
+    });
+    await page.goto("/carga-masiva");
+    await login(page);
+    const headers = "operacion,producto_id,catalog_version,sku_base,sku_variante,nombre,descripcion,categoria_id,marca_id,tipo_producto_id,tiene_variantes,precio_regular,atributos_producto,atributos_variante,imagen_url,stock_inicial";
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "borrador-audit.csv", mimeType: "text/csv",
+      buffer: Buffer.from(`${headers}\nALTA,,,SKU-AUDIT,,Borrador,,,,,false,10,,,,0\n`),
+    });
+    await page.getByRole("button", { name: "Continuar a revisión", exact: true }).click();
+    await expect(page.getByText("borrador-audit.csv", { exact: true })).toBeVisible();
+    // Going back to selection and review does not change the selected File.
+    await page.getByRole("link", { name: "Volver", exact: true }).click();
+    await page.getByRole("button", { name: "Continuar a revisión", exact: true }).click();
+    if (scenario === "uncertain" || scenario === "pending-late") {
+      await page.getByRole("button", { name: "Confirmar importación", exact: true }).first().click();
+      await expect.poll(() => posts).toBe(1);
+      await expect(page.getByRole("button", { name: "Confirmar importación", exact: true }).first()).toBeDisabled();
+    }
+    const intentBefore = await page.evaluate(() => Object.entries(sessionStorage).filter(([key]) => key.startsWith("g6:bulk:admission:v1:")));
+    if (scenario === "logout") {
+      await page.getByRole("button", { name: "Cerrar sesión", exact: true }).click();
+    } else {
+      failure = "REFRESCO_INVALIDO";
+      await page.clock.fastForward(120001);
+    }
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByRole("navigation")).toHaveCount(0);
+    await expect(page.getByText("borrador-audit.csv", { exact: true })).toHaveCount(0);
+    failure = "";
+    expiry = 900;
+    if (scenario === "other-user") userId = "22222222-2222-4222-8222-222222222222";
+    await login(page);
+    await expect(page.getByRole("navigation", { name: "Navegación de la aplicación" })).toBeVisible();
+    finishPending?.();
+    if (scenario === "logout" || scenario === "other-user") {
+      await page.evaluate(() => { history.pushState({}, "", "/carga-masiva/revisar"); dispatchEvent(new PopStateEvent("popstate")); });
+      await expect(page.getByText("Ningún archivo seleccionado", { exact: true })).toBeVisible();
+    } else {
+      await expect(page).toHaveURL(/\/carga-masiva\/revisar$/);
+      await expect(page.getByText("borrador-audit.csv", { exact: true })).toBeVisible();
+      const confirm = page.getByRole("button", { name: "Confirmar importación", exact: true }).first();
+      if (scenario === "uncertain" || scenario === "pending-late") {
+        await expect(confirm).toBeDisabled();
+        expect(await page.evaluate(() => Object.entries(sessionStorage).filter(([key]) => key.startsWith("g6:bulk:admission:v1:")))).toEqual(intentBefore);
+      } else await expect(confirm).toBeEnabled();
+    }
+    expect(posts).toBe(scenario === "uncertain" || scenario === "pending-late" ? 1 : 0);
+  });
 }
 
 for (const path of ["/inventario", "/precios", "/carga-masiva"]) test(`auditoría: reload de ${path} restaura mediante G7 antes de proteger la ruta`, async ({ page, context }) => {

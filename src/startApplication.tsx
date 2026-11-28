@@ -24,6 +24,7 @@ import { createOptionalCatalogHttpServices } from "./features/catalog/services/c
 import { createApplicationCombosRuntime } from "./features/combos/services/combosService";
 import { CombosProvider } from "./features/combos/components/CombosProvider";
 import { BulkRepositoryContext } from "./features/bulk/services/BulkRepositoryContext";
+import { BulkUploadProvider } from "./features/bulk/context/BulkUploadContext";
 import { createBulkFetchTransport, createHttpBulkRepository } from "./features/bulk/adapters/httpBulkRepository";
 import { verifyBulkHomologationManifest } from "./features/bulk/adapters/bulkHomologationManifest";
 import { GatewayOriginContext } from "./app/config/GatewayOriginContext";
@@ -243,7 +244,7 @@ export async function startApplication(root: Root, mode: "mock" | "api", session
                     <PromotionApiContext.Provider value={promotions?.services ?? null}>
                       <CombosProvider mode={mode} runtime={combosRuntime}>
                         <GatewayOriginContext.Provider value={gateway}>
-                          <AdminApiContext.Provider value={adminApi}><App /></AdminApiContext.Provider>
+                          <AdminApiContext.Provider value={adminApi}><BulkUploadProvider><App /></BulkUploadProvider></AdminApiContext.Provider>
                         </GatewayOriginContext.Provider>
                       </CombosProvider>
                     </PromotionApiContext.Provider>

@@ -52,6 +52,10 @@ function start() {
 session?.subscribe(() => {
   const user = session.snapshot().user;
   if (identity && (user?.id !== identity || !canAdminister(user))) {
+    // Expiration closes protected routes through RequireSession while keeping
+    // in-memory drafts for reauthentication by this same identity. Explicit
+    // logout or a different authenticated identity discards the whole realm.
+    if (!user && session.snapshot().noticeSemantic !== "info") return;
     try { sessionStorage.setItem("g6:session-notice", session.snapshot().noticeSemantic === "info" ? "logout" : "expired"); } catch { /* Optional feedback only. */ }
     history.replaceState(null, "", "/login");
     location.reload();

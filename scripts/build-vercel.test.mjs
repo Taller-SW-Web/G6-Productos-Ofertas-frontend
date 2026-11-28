@@ -59,6 +59,8 @@ test("API sin configuración explícita o con bypass ACA falla antes del build",
   assert.throws(() => vercelBuildEnvironment({}), /VITE_GATEWAY_ORIGIN/);
   assert.throws(() => vercelBuildEnvironment({ VITE_GATEWAY_ORIGIN: "https://apim.example.test" }), /VITE_G7_API_BASE/);
   assert.throws(() => vercelBuildEnvironment({ VITE_GATEWAY_ORIGIN: "https://gateway.example.azurecontainerapps.io", VITE_G7_API_BASE: "https://g7.example.test/api/v1" }), /APIM/);
+  assert.throws(() => vercelBuildEnvironment({ VITE_GATEWAY_ORIGIN: "https://gateway.example.azurecontainerapps.io.", VITE_G7_API_BASE: "https://g7.example.test/api/v1" }), /APIM/);
+  assert.doesNotThrow(() => vercelBuildEnvironment({ VITE_GATEWAY_ORIGIN: "https://notazurecontainerapps.io", VITE_G7_API_BASE: "https://g7.example.test/api/v1" }));
 });
 
 test("SPA conserva rutas profundas y excluye assets y rutas API ausentes", async () => {

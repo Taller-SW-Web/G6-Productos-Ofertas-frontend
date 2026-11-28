@@ -15,7 +15,8 @@ export function vercelBuildEnvironment(environment) {
       if (!configured[name]?.trim()) throw new Error(`Configura explícitamente ${name} antes de compilar en modo API.`);
     }
     const gateway = new URL(configured.VITE_GATEWAY_ORIGIN);
-    if (gateway.hostname.endsWith("azurecontainerapps.io"))
+    const host = gateway.hostname.replace(/\.$/, "");
+    if (host === "azurecontainerapps.io" || host.endsWith(".azurecontainerapps.io"))
       throw new Error("Configura APIM como ingreso G6; no se permite omitirlo mediante ACA.");
   }
   return configured;
